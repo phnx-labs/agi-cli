@@ -216,7 +216,7 @@ only the editor-tab presentation derived from an accepted stream event.
 - [x] Split Claude `topic` and `label`; preserve non-empty labels.
 - [x] Reconcile canonical labels into tabs without a second scheduler.
 - [x] Add parser, database, and presentation regression tests.
-- [ ] Run full CLI and extension verification plus packaged build.
+- [x] Run full CLI and extension verification plus packaged build.
 - [ ] Install on the interactive editor and visually verify the real tab.
 - [ ] Land reviewed PR, release both surfaces, and verify installed versions.
 
