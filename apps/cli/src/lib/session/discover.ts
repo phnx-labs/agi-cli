@@ -261,6 +261,8 @@ interface ClaudeSessionScan {
   version?: string;
   model?: string;
   topic?: string;
+  /** Harness-owned session name (`/rename` or Claude's generated `ai-title`). */
+  label?: string;
   messageCount: number;
   tokenCount?: number;
   /** Real generated (output) tokens, excluding cache-read/-write context. */
@@ -1594,7 +1596,9 @@ async function readClaudeMeta(
       accountKey: acct.key,
       accountOrg: acct.orgName ?? undefined,
       topic: scan.topic,
-      label,
+      // The live sessions metadata file contains only user `/rename` values;
+      // prefer it when present, then fall back to the title parsed from JSONL.
+      label: label || scan.label,
       messageCount: scan.messageCount,
       toolCallCount: scan.toolCallCount,
       tokenCount: scan.tokenCount,
@@ -3836,9 +3840,10 @@ export function finalizeClaudeScan(state: ClaudeParseState): ClaudeSessionScan {
       ? state.lastTsMs - state.firstTsMs
       : undefined;
 
-  // Prefer an explicit session title (user `/rename` > Claude auto-title) over
-  // the first-prompt topic.
-  const resolvedTopic = state.customTitle || state.aiTitle || state.topic;
+  // A topic is the first meaningful prompt. Harness-owned names travel in the
+  // separate label field so consumers can replace an early topic once Claude's
+  // generated title (or a later `/rename`) arrives.
+  const label = state.customTitle || state.aiTitle;
   const worktree = detectWorktree(state.cwd, state.gitBranch);
   const ticket = detectTicket(state.userTexts.join('\n') || undefined, state.gitBranch);
 
@@ -3848,7 +3853,8 @@ export function finalizeClaudeScan(state: ClaudeParseState): ClaudeSessionScan {
     gitBranch: state.gitBranch,
     version: state.version,
     model: state.model,
-    topic: resolvedTopic,
+    topic: state.topic,
+    label,
     entrypoint: state.entrypoint,
     messageCount: state.messageCount,
     toolCallCount: state.toolCallCount,

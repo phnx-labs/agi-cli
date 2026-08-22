@@ -77,7 +77,7 @@ function expectScanParity(inc: any, full: any) {
   expect(inc).toEqual(full);
   // Belt-and-suspenders: name each field so a failure points at the culprit.
   const fields = [
-    'timestamp', 'cwd', 'gitBranch', 'version', 'topic', 'entrypoint',
+    'timestamp', 'cwd', 'gitBranch', 'version', 'topic', 'label', 'entrypoint',
     'messageCount', 'tokenCount', 'outputTokens', 'costUsd', 'durationMs',
     'lastActivity', 'contentText', 'prUrl', 'prNumber', 'worktreeSlug',
     'ticketId', 'createdTickets', 'spawnedTeam', 'plan', 'todos', 'recentDirectoriesTouched',
@@ -204,7 +204,7 @@ describe('incremental parity — straddled two-event patterns', () => {
 });
 
 describe('incremental parity — title/plan after boundary', () => {
-  it('custom-title / ai-title / ExitPlanMode in the tail update topic + plan', async () => {
+  it('custom-title / ai-title / ExitPlanMode in the tail update label + plan', async () => {
     const chunkA = jsonl([
       { type: 'user', timestamp: '2026-06-28T00:00:00.000Z', cwd: '/x', message: { role: 'user', content: 'first prompt topic' } },
     ]);
@@ -213,7 +213,8 @@ describe('incremental parity — title/plan after boundary', () => {
       { type: 'custom-title', customTitle: 'renamed-in-tail', sessionId: 's' },
     ]);
     const { inc, full } = await replay([chunkA, chunkB]);
-    expect(inc.topic).toBe('renamed-in-tail');
+    expect(inc.topic).toBe('first prompt topic');
+    expect(inc.label).toBe('renamed-in-tail');
     expect(inc.plan).toBe('# Tail plan');
     expectScanParity(inc, full);
   });
@@ -228,8 +229,10 @@ describe('incremental parity — title/plan after boundary', () => {
       { type: 'user', timestamp: '2026-06-28T00:02:00.000Z', message: { role: 'user', content: 'keep going' } },
     ]);
     const { inc, full } = await replay([chunkA, chunkB]);
-    expect(inc.topic).toBe('set-early');
-    expect(full.topic).toBe('set-early');
+    expect(inc.topic).toBe('start');
+    expect(full.topic).toBe('start');
+    expect(inc.label).toBe('set-early');
+    expect(full.label).toBe('set-early');
     expectScanParity(inc, full);
   });
 });

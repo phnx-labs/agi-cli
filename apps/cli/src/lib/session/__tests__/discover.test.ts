@@ -150,8 +150,8 @@ describe('FTS5 session_text schema (smoke test)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Claude session titles: `/rename` (custom-title) > Claude auto (ai-title) >
-// first-prompt topic. Both title events can repeat; the last one wins.
+// Claude session titles: `/rename` (custom-title) > Claude auto (ai-title).
+// The first prompt remains the topic; both title events can repeat and last wins.
 // ---------------------------------------------------------------------------
 
 describe('scanClaudeSession title resolution', () => {
@@ -183,7 +183,9 @@ describe('scanClaudeSession title resolution', () => {
       { type: 'ai-title', aiTitle: 'Auth refresh fix', sessionId: 's' },
       { type: 'custom-title', customTitle: 'close-li-outreach-gap', sessionId: 's' },
     ]);
-    expect((await scanClaudeSession(fp)).topic).toBe('close-li-outreach-gap');
+    const scan = await scanClaudeSession(fp);
+    expect(scan.topic).toBe('fix the auth refresh bug please');
+    expect(scan.label).toBe('close-li-outreach-gap');
   });
 
   it('falls back to ai-title when there is no custom-title', async () => {
@@ -191,12 +193,16 @@ describe('scanClaudeSession title resolution', () => {
       userMsg('do the thing'),
       { type: 'ai-title', aiTitle: 'Release new version of agents-cli', sessionId: 's' },
     ]);
-    expect((await scanClaudeSession(fp)).topic).toBe('Release new version of agents-cli');
+    const scan = await scanClaudeSession(fp);
+    expect(scan.topic).toBe('do the thing');
+    expect(scan.label).toBe('Release new version of agents-cli');
   });
 
   it('falls back to the first-prompt topic when no title events exist', async () => {
     const fp = write([userMsg('investigate the flaky test')]);
-    expect((await scanClaudeSession(fp)).topic).toBe('investigate the flaky test');
+    const scan = await scanClaudeSession(fp);
+    expect(scan.topic).toBe('investigate the flaky test');
+    expect(scan.label).toBeUndefined();
   });
 
   it('takes the last custom-title when renamed more than once', async () => {
@@ -205,7 +211,9 @@ describe('scanClaudeSession title resolution', () => {
       { type: 'custom-title', customTitle: 'first name', sessionId: 's' },
       { type: 'custom-title', customTitle: 'second name', sessionId: 's' },
     ]);
-    expect((await scanClaudeSession(fp)).topic).toBe('second name');
+    const scan = await scanClaudeSession(fp);
+    expect(scan.topic).toBe('start');
+    expect(scan.label).toBe('second name');
   });
 
   it('ignores whitespace-only title values', async () => {
@@ -213,7 +221,9 @@ describe('scanClaudeSession title resolution', () => {
       userMsg('real prompt here'),
       { type: 'ai-title', aiTitle: '   ', sessionId: 's' },
     ]);
-    expect((await scanClaudeSession(fp)).topic).toBe('real prompt here');
+    const scan = await scanClaudeSession(fp);
+    expect(scan.topic).toBe('real prompt here');
+    expect(scan.label).toBeUndefined();
   });
 
   it('sets lastActivity to the last event time, distinct from the creation timestamp', async () => {

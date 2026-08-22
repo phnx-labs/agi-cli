@@ -19,6 +19,7 @@ export interface PersistedSession {
                                 // transcript lives there, so a restored tab must keep routing
                                 // its session lookups through that host.
   label?: string;               // User-set label
+  autoLabel?: string;           // Harness/LLM-generated label; remains replaceable
   agentType?: string;           // Agent type key (e.g., "claude", "codex")
   version?: string;             // Pinned agent version, if known (e.g., "2.1.113")
   createdAt: number;            // Timestamp

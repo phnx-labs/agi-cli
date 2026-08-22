@@ -121,6 +121,13 @@ describe('upsertSession preserves a good label; a real one still wins (clobber f
     expect(ftsSearch('renamed')[0]?.sessionId).toBe('sync-change');
   });
 
+  it('syncLabels does not erase a stored label when live metadata has no name', () => {
+    upsertSession(meta('sync-empty', { label: 'generated-title' }), '');
+    syncLabels(new Map([['sync-empty', null]]));
+    expect(getSessionById('sync-empty')?.label).toBe('generated-title');
+    expect(ftsSearch('generated-title')[0]?.sessionId).toBe('sync-empty');
+  });
+
   it('the first upsert still sets a real label (INSERT path unaffected)', () => {
     upsertSession(meta('first-real', { label: 'born-with-a-label' }), '');
     expect(getSessionById('first-real')?.label).toBe('born-with-a-label');

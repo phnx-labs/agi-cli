@@ -2,6 +2,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import type { ActiveSession } from './session/active.js';
 
 // RUSH-2691: the tick's only test injected a `deps.discover` seam — a mock with
 // no production caller — so the real branch never evaluated and it asserted
@@ -32,8 +33,9 @@ const testHome = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'agents-c
 process.env.HOME = testHome;
 process.env.USERPROFILE = testHome;
 
-const { runSessionIndexWarmTick } = await import('./daemon-ticks.js');
+const { runActiveSessionsWarmTick, runSessionIndexWarmTick } = await import('./daemon-ticks.js');
 const db = await import('./session/db.js');
+const sessionCache = await import('./session/session-cache.js');
 
 afterAll(() => {
   db.closeDB();
@@ -46,23 +48,24 @@ afterAll(() => {
 });
 
 /** Write a real Claude transcript for `id`, working in `projectCwd`. */
-function writeTranscript(id: string, projectCwd: string): void {
+function writeTranscript(id: string, projectCwd: string, label?: string): void {
   fs.mkdirSync(projectCwd, { recursive: true });
   // Flatten the cwd into one dir segment. The class covers `\` and `:` as well as
   // `/` and `.` so the name stays a single valid segment on Windows, where the
   // full suite also runs (tests.yml).
   const projectDir = path.join(testHome, '.claude', 'projects', projectCwd.replace(/[/\\.:]/g, '-'));
   fs.mkdirSync(projectDir, { recursive: true });
-  fs.writeFileSync(
-    path.join(projectDir, `${id}.jsonl`),
+  const events = [
     JSON.stringify({
       type: 'user',
       sessionId: id,
       cwd: projectCwd,
       timestamp: '2026-08-15T10:00:00.000Z',
       message: { role: 'user', content: 'index me' },
-    }) + '\n',
-  );
+    }),
+  ];
+  if (label) events.push(JSON.stringify({ type: 'custom-title', customTitle: label, sessionId: id }));
+  fs.writeFileSync(path.join(projectDir, `${id}.jsonl`), `${events.join('\n')}\n`);
 }
 
 describe('runSessionIndexWarmTick (RUSH-2682, RUSH-2691)', () => {
@@ -108,5 +111,32 @@ describe('runSessionIndexWarmTick (RUSH-2682, RUSH-2691)', () => {
     const third = await runSessionIndexWarmTick();
     expect(third.indexed, 'a newly written transcript must be parsed').toBeGreaterThan(0);
     expect(db.getSessionById(id), 'the new session must be resolvable by id').not.toBeNull();
+  });
+
+  it('publishes an indexed Claude title into the canonical active-session journal', async () => {
+    const id = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const projectCwd = path.join(testHome, 'work', 'watch-label');
+    writeTranscript(id, projectCwd, 'Remote tab title synced');
+
+    const indexed = await runSessionIndexWarmTick();
+    expect(indexed.indexed, 'the title event must reach the real index').toBeGreaterThan(0);
+    expect(db.getSessionById(id)?.label).toBe('Remote tab title synced');
+
+    const raw: ActiveSession = {
+      context: 'terminal',
+      kind: 'claude',
+      sessionId: id,
+      cwd: projectCwd,
+      topic: 'index me',
+      status: 'running',
+    };
+    await runActiveSessionsWarmTick({ gather: async () => [raw] });
+
+    const published = sessionCache.readActiveSessionsCache('local')?.sessions.find((row) => row.sessionId === id);
+    expect(published?.label).toBe('Remote tab title synced');
+    const records = fs.readFileSync(sessionCache.activeSessionsJournalPath(), 'utf8')
+      .trim().split('\n').map((line) => JSON.parse(line));
+    const journalRow = records.flatMap((record) => record.upserts).find((row) => row.sessionId === id);
+    expect(journalRow?.label).toBe('Remote tab title synced');
   });
 });

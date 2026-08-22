@@ -4,6 +4,15 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
 [Keep a Changelog](https://keepachangelog.com/); `scripts/release.sh` requires a
 `## [<version>]` section for the version being published.
 
+## [0.9.330] - 2026-08-21
+
+- **Remote editor tabs replace provisional topics with the canonical session
+  name (RUSH-3011).** A tab no longer locks onto an early `/continue …` title:
+  the existing fleet session stream reconciles later harness-generated names
+  into matching tabs, while user-set labels remain authoritative. Raw slash
+  commands are no longer accepted as task-title topics. Source:
+  `src/core/sessionTabLabelSync.ts`, `src/vscode/extension.ts`.
+
 ## [0.9.329] - 2026-08-20
 
 - **New Agent separates placement from account choice (RUSH-2961).**

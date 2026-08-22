@@ -28,7 +28,7 @@ import * as path from 'path';
 
 import { createMemoryCache } from '../memory-cache.js';
 import { getCacheDir } from '../state.js';
-import { sessionProcessIsLocal, type ActiveSession } from './active.js';
+import { backfillActiveRowsFromIndex, sessionProcessIsLocal, type ActiveSession } from './active.js';
 
 /** Snapshot file under `getCacheDir()` (regenerable, gitignored). */
 const SNAPSHOT_FILE = '.active-sessions.json';
@@ -493,6 +493,10 @@ export async function loadLocalActiveSessions(
     });
 
   const sessions = await gather();
+  // The index owns transcript-derived labels (Claude custom-title / ai-title).
+  // Enrich before publishing so the canonical watch snapshot carries the same
+  // label as one-shot `sessions --active` output.
+  backfillActiveRowsFromIndex(sessions);
   for (const s of sessions) applyImmutableMemo(s);
   updateImmutableMemos(sessions, now);
   const snap = writeCache('local', sessions, { capturedAt: now });

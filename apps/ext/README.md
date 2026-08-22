@@ -65,6 +65,11 @@ Spawn any agent as a full-screen editor tab. Built-in support for Claude Code, C
 
 Every open agent terminal is fully restorable. Session ID, icon, and custom labels are saved to disk in real-time. VS Code crashes? Restart? All your agent tabs come back exactly as they were.
 
+Automatic tab titles follow the canonical session name from the fleet stream.
+A remote tab may briefly show its first meaningful prompt, then replaces it when
+the harness generates a name or the session is renamed; a label set with
+`Cmd+Shift+L` remains authoritative.
+
 ### Task Management
 
 - **Labels** - Tag agents by task (`Cmd+Shift+L`). Status bar shows active agent and label.

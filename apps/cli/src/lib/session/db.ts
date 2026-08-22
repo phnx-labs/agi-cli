@@ -2376,8 +2376,10 @@ export function syncLabels(labelMap: Map<string, string | null>): number {
       .prepare(`SELECT id, label FROM sessions WHERE id IN (${placeholders})`)
       .all(...chunk) as Array<{ id: string; label: string | null }>;
     for (const row of rows) {
-      const live = labelMap.get(row.id) ?? null;
-      if ((live ?? '') !== (row.label ?? '')) {
+      const live = labelMap.get(row.id)?.trim() || null;
+      // A missing/empty live label means "no refinement yet", not "erase the
+      // generated title or launch handle already stored for this session".
+      if (live && live !== (row.label ?? '')) {
         updates.push({ id: row.id, label: live });
       }
     }

@@ -33,6 +33,10 @@ import * as notifications from './notifications.vscode';
 import * as terminals from './terminals.vscode';
 import { fetchRemoteSessionLabelSource, fetchSessionIdentity, fetchRecapSessions, LOCAL_LABEL, LOCAL_MACHINE_ID, mapWithConcurrency } from './remoteSessions.vscode';
 import { sessionPresentationStore } from '../core/sessionPresentationStore';
+import {
+  isScaffoldingSessionTopic,
+  planSessionTabLabelUpdate,
+} from '../core/sessionTabLabelSync';
 import { runRecapHeadless, isRecapSupported } from './recap.vscode';
 import { buildAgentTerminalEnv } from '../core/terminals';
 import {
@@ -3503,17 +3507,12 @@ function isLocalDeviceName(name: string): boolean {
   return isLocalActiveMapKey(activeMapCacheKey(name));
 }
 
-function isScaffoldingTopic(text: string): boolean {
-  return /^Base directory for this skill:/i.test(text)
-    || /^<command-(?:name|message)>/i.test(text);
-}
-
 /** Stamp a {label, topic} pair onto the tab — persisted name, else LLM/5-word. */
 async function applyLabelSource(
   terminal: vscode.Terminal,
   source: { label: string | null; topic: string | null },
 ): Promise<string | undefined> {
-  const topic = source.topic && !isScaffoldingTopic(source.topic) ? source.topic : null;
+  const topic = source.topic && !isScaffoldingSessionTopic(source.topic) ? source.topic : null;
   const ticket = topic ? extractLinearTicketId(topic) : null;
   if (source.label) {
     const label = ticket ? `${ticket} ${source.label}` : source.label;
@@ -3573,7 +3572,7 @@ async function fetchAndSetAutoLabel(
   if (!opts.useFullConversation) {
     const live = sessionPresentationStore.liveSession(sessionId);
     if (live) {
-      const topic = live.topic.trim() && !isScaffoldingTopic(live.topic) ? live.topic.trim() : null;
+      const topic = live.topic.trim() && !isScaffoldingSessionTopic(live.topic) ? live.topic.trim() : null;
       // Reuse isDerivedSessionName so a real one-word /rename ("RUSH-2058",
       // "Auth") is kept and only Claude's `<dirname>-<n>` placeholder is dropped.
       const rawLabel = live.label.trim();
@@ -3636,6 +3635,47 @@ async function fetchAndSetAutoLabel(
     return autoLabel ?? undefined;
   } catch {
     return undefined;
+  }
+}
+
+/**
+ * Apply harness-owned names from the canonical fleet stream to editor tabs.
+ * The stream is already elected once per editor process; this is presentation
+ * reconciliation only, never another query or lifecycle loop.
+ */
+async function syncCanonicalSessionTabLabels(context: vscode.ExtensionContext): Promise<void> {
+  const display = getDisplayPrefs(context);
+  if (!display.autoLabelInTabTitles) return;
+
+  for (const entry of terminals.getAllTerminals()) {
+    if (!entry.sessionId || !entry.agentConfig) continue;
+    const live = sessionPresentationStore.liveSession(entry.sessionId);
+    if (!live) continue;
+    const update = planSessionTabLabelUpdate({
+      manualLabel: entry.label,
+      autoLabel: entry.autoLabel,
+    }, live);
+    if (!update) continue;
+
+    if (update.clearManualLabel) {
+      await terminals.setLabel(entry.terminal, undefined, context);
+    }
+    terminals.setAutoLabel(entry.terminal, update.label);
+
+    // Renaming briefly activates a terminal. Apply immediately only to the tab
+    // the user is already viewing; an inactive tab stores the new autoLabel and
+    // the existing focus handler renders it when that tab is next selected.
+    if (vscode.window.activeTerminal !== entry.terminal) continue;
+    updateStatusBarForTerminal(entry.terminal, context.extensionPath);
+    if (display.showLabelsInTitles) {
+      const newTitle = buildTerminalTitle(
+        entry.agentConfig.title,
+        update.label,
+        context,
+        entry.sessionId,
+      );
+      await terminals.renameTerminal(entry.terminal, newTitle);
+    }
   }
 }
 
@@ -4974,7 +5014,8 @@ async function restoreAgentTerminals(context: vscode.ExtensionContext): Promise<
       displayTitle = def.title;
     }
 
-    const title = buildTerminalTitle(displayTitle, session.label, context, session.sessionId || null);
+    const titleLabel = session.label || session.autoLabel;
+    const title = buildTerminalTitle(displayTitle, titleLabel, context, session.sessionId || null);
 
     const terminal = vscode.window.createTerminal({
       iconPath: agentConfig.iconPath,
@@ -4988,6 +5029,7 @@ async function restoreAgentTerminals(context: vscode.ExtensionContext): Promise<
     // Carry the tab's original creation time across the reload — the agent it is
     // being restored onto is older than this widget (see register's createdAt).
     terminals.register(terminal, session.terminalId, agentConfig, pid, context, session.label, session.createdAt);
+    if (session.autoLabel) terminals.setAutoLabel(terminal, session.autoLabel);
     readiness.registerTerminal(terminal);
 
     // Preserve the version pin across reloads. The env var above is belt; this
@@ -5278,7 +5320,10 @@ function initMonitorFollower(context: vscode.ExtensionContext): void {
         childPid: p.childPid,
       });
     } else if (proto.isSessionCliFact(event)) {
-      if (sessionPresentationStore.apply(event.payload)) void settings.refreshFloorFromSessionStream();
+      if (sessionPresentationStore.apply(event.payload)) {
+        void settings.refreshFloorFromSessionStream();
+        void syncCanonicalSessionTabLabels(context);
+      }
     }
   });
   context.subscriptions.push({ dispose: factSub });

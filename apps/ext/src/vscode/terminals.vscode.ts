@@ -10,6 +10,7 @@ import { findAgentInTree, SHELL_ADOPTION_TREE_DEPTH } from '../monitor/readiness
 import type { AgentLauncherKey } from '../core/terminalReadiness';
 import { generateTerminalId, resolveRestoredVersion, RunningCounts } from '../core/terminals';
 import * as sessionsPersist from '../core/sessions.persist';
+import { restoredSessionTabLabels } from '../core/sessionTabLabelSync';
 import { getSessionPathBySessionId, getSessionPreviewInfo, getOpenCodeSessionPreviewInfo, getCursorSessionPreviewInfo, SessionPreviewInfo } from './sessions.vscode';
 import { sessionPresentationStore } from '../core/sessionPresentationStore';
 import type { RemoteSession } from '../core/remoteSessions';
@@ -361,6 +362,7 @@ export function setAutoLabel(terminal: vscode.Terminal, autoLabel: string | unde
       entry.autoLabelPollerId = undefined;
       console.log(`[TERMINALS] Cleared auto-label poller for terminal "${terminal.name}" - label set: "${autoLabel}"`);
     }
+    schedulePersist();
   }
 }
 
@@ -634,7 +636,12 @@ export async function scanExisting(
       console.log(`[TERMINALS] Could not retrieve PID for terminal "${terminal.name}"`);
     }
 
-    register(terminal, id, agentConfig, pid, context, info.label || undefined);
+    const persistedByTerminalId = identOpts.terminalId
+      ? persistedSessions.find(p => p.terminalId === identOpts.terminalId)
+      : undefined;
+    const restoredLabels = restoredSessionTabLabels(info.label || undefined, persistedByTerminalId);
+    register(terminal, id, agentConfig, pid, context, restoredLabels.manualLabel);
+    if (restoredLabels.autoLabel) setAutoLabel(terminal, restoredLabels.autoLabel);
     registeredCount++;
     console.log(`[TERMINALS] Registered: id=${id}, prefix=${info.prefix}, pid=${pid}, label=${info.label}`);
 
@@ -647,10 +654,6 @@ export async function scanExisting(
     // Strategy 2 (`if (!sessionId && info.prefix) { ... }`), so Strategy 1
     // succeeding silently skipped version recovery, and Cmd+Shift+J's
     // "already on usable version" short-circuit couldn't fire.
-    const persistedByTerminalId = identOpts.terminalId
-      ? persistedSessions.find(p => p.terminalId === identOpts.terminalId)
-      : undefined;
-
     // Recover the offloaded device BEFORE any host-dependent lookup runs. VS Code
     // restores terminals without our env vars, so `entry.host` is lost on reload
     // unless we rehydrate it from the persisted session here. Without this, a
@@ -757,6 +760,12 @@ export async function scanExisting(
         if (!pinnedVersion && matched.version) {
           setVersion(terminal, matched.version);
         }
+
+        const matchedLabels = restoredSessionTabLabels(info.label || undefined, matched);
+        if (matchedLabels.manualLabel !== getByTerminal(terminal)?.label) {
+          await setLabel(terminal, matchedLabels.manualLabel, context);
+        }
+        if (matchedLabels.autoLabel) setAutoLabel(terminal, matchedLabels.autoLabel);
       }
     }
 
@@ -1241,6 +1250,7 @@ export function buildPersistedSessions(): sessionsPersist.PersistedSession[] {
       sessionId: entry.sessionId,
       host: entry.host,
       label: entry.label,
+      autoLabel: entry.autoLabel,
       agentType: entry.agentType,
       version: entry.version,
       createdAt: entry.createdAt,

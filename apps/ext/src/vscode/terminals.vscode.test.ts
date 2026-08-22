@@ -81,6 +81,23 @@ describe('BUG C: setSessionId clears autoLabel on session change', () => {
   });
 });
 
+describe('automatic-label persistence', () => {
+  test('buildPersistedSessions keeps the automatic label provenance', () => {
+    const term = fakeTerm('CC-auto-label');
+    t.register(term, 'CC-auto', fakeAgentConfig(), undefined);
+    t.setSessionId(term, 'session-auto');
+    t.setAutoLabel(term, 'Release the project');
+
+    expect(t.buildPersistedSessions()).toEqual([
+      expect.objectContaining({
+        terminalId: 'CC-auto',
+        label: undefined,
+        autoLabel: 'Release the project',
+      }),
+    ]);
+  });
+});
+
 describe('BUG A: startAutoLabelPoller guard blocks restart once autoLabel is set', () => {
   test('pollFn is never called when autoLabel is already set', async () => {
     const term = fakeTerm('CC-bug-a');

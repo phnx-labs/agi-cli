@@ -173,7 +173,8 @@ describe('B-2 live incremental scan parity', () => {
 
     // Spot-check the incrementally-scanned row carries the appended-chunk signals.
     const inc = db.getSessionById(id)!;
-    expect(inc.topic).toBe('Flaky exec test fix'); // ai-title came in the append
+    expect(inc.topic).toBe('investigate flaky exec test for core-session');
+    expect(inc.label).toBe('Flaky exec test fix'); // ai-title came in the append
     expect(inc.messageCount).toBe(5);
     // outputTokens = 20 + 10 + 40 across all three assistant events.
     expect(inc.outputTokens).toBe(70);
@@ -240,15 +241,16 @@ describe('B-2 live incremental scan parity', () => {
     assertRowParity(id, gtId);
   });
 
-  it('STRADDLED title: an ai-title appearing only in the appended chunk becomes the topic', async () => {
+  it('STRADDLED title: a title in the appended chunk refines label without replacing topic', async () => {
     const id = 'straddle-title';
     writeTranscript(id, [
       { type: 'user', timestamp: '2026-06-28T03:00:00.000Z', cwd: '/home/u/repo', message: { role: 'user', content: 'do the thing please' } },
     ]);
     await runScan();
-    // Topic is the first-prompt fallback before the title arrives.
+    // Topic is the first prompt; label is absent before the title arrives.
     const before = db.getSessionById(id)!;
-    expect(before.topic).not.toBe('Rename me later');
+    expect(before.topic).toBe('do the thing please');
+    expect(before.label).toBeUndefined();
 
     appendTranscript(id, [
       { type: 'custom-title', customTitle: 'Rename me later', sessionId: id },
@@ -257,7 +259,8 @@ describe('B-2 live incremental scan parity', () => {
     bumpMtimeToNow(sessionFile(id), 1);
     await runScan();
     expect(discover.__claudeScanBranchCountsForTest().incremental).toBeGreaterThanOrEqual(1);
-    expect(db.getSessionById(id)!.topic).toBe('Rename me later');
+    expect(db.getSessionById(id)!.topic).toBe('do the thing please');
+    expect(db.getSessionById(id)!.label).toBe('Rename me later');
 
     const gtId = await groundTruth([
       { type: 'user', timestamp: '2026-06-28T03:00:00.000Z', cwd: '/home/u/repo', message: { role: 'user', content: 'do the thing please' } },
