@@ -255,6 +255,16 @@ export interface SessionMeta {
   mode?: SessionRunMode;
   topic?: string;
   /**
+   * The full, genuine first user turn as the harness recorded it — the real
+   * opening prompt, uncleaned and untruncated. Distinct from {@link topic} (a
+   * short first-line summary), {@link label} (an agent/user-set title), and the
+   * live-row `userPromptClean` (a display-cleaned turn): this is the raw text,
+   * persisted at scan time so a consumer can render "THE ASK" without
+   * re-reading the transcript. Undefined for a row scanned before this field
+   * existed or for a harness whose first turn cannot be located (PHNX-3621).
+   */
+  firstUserMessage?: string;
+  /**
    * The session's human-readable name — one field, several sources with a plain
    * priority: an agent-generated title / Claude `/rename` wins; else the launch
    * handle seeded from `agents run --name <slug>` (interactive, headless, remote

@@ -694,6 +694,16 @@ SSH access (§7); rendering sessions that no harness produced.
   re-deriving it from the status word; `orphaned` and `crashed` MUST bucket to `failed`,
   never `idle`, so a dead-but-dangling agent is never hidden (PHNX-2484;
   `lib/session/active.phase.test.ts`).
+- **SES-42b (MUST).** Each row SHOULD carry `firstUserMessage` — the full, genuine
+  first user turn as the harness recorded it (raw and untruncated), distinct from the
+  truncated `topic` and the display-cleaned `userPromptClean`. A running process cannot
+  report it, so like `version`/`account` it is backfilled from the indexed transcript
+  (`SessionMeta.firstUserMessage`, persisted at scan time in `sessions.first_user_message`)
+  — never fetched through a side channel. It is absent for a row whose transcript has no
+  locatable first user turn or that predates the field (old rows re-derive it on their next
+  scan via the paired `CONTENT_INDEX_VERSION` bump). PHNX-3621;
+  `lib/session/active.ts` (`backfillActiveRowsFromMeta`), `lib/session/remote/watch.ts`
+  (`toSessionWatchRow`), `lib/session/db.ts` (`rowToMeta`), `lib/session/first-user-message.test.ts`.
 - **SES-43 (MUST).** The default stream MUST hold one long-lived local subscription
   and one long-lived SSH subscription per dialable compute device. `--local` MUST
   suppress peer subscriptions. Neither path may poll transcript history or invoke

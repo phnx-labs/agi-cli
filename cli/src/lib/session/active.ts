@@ -169,7 +169,7 @@ type ActiveContext = 'terminal' | 'teams' | 'cloud' | 'headless';
 /** The SessionMeta fields the live-row backfill reads — the enrichment a running process cannot report. */
 export type BackfillMeta = Pick<SessionMeta,
   'version' | 'account' | 'timestamp' | 'label' | 'ticketId' | 'prUrl' | 'prNumber' | 'origin' | 'routineName' | 'harness' |
-  'tokenCount' | 'durationMs' | 'subAgentCount'
+  'tokenCount' | 'durationMs' | 'subAgentCount' | 'firstUserMessage'
 >;
 
 export function backfillActiveRowsFromMeta(
@@ -182,6 +182,7 @@ export function backfillActiveRowsFromMeta(
     if (!m) continue;
     if (!s.version && m.version) s.version = m.version;
     if (!s.account && m.account) s.account = m.account;
+    if (!s.firstUserMessage && m.firstUserMessage) s.firstUserMessage = m.firstUserMessage;
     if (!s.label && m.label) s.label = m.label;
     if (!s.ticket && m.ticketId) s.ticket = { id: m.ticketId, url: linearIssueUrl(m.ticketId) };
     if (!s.pr && m.prUrl) s.pr = { url: m.prUrl, number: m.prNumber };
@@ -352,6 +353,17 @@ export interface ActiveSession {
   userPromptClean?: string;
   /** What kind of first turn {@link userPromptClean} was. */
   userPromptKind?: UserPromptKind;
+  /**
+   * The full, genuine first user turn — the real opening prompt, raw and
+   * untruncated. Distinct from {@link userPromptClean} (display-cleaned) and
+   * {@link topic} (a short first-line summary). A running process cannot report
+   * it, so like {@link version} / {@link account} it is backfilled from the
+   * indexed transcript ({@link SessionMeta.firstUserMessage}); the
+   * `sessions watch --json` row (`SessionWatchRow`) carries it so the AGI EXT
+   * Sessions "THE ASK" line renders the real prompt with no side-channel
+   * transcript fetch (PHNX-3621).
+   */
+  firstUserMessage?: string;
   /**
    * The most recent assistant line (from the transcript tail) — the free,
    * always-current signal of what the agent last said/did. Ladder rung 3.

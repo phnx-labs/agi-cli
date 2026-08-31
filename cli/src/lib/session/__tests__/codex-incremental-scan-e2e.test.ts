@@ -383,7 +383,7 @@ describe('B-3 live incremental Codex scan parity', () => {
     expect(row, 'ledger row exists').toBeDefined();
     expect(row!.parserState, 'parser_state persisted').not.toBeNull();
     const parsed = JSON.parse(row!.parserState!);
-    expect(parsed.v).toBe(3); // v3: added the assistantContentText accumulator (PHNX content-search)
+    expect(parsed.v).toBe(4); // v4: added firstUserMessage (PHNX-3621)
     expect(typeof parsed.offset).toBe('number');
     const offsetAfterFirst = parsed.offset;
 

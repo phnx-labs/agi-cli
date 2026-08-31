@@ -38,7 +38,7 @@ const DB_PATH = getSessionsDbPath();
 /** Current schema version; bumped when migrations are added. Exported so tests
  * assert against the constant instead of hardcoding a number that every bump
  * then has to chase (docs/sessions.md calls the constant the source of truth). */
-export const SCHEMA_VERSION = 44;
+export const SCHEMA_VERSION = 45;
 
 /**
  * Bump to force the content extractor (assistant-answer text, alongside the
@@ -50,8 +50,12 @@ export const SCHEMA_VERSION = 44;
  * here backfills every existing session's assistant text on its next scan
  * without a `DELETE FROM scan_ledger` (which would also throw away the
  * resumable parser_state/content_text for Claude/Codex).
+ *
+ * v2 (PHNX-3621): the parsers now also persist `first_user_message` (the full
+ * genuine first user turn). Bumped so every already-indexed row re-derives it on
+ * its next scan instead of staying NULL until the transcript happens to change.
  */
-export const CONTENT_INDEX_VERSION = 1;
+export const CONTENT_INDEX_VERSION = 2;
 
 /**
  * Bump to force `agents sessions backfill resources` to re-derive every
@@ -110,6 +114,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   cwd TEXT,
   git_branch TEXT,
   topic TEXT,
+  first_user_message TEXT,
   label TEXT,
   message_count INTEGER,
   token_count INTEGER,
@@ -505,6 +510,8 @@ interface SessionRow {
   cwd: string | null;
   git_branch: string | null;
   topic: string | null;
+  /** Full genuine first user turn, persisted at scan time (PHNX-3621). NULL for a row scanned before this column existed. */
+  first_user_message: string | null;
   label: string | null;
   message_count: number | null;
   token_count: number | null;
@@ -1393,6 +1400,21 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     }
   }
 
+  if (fromVersion < 45) {
+    // v44 -> v45: persist the full genuine first user turn (PHNX-3621) so a
+    // consumer (the AGI EXT Sessions "THE ASK" line) can render the real opening
+    // prompt without a side-channel transcript fetch. Additive, nullable column —
+    // no ledger flush (the v33->v34 contract that adding a column keeps warm
+    // session ledgers warm). Pre-upgrade rows stay NULL until re-indexed; the
+    // paired CONTENT_INDEX_VERSION bump (1 -> 2) is what re-derives them on the
+    // next scan (a stored extractor_version below it reads as "changed"), so a
+    // bare ALTER here does not leave existing rows dark forever.
+    const cols = new Set(
+      (db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map((c) => c.name),
+    );
+    if (!cols.has('first_user_message')) db.exec(`ALTER TABLE sessions ADD COLUMN first_user_message TEXT`);
+  }
+
 }
 
 /**
@@ -2010,7 +2032,7 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
   INSERT INTO sessions (
     id, short_id, agent, harness, origin, routine_name, routine_run_id,
     version, account, account_key, account_org, mode, timestamp, last_activity,
-    project, cwd, git_branch, topic, label, message_count, token_count,
+    project, cwd, git_branch, topic, first_user_message, label, message_count, token_count,
     output_tokens, input_tokens, cache_read_tokens, cache_write_tokens,
     cost_usd, cost_usd_nocache, duration_ms, model, tool_call_count,
     file_path, file_mtime_ms, file_size, scanned_at, is_team_origin,
@@ -2021,7 +2043,7 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
   ) VALUES (
     @id, @short_id, @agent, @harness, @origin, @routine_name, @routine_run_id,
     @version, @account, @account_key, @account_org, @mode, @timestamp, @last_activity,
-    @project, @cwd, @git_branch, @topic, @label, @message_count, @token_count,
+    @project, @cwd, @git_branch, @topic, @first_user_message, @label, @message_count, @token_count,
     @output_tokens, @input_tokens, @cache_read_tokens, @cache_write_tokens,
     @cost_usd, @cost_usd_nocache, @duration_ms, @model, @tool_call_count,
     @file_path, @file_mtime_ms, @file_size, @scanned_at, @is_team_origin,
@@ -2052,6 +2074,7 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     cwd = excluded.cwd,
     git_branch = excluded.git_branch,
     topic = excluded.topic,
+    first_user_message = excluded.first_user_message,
     -- Never let an empty/placeholder incoming label clobber a good stored one.
     -- A real incoming label (non-empty after trim) still wins; a blank one keeps
     -- the label seeded by --name (seedLabelsFromNames) or refined by an agent
@@ -2374,6 +2397,7 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
     cwd: meta.cwd ?? null,
     git_branch: meta.gitBranch ?? null,
     topic: meta.topic ?? null,
+    first_user_message: meta.firstUserMessage ?? null,
     label: meta.label ?? null,
     message_count: meta.messageCount ?? null,
     token_count: meta.tokenCount ?? null,
@@ -2653,6 +2677,7 @@ export function upsertSessionsBatch(
         cwd: meta.cwd ?? null,
         git_branch: meta.gitBranch ?? null,
         topic: meta.topic ?? null,
+        first_user_message: meta.firstUserMessage ?? null,
         label: meta.label ?? null,
         message_count: meta.messageCount ?? null,
         token_count: meta.tokenCount ?? null,
@@ -2917,6 +2942,7 @@ function rowToMeta(row: SessionRow): SessionMeta {
     accountOrg: row.account_org ?? undefined,
     mode: isSessionRunMode(row.mode) ? row.mode : undefined,
     topic: row.topic ?? undefined,
+    firstUserMessage: row.first_user_message ?? undefined,
     label: row.label ?? undefined,
     isTeamOrigin: row.is_team_origin === 1,
     prUrl: row.pr_url ?? undefined,

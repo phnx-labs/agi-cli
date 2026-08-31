@@ -251,6 +251,8 @@ interface ClaudeSessionScan {
   version?: string;
   model?: string;
   topic?: string;
+  /** Full genuine first user turn, untruncated (PHNX-3621). */
+  firstUserMessage?: string;
   /** Harness-owned session name (`/rename` or Claude's generated `ai-title`). */
   label?: string;
   messageCount: number;
@@ -310,6 +312,8 @@ interface CodexSessionScan {
   version?: string;
   model?: string;
   topic?: string;
+  /** Full genuine first user turn, untruncated (PHNX-3621). */
+  firstUserMessage?: string;
   messageCount: number;
   tokenCount?: number;
   /** Real generated (output) tokens, excluding cache-read/-write context. */
@@ -1574,6 +1578,7 @@ async function readClaudeMeta(
       accountKey: acct.key,
       accountOrg: acct.orgName ?? undefined,
       topic: scan.topic,
+      firstUserMessage: scan.firstUserMessage,
       // The live sessions metadata file contains only user `/rename` values;
       // prefer it when present, then fall back to the title parsed from JSONL.
       label: label || scan.label,
@@ -1629,6 +1634,7 @@ async function readClaudeMeta(
       costUsdNoCache: scan.costUsdNoCache,
       durationMs: scan.durationMs,
       topic: scan.topic,
+      firstUserMessage: scan.firstUserMessage,
       isTeamOrigin,
       prUrl: scan.prUrl,
       prNumber: scan.prNumber,
@@ -1969,6 +1975,7 @@ export async function readCodexMeta(
     version: resolveSessionVersion('codex', filePath, scan.version, currentVersion),
     model: scan.model,
     topic: scan.topic,
+    firstUserMessage: scan.firstUserMessage,
     messageCount: scan.messageCount,
     tokenCount: scan.tokenCount,
     outputTokens: scan.outputTokens,
@@ -2122,6 +2129,7 @@ function readGeminiMeta(
   const messages = Array.isArray(session.messages) ? session.messages : [];
   const sessionModel = typeof session.model === 'string' ? session.model : undefined;
   let topic: string | undefined;
+  let firstUserMessage: string | undefined;
   let messageCount = 0;
   let tokenCount = 0;
   let outputTokens = 0;
@@ -2143,6 +2151,7 @@ function readGeminiMeta(
         messageCount++;
         userTexts.push(text);
         if (!topic) topic = extractSessionTopic(text);
+        if (firstUserMessage === undefined) firstUserMessage = text;
       }
     } else if (message.type === 'gemini') {
       const text = extractGeminiMessageText(message.content);
@@ -2220,6 +2229,7 @@ function readGeminiMeta(
     version: resolveSessionVersion('gemini', filePath, embeddedVersion, currentVersion),
     model: sessionModel,
     topic,
+    firstUserMessage,
     messageCount,
     tokenCount: sawTokenCount ? tokenCount : undefined,
     outputTokens: sawTokenCount ? outputTokens : undefined,
@@ -2364,6 +2374,11 @@ function readAntigravityMeta(
 
   // Topic: the first tool's human summary is a decent one-line label.
   const topic = events.find(e => e.content)?.content;
+  // First user turn is the first genuine user message — distinct from the topic
+  // above, which is the first event with content (often a tool summary).
+  const firstUserMessage = events.find(
+    e => e.type === 'message' && e.role === 'user' && !e._synthetic && e.content,
+  )?.content;
 
   const stat = safeStatSync(filePath);
   const meta: SessionMeta = {
@@ -2376,6 +2391,7 @@ function readAntigravityMeta(
     filePath,
     version: resolveSessionVersion('antigravity', filePath, undefined, currentVersion),
     topic: topic ? topic.slice(0, 120) : undefined,
+    firstUserMessage,
     messageCount: events.length,
   };
   return { meta, content: contentParts.join('\n'), events };
@@ -2620,9 +2636,32 @@ async function scanOpenCodeIncremental(onProgress?: (p: ScanProgress) => void): 
         || prevStamp.fileSize !== c.scan.fileSize;
     });
 
+    // The full genuine first user turn (PHNX-3621): the text part(s) of the
+    // earliest user-role message for a session, concatenated. Role lives in
+    // `message.data.$.role` and text in `part.data.$.text` (same JSON shape
+    // OPENCODE_TRANSCRIPT_QUERY reads); every json_extract is json_valid-guarded
+    // so a poisoned row costs that row, not the whole query.
+    const firstUserStmt = db.prepare(`
+      SELECT json_extract(p.data, '$.text') AS text
+      FROM part p
+      WHERE p.message_id = (
+        SELECT m.id FROM message m
+        WHERE m.session_id = ?
+          AND json_valid(m.data) AND json_extract(m.data, '$.role') = 'user'
+        ORDER BY m.time_created ASC
+        LIMIT 1
+      )
+      AND json_valid(p.data) AND json_extract(p.data, '$.type') = 'text'
+      ORDER BY p.time_created ASC
+    `);
+
     const entries: ScanEntry[] = [];
     for (const { row, id, filePath, scan } of changed) {
       const title = typeof row.title === 'string' ? row.title : '';
+      const firstUserMessage = (firstUserStmt.all(id) as Array<{ text: unknown }>)
+        .map((r) => (typeof r.text === 'string' ? r.text : ''))
+        .join('')
+        .trim() || undefined;
       const directory = typeof row.directory === 'string' ? row.directory : '';
       const version = typeof row.version === 'string' ? row.version : '';
 
@@ -2679,6 +2718,7 @@ async function scanOpenCodeIncremental(onProgress?: (p: ScanProgress) => void): 
         version: resolveSessionVersion('opencode', OPENCODE_DB, version || undefined, currentVersion),
         account,
         topic,
+        firstUserMessage,
         model,
         costUsd,
         durationMs,
@@ -2839,6 +2879,7 @@ async function scanOpenClawIncremental(onProgress?: (p: ScanProgress) => void): 
 interface RushSessionScan {
   timestamp?: string;
   topic?: string;
+  firstUserMessage?: string;
   agentId?: string;
   messageCount: number;
   contentText?: string;
@@ -2915,6 +2956,7 @@ async function readRushMeta(
     project: scan.agentId,
     filePath,
     topic: scan.topic,
+    firstUserMessage: scan.firstUserMessage,
     messageCount: scan.messageCount,
   };
 
@@ -2928,6 +2970,7 @@ async function scanRushSession(filePath: string): Promise<RushSessionScan> {
 
   let timestamp: string | undefined;
   let topic: string | undefined;
+  let firstUserMessage: string | undefined;
   let agentId: string | undefined;
   let messageCount = 0;
   const userTexts: string[] = [];
@@ -2966,6 +3009,7 @@ async function scanRushSession(filePath: string): Promise<RushSessionScan> {
       if (parsed.role === 'user') {
         userTexts.push(cleaned);
         if (!topic) topic = extractSessionTopic(cleaned);
+        if (firstUserMessage === undefined) firstUserMessage = cleaned;
       } else if (parsed.role === 'assistant') {
         assistantTexts.push(cleaned);
       }
@@ -2978,6 +3022,7 @@ async function scanRushSession(filePath: string): Promise<RushSessionScan> {
   return {
     timestamp,
     topic,
+    firstUserMessage,
     agentId,
     messageCount,
     contentText: userTexts.length > 0 ? userTexts.join('\n') : undefined,
@@ -3058,6 +3103,7 @@ function readHermesMeta(filePath: string): { meta: SessionMeta; content: string;
   const userTexts: string[] = [];
   const assistantTexts: string[] = [];
   let topic: string | undefined;
+  let firstUserMessage: string | undefined;
   let messageCount = 0;
   for (const msg of messages) {
     const text = extractHermesMessageText(msg?.content);
@@ -3066,6 +3112,7 @@ function readHermesMeta(filePath: string): { meta: SessionMeta; content: string;
     if (msg?.role === 'user') {
       userTexts.push(text);
       if (!topic) topic = extractSessionTopic(text);
+      if (firstUserMessage === undefined) firstUserMessage = text;
     } else if (msg?.role === 'assistant') {
       assistantTexts.push(text);
     }
@@ -3092,6 +3139,7 @@ function readHermesMeta(filePath: string): { meta: SessionMeta; content: string;
     version: model,
     model,
     topic,
+    firstUserMessage,
     messageCount: messageCount || (typeof session.message_count === 'number' ? session.message_count : undefined),
   };
 
@@ -3190,6 +3238,7 @@ function readMuseMeta(filePath: string): { meta: SessionMeta; content: string; a
   const userTexts: string[] = [];
   const assistantTexts: string[] = [];
   let topic: string | undefined;
+  let firstUserMessage: string | undefined;
   let messageCount = 0;
   let model: string | undefined;
   let project: string | undefined;
@@ -3228,6 +3277,7 @@ function readMuseMeta(filePath: string): { meta: SessionMeta; content: string; a
         messageCount++;
         userTexts.push(cmd.prompt.trim());
         if (!topic) topic = extractSessionTopic(cmd.prompt.trim());
+        if (firstUserMessage === undefined) firstUserMessage = cmd.prompt.trim();
       }
     }
 
@@ -3258,6 +3308,7 @@ function readMuseMeta(filePath: string): { meta: SessionMeta; content: string; a
     filePath,
     model,
     topic,
+    firstUserMessage,
     messageCount: messageCount || undefined,
   };
 
@@ -3288,6 +3339,7 @@ interface DroidSessionScan {
   timestamp?: string;
   cwd?: string;
   topic?: string;
+  firstUserMessage?: string;
   model?: string;
   messageCount: number;
   durationMs?: number;
@@ -3385,6 +3437,7 @@ async function readDroidMeta(
     version: resolveSessionVersion('droid', filePath, undefined, currentVersion),
     model,
     topic: scan.topic,
+    firstUserMessage: scan.firstUserMessage,
     messageCount: scan.messageCount,
     tokenCount,
     outputTokens: settings.usage?.outputTokens,
@@ -3438,6 +3491,7 @@ async function scanDroidSession(filePath: string): Promise<DroidSessionScan> {
   let title: string | undefined;
   let sessionTitle: string | undefined;
   let firstUserTopic: string | undefined;
+  let firstUserMessage: string | undefined;
   let model: string | undefined;
   let messageCount = 0;
   let firstTsMs: number | undefined;
@@ -3490,6 +3544,7 @@ async function scanDroidSession(filePath: string): Promise<DroidSessionScan> {
       if (msg.role === 'user') {
         userTexts.push(text);
         if (!firstUserTopic) firstUserTopic = extractSessionTopic(text);
+        if (firstUserMessage === undefined) firstUserMessage = text;
       } else if (msg.role === 'assistant') {
         assistantTexts.push(text);
       }
@@ -3511,6 +3566,7 @@ async function scanDroidSession(filePath: string): Promise<DroidSessionScan> {
     // Prefer Droid's auto-title, then the raw first-prompt title, then the
     // derived first-user-message topic.
     topic: sessionTitle || title || firstUserTopic,
+    firstUserMessage,
     model,
     messageCount,
     durationMs,
@@ -3547,6 +3603,8 @@ interface ClaudeParseState {
   version?: string;
   model?: string;
   topic?: string;
+  /** Full genuine first user turn — the first non-synthetic user text, untruncated (PHNX-3621). */
+  firstUserMessage?: string;
   // Explicit session titles: `/rename` writes a `custom-title` event; Claude
   // auto-generates an `ai-title`. Both can repeat across the file — last wins.
   customTitle?: string;
@@ -3803,6 +3861,7 @@ export function applyClaudeLine(state: ClaudeParseState, parsed: any): void {
       state.messageCount++;
       state.userTexts.push(text);
       if (!state.topic) state.topic = extractSessionTopic(text);
+      if (state.firstUserMessage === undefined) state.firstUserMessage = text;
       // #12: the USER typing a slash command — Claude injects a <command-name>
       // wrapper as the message content (extractClaudeUserText returns it
       // un-stripped; isLocalCommandMessage only filters bash-echo wrappers).
@@ -3895,6 +3954,7 @@ export function finalizeClaudeScan(state: ClaudeParseState): ClaudeSessionScan {
     version: state.version,
     model: state.model,
     topic: state.topic,
+    firstUserMessage: state.firstUserMessage,
     label,
     entrypoint: state.entrypoint,
     messageCount: state.messageCount,
@@ -3974,7 +4034,10 @@ export interface ClaudeParserState {
   // reparse that backfills the new assistant text — belt-and-suspenders with
   // scan_ledger.extractor_version, which gates resuming from it in the first
   // place (see readClaudeMeta).
-  v: 5;
+  // v6 (PHNX-3621): added `firstUserMessage` (the full genuine first user turn).
+  // A stale v5 blob is rejected by the `!== 6` guard and re-parsed from byte 0,
+  // which populates it correctly rather than resuming without it.
+  v: 6;
   /**
    * Fan-out tallies carried across a RESUMED parse (RUSH-3091/3095). They must
    * live in the durable blob: the resumable parser reads only new bytes, so
@@ -3994,6 +4057,8 @@ export interface ClaudeParserState {
   entrypoint?: string;
   firstTsMs?: number;
   topic?: string;
+  /** Full genuine first user turn, carried across a resumed parse (PHNX-3621). */
+  firstUserMessage?: string;
   customTitle?: string;
   aiTitle?: string;
   plan?: string;
@@ -4047,7 +4112,7 @@ export function serializeClaudeParserState(
     : allIds;
   const ticket = detectTicket(state.userTexts.join('\n') || undefined, state.gitBranch);
   return {
-    v: 5,
+    v: 6,
     subAgents: state.subAgents,
     backgroundShells: state.backgroundShells,
     offset,
@@ -4060,6 +4125,7 @@ export function serializeClaudeParserState(
     entrypoint: state.entrypoint,
     firstTsMs: state.firstTsMs,
     topic: state.topic,
+    firstUserMessage: state.firstUserMessage,
     customTitle: state.customTitle,
     aiTitle: state.aiTitle,
     plan: state.plan,
@@ -4131,6 +4197,7 @@ export function hydrateClaudeParseState(prior: ClaudeParserState): ClaudeParseSt
     version: prior.version,
     model: prior.model,
     topic: prior.topic,
+    firstUserMessage: prior.firstUserMessage,
     customTitle: prior.customTitle,
     aiTitle: prior.aiTitle,
     entrypoint: prior.entrypoint,
@@ -4315,7 +4382,7 @@ function parsePriorClaudeState(row: { parserState: string | null } | undefined):
   if (!row?.parserState) return null;
   try {
     const parsed = JSON.parse(row.parserState) as ClaudeParserState;
-    if (parsed?.v !== 5 || typeof parsed.offset !== 'number' || parsed.toolCalls?.v !== 1) return null;
+    if (parsed?.v !== 6 || typeof parsed.offset !== 'number' || parsed.toolCalls?.v !== 1) return null;
     return parsed;
   } catch {
     return null;
@@ -4353,6 +4420,8 @@ interface CodexParseState {
   version?: string;
   model?: string;
   topic?: string;
+  /** Full genuine first user turn — the first non-synthetic user text, untruncated (PHNX-3621). */
+  firstUserMessage?: string;
   // Additive across every counted message (user + assistant).
   messageCount: number;
   // LAST-WINS cumulative token snapshots: Codex's token_count events carry a
@@ -4502,6 +4571,7 @@ function applyCodexLine(state: CodexParseState, parsed: any): void {
     if (role === 'user') {
       state.userTexts.push(text);
       if (!state.topic) state.topic = extractSessionTopic(text);
+      if (state.firstUserMessage === undefined) state.firstUserMessage = text;
     } else {
       state.assistantTexts.push(text);
     }
@@ -4572,6 +4642,7 @@ function finalizeCodexScan(state: CodexParseState): CodexSessionScan {
     version: state.version,
     model: state.model,
     topic: state.topic,
+    firstUserMessage: state.firstUserMessage,
     messageCount: state.messageCount,
     tokenCount: state.tokenCount,
     outputTokens,
@@ -4637,7 +4708,9 @@ async function scanCodexSession(filePath: string): Promise<CodexSessionScan> {
 export interface CodexParserState {
   // v3: added `assistantContentText` (assistant-answer accumulator). A stale v2
   // blob is rejected, forcing one full reparse — see ClaudeParserState's v5 note.
-  v: 3;
+  // v4 (PHNX-3621): added `firstUserMessage` (the full genuine first user turn).
+  // A stale v3 blob is rejected by the `!== 4` guard and re-parsed from byte 0.
+  v: 4;
   offset: number;
   jsonlDroppingOversizedLine?: boolean;
   sessionId?: string;
@@ -4647,6 +4720,8 @@ export interface CodexParserState {
   version?: string;
   model?: string;
   topic?: string;
+  /** Full genuine first user turn, carried across a resumed parse (PHNX-3621). */
+  firstUserMessage?: string;
   messageCount: number;
   tokenCount?: number;
   lastTotalTokenUsage?: any;
@@ -4678,7 +4753,7 @@ export function serializeCodexParserState(
 ): CodexParserState {
   const ticket = detectTicket(state.userTexts.join('\n') || undefined, state.gitBranch);
   return {
-    v: 3,
+    v: 4,
     offset,
     jsonlDroppingOversizedLine: jsonlDroppingOversizedLine || undefined,
     sessionId: state.sessionId,
@@ -4688,6 +4763,7 @@ export function serializeCodexParserState(
     version: state.version,
     model: state.model,
     topic: state.topic,
+    firstUserMessage: state.firstUserMessage,
     messageCount: state.messageCount,
     tokenCount: state.tokenCount,
     lastTotalTokenUsage: state.lastTotalTokenUsage,
@@ -4731,6 +4807,7 @@ function hydrateCodexParseState(prior: CodexParserState): CodexParseState {
     version: prior.version,
     model: prior.model,
     topic: prior.topic,
+    firstUserMessage: prior.firstUserMessage,
     messageCount: prior.messageCount,
     tokenCount: prior.tokenCount,
     lastTotalTokenUsage: prior.lastTotalTokenUsage,
@@ -4890,7 +4967,7 @@ function parsePriorCodexState(row: { parserState: string | null } | undefined): 
   if (!row?.parserState) return null;
   try {
     const parsed = JSON.parse(row.parserState) as CodexParserState;
-    if (parsed?.v !== 3 || typeof parsed.offset !== 'number' || parsed.toolCalls?.v !== 1) return null;
+    if (parsed?.v !== 4 || typeof parsed.offset !== 'number' || parsed.toolCalls?.v !== 1) return null;
     return parsed;
   } catch {
     return null;
@@ -5305,6 +5382,7 @@ export function readCursorMeta(
     filePath,
     version: resolveSessionVersion('cursor', filePath, undefined, currentVersion),
     topic: firstUserText ? extractSessionTopic(firstUserText) : undefined,
+    firstUserMessage: firstUserText,
     label: title,
     messageCount: events.filter((event) => event.type === 'message').length,
     todos: extractTodoProgressFromEvents(events),
@@ -5432,7 +5510,7 @@ export function readKimiMeta(
   // bases when the wire grew, else full-parse from byte 0. The continuation is
   // persisted on this session's state.json ledger row.
   const prior = parsePriorKimiState(priorRow);
-  const { messageCount, tokenCount, outputTokens, newState } = parseKimiWireMetricsIncremental(sessionDir, prior);
+  const { messageCount, tokenCount, outputTokens, firstUserMessage, newState } = parseKimiWireMetricsIncremental(sessionDir, prior);
 
   const meta: SessionMeta = {
     id: sessionId,
@@ -5442,6 +5520,7 @@ export function readKimiMeta(
     project,
     filePath,
     topic,
+    firstUserMessage,
     messageCount,
     tokenCount: tokenCount > 0 ? tokenCount : undefined,
     outputTokens: outputTokens > 0 ? outputTokens : undefined,
@@ -5457,20 +5536,42 @@ export function readKimiMeta(
  * from `offset` + adding the appended tail's deltas equals a full parse.
  */
 export interface KimiParserState {
-  v: 1;
+  // v2 (PHNX-3621): added `firstUserMessage`. A stale v1 blob is rejected by the
+  // `!== 2` guard and re-parsed from byte 0, which populates it.
+  v: 2;
   offset: number;
   messageCount: number;
   tokenCount: number;
   outputTokens: number;
+  /** Full genuine first user turn, carried across a resumed wire parse (PHNX-3621). */
+  firstUserMessage?: string;
+}
+
+/** Flatten a Kimi wire message `content` (string or `[{ type:'text', text }]`) to plain text. */
+function extractKimiWireMessageText(rawContent: any): string {
+  if (typeof rawContent === 'string') return rawContent.trim();
+  if (Array.isArray(rawContent)) {
+    return rawContent
+      .map((part: any) => (typeof part?.text === 'string' ? part.text : ''))
+      .join('')
+      .trim();
+  }
+  return '';
 }
 
 /** Fold one parsed Kimi wire event into the additive counters, in place. */
 function applyKimiWireEvent(
-  acc: { messageCount: number; tokenCount: number; outputTokens: number },
+  acc: { messageCount: number; tokenCount: number; outputTokens: number; firstUserMessage?: string },
   event: any,
 ): void {
   if (event.type === 'context.append_message') {
     acc.messageCount++;
+    // Capture the full genuine first user turn (PHNX-3621) — wire.jsonl is the
+    // only place Kimi records it (state.json carries the LAST prompt, not the first).
+    if (acc.firstUserMessage === undefined && event.message?.role === 'user') {
+      const text = extractKimiWireMessageText(event.message?.content);
+      if (text) acc.firstUserMessage = text;
+    }
   } else if (event.type === 'usage.record' && event.usage) {
     // Kimi usage structure: inputOther + output + inputCacheRead + inputCacheCreation
     const u = event.usage;
@@ -5497,14 +5598,14 @@ function applyKimiWireEvent(
 export function parseKimiWireMetricsIncremental(
   sessionDir: string,
   prior: KimiParserState | null,
-): { messageCount: number; tokenCount: number; outputTokens: number; newState: KimiParserState } {
+): { messageCount: number; tokenCount: number; outputTokens: number; firstUserMessage?: string; newState: KimiParserState } {
   const wirePath = path.join(sessionDir, 'agents', 'main', 'wire.jsonl');
 
   const stat = safeStatSync(wirePath);
   if (!stat) {
     // No wire.jsonl (yet): zero counters, offset 0 so a later append is a clean
     // full parse.
-    return { messageCount: 0, tokenCount: 0, outputTokens: 0, newState: { v: 1, offset: 0, messageCount: 0, tokenCount: 0, outputTokens: 0 } };
+    return { messageCount: 0, tokenCount: 0, outputTokens: 0, newState: { v: 2, offset: 0, messageCount: 0, tokenCount: 0, outputTokens: 0 } };
   }
 
   // INCREMENTAL only when a usable prior exists AND the file grew past its
@@ -5523,8 +5624,8 @@ export function parseKimiWireMetricsIncremental(
   // the offset and takes the FULL branch above.)
   const canIncrement = prior !== null && stat.size > prior.offset;
   const fromOffset = canIncrement ? prior!.offset : 0;
-  const acc = canIncrement
-    ? { messageCount: prior!.messageCount, tokenCount: prior!.tokenCount, outputTokens: prior!.outputTokens }
+  const acc: { messageCount: number; tokenCount: number; outputTokens: number; firstUserMessage?: string } = canIncrement
+    ? { messageCount: prior!.messageCount, tokenCount: prior!.tokenCount, outputTokens: prior!.outputTokens, firstUserMessage: prior!.firstUserMessage }
     : { messageCount: 0, tokenCount: 0, outputTokens: 0 };
 
   let consumedBytes = 0;
@@ -5574,7 +5675,8 @@ export function parseKimiWireMetricsIncremental(
     messageCount: acc.messageCount,
     tokenCount: acc.tokenCount,
     outputTokens: acc.outputTokens,
-    newState: { v: 1, offset: fromOffset + consumedBytes, messageCount: acc.messageCount, tokenCount: acc.tokenCount, outputTokens: acc.outputTokens },
+    firstUserMessage: acc.firstUserMessage,
+    newState: { v: 2, offset: fromOffset + consumedBytes, messageCount: acc.messageCount, tokenCount: acc.tokenCount, outputTokens: acc.outputTokens, firstUserMessage: acc.firstUserMessage },
   };
 }
 
@@ -5588,7 +5690,7 @@ function parsePriorKimiState(row: { parserState: string | null } | undefined): K
   if (!row?.parserState) return null;
   try {
     const parsed = JSON.parse(row.parserState) as KimiParserState;
-    if (parsed?.v !== 1 || typeof parsed.offset !== 'number') return null;
+    if (parsed?.v !== 2 || typeof parsed.offset !== 'number') return null;
     return parsed;
   } catch {
     return null;
@@ -5662,6 +5764,33 @@ async function scanGrokIncremental(onProgress?: (p: ScanProgress) => void): Prom
   recordScans(touched);
 }
 
+/**
+ * The full genuine first user turn for a Grok session — its conversation lives
+ * in `chat_history.jsonl` alongside summary.json (PHNX-3621). summary.json only
+ * carries a generated title, so read the transcript's first `user` line. Scans
+ * line by line and stops at the first genuine user turn, so it is bounded by the
+ * head of the file, not its size.
+ */
+function readGrokFirstUserMessage(sessionDir: string): string | undefined {
+  const historyPath = path.join(sessionDir, 'chat_history.jsonl');
+  let content: string;
+  try { content = fs.readFileSync(historyPath, 'utf-8'); } catch { return undefined; }
+  for (const line of content.split('\n')) {
+    if (!line.trim()) continue;
+    let msg: any;
+    try { msg = JSON.parse(line); } catch { continue; }
+    if (msg?.type !== 'user') continue;
+    const raw = msg.content;
+    const text = typeof raw === 'string'
+      ? raw.trim()
+      : Array.isArray(raw)
+        ? raw.map((p: any) => (typeof p?.text === 'string' ? p.text : '')).join('').trim()
+        : '';
+    if (text) return text;
+  }
+  return undefined;
+}
+
 /** Parse a single Grok session summary.json into session metadata. */
 export function readGrokMeta(
   filePath: string,
@@ -5726,6 +5855,7 @@ export function readGrokMeta(
     filePath,
     version: resolveSessionVersion('grok', filePath, embeddedVersion, currentVersion),
     topic,
+    firstUserMessage: readGrokFirstUserMessage(sessionDir),
     messageCount,
   };
 
