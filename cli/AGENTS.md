@@ -86,6 +86,20 @@ composes the existing session watcher with feed attention and activity, while
 Answers go through `agents feed answer <attention-key>` so the CLI atomically
 claims the first reply and routes it over the recorded session reply rail.
 
+The stream owner (`watchLocalSessions`, `lib/session/remote/watch.ts`) carries
+more than the LIVE session cache: it folds a bounded, durable **Previous** set
+from the transcript index into the reset and every delta — this box's own
+resumable sessions, last 7 days, at most 50, team-origin/archived/synthetic
+excluded (`buildPreviousRows`). Each Previous row is marked `previous: true` and
+carries `recovery`, `sourceDevice`, the exact `harness`, `firstUserMessage`, and
+the CLI-derived `phase` (+ attention via the feed projection). A **live row wins
+by session id**, and the set is re-derived on the same journal/index publication
+seam the live snapshot rides (each journal record + heartbeat), never on a
+consumer poll — so a just-ended session transitions in place from its live row to
+its durable Previous row. This owns the recoverable history the AGI EXT once
+assembled with its own now-deleted `fetchPreviousSessions` fleet sweep
+(PHNX-3621, spec SES-43a).
+
 Owner-addressed delivery is policy fan-out, not primary/fallback selection.
 `agents send --to owner`, deprecated `agents notify`, and an important feed's
 `channel: owner` sink resolve every addressable id in

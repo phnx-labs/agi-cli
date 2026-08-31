@@ -8,7 +8,7 @@ import { deviceIdentityArgs, sshTargetFor } from '../../devices/connect.js';
 import { machineId, normalizeHost } from '../../machine-id.js';
 import { SSH_OPTS, controlOpts, shellQuote } from '../../ssh-exec.js';
 import { buildWindowsAgentsCommand, remoteShellFor } from '../../hosts/remote-cmd.js';
-import { isReapableOrphan, type ActiveSession } from '../active.js';
+import { derivePhase, isReapableOrphan, type ActiveSession } from '../active.js';
 import {
   activeSessionsJournalPath,
   activeSessionJournalIdentity,
@@ -16,6 +16,9 @@ import {
   noteActiveSessionsJournalReader,
   type ActiveSessionsJournalRecord,
 } from '../session-cache.js';
+import { querySessions } from '../db.js';
+import { linearIssueUrl } from '../linear.js';
+import type { SessionMeta } from '../types.js';
 
 export const SESSION_WATCH_VERSION = 1 as const;
 export const SESSION_WATCH_HEARTBEAT_MS = 15_000;
@@ -36,7 +39,25 @@ export interface SessionWatchRow extends Omit<ActiveSession, 'viewingIn'> {
   unwatched: boolean;
   viewingIn: string | null;
   recovery: { command: 'agents'; args: string[]; cwd?: string } | null;
+  /**
+   * True when the row is a durable "Previous" session projected from the
+   * transcript index (see {@link ActiveSession.previous}), not a live process.
+   * A consumer renders these as its recoverable-history / SessionPicker list; a
+   * live row for the same session id always wins the merge, so a `previous` row
+   * is only ever surfaced while that session has no live process (PHNX-3621).
+   */
+  previous: boolean;
 }
+
+/**
+ * Bounded window and cap for the durable "Previous" rows the local watch stream
+ * folds in beside the live set (PHNX-3621). The AGI EXT dropped its own
+ * `fetchPreviousSessions` fleet sweep, so the canonical stream owner MUST carry
+ * a recoverable-history list itself rather than only the live ActiveSession
+ * cache rows.
+ */
+export const PREVIOUS_ROW_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+export const PREVIOUS_ROW_LIMIT = 50;
 
 /** Stable, opaque identity for one row within one device scope. */
 export function sessionWatchRowKey(scope: string, row: ActiveSession): string {
@@ -64,7 +85,85 @@ export function toSessionWatchRow(scope: string, row: ActiveSession): SessionWat
     recovery: resumable
       ? { command: 'agents', args: ['sessions', 'resume', row.sessionId!, '--device', scope], ...(row.cwd ? { cwd: row.cwd } : {}) }
       : null,
+    previous: Boolean(row.previous),
   };
+}
+
+/**
+ * Project one indexed {@link SessionMeta} into a durable "Previous" row — an
+ * inactive, resumable ActiveSession shaped like the SessionPicker's rows.
+ * It carries the enrichment a running process cannot report (`version`,
+ * `account`, `firstUserMessage`) straight off the index, plus the exact
+ * producing `harness`. Status is `closed` — the process is not running — which
+ * (not being `abandoned`) keeps {@link isReapableOrphan} false so the row stays
+ * resumable and {@link toSessionWatchRow} emits its `recovery` command.
+ */
+function previousRowFromMeta(scope: string, m: SessionMeta): ActiveSession {
+  const startedAtMs = Date.parse(m.timestamp);
+  const lastActivityMs = m.lastActivity ? Date.parse(m.lastActivity) : undefined;
+  return {
+    context: 'headless',
+    kind: m.agent,
+    harness: m.harness,
+    sessionId: m.id,
+    cwd: m.cwd,
+    project: m.project ?? null,
+    topic: m.topic,
+    label: m.label,
+    title: m.label || m.topic,
+    firstUserMessage: m.firstUserMessage,
+    version: m.version,
+    account: m.account,
+    machine: m.machine ?? scope,
+    startedAtMs: Number.isFinite(startedAtMs) ? startedAtMs : undefined,
+    lastActivityMs: Number.isFinite(lastActivityMs as number)
+      ? (lastActivityMs as number)
+      : (Number.isFinite(startedAtMs) ? startedAtMs : undefined),
+    tokenCount: m.tokenCount,
+    durationMs: m.durationMs,
+    subAgentCount: m.subAgentCount,
+    origin: m.origin,
+    routineName: m.routineName,
+    ...(m.ticketId ? { ticket: { id: m.ticketId, url: linearIssueUrl(m.ticketId) } } : {}),
+    ...(m.prUrl ? { pr: { url: m.prUrl, number: m.prNumber } } : {}),
+    status: 'closed',
+    phase: derivePhase('closed'),
+    pidAlive: false,
+    previous: true,
+  };
+}
+
+/**
+ * The bounded, durable recoverable-history set for one device scope: the last
+ * {@link PREVIOUS_ROW_WINDOW_MS} of this box's own resumable sessions, capped at
+ * {@link PREVIOUS_ROW_LIMIT}, read from the transcript index (PHNX-3621).
+ *
+ * Team-origin rows are excluded (they flood the operator's list); archived
+ * (transcript-gone) and synthetic (no file, e.g. OpenClaw channel inventory)
+ * rows are dropped because they are not resumable. Scoped to `machine = scope`
+ * so a synced mirror of another box's session — readable here but resumable only
+ * on its owner — never appears as locally recoverable. Best-effort: any index
+ * error yields an empty set rather than breaking the live stream.
+ */
+export function buildPreviousRows(
+  scope: string,
+  opts: { windowMs?: number; limit?: number; nowMs?: number } = {},
+): ActiveSession[] {
+  const windowMs = opts.windowMs ?? PREVIOUS_ROW_WINDOW_MS;
+  const limit = opts.limit ?? PREVIOUS_ROW_LIMIT;
+  const now = opts.nowMs ?? Date.now();
+  let metas: SessionMeta[];
+  try {
+    metas = querySessions({ machine: scope, sinceMs: now - windowMs, excludeTeamOrigin: true, limit });
+  } catch {
+    return [];
+  }
+  const rows: ActiveSession[] = [];
+  for (const m of metas) {
+    if (!m.id || !m.filePath || m.archived) continue;
+    rows.push(previousRowFromMeta(scope, m));
+  }
+  return rows;
 }
 
 function sameRow(a: SessionWatchRow, b: SessionWatchRow): boolean {
@@ -106,24 +205,6 @@ export class SessionWatchState {
     return events;
   }
 
-  patch(scope: string, upserts: ActiveSession[], removes: string[]): SessionWatchEnvelope[] {
-    const current = new Map(this.rows.get(scope) ?? []);
-    const events: SessionWatchEnvelope[] = [];
-    for (const source of upserts) {
-      const row = toSessionWatchRow(scope, source);
-      if (!current.has(row.rowKey) || !sameRow(current.get(row.rowKey)!, row)) {
-        current.set(row.rowKey, row);
-        events.push({ ...this.base('upsert'), scope, rowKey: row.rowKey, row });
-      }
-    }
-    for (const identity of removes) {
-      const rowKey = createHash('sha256').update(`${scope}\0${identity}`).digest('base64url').slice(0, 22);
-      if (current.delete(rowKey)) events.push({ ...this.base('remove'), scope, rowKey });
-    }
-    this.rows.set(scope, current);
-    return events;
-  }
-
   scope(scope: string, status: SessionWatchScopeStatus, reason?: string): SessionWatchEnvelope {
     // Deliberately retain rows while unavailable. A reconnecting scope replaces
     // them with a reset; transient fleet loss must not look like session death.
@@ -142,23 +223,59 @@ export interface WatchLocalOptions {
   refreshMs?: number;
   heartbeatMs?: number;
   readCache?: typeof readActiveSessionsCache;
+  /**
+   * The durable "Previous" set for this scope (PHNX-3621). Defaults to
+   * {@link buildPreviousRows}; injected in tests to exercise the merge without a
+   * real index. Re-read on every publication seam, so a newly-ended session that
+   * the index has just picked up appears without a consumer poll.
+   */
+  readPrevious?: (scope: string) => ActiveSession[];
   journalPath?: string;
   journalPollMs?: number;
 }
 
 /**
- * Keep one local subscription alive. Startup reads one canonical reset snapshot;
- * steady state tails the canonical writer journal and never invokes a gather.
+ * Keep one local subscription alive. Startup reads one canonical reset snapshot
+ * (the live ActiveSession cache) merged with the durable "Previous" set from the
+ * transcript index; steady state tails the canonical writer journal and never
+ * invokes a live gather.
+ *
+ * The reset and every subsequent upsert carry BOTH the live rows and the bounded
+ * recoverable-history rows (PHNX-3621): a live row always wins by session id, and
+ * the Previous set is re-derived on each journal record and heartbeat — the same
+ * publication seam the live snapshot rides — so a session that just ended
+ * transitions in place from its live row to its durable Previous row with no
+ * consumer polling.
  */
 export async function watchLocalSessions(options: WatchLocalOptions): Promise<void> {
   const state = new SessionWatchState();
   const readCache = options.readCache ?? readActiveSessionsCache;
+  const readPrevious = options.readPrevious ?? buildPreviousRows;
   const journal = options.journalPath ?? activeSessionsJournalPath();
   const heartbeatMs = options.heartbeatMs ?? SESSION_WATCH_HEARTBEAT_MS;
+
+  // The live set, keyed by journal identity, kept in sync from the cache reset
+  // and the journal's incremental upserts/removes. The merged desired set is
+  // live ∪ Previous, with a Previous row dropped whenever its session id is live.
+  const liveByIdentity = new Map<string, ActiveSession>();
+  const setLive = (rows: ActiveSession[]) => {
+    liveByIdentity.clear();
+    for (const row of rows) liveByIdentity.set(activeSessionJournalIdentity(row), row);
+  };
+  const mergeDesired = (): ActiveSession[] => {
+    const liveIds = new Set<string>();
+    for (const row of liveByIdentity.values()) if (row.sessionId) liveIds.add(row.sessionId);
+    let previous: ActiveSession[] = [];
+    try { previous = readPrevious(options.scope).filter((p) => !p.sessionId || !liveIds.has(p.sessionId)); }
+    catch { previous = []; }
+    return [...liveByIdentity.values(), ...previous];
+  };
+
   let offset = 0;
   try { offset = fs.statSync(journal).size; } catch { /* first publication */ }
   const initial = readCache('local');
-  options.emit(state.reset(options.scope, initial?.sessions ?? []));
+  setLive(initial?.sessions ?? []);
+  options.emit(state.reset(options.scope, mergeDesired()));
   // Known gap (out of scope for RUSH-2484): a present cache alone marks
   // 'available' with no staleness/age check, so a reconnect can briefly render
   // a stale snapshot as live before the out-of-band gather this file triggers
@@ -189,7 +306,12 @@ export async function watchLocalSessions(options: WatchLocalOptions): Promise<vo
             try {
               const record = JSON.parse(line) as ActiveSessionsJournalRecord;
               if (record.version !== 1 || record.scope !== 'local' || !Array.isArray(record.upserts) || !Array.isArray(record.removes)) continue;
-              for (const event of state.patch(options.scope, record.upserts, record.removes)) options.emit(event);
+              for (const source of record.upserts) liveByIdentity.set(activeSessionJournalIdentity(source), source);
+              for (const identity of record.removes) liveByIdentity.delete(identity);
+              // A full convergent diff over live ∪ Previous: a just-removed live
+              // row reappears as its durable Previous row (same session id, same
+              // rowKey) in one upsert, so the transition is seamless.
+              for (const event of state.update(options.scope, mergeDesired())) options.emit(event);
               options.emit(state.scope(options.scope, 'available'));
             } catch { /* partial/corrupt journal lines are not state */ }
           }
@@ -202,6 +324,11 @@ export async function watchLocalSessions(options: WatchLocalOptions): Promise<vo
     fs.watchFile(journal, { interval: options.journalPollMs ?? 250 }, journalListener);
     const heartbeatTimer = setInterval(() => {
       noteActiveSessionsJournalReader();
+      // Re-derive Previous on the heartbeat too, so an index update with no live
+      // churn (a session aging out of the 7-day window, or one indexed after its
+      // live row was already gone) still converges. state.update emits nothing
+      // when the merged set is unchanged, so an idle heartbeat stays quiet.
+      for (const event of state.update(options.scope, mergeDesired())) options.emit(event);
       options.emit(state.heartbeat(options.scope));
     }, heartbeatMs);
     const stop = () => { fs.unwatchFile(journal, journalListener); clearInterval(heartbeatTimer); resolve(); };

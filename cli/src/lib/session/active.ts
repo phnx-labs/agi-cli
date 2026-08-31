@@ -365,6 +365,16 @@ export interface ActiveSession {
    */
   firstUserMessage?: string;
   /**
+   * Marks a SYNTHESIZED durable row projected from the transcript index rather
+   * than a live process — the bounded last-7-days / ≤50 resumable "Previous"
+   * sessions the `sessions watch` / `feed watch` stream surfaces so a consumer's
+   * SessionPicker has recoverable history with no side-channel index fetch
+   * (PHNX-3621). Only ever set on a row that has no live process this scan: a
+   * live row for the same session id always wins the merge. Never asserted by a
+   * live source; set exclusively by {@link buildPreviousRows}.
+   */
+  previous?: boolean;
+  /**
    * The most recent assistant line (from the transcript tail) — the free,
    * always-current signal of what the agent last said/did. Ladder rung 3.
    */

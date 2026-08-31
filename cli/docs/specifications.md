@@ -711,6 +711,21 @@ SSH access (§7); rendering sessions that no harness produced.
   row deltas from the canonical snapshot writer's journal
   (`lib/session/session-cache.ts:190-230`; `lib/session/remote/watch.ts:141-211`;
   `lib/session/remote/watch.test.ts:30-61`; `commands/sessions-watch.ts:27-43`).
+- **SES-43a (MUST).** The local stream MUST fold a bounded, durable **Previous** set
+  into the reset and every subsequent delta beside the live rows: this scope's own
+  resumable sessions from the transcript index, at most the last 7 days and 50 rows,
+  team-origin / archived / synthetic rows excluded, each carrying `recovery`,
+  `sourceDevice`, the exact producing `harness`, `firstUserMessage`, and the CLI-derived
+  `phase` (and, via the feed projection, attention). A Previous row MUST be marked
+  `previous: true`, and a **live row MUST win by session id** — a Previous row is
+  surfaced only while its session has no live process. The set MUST be re-derived on the
+  same journal / index publication seam the live snapshot rides (each journal record and
+  each heartbeat), never on a consumer poll, so a newly-ended session transitions in
+  place from its live row to its durable Previous row. This carries the recoverable
+  history the AGI EXT once assembled with its own `fetchPreviousSessions` fleet sweep, now
+  deleted — the canonical CLI stream owns it (PHNX-3621; `lib/session/remote/watch.ts`
+  `buildPreviousRows` / `watchLocalSessions`; `lib/session/remote/watch.test.ts`,
+  `lib/session/remote/previous-rows.test.ts`).
 - **SES-44 (MUST).** A one-shot `agents sessions ... --json` listing is distinct
   from the incremental stream, but MUST expose the same picker-facing lifecycle,
   device, viewing, and recovery metadata in each durable row. Consumers MUST NOT

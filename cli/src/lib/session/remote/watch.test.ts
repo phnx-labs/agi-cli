@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { ActiveSession } from '../active.js';
-import { SessionWatchState, sessionWatchRowKey, watchLocalSessions, toSessionWatchRow } from './watch.js';
+import { SessionWatchState, sessionWatchRowKey, watchLocalSessions, toSessionWatchRow, type SessionWatchRow } from './watch.js';
 
 const row = (sessionId: string, status: ActiveSession['status'] = 'running'): ActiveSession => ({
   context: 'terminal', kind: 'codex', sessionId, status, cwd: '/repo', lastActivityMs: 10,
@@ -53,6 +53,7 @@ describe('session watch protocol', () => {
     const events: Array<{ type: string }> = [];
     const watching = watchLocalSessions({
       scope: 'local', signal: controller.signal, journalPath, journalPollMs: 5, heartbeatMs: 1_000,
+      readPrevious: () => [],
       readCache: () => {
         snapshotReads++;
         return { version: 1, scope: 'local', capturedAt: 1, sessions: [row('a')] };
@@ -72,6 +73,96 @@ describe('session watch protocol', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
+  const previousRow = (sessionId: string, firstUserMessage: string): ActiveSession => ({
+    context: 'headless', kind: 'claude', sessionId, status: 'closed', cwd: '/repo',
+    firstUserMessage, version: '2.1.200', account: 'a@b.com', harness: 'claude',
+    lastActivityMs: 5, previous: true,
+  });
+
+  it('initial reset folds durable Previous rows in beside the live set (PHNX-3621)', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-watch-prev-'));
+    const journalPath = path.join(dir, 'active.jsonl');
+    const controller = new AbortController();
+    let reset: { type: string; rows: SessionWatchRow[] } | undefined;
+    const watching = watchLocalSessions({
+      scope: 'zion', signal: controller.signal, journalPath, journalPollMs: 5, heartbeatMs: 1_000,
+      readCache: () => ({ version: 1, scope: 'local', capturedAt: 1, sessions: [row('live-1')] }),
+      readPrevious: () => [previousRow('prev-1', 'the original ask, verbatim')],
+      emit: (event) => {
+        if (event.type === 'reset') { reset = event as unknown as { type: string; rows: SessionWatchRow[] }; controller.abort(); }
+      },
+    });
+    await watching;
+    fs.rmSync(dir, { recursive: true, force: true });
+
+    const byId = new Map(reset!.rows.map((r) => [r.sessionId, r]));
+    expect(byId.has('live-1')).toBe(true);
+    expect(byId.has('prev-1')).toBe(true);
+    // The live row is not a Previous row; the durable row is.
+    expect(byId.get('live-1')!.previous).toBe(false);
+    const prev = byId.get('prev-1')!;
+    expect(prev.previous).toBe(true);
+    // firstUserMessage and a resume recovery command survive the projection.
+    expect(prev.firstUserMessage).toBe('the original ask, verbatim');
+    expect(prev.resumable).toBe(true);
+    expect(prev.recovery).toMatchObject({ command: 'agents', args: ['sessions', 'resume', 'prev-1', '--device', 'zion'] });
+    expect(prev.sourceDevice).toBe('zion');
+  });
+
+  it('a live row wins by session id over a Previous row for the same session', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-watch-prevwin-'));
+    const journalPath = path.join(dir, 'active.jsonl');
+    const controller = new AbortController();
+    let reset: { rows: SessionWatchRow[] } | undefined;
+    const watching = watchLocalSessions({
+      scope: 'zion', signal: controller.signal, journalPath, journalPollMs: 5, heartbeatMs: 1_000,
+      readCache: () => ({ version: 1, scope: 'local', capturedAt: 1, sessions: [row('dup', 'running')] }),
+      // The index still lists 'dup' as a durable row — the live process must win.
+      readPrevious: () => [previousRow('dup', 'stale ask'), previousRow('prev-only', 'other ask')],
+      emit: (event) => { if (event.type === 'reset') { reset = event as unknown as { rows: SessionWatchRow[] }; controller.abort(); } },
+    });
+    await watching;
+    fs.rmSync(dir, { recursive: true, force: true });
+
+    const dupRows = reset!.rows.filter((r) => r.sessionId === 'dup');
+    expect(dupRows).toHaveLength(1);
+    expect(dupRows[0].previous).toBe(false);
+    expect(dupRows[0].status).toBe('running');
+    // The non-colliding durable row still comes through.
+    expect(reset!.rows.some((r) => r.sessionId === 'prev-only' && r.previous)).toBe(true);
+  });
+
+  it('a newly-ended session reappears as its durable Previous row on the journal seam', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-watch-ended-'));
+    const journalPath = path.join(dir, 'active.jsonl');
+    const controller = new AbortController();
+    const upserts: SessionWatchRow[] = [];
+    // 'a' starts live; once its live process is gone the index lists it as Previous.
+    let ended = false;
+    const watching = watchLocalSessions({
+      scope: 'zion', signal: controller.signal, journalPath, journalPollMs: 5, heartbeatMs: 10_000,
+      readCache: () => ({ version: 1, scope: 'local', capturedAt: 1, sessions: [row('a', 'running')] }),
+      readPrevious: () => (ended ? [previousRow('a', 'the ask for a')] : []),
+      emit: (event) => {
+        if (event.type === 'upsert') {
+          upserts.push(event.row);
+          if (event.row.sessionId === 'a' && event.row.previous) controller.abort();
+        }
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    // The live 'a' exits: the gather removes it from the live snapshot journal.
+    ended = true;
+    fs.appendFileSync(journalPath, `${JSON.stringify({ version: 1, scope: 'local', capturedAt: 2, upserts: [], removes: ['a'] })}\n`);
+    await watching;
+    fs.rmSync(dir, { recursive: true, force: true });
+
+    const durableA = upserts.find((r) => r.sessionId === 'a' && r.previous);
+    expect(durableA).toBeDefined();
+    expect(durableA!.firstUserMessage).toBe('the ask for a');
+    expect(durableA!.resumable).toBe(true);
+  });
+
   it('consumes a first publication written during the startup handoff', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-watch-handoff-'));
     const journalPath = path.join(dir, 'active.jsonl');
@@ -79,6 +170,7 @@ describe('session watch protocol', () => {
     const statuses: string[] = [];
     const watching = watchLocalSessions({
       scope: 'local', signal: controller.signal, journalPath, journalPollMs: 5,
+      readPrevious: () => [],
       readCache: () => {
         fs.appendFileSync(journalPath, `${JSON.stringify({
           version: 1, scope: 'local', capturedAt: 2, upserts: [], removes: [],
