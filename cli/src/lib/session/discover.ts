@@ -2494,7 +2494,19 @@ async function scanOpenCodeIncremental(onProgress?: (p: ScanProgress) => void): 
     fileSize: stat.size,
   };
   const prev = getScanStampByPath(OPENCODE_DB);
-  if (prev && prev.fileMtimeMs === currentScan.fileMtimeMs && prev.fileSize === currentScan.fileSize) {
+  // The whole-DB short-circuit is (mtime, size) AND extractor-version current:
+  // a stored `extractor_version` behind CONTENT_INDEX_VERSION means an unchanged
+  // opencode.db (no new sessions) was last scanned under an older content
+  // extractor, so its rows still need re-extraction (e.g. to backfill
+  // firstUserMessage). Without the version check the DB never re-scans until an
+  // unrelated write bumps its mtime, and even then the per-session gate below
+  // would exclude the old rows — so a v1 row stays firstUserMessage-null forever.
+  if (
+    prev &&
+    prev.fileMtimeMs === currentScan.fileMtimeMs &&
+    prev.fileSize === currentScan.fileSize &&
+    prev.extractorVersion === CONTENT_INDEX_VERSION
+  ) {
     return;
   }
 
@@ -2631,9 +2643,17 @@ async function scanOpenCodeIncremental(onProgress?: (p: ScanProgress) => void): 
     const priorStamps = getScanStampsForPaths(candidates.map(c => c.filePath));
     const changed = candidates.filter(c => {
       const prevStamp = priorStamps.get(c.filePath);
+      // Same extractor-version invalidation the file-based scanners honor
+      // (filterChangedEntries): a per-session stamp whose `extractor_version` is
+      // behind CONTENT_INDEX_VERSION was last extracted by an older content
+      // extractor and must be re-scanned even when its (mtime, size) is
+      // unchanged — otherwise a completed v1 OpenCode session is never
+      // re-extracted after a CONTENT_INDEX_VERSION bump and its firstUserMessage
+      // stays null indefinitely.
       return !prevStamp
         || prevStamp.fileMtimeMs !== c.scan.fileMtimeMs
-        || prevStamp.fileSize !== c.scan.fileSize;
+        || prevStamp.fileSize !== c.scan.fileSize
+        || prevStamp.extractorVersion !== CONTENT_INDEX_VERSION;
     });
 
     // The full genuine first user turn (PHNX-3621): the text part(s) of the

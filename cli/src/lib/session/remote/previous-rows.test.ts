@@ -93,6 +93,28 @@ describe('buildPreviousRows — durable recoverable history from the index (PHNX
     expect(watchRow.recovery).toMatchObject({ command: 'agents', args: ['sessions', 'resume', 'resumable-claude', '--device', SCOPE] });
   });
 
+  it('surfaces an older resumable row even when >50 newer rows are all excluded (PHNX-3621)', () => {
+    // 60 captured-only (non-resumable) sessions, ALL newer than the valid Claude
+    // row below. Before the fix, querySessions applied the 50-row cap BEFORE the
+    // resumable-harness exclusion, so these newer rows filled the query window
+    // and the older Claude session was never even returned — valid recoverable
+    // history vanished behind the cap. The fix pushes the resumable-harness
+    // filter INTO the query and caps only AFTER exclusion.
+    const EXCLUDED = 60;
+    for (let i = 0; i < EXCLUDED; i++) {
+      const ts = new Date(NOW - (i + 1) * 60_000).toISOString(); // all today, newest-first
+      seed({ id: `newer-grok-${i}`, agent: 'grok', harness: 'grok', timestamp: ts, lastActivity: ts });
+    }
+    // One valid, resumable Claude session — OLDER than every excluded row above
+    // but well inside the 7-day window.
+    const olderTs = new Date(NOW - 3 * 24 * 60 * 60 * 1000).toISOString();
+    seed({ id: 'older-valid-claude', agent: 'claude', harness: 'claude', timestamp: olderTs, lastActivity: olderTs });
+
+    const ids = buildPreviousRows(SCOPE, { nowMs: NOW }).map((r) => r.sessionId);
+    expect(ids).toContain('older-valid-claude');
+    expect(ids.some((id) => id.startsWith('newer-grok-'))).toBe(false);
+  });
+
   it('excludes team-origin, a foreign-box mirror, a synthetic row, and an archived (file-gone) row', () => {
     seed({ id: 'team-child', isTeamOrigin: true });
     seed({ id: 'foreign', machine: 'some-other-box' });

@@ -18,7 +18,7 @@ import {
 } from '../session-cache.js';
 import { querySessions } from '../db.js';
 import { linearIssueUrl } from '../linear.js';
-import { isResumableHarness } from '../resume-capability.js';
+import { isResumableHarness, RESUMABLE_HARNESSES } from '../resume-capability.js';
 import type { SessionMeta } from '../types.js';
 
 export const SESSION_WATCH_VERSION = 1 as const;
@@ -159,19 +159,36 @@ export function buildPreviousRows(
   const now = opts.nowMs ?? Date.now();
   let metas: SessionMeta[];
   try {
-    metas = querySessions({ machine: scope, sinceMs: now - windowMs, excludeTeamOrigin: true, limit });
+    // The resumable-harness filter is pushed INTO the query (`agent IN (...)`),
+    // and the `limit` is applied AFTER the archived/synthetic guards below —
+    // NOT as a SQL LIMIT. Capping before exclusion was the defect: enough
+    // newer excluded rows (e.g. 60 captured-only grok/kimi sessions, or archived
+    // transcript-gone rows) would fill the LIMIT window and hide valid older
+    // resumable Claude history behind it. Scoping the query to RESUMABLE_HARNESSES
+    // drops the captured-only flood in SQL, and slicing to `limit` post-filter
+    // makes the cap count FINAL eligible rows — at most PREVIOUS_ROW_LIMIT, never
+    // fewer because the excluded rows happened to be more recent. The set stays
+    // bounded (one machine × 7 days × 4 resumable harnesses), so the whole-window
+    // query is cheap.
+    metas = querySessions({
+      machine: scope,
+      sinceMs: now - windowMs,
+      excludeTeamOrigin: true,
+      agents: [...RESUMABLE_HARNESSES],
+    });
   } catch {
     return [];
   }
   const rows: ActiveSession[] = [];
   for (const m of metas) {
+    if (rows.length >= limit) break;
     if (!m.id || !m.filePath || m.archived) continue;
     // The stream carries RECOVERABLE Previous history, so a captured-only harness
     // with no native resume path (gemini/antigravity/grok/kimi/droid/cursor/…) is
-    // excluded here — rather than surfaced with a dead Resume. `resumable` and the
-    // `recovery` command that toSessionWatchRow derives key on sessionId + orphan
-    // state alone, which cannot see harness capability; RESUMABLE_HARNESSES is the
-    // one authority the SessionPicker projection also uses (PHNX-3621).
+    // excluded — rather than surfaced with a dead Resume. This mirrors the query
+    // filter above; keeping the predicate here means RESUMABLE_HARNESSES, the one
+    // authority the SessionPicker projection also uses, still gates the row even
+    // if the two ever drift (PHNX-3621).
     if (!isResumableHarness(m.agent)) continue;
     rows.push(previousRowFromMeta(scope, m));
   }

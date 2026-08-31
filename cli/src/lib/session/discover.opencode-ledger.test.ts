@@ -331,3 +331,58 @@ describe('OpenCode per-session scan ledger (RUSH-2210)', () => {
     expect(openCounter.count).toBe(0);
   });
 });
+
+describe('OpenCode content extractor-version invalidation (PHNX-3621)', () => {
+  /** Force a ledger row's extractor_version, simulating a pre-bump (v1) scan. */
+  function setLedgerExtractorVersion(filePath: string, version: number): void {
+    db.getDB()
+      .prepare(`UPDATE scan_ledger SET extractor_version = ? WHERE file_path = ?`)
+      .run(version, filePath);
+  }
+  function firstUserMessageOf(sessionId: string): string | null {
+    const row = db.getDB()
+      .prepare(`SELECT first_user_message FROM sessions WHERE id = ?`)
+      .get(sessionId) as { first_user_message: string | null } | undefined;
+    return row?.first_user_message ?? null;
+  }
+
+  it('re-extracts an unchanged session whose ledger predates CONTENT_INDEX_VERSION', async () => {
+    const target = 'ses_fixture09';
+    // A normal scan indexes it at the CURRENT content extractor version.
+    await scan();
+    expect(firstUserMessageOf(target)).toBe('first turn of 9');
+
+    // Reproduce the real regression: this session was indexed under content
+    // extractor v1 (before firstUserMessage existed), so its ledger rows carry a
+    // stale extractor_version and its stored first_user_message is NULL. The DB
+    // file itself is UNCHANGED — no new turn, same mtime/size — only the
+    // extractor version bumped.
+    const stale = db.CONTENT_INDEX_VERSION - 1;
+    setLedgerExtractorVersion(OPENCODE_DB, stale); // whole-DB short-circuit gate
+    setLedgerExtractorVersion(`${OPENCODE_DB}#${target}`, stale); // per-session gate
+    db.getDB().prepare(`UPDATE sessions SET first_user_message = NULL WHERE id = ?`).run(target);
+    expect(firstUserMessageOf(target)).toBeNull();
+
+    // Re-scan with NO mtime/size change. Pre-fix both gates short-circuit on
+    // (mtime, size) alone, so the stale row is never re-extracted and its
+    // firstUserMessage stays null forever. Post-fix the below-CONTENT_INDEX_VERSION
+    // stamp forces re-extraction on BOTH gates and the value is backfilled.
+    openCounter.match = OPENCODE_DB;
+    openCounter.count = 0;
+    await scan();
+
+    expect(firstUserMessageOf(target)).toBe('first turn of 9');
+    // The whole-DB gate did not short-circuit — it re-opened the DB — and the
+    // per-session gate re-included the stale row.
+    expect(openCounter.count).toBeGreaterThanOrEqual(1);
+
+    // The ledger is now stamped current, so getScanStampByPath carries the
+    // extractor_version it previously dropped and a subsequent unchanged scan
+    // short-circuits again.
+    expect(db.getScanStampByPath(OPENCODE_DB)?.extractorVersion).toBe(db.CONTENT_INDEX_VERSION);
+    openCounter.match = OPENCODE_DB;
+    openCounter.count = 0;
+    await scan();
+    expect(openCounter.count).toBe(0);
+  });
+});
