@@ -18,6 +18,7 @@ import {
 } from '../session-cache.js';
 import { querySessions } from '../db.js';
 import { linearIssueUrl } from '../linear.js';
+import { isResumableHarness } from '../resume-capability.js';
 import type { SessionMeta } from '../types.js';
 
 export const SESSION_WATCH_VERSION = 1 as const;
@@ -140,10 +141,14 @@ function previousRowFromMeta(scope: string, m: SessionMeta): ActiveSession {
  *
  * Team-origin rows are excluded (they flood the operator's list); archived
  * (transcript-gone) and synthetic (no file, e.g. OpenClaw channel inventory)
- * rows are dropped because they are not resumable. Scoped to `machine = scope`
- * so a synced mirror of another box's session — readable here but resumable only
- * on its owner — never appears as locally recoverable. Best-effort: any index
- * error yields an empty set rather than breaking the live stream.
+ * rows are dropped because they are not resumable. A captured-only harness with
+ * no native resume path (gemini/antigravity/grok/kimi/droid/cursor/rush/hermes/
+ * openclaw) is also excluded via {@link isResumableHarness} — the stream is
+ * RECOVERABLE history, so it must not carry a row whose Resume would dead-end
+ * (PHNX-3621). Scoped to `machine = scope` so a synced mirror of another box's
+ * session — readable here but resumable only on its owner — never appears as
+ * locally recoverable. Best-effort: any index error yields an empty set rather
+ * than breaking the live stream.
  */
 export function buildPreviousRows(
   scope: string,
@@ -161,6 +166,13 @@ export function buildPreviousRows(
   const rows: ActiveSession[] = [];
   for (const m of metas) {
     if (!m.id || !m.filePath || m.archived) continue;
+    // The stream carries RECOVERABLE Previous history, so a captured-only harness
+    // with no native resume path (gemini/antigravity/grok/kimi/droid/cursor/…) is
+    // excluded here — rather than surfaced with a dead Resume. `resumable` and the
+    // `recovery` command that toSessionWatchRow derives key on sessionId + orphan
+    // state alone, which cannot see harness capability; RESUMABLE_HARNESSES is the
+    // one authority the SessionPicker projection also uses (PHNX-3621).
+    if (!isResumableHarness(m.agent)) continue;
     rows.push(previousRowFromMeta(scope, m));
   }
   return rows;

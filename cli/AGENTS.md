@@ -89,8 +89,12 @@ claims the first reply and routes it over the recorded session reply rail.
 The stream owner (`watchLocalSessions`, `lib/session/remote/watch.ts`) carries
 more than the LIVE session cache: it folds a bounded, durable **Previous** set
 from the transcript index into the reset and every delta — this box's own
-resumable sessions, last 7 days, at most 50, team-origin/archived/synthetic
-excluded (`buildPreviousRows`). Each Previous row is marked `previous: true` and
+resumable sessions, last 7 days, at most 50, team-origin/archived/synthetic and
+captured-only harnesses with no native resume path (gemini/grok/kimi/droid/cursor/
+antigravity/rush/hermes/openclaw) excluded (`buildPreviousRows`) — the stream is
+recoverable history, so `isResumableHarness` (`lib/session/resume-capability.ts`,
+the one authority the SessionPicker projection and `buildResumeCommand` also use)
+keeps a row whose Resume would dead-end out of it. Each Previous row is marked `previous: true` and
 carries `recovery`, `sourceDevice`, the exact `harness`, `firstUserMessage`, and
 the CLI-derived `phase` (+ attention via the feed projection). A **live row wins
 by session id**, and the set is re-derived on the same journal/index publication

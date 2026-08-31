@@ -11,7 +11,7 @@ process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 
 const { upsertSession } = await import('../db.js');
-const { buildPreviousRows } = await import('./watch.js');
+const { buildPreviousRows, toSessionWatchRow } = await import('./watch.js');
 type SessionMeta = import('../types.js').SessionMeta;
 
 const SEED_DIR = path.join(TEST_HOME, 'seed');
@@ -70,6 +70,27 @@ describe('buildPreviousRows — durable recoverable history from the index (PHNX
 
     expect(buildPreviousRows(SCOPE, { nowMs: NOW, limit: 3 }).length).toBeLessThanOrEqual(3);
     expect(buildPreviousRows(SCOPE, { nowMs: NOW }).map((r) => r.sessionId)).not.toContain('ancient');
+  });
+
+  it('emits a resumable harness but excludes a captured-only one that cannot recover', () => {
+    // Two rows identical except harness: a resumable Claude vs a captured-only
+    // Grok (buildResumeCommand → null). The stream carries RECOVERABLE history,
+    // so only the Claude must appear — a Grok Previous row would carry a dead
+    // Resume (PHNX-3621).
+    seed({ id: 'resumable-claude', agent: 'claude', harness: 'claude' });
+    seed({ id: 'captured-grok', agent: 'grok', harness: 'grok' });
+
+    const rows = buildPreviousRows(SCOPE, { nowMs: NOW });
+    const ids = rows.map((r) => r.sessionId);
+    expect(ids).toContain('resumable-claude');
+    expect(ids).not.toContain('captured-grok');
+
+    // Projected into the watch stream, the surviving Claude row is genuinely
+    // recoverable — resumable with a live Resume command, never a dead one.
+    const watchRow = toSessionWatchRow(SCOPE, rows.find((r) => r.sessionId === 'resumable-claude')!);
+    expect(watchRow.previous).toBe(true);
+    expect(watchRow.resumable).toBe(true);
+    expect(watchRow.recovery).toMatchObject({ command: 'agents', args: ['sessions', 'resume', 'resumable-claude', '--device', SCOPE] });
   });
 
   it('excludes team-origin, a foreign-box mirror, a synthetic row, and an archived (file-gone) row', () => {

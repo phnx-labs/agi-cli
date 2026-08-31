@@ -714,7 +714,12 @@ SSH access (§7); rendering sessions that no harness produced.
 - **SES-43a (MUST).** The local stream MUST fold a bounded, durable **Previous** set
   into the reset and every subsequent delta beside the live rows: this scope's own
   resumable sessions from the transcript index, at most the last 7 days and 50 rows,
-  team-origin / archived / synthetic rows excluded, each carrying `recovery`,
+  team-origin / archived / synthetic rows excluded — and a captured-only harness with
+  no native resume path (`isResumableHarness` false: gemini / antigravity / grok / kimi /
+  droid / cursor / rush / hermes / openclaw) MUST be excluded, because the stream is
+  recoverable history and a Previous row it cannot recover would carry a dead Resume.
+  `isResumableHarness` (`lib/session/resume-capability.ts`) is the single authority shared
+  with the SessionPicker projection and `buildResumeCommand`. Each surviving row carries `recovery`,
   `sourceDevice`, the exact producing `harness`, `firstUserMessage`, and the CLI-derived
   `phase` (and, via the feed projection, attention). A Previous row MUST be marked
   `previous: true`, and a **live row MUST win by session id** — a Previous row is
@@ -724,8 +729,9 @@ SSH access (§7); rendering sessions that no harness produced.
   place from its live row to its durable Previous row. This carries the recoverable
   history the AGI EXT once assembled with its own `fetchPreviousSessions` fleet sweep, now
   deleted — the canonical CLI stream owns it (PHNX-3621; `lib/session/remote/watch.ts`
-  `buildPreviousRows` / `watchLocalSessions`; `lib/session/remote/watch.test.ts`,
-  `lib/session/remote/previous-rows.test.ts`).
+  `buildPreviousRows` / `watchLocalSessions`; `lib/session/resume-capability.ts`;
+  `lib/session/remote/watch.test.ts`, `lib/session/remote/previous-rows.test.ts`,
+  `lib/session/resume-capability.test.ts`).
 - **SES-44 (MUST).** A one-shot `agents sessions ... --json` listing is distinct
   from the incremental stream, but MUST expose the same picker-facing lifecycle,
   device, viewing, and recovery metadata in each durable row. Consumers MUST NOT
