@@ -276,6 +276,38 @@ describe('shouldRecommendDaemonRefresh', () => {
   });
 });
 
+// PHNX-3695: reconcileDaemonVersion asks a version-skewed daemon to self-update
+// (the `version` probe then `request-self-update`) on ordinary browser calls. If
+// the daemon accepts the socket but wedges (a stuck self-update), an UNBOUNDED
+// client request would hang the browser verb forever. The client now passes a
+// bounded `timeoutMs` on both calls; prove that guard fails fast against a daemon
+// that accepts connections but never answers, instead of hanging.
+describe('sendIPCRequest timeout — a non-responsive daemon fails fast, never hangs the browser verb', () => {
+  it('rejects with a timeout when the daemon accepts but never responds', async () => {
+    mkdirSync(path.dirname(getSocketPath()), { recursive: true });
+    // A daemon that accepts the connection (so the service reads as reachable)
+    // but never writes a response line — exactly a wedged self-update handler.
+    const stuck = net.createServer(() => {
+      /* accept and hold the socket open, writing nothing */
+    });
+    await new Promise<void>((resolve, reject) => {
+      stuck.listen(ipcEndpoint(getSocketPath()), resolve);
+      stuck.on('error', reject);
+    });
+    try {
+      const started = Date.now();
+      await expect(
+        sendIPCRequest({ action: 'version' }, { autoStartDaemon: false, timeoutMs: 300 }),
+      ).rejects.toThrow(/timed out/);
+      // It failed FAST — well under a "hang" — bounded by the timeout, not the
+      // test's own 20s ceiling.
+      expect(Date.now() - started).toBeLessThan(5_000);
+    } finally {
+      await new Promise<void>((resolve) => stuck.close(() => resolve()));
+    }
+  }, 20_000);
+});
+
 // RUSH-2622: the daemon owns the live BrowserService, so `agents browser prune`
 // can only reach the abandoned-task reaper across this seam. Driven over a real
 // socket against a real BrowserService — the point is that the request routes

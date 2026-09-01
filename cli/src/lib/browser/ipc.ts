@@ -13,7 +13,7 @@ import {
 } from '../daemon/daemon.js';
 import { getCliVersion } from '../version.js';
 import { compareVersions } from '../agent-spec/primitives.js';
-import { attemptSelfUpdateAndExit } from '../daemon/self-update-service.js';
+import { runSelfUpdateRequest, scheduleSelfUpdateExit } from '../daemon/self-update-service.js';
 import { log as daemonLog } from '../daemon/daemon.js';
 import {
   isDaemonServiceEnabled,
@@ -108,6 +108,35 @@ function isSameSocket(socketPath: string, expected: SocketIdentity): boolean {
 const IPC_CLOSE_TIMEOUT_MS = 1_500;
 
 /**
+ * Delay before a verified on-demand self-update exits the daemon, so
+ * `BrowserIPCServer` has flushed the `request-self-update` response to the
+ * client socket first — otherwise the client hangs on a socket closing
+ * mid-write. Short (a socket flush, not a wait), and serialized with the
+ * periodic tick's exit by {@link scheduleSelfUpdateExit}.
+ */
+const SELF_UPDATE_IPC_EXIT_DELAY_MS = 250;
+
+/**
+ * Client-side ceiling on the daemon `version` probe inside
+ * {@link reconcileDaemonVersion}. A daemon that accepts the socket but never
+ * answers (mid-restart, wedged) must not stall the browser verb that triggered
+ * the reconcile — on timeout the probe is abandoned and the daemon is left
+ * alone, exactly like an unreachable one.
+ */
+const DAEMON_VERSION_PROBE_TIMEOUT_MS = 5_000;
+
+/**
+ * Client-side ceiling on the on-demand `request-self-update` call inside
+ * {@link reconcileDaemonVersion}. The daemon bounds its OWN handler
+ * (`runSelfUpdateRequest`, `SELF_UPDATE_IPC_DEADLINE_MS`), but the client must
+ * not depend on that: a daemon wedged BEFORE it reaches the handler would still
+ * hang every version-skewed `agents browser` call. This is the hard guarantee
+ * that the browser verb fails fast and continues rather than hanging on a stuck
+ * self-update.
+ */
+const REQUEST_SELF_UPDATE_TIMEOUT_MS = 30_000;
+
+/**
  * How long {@link waitForBrowserService} waits for the browser service to come up before
  * failing loud (PHNX-3289).
  *
@@ -161,6 +190,16 @@ const RESPONSIVENESS_PROBE_ATTEMPTS = 3;
 
 export interface IPCRequestOptions {
   autoStartDaemon?: boolean;
+  /**
+   * Optional hard ceiling (ms) on a single request/response round-trip in
+   * {@link sendRawIPCRequest}. When the daemon accepts the socket but never
+   * writes a response line within the window, the socket is destroyed and the
+   * call rejects rather than hanging forever. Used by
+   * {@link reconcileDaemonVersion} so a wedged daemon self-update can never
+   * hang an ordinary browser verb; unset means wait indefinitely, the prior
+   * behavior for every other caller.
+   */
+  timeoutMs?: number;
 }
 
 type PendingIPCResponse = {
@@ -755,18 +794,22 @@ export class BrowserIPCServer {
       // On-demand self-update, triggered by a client that noticed version
       // skew (reconcileDaemonVersion below). Runs the exact same fail-closed
       // check/install/verify path SelfUpdateService's periodic tick runs — no
-      // duplicated logic — just off-schedule. The client must get its
-      // response before the process exits, or it hangs on a closing socket,
-      // so the exit (only on a verified update) is scheduled AFTER this
-      // handler returns and the caller has written the response to the
-      // socket (BrowserIPCServer's `socket.write` right after `handleRequest`
-      // resolves) — a short setTimeout, not setImmediate, to give the actual
-      // OS-level socket write time to flush before the process ends.
+      // duplicated logic — just off-schedule, under a hard IPC deadline
+      // (runSelfUpdateRequest) so a wedged install can never hold this handler
+      // open: reconcileDaemonVersion fires on every version-skewed browser
+      // call, so an unbounded handler here would hang ordinary `agents browser`
+      // usage. The client must get its response before the process exits, or it
+      // hangs on a closing socket, so the exit (only on a verified update) is
+      // scheduled AFTER this handler returns and the caller has written the
+      // response to the socket (BrowserIPCServer's `socket.write` right after
+      // `handleRequest` resolves) — a short delay, not setImmediate, to give
+      // the actual OS-level socket write time to flush before the process ends.
+      // scheduleSelfUpdateExit serializes this against the periodic tick's own
+      // exit so the two can never double-exit or cut each other's flush short.
       case 'request-self-update': {
-        const controller = new AbortController();
-        const outcome = await attemptSelfUpdateAndExit({ log: daemonLog }, controller.signal);
+        const outcome = await runSelfUpdateRequest({ log: daemonLog });
         if (outcome.updated) {
-          setTimeout(() => process.exit(0), 250);
+          scheduleSelfUpdateExit(SELF_UPDATE_IPC_EXIT_DELAY_MS);
         }
         return { ok: true, updated: outcome.updated, reason: outcome.reason };
       }
@@ -1284,7 +1327,10 @@ async function reconcileDaemonVersion(): Promise<void> {
 
   let daemon: string | undefined;
   try {
-    const resp = await sendRawIPCRequest({ action: 'version' }, { autoStartDaemon: false });
+    const resp = await sendRawIPCRequest(
+      { action: 'version' },
+      { autoStartDaemon: false, timeoutMs: DAEMON_VERSION_PROBE_TIMEOUT_MS },
+    );
     daemon = resp.version;
   } catch {
     // Daemon unreachable or too old to speak 'version' — leave it alone.
@@ -1299,7 +1345,10 @@ async function reconcileDaemonVersion(): Promise<void> {
       + 'Asking the daemon to self-update (verify-then-exit; the OS supervisor relaunches it onto the new code)...\n',
   );
   try {
-    const resp = await sendRawIPCRequest({ action: 'request-self-update' }, { autoStartDaemon: false });
+    const resp = await sendRawIPCRequest(
+      { action: 'request-self-update' },
+      { autoStartDaemon: false, timeoutMs: REQUEST_SELF_UPDATE_TIMEOUT_MS },
+    );
     if (resp.updated) {
       process.stderr.write('Daemon self-update triggered — it will restart shortly.\n\n');
     } else {
@@ -1397,6 +1446,26 @@ async function sendRawIPCRequest(
   return new Promise((resolve, reject) => {
     const socket = net.createConnection(endpoint);
     let buffer = '';
+    let settled = false;
+    // Optional hard round-trip ceiling: a daemon that accepts the socket but
+    // never writes a response (wedged mid-self-update) must not hang the caller.
+    // On expiry we destroy the socket and fail fast; without it we wait forever
+    // (the prior behavior every other caller keeps).
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const settle = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      fn();
+    };
+    if (opts.timeoutMs !== undefined) {
+      timer = setTimeout(() => {
+        settle(() => {
+          socket.destroy();
+          reject(new Error(`IPC request '${request.action}' timed out after ${opts.timeoutMs}ms`));
+        });
+      }, opts.timeoutMs);
+    }
 
     socket.on('connect', () => {
       socket.write(JSON.stringify(request) + '\n');
@@ -1408,21 +1477,21 @@ async function sendRawIPCRequest(
       if (idx !== -1) {
         const response = JSON.parse(buffer.slice(0, idx)) as IPCResponse;
         socket.end();
-        resolve(response);
+        settle(() => resolve(response));
       }
     });
 
     socket.on('error', (err: NodeJS.ErrnoException) => {
       if (!autoStartDaemon && (err.code === 'ENOENT' || err.code === 'ECONNREFUSED')) {
-        reject(new BrowserServiceNotRunningError());
+        settle(() => reject(new BrowserServiceNotRunningError()));
         return;
       }
-      reject(new Error(`IPC error: ${err.message}`));
+      settle(() => reject(new Error(`IPC error: ${err.message}`)));
     });
 
     socket.on('close', () => {
       if (!buffer.includes('\n')) {
-        reject(new Error('Connection closed before response'));
+        settle(() => reject(new Error('Connection closed before response')));
       }
     });
   });

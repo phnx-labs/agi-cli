@@ -16,7 +16,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { createHash, timingSafeEqual } from 'crypto';
-import { spawnSync } from 'child_process';
+import { spawn } from 'child_process';
 // Leaf comparator only — do not pull the full versions.ts graph into every
 // bootstrap that imports self-update (RUSH-2331).
 import { compareVersions } from './agent-spec/primitives.js';
@@ -376,8 +376,13 @@ export function deriveGlobalPrefix(packageRoot: string): string {
  * retire-path shape (a dot-prefixed sibling starting with the package's own
  * basename), so an unrelated dotfile in the same directory is left alone.
  * Best-effort per entry: one unremovable sibling must not block the rest.
+ *
+ * Async (readdir + rm via `fs.promises`) so it never blocks the daemon's single
+ * event loop when it runs on the supervised self-update tick
+ * (`self-update-service.ts`) — a synchronous `fs.rmSync` of a large orphaned
+ * staging tree would stall every other daemon service for its duration.
  */
-export function sweepStaleInstallStaging(packageRoot: string): string[] {
+export async function sweepStaleInstallStaging(packageRoot: string): Promise<string[]> {
   const resolved = path.resolve(packageRoot);
   const dir = path.dirname(resolved);
   const base = path.basename(resolved);
@@ -386,7 +391,7 @@ export function sweepStaleInstallStaging(packageRoot: string): string[] {
 
   let entries: string[];
   try {
-    entries = fs.readdirSync(dir);
+    entries = await fs.promises.readdir(dir);
   } catch {
     return [];
   }
@@ -396,7 +401,7 @@ export function sweepStaleInstallStaging(packageRoot: string): string[] {
     if (!stagingPattern.test(entry)) continue;
     const full = path.join(dir, entry);
     try {
-      fs.rmSync(full, { recursive: true, force: true });
+      await fs.promises.rm(full, { recursive: true, force: true });
       swept.push(full);
     } catch {
       /* best-effort — one unremovable stager must not block the rest */
@@ -519,11 +524,22 @@ export function readInstalledVersion(packageRoot: string): string {
 }
 
 /**
+ * Async twin of {@link readInstalledVersion}, so the post-install verify on the
+ * daemon's self-update tick reads package.json off the event loop.
+ */
+export async function readInstalledVersionAsync(packageRoot: string): Promise<string> {
+  return JSON.parse(await fs.promises.readFile(path.join(packageRoot, 'package.json'), 'utf-8')).version;
+}
+
+/**
  * Assert that the install at `packageRoot` now carries `expectedVersion`.
  * npm exiting 0 only proves it wrote *somewhere*; this proves it wrote *here*.
+ *
+ * Async so the daemon's supervised self-update tick never blocks its single
+ * event loop on a synchronous package.json read (PHNX-3695).
  */
-export function verifyInstalledVersion(packageRoot: string, expectedVersion: string): void {
-  const actual = readInstalledVersion(packageRoot);
+export async function verifyInstalledVersion(packageRoot: string, expectedVersion: string): Promise<void> {
+  const actual = await readInstalledVersionAsync(packageRoot);
   if (actual !== expectedVersion) {
     const manager = detectPackageManager(packageRoot);
     const hint = manualInstallHint(manager, packageRoot, `${NPM_PACKAGE_NAME}@${expectedVersion}`);
@@ -540,11 +556,21 @@ export function verifyInstalledVersion(packageRoot: string, expectedVersion: str
  * and any aliases added in the new version. Best-effort: a failure here
  * leaves the previous shims in place, which still point at the (now
  * upgraded) package root.
+ *
+ * Async (`spawn`, not `spawnSync`) so the daemon's self-update tick never
+ * blocks its single event loop for the whole lifetime of a Node subprocess
+ * (PHNX-3695). Best-effort: the returned promise resolves regardless of the
+ * child's exit code or a spawn error — a failed shim refresh still leaves the
+ * previous shims pointing at the now-upgraded package root.
  */
-export function refreshAliasShims(packageRoot: string): void {
-  spawnSync(process.execPath, [path.join(packageRoot, 'scripts', 'postinstall.js')], {
-    env: { ...process.env, AGENTS_POSTINSTALL_SHIMS_ONLY: '1' },
-    stdio: 'ignore',
+export async function refreshAliasShims(packageRoot: string): Promise<void> {
+  await new Promise<void>((resolve) => {
+    const child = spawn(process.execPath, [path.join(packageRoot, 'scripts', 'postinstall.js')], {
+      env: { ...process.env, AGENTS_POSTINSTALL_SHIMS_ONLY: '1' },
+      stdio: 'ignore',
+    });
+    child.once('error', () => resolve());
+    child.once('close', () => resolve());
   });
 }
 
@@ -567,9 +593,9 @@ export interface BinLinkRepair {
 }
 
 /** Resolve `p` through symlinks, or null when it does not resolve (missing/dangling). */
-function realpathOrNull(p: string): string | null {
+async function realpathOrNull(p: string): Promise<string | null> {
   try {
-    return fs.realpathSync(p);
+    return await fs.promises.realpath(p);
   } catch {
     return null;
   }
@@ -584,18 +610,18 @@ function realpathOrNull(p: string): string | null {
  * repair that still does not resolve (target missing, unwritable bin dir) is
  * reported `failed` with the reason rather than silently swallowed.
  */
-function reconcileBinLink(name: string, linkPath: string, target: string): BinLinkRepair {
-  const wanted = realpathOrNull(target);
-  if (wanted !== null && realpathOrNull(linkPath) === wanted) {
+async function reconcileBinLink(name: string, linkPath: string, target: string): Promise<BinLinkRepair> {
+  const wanted = await realpathOrNull(target);
+  if (wanted !== null && (await realpathOrNull(linkPath)) === wanted) {
     return { name, linkPath, target, action: 'ok' };
   }
   try {
-    fs.mkdirSync(path.dirname(linkPath), { recursive: true });
+    await fs.promises.mkdir(path.dirname(linkPath), { recursive: true });
     // Replace whatever is there (a dangling link, a stale link, or nothing).
-    fs.rmSync(linkPath, { force: true });
-    fs.symlinkSync(path.relative(path.dirname(linkPath), target), linkPath);
-    const resolved = realpathOrNull(linkPath);
-    if (resolved !== null && resolved === realpathOrNull(target)) {
+    await fs.promises.rm(linkPath, { force: true });
+    await fs.promises.symlink(path.relative(path.dirname(linkPath), target), linkPath);
+    const resolved = await realpathOrNull(linkPath);
+    if (resolved !== null && resolved === (await realpathOrNull(target))) {
       return { name, linkPath, target, action: 'repaired' };
     }
     return {
@@ -637,10 +663,10 @@ function reconcileBinLink(name: string, linkPath: string, target: string): BinLi
  * npm global prefix from {@link deriveGlobalPrefix}; the bun path uses its own
  * bin layout and is out of scope.
  */
-export function ensureGlobalBinLinks(packageRoot: string, prefix: string): BinLinkRepair[] {
+export async function ensureGlobalBinLinks(packageRoot: string, prefix: string): Promise<BinLinkRepair[]> {
   let bin: Record<string, string>;
   try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(packageRoot, 'package.json'), 'utf-8'));
+    const pkg = JSON.parse(await fs.promises.readFile(path.join(packageRoot, 'package.json'), 'utf-8'));
     bin = pkg && typeof pkg.bin === 'object' && pkg.bin !== null ? (pkg.bin as Record<string, string>) : {};
   } catch (err) {
     throw new Error(
@@ -651,7 +677,7 @@ export function ensureGlobalBinLinks(packageRoot: string, prefix: string): BinLi
   const repairs: BinLinkRepair[] = [];
   for (const [name, rel] of Object.entries(bin)) {
     if (typeof rel !== 'string' || !rel) continue;
-    repairs.push(reconcileBinLink(name, path.join(binDir, name), path.resolve(packageRoot, rel)));
+    repairs.push(await reconcileBinLink(name, path.join(binDir, name), path.resolve(packageRoot, rel)));
   }
   return repairs;
 }

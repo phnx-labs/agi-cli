@@ -250,7 +250,7 @@ new periodic supervised service — the daemon previously ran with
 `AGENTS_CLI_DISABLE_AUTO_UPDATE=1` forced on (`bootstrap.ts`), so R5 ("the
 installed CLI auto-updates") held for the interactive CLI but silently did NOT
 hold for the one process that runs unattended for days. `agents daemon
-services` now reports measured health for 18 of 19 declared services and
+services` now reports measured health for 20 of 21 declared services and
 infers only `scheduler`.
 This doc's Current architecture section
 above is the source of truth for all of it.

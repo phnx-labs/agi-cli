@@ -19,11 +19,12 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { needsWindowsShell } from '../platform/index.js';
-import { readInstalledVersion } from '../self-update.js';
+import { deriveGlobalPrefix, ensureGlobalBinLinks, readInstalledVersion } from '../self-update.js';
 import type { DaemonContext } from './service.js';
 import {
   attemptSelfUpdateAndExit,
   installAndVerifyDefault,
+  runSelfUpdateRequest,
   type SelfUpdateDeps,
 } from './self-update-service.js';
 
@@ -370,6 +371,54 @@ describe('attemptSelfUpdateAndExit', () => {
     expect(readInstalledVersion(packageRoot)).toBe('3.0.0');
   });
 
+  it('repairs the global bin links after a verified install (PHNX-2768 "zion stranding")', { timeout: 120_000 }, async () => {
+    // The daemon self-update path installs exactly like `agents upgrade`, whose
+    // installResolvedPackage repairs the agents/ag/browser/computer bin symlinks
+    // after a global install. Prove the daemon path (installAndVerifyDefault)
+    // ends with a WORKING command link resolving to the freshly-installed
+    // entrypoint — the state whose absence stranded zion (package upgraded but
+    // `bin/agents` missing, every invocation "command not found").
+    const src = makeTempDir('bin-src');
+    fs.mkdirSync(path.join(src, 'dist'));
+    fs.writeFileSync(path.join(src, 'dist', 'index.js'), '#!/usr/bin/env node\n');
+    fs.writeFileSync(
+      path.join(src, 'package.json'),
+      JSON.stringify({
+        name: '@agents-cli-test/dummy',
+        version: '2.0.0',
+        license: 'MIT',
+        bin: { 'dummy-agents': 'dist/index.js' },
+      }),
+    );
+    const tarballName = execFileSync('npm', ['pack', '--silent'], {
+      cwd: src,
+      encoding: 'utf-8',
+      shell: needsWindowsShell('npm'),
+    }).trim();
+    const bytes = fs.readFileSync(path.join(src, tarballName));
+    const integrity = sriFor(bytes);
+    const server = http.createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/octet-stream' });
+      res.end(bytes);
+    });
+    servers.push(server);
+    const tarballUrl = await new Promise<string>((resolve) => {
+      server.listen(0, '127.0.0.1', () => {
+        const addr = server.address() as { port: number };
+        resolve(`http://127.0.0.1:${addr.port}/${tarballName}`);
+      });
+    });
+
+    const packageRoot = makeInstalledPackageRoot('1.0.0');
+    await installAndVerifyDefault({ version: '2.0.0', integrity, tarball: tarballUrl }, packageRoot, new AbortController().signal);
+
+    const prefix = deriveGlobalPrefix(packageRoot);
+    const linkPath = path.join(prefix, 'bin', 'dummy-agents');
+    // The link exists and resolves to the freshly-installed entrypoint.
+    expect(fs.existsSync(linkPath)).toBe(true);
+    expect(fs.realpathSync(linkPath)).toBe(fs.realpathSync(path.join(packageRoot, 'dist', 'index.js')));
+  });
+
   it('a failed post-install .system/local sync does not undo an already-verified update', { timeout: 120_000 }, async () => {
     const { tarballUrl, integrity } = await packAndServe('2.0.0');
     const packageRoot = makeInstalledPackageRoot('1.0.0');
@@ -392,5 +441,118 @@ describe('attemptSelfUpdateAndExit', () => {
     expect(readInstalledVersion(packageRoot)).toBe('2.0.0');
     expect(logs.some((l) => l.level === 'WARN' && l.message.includes('no .system repo here'))).toBe(true);
     expect(logs.some((l) => l.level === 'WARN' && l.message.includes('reconcile failed'))).toBe(true);
+  });
+});
+
+describe('ensureGlobalBinLinks (async — off the daemon event loop, PHNX-3695)', () => {
+  function makePackageRootWithBin(): string {
+    const root = makeTempDir('binroot');
+    fs.mkdirSync(path.join(root, 'dist'));
+    fs.writeFileSync(path.join(root, 'dist', 'index.js'), '#!/usr/bin/env node\n');
+    fs.writeFileSync(
+      path.join(root, 'package.json'),
+      JSON.stringify({ name: '@agents-cli-test/dummy', version: '2.0.0', bin: { agents: 'dist/index.js', ag: 'dist/index.js' } }),
+    );
+    return root;
+  }
+
+  it('creates a missing bin link and reports it repaired', async () => {
+    const packageRoot = makePackageRootWithBin();
+    const prefix = makeTempDir('binprefix');
+    const repairs = await ensureGlobalBinLinks(packageRoot, prefix);
+    expect(repairs.every((r) => r.action === 'repaired')).toBe(true);
+    for (const name of ['agents', 'ag']) {
+      const linkPath = path.join(prefix, 'bin', name);
+      expect(fs.realpathSync(linkPath)).toBe(fs.realpathSync(path.join(packageRoot, 'dist', 'index.js')));
+    }
+  });
+
+  it('replaces a dangling link that points nowhere', async () => {
+    const packageRoot = makePackageRootWithBin();
+    const prefix = makeTempDir('binprefix2');
+    const binDir = path.join(prefix, 'bin');
+    fs.mkdirSync(binDir, { recursive: true });
+    // A leftover link into a since-removed install — the dangling state a
+    // half-finished reify leaves behind.
+    fs.symlinkSync(path.join(prefix, 'gone', 'index.js'), path.join(binDir, 'agents'));
+    const repairs = await ensureGlobalBinLinks(packageRoot, prefix);
+    const agents = repairs.find((r) => r.name === 'agents');
+    expect(agents?.action).toBe('repaired');
+    expect(fs.realpathSync(path.join(binDir, 'agents'))).toBe(fs.realpathSync(path.join(packageRoot, 'dist', 'index.js')));
+  });
+
+  it('reports failed (not a throw) when the target entrypoint is missing', async () => {
+    const root = makeTempDir('binroot-notarget');
+    fs.writeFileSync(
+      path.join(root, 'package.json'),
+      JSON.stringify({ name: '@agents-cli-test/dummy', version: '2.0.0', bin: { agents: 'dist/missing.js' } }),
+    );
+    const prefix = makeTempDir('binprefix3');
+    const repairs = await ensureGlobalBinLinks(root, prefix);
+    const agents = repairs.find((r) => r.name === 'agents');
+    expect(agents?.action).toBe('failed');
+    expect(agents?.error).toBeTruthy();
+  });
+});
+
+describe('runSelfUpdateRequest (on-demand IPC path — bounded deadline, PHNX-3695)', () => {
+  it('delegates to the shared attempt and reports the fixture install outcome', { timeout: 120_000 }, async () => {
+    const { tarballUrl, integrity } = await packAndServe('2.0.0');
+    const packageRoot = makeInstalledPackageRoot('1.0.0');
+    const { ctx } = makeCtx();
+
+    const outcome = await runSelfUpdateRequest(
+      ctx,
+      baseDeps({
+        currentVersion: () => '1.0.0',
+        packageRoot: () => packageRoot,
+        fetchLatestMetadata: async () => ({ version: '2.0.0', integrity, tarball: tarballUrl }),
+        installAndVerify: installAndVerifyDefault,
+      }),
+    );
+
+    expect(outcome).toEqual({ updated: true });
+    expect(readInstalledVersion(packageRoot)).toBe('2.0.0');
+  });
+
+  it('fails closed with a bounded timeout and really aborts a wedged install, so the browser verb never hangs', { timeout: 30_000 }, async () => {
+    // reconcileDaemonVersion (browser/ipc.ts) fires this on every version-skewed
+    // browser call; a self-update that wedged mid-install must not hold the
+    // handler open. Prove the deadline trips, returns a fail-closed outcome, and
+    // aborts the in-flight install for real (its AbortSignal fires) rather than
+    // abandoning an orphaned install.
+    let aborted = false;
+    const { ctx } = makeCtx();
+
+    const outcome = await runSelfUpdateRequest(
+      ctx,
+      baseDeps({
+        currentVersion: () => '1.0.0',
+        packageRoot: () => makeInstalledPackageRoot('1.0.0'),
+        fetchLatestMetadata: async () => ({ version: '2.0.0', integrity: 'sha512-x', tarball: 'http://127.0.0.1:1/x.tgz' }),
+        installAndVerify: (_m, _r, signal) =>
+          new Promise((_resolve, reject) => {
+            signal.addEventListener('abort', () => {
+              aborted = true;
+              reject(new Error('install aborted by deadline'));
+            });
+          }),
+      }),
+      150, // deadlineMs — short so the test is fast
+    );
+
+    expect(outcome.updated).toBe(false);
+    expect(outcome.reason).toMatch(/timed out/);
+    // The deadline aborted the real in-flight install, not just abandoned it.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(aborted).toBe(true);
+  });
+
+  it('no-ops on a dev build without touching the registry', async () => {
+    const { ctx } = makeCtx();
+    const fetchLatestMetadata = vi.fn();
+    const outcome = await runSelfUpdateRequest(ctx, baseDeps({ isDevBuild: () => true, fetchLatestMetadata }));
+    expect(outcome).toEqual({ updated: false, reason: 'dev build — self-update is a no-op' });
+    expect(fetchLatestMetadata).not.toHaveBeenCalled();
   });
 });

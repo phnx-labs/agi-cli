@@ -391,7 +391,7 @@ async function installResolvedPackage(metadata: NpmPackageMetadata): Promise<voi
     // every subsequent upgrade dead-ends there forever. bun does not use
     // npm's retire-path staging scheme, so this only needs to run once, ahead
     // of both package-manager branches below.
-    sweepStaleInstallStaging(packageRoot);
+    await sweepStaleInstallStaging(packageRoot);
     // Upgrade with the package manager that owns this install. A bun global
     // install lives at <bunGlobalDir>/node_modules/... (no `lib` segment), so an
     // `npm install --prefix` would write to <bunGlobalDir>/lib/node_modules and
@@ -409,8 +409,8 @@ async function installResolvedPackage(metadata: NpmPackageMetadata): Promise<voi
       /* leave it for the OS temp sweep */
     }
   }
-  verifyInstalledVersion(packageRoot, metadata.version);
-  refreshAliasShims(packageRoot);
+  await verifyInstalledVersion(packageRoot, metadata.version);
+  await refreshAliasShims(packageRoot);
   // PHNX-2768: the npm install above can leave the package at the new version
   // but the global bin links GONE — the state that stranded zion (package at
   // 1.22.40, `/opt/homebrew/bin/{agents,ag,browser,computer}` missing, every
@@ -421,7 +421,7 @@ async function installResolvedPackage(metadata: NpmPackageMetadata): Promise<voi
   // own bin shims and are out of scope.
   if (detectPackageManager(packageRoot) !== 'bun' && process.platform !== 'win32') {
     const prefix = deriveGlobalPrefix(packageRoot);
-    const repairs = ensureGlobalBinLinks(packageRoot, prefix);
+    const repairs = await ensureGlobalBinLinks(packageRoot, prefix);
     const repaired = repairs.filter((r) => r.action === 'repaired');
     const failed = repairs.filter((r) => r.action === 'failed');
     if (repaired.length > 0) {

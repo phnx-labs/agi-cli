@@ -45,6 +45,7 @@ import {
   deriveGlobalPrefix,
   detectPackageManager,
   downloadVerifiedTarball,
+  ensureGlobalBinLinks,
   installPackageIntoPrefix,
   installPackageWithBun,
   refreshAliasShims,
@@ -76,9 +77,80 @@ const SELF_UPDATE_DEADLINE_MS = 15 * 60_000;
  */
 const SELF_UPDATE_STARTUP_DELAY_MS = 5 * 60_000;
 
+/**
+ * Hard ceiling on the on-demand `request-self-update` IPC handler
+ * (`browser/ipc.ts`). Unlike the periodic tick — which the ServiceSupervisor
+ * already bounds with {@link SELF_UPDATE_DEADLINE_MS} — the IPC path has no
+ * supervisor deadline, and it fires on every version-skewed browser call
+ * (`reconcileDaemonVersion`). Without a bound, a self-update that wedges
+ * (a hung install, a stuck registry read) would hold the request open
+ * indefinitely. {@link runSelfUpdateRequest} races the attempt against this
+ * deadline and returns a fail-closed "timed out" outcome the moment it trips,
+ * so the daemon always answers the browser client promptly. 5 minutes is well
+ * above a real download+install yet bounded, so an on-demand update can still
+ * complete while a genuinely stuck one is abandoned rather than hung.
+ */
+const SELF_UPDATE_IPC_DEADLINE_MS = 5 * 60_000;
+
 export interface SelfUpdateOutcome {
   updated: boolean;
   reason?: string;
+}
+
+/**
+ * Serializes the ONE `process.exit(0)` a verified self-update triggers, shared
+ * by the periodic tick ({@link SelfUpdateService.onTick}, which exits
+ * immediately) and the on-demand IPC handler (`browser/ipc.ts`, which delays
+ * its exit until after it has written the response to the client socket). Both
+ * can decide to exit in the same process — the tick firing while an IPC-driven
+ * update is mid-flush, or two skewed clients each triggering one. Without a
+ * single guard the immediate tick exit could cut off the IPC handler's
+ * in-flight socket write (the client then hangs on a closing socket), or two
+ * delayed exits could stack. First caller wins: once an exit is scheduled,
+ * every later request is a no-op, so a delay already chosen to flush a socket
+ * is never shortened out from under that write.
+ */
+let selfUpdateExitScheduled = false;
+
+export function scheduleSelfUpdateExit(delayMs = 0): void {
+  if (selfUpdateExitScheduled) return;
+  selfUpdateExitScheduled = true;
+  if (delayMs <= 0) {
+    process.exit(0);
+    return;
+  }
+  setTimeout(() => process.exit(0), delayMs);
+}
+
+/**
+ * Run the self-update attempt for the on-demand `request-self-update` IPC path
+ * under a hard {@link SELF_UPDATE_IPC_DEADLINE_MS} ceiling. Races the shared
+ * {@link attemptSelfUpdateAndExit} against the deadline: if the deadline wins,
+ * the local {@link AbortController} is aborted (a best-effort real cancellation
+ * of an attempt THIS call started — a tick-initiated attempt runs under its own
+ * signal and finishes under the supervisor deadline) and a fail-closed
+ * `timed out` outcome is returned, so the browser verb that triggered the
+ * reconcile never hangs on a wedged install. `deadlineMs`/`deps` are injectable
+ * for the hermetic test; production uses the defaults.
+ */
+export async function runSelfUpdateRequest(
+  ctx: DaemonContext,
+  deps: SelfUpdateDeps = defaultSelfUpdateDeps(),
+  deadlineMs = SELF_UPDATE_IPC_DEADLINE_MS,
+): Promise<SelfUpdateOutcome> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<SelfUpdateOutcome>((resolve) => {
+    timer = setTimeout(() => {
+      controller.abort(new Error('self-update IPC deadline exceeded'));
+      resolve({ updated: false, reason: `self-update timed out after ${deadlineMs}ms` });
+    }, deadlineMs);
+  });
+  try {
+    return await Promise.race([attemptSelfUpdateAndExit(ctx, controller.signal, deps), timedOut]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 interface NpmLatestMetadata {
@@ -128,7 +200,12 @@ export async function fetchLatestNpmMetadata(signal: AbortSignal): Promise<NpmLa
  * Install + byte-verify `metadata` into `packageRoot`'s install, exactly the
  * sequence `bootstrap.ts`'s `installResolvedPackage` runs for `agents
  * upgrade` (download+integrity-verify -> sweep stale staging -> package-
- * manager install -> verify installed version -> refresh alias shims).
+ * manager install -> verify installed version -> refresh alias shims ->
+ * repair the global bin links). Every step reachable here is async so it never
+ * blocks the daemon's single event loop on the supervised tick (PHNX-3695):
+ * the stale-staging sweep, the temp-dir cleanup, the post-install verify, the
+ * alias-shim refresh (a spawned Node subprocess, `spawn` not `spawnSync`), and
+ * the bin-link repair all run off the loop.
  * `bootstrap.ts` cannot be imported here — it runs side-effecting top-level
  * code (argv parsing, command registration) on import, which the daemon must
  * never trigger — so this is the same primitives from `self-update.ts`
@@ -155,7 +232,7 @@ export async function installAndVerifyDefault(
 ): Promise<void> {
   const tarball = await downloadVerifiedTarball(metadata.tarball, metadata.integrity, 60_000, signal);
   try {
-    sweepStaleInstallStaging(packageRoot);
+    await sweepStaleInstallStaging(packageRoot);
     if (detectPackageManager(packageRoot) === 'bun') {
       await installPackageWithBun(tarball, signal);
     } else {
@@ -163,13 +240,42 @@ export async function installAndVerifyDefault(
     }
   } finally {
     try {
-      fs.rmSync(path.dirname(tarball), { recursive: true, force: true });
+      await fs.promises.rm(path.dirname(tarball), { recursive: true, force: true });
     } catch {
       /* leave it for the OS temp sweep */
     }
   }
-  verifyInstalledVersion(packageRoot, metadata.version);
-  refreshAliasShims(packageRoot);
+  await verifyInstalledVersion(packageRoot, metadata.version);
+  await refreshAliasShims(packageRoot);
+  // PHNX-2768 ("zion stranding"): the package-manager install above can leave
+  // the package at the new version but the global bin links GONE — the state
+  // where `/opt/homebrew/lib/node_modules/...` is upgraded but
+  // `/opt/homebrew/bin/{agents,ag,browser,computer}` are missing, so every
+  // operator command is "command not found". `bootstrap.ts`'s
+  // `installResolvedPackage` repairs those links after a foreground `agents
+  // upgrade`; the daemon self-update path installs the same way and MUST do the
+  // same, or it can exit `updated: true` (the OS supervisor relaunches onto the
+  // new code) while the operator's `agents`/`ag`/`browser`/`computer` shims are
+  // broken. Only the npm-prefix POSIX layout has these symlinks; bun and Windows
+  // use their own bin shims and are out of scope. Fail LOUD when a link cannot be
+  // restored — the caller then treats the whole self-update as failed and stays
+  // on the old (working) daemon rather than exiting into a box it cannot run.
+  if (detectPackageManager(packageRoot) !== 'bun' && process.platform !== 'win32') {
+    const prefix = deriveGlobalPrefix(packageRoot);
+    const repairs = await ensureGlobalBinLinks(packageRoot, prefix);
+    const failed = repairs.filter((r) => r.action === 'failed');
+    if (failed.length > 0) {
+      const relink = failed
+        .map((r) => `ln -sf ${path.relative(path.dirname(r.linkPath), r.target)} ${r.linkPath}`)
+        .join(' && ');
+      throw new Error(
+        `installed ${metadata.version} but could not restore the ` +
+          `${failed.map((r) => r.name).join(', ')} command link${failed.length === 1 ? '' : 's'} in ` +
+          `${path.join(prefix, 'bin')} (${failed.map((r) => r.error).join('; ')}). ` +
+          `Relink manually: ${relink}`,
+      );
+    }
+  }
 }
 
 export function defaultSelfUpdateDeps(): SelfUpdateDeps {
@@ -318,7 +424,9 @@ export class SelfUpdateService extends BasePeriodicService {
       // Exit immediately once verified — the periodic path owns no open
       // socket response to flush, unlike the on-demand IPC path in
       // browser/ipc.ts, which delays its own exit until after replying.
-      process.exit(0);
+      // Routed through the shared serializer so a concurrent IPC-driven exit
+      // (mid socket-flush) is never cut short, and the exit fires at most once.
+      scheduleSelfUpdateExit();
     }
   }
 }
