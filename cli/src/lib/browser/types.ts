@@ -350,7 +350,11 @@ export type IPCAction =
   | 'wait-download'
   | 'upload'
   | 'getAppLogs'
-  | 'version';
+  | 'version'
+  // On-demand self-update: run the same fail-closed check/install/verify/exit
+  // path SelfUpdateService's periodic tick runs (self-update-service.ts),
+  // right now instead of on its own schedule. See reconcileDaemonVersion below.
+  | 'request-self-update';
 
 export interface IPCRequest {
   action: IPCAction;
@@ -523,6 +527,11 @@ export interface IPCResponse {
   // launchd-managed registry daemon silently serving old code to a
   // dev-build CLI client).
   version?: string;
+  // 'request-self-update' result: whether the daemon installed + verified a
+  // newer version and is about to exit for the OS supervisor to relaunch it
+  // (see self-update-service.ts), or why it did not.
+  updated?: boolean;
+  reason?: string;
   // Domain-skill auto-discovery result from `start` when a URL is supplied
   // and a matching SKILL.md was found under
   // ~/.agents/skills/browser/domain-skills/.

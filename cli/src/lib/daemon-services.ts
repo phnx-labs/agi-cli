@@ -22,6 +22,7 @@ export type DaemonServiceId =
   | 'browser-ipc'
   | 'webhook-receiver'
   | 'self-heal'
+  | 'self-update'
   | 'keychain-reap'
   | 'account-state'
   | 'account-auth'
@@ -78,6 +79,11 @@ export const DAEMON_SERVICES: DaemonServiceDef[] = [
     id: 'self-heal',
     title: 'Self-heal registry',
     description: 'Repairs shims, PATH, shadowing, and resource drift on a schedule.',
+  },
+  {
+    id: 'self-update',
+    title: 'Self-update',
+    description: 'Checks npm for a newer agents-cli, installs + verifies it, then exits so the OS supervisor relaunches onto the new code (PHNX-3695).',
   },
   {
     id: 'keychain-reap',

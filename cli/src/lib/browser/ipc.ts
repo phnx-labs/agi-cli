@@ -13,6 +13,8 @@ import {
 } from '../daemon/daemon.js';
 import { getCliVersion } from '../version.js';
 import { compareVersions } from '../agent-spec/primitives.js';
+import { attemptSelfUpdateAndExit } from '../daemon/self-update-service.js';
+import { log as daemonLog } from '../daemon/daemon.js';
 import {
   isDaemonServiceEnabled,
   queueDaemonServiceRestart,
@@ -750,6 +752,25 @@ export class BrowserIPCServer {
         return { ok: true, version: getCliVersion() };
       }
 
+      // On-demand self-update, triggered by a client that noticed version
+      // skew (reconcileDaemonVersion below). Runs the exact same fail-closed
+      // check/install/verify path SelfUpdateService's periodic tick runs — no
+      // duplicated logic — just off-schedule. The client must get its
+      // response before the process exits, or it hangs on a closing socket,
+      // so the exit (only on a verified update) is scheduled AFTER this
+      // handler returns and the caller has written the response to the
+      // socket (BrowserIPCServer's `socket.write` right after `handleRequest`
+      // resolves) — a short setTimeout, not setImmediate, to give the actual
+      // OS-level socket write time to flush before the process ends.
+      case 'request-self-update': {
+        const controller = new AbortController();
+        const outcome = await attemptSelfUpdateAndExit({ log: daemonLog }, controller.signal);
+        if (outcome.updated) {
+          setTimeout(() => process.exit(0), 250);
+        }
+        return { ok: true, updated: outcome.updated, reason: outcome.reason };
+      }
+
       case 'show': {
         // Task-less by design — see BrowserService.showUrl. Absent from both
         // PAGE_CREATE_VERBS and PAGE_RESOLVE_VERBS, so bindTask never ran above
@@ -1245,10 +1266,17 @@ export function shouldRecommendDaemonRefresh(
 
 /**
  * Reconcile the running daemon's version with ours without evicting it. If the
- * daemon is serving stale code, surface the deliberate operator command once
- * and continue on the already-running service. A browser client owns neither
- * the shared supervisor nor its sibling services, so version skew can never be
- * permission to stop or restart that process (PHNX-3605).
+ * daemon is serving stale code, ask the daemon to run its OWN self-update path
+ * (`request-self-update`, same fail-closed check/install/verify/exit
+ * SelfUpdateService's periodic tick runs, self-update-service.ts) rather than
+ * telling a human to run `agents daemon restart` by hand. A browser client
+ * still owns neither the shared supervisor nor its sibling services, so
+ * version skew can never be permission for THIS client to stop or restart
+ * that process directly (PHNX-3605 holds) — it only asks the daemon to run a
+ * path the daemon already runs on its own schedule, which only exits once the
+ * daemon itself has verified the new version is good. If self-update declines
+ * (dev build, shadowed install, already current, or a real failure) this
+ * degrades to the same "nothing changed" outcome PHNX-3605 shipped.
  */
 async function reconcileDaemonVersion(): Promise<void> {
   if (versionReconciledThisProcess) return;
@@ -1268,9 +1296,25 @@ async function reconcileDaemonVersion(): Promise<void> {
 
   process.stderr.write(
     `\nBrowser service is running on shared daemon ${daemon}, while this CLI is ${client}. `
-      + 'Continuing without evicting the daemon or its other services.\n'
-      + 'To load current daemon code when it is safe to interrupt every hosted service: agents daemon restart\n\n',
+      + 'Asking the daemon to self-update (verify-then-exit; the OS supervisor relaunches it onto the new code)...\n',
   );
+  try {
+    const resp = await sendRawIPCRequest({ action: 'request-self-update' }, { autoStartDaemon: false });
+    if (resp.updated) {
+      process.stderr.write('Daemon self-update triggered — it will restart shortly.\n\n');
+    } else {
+      process.stderr.write(
+        `Daemon self-update did not run${resp.reason ? ` (${resp.reason})` : ''}. `
+          + 'Continuing without evicting the daemon or its other services. '
+          + 'To load current daemon code when it is safe to interrupt every hosted service: agents daemon restart\n\n',
+      );
+    }
+  } catch (err) {
+    process.stderr.write(
+      `Could not reach the daemon to request a self-update (${err instanceof Error ? err.message : String(err)}). `
+        + 'To load current daemon code when it is safe to interrupt every hosted service: agents daemon restart\n\n',
+    );
+  }
 }
 
 export async function sendIPCRequest(

@@ -1261,8 +1261,13 @@ agents daemon doctor                        # one-shot health check; non-zero ex
 ```
 
 Each hosted responsibility (secrets broker, browser IPC, scheduler, monitors,
-watchdog, device probe, self-heal, keychain reap, account-state refresh,
+watchdog, device probe, self-heal, self-update, keychain reap, account-state refresh,
 state-dir checks) is an independent toggle in `~/.agents/daemon/services.yaml`.
+Self-update checks npm on its own schedule, installs + verifies a newer
+agents-cli with the same primitives `agents upgrade` uses, then exits so the OS
+supervisor relaunches the daemon onto the new code — the daemon used to run
+with auto-update forced off and only picked up new code on a manual
+`agents daemon restart`.
 `agents daemon services list` shows every service; `enable|disable <id>` flips
 one. Missing keys default to enabled, so upgrades are no-ops. Most services take
 effect on the next daemon start; browser IPC is registered even when boot-disabled

@@ -41,6 +41,7 @@ import { BrowserIPCService } from './browser-ipc-service.js';
 import { WatchdogService } from './watchdog-service.js';
 import { DeviceProbeService } from './device-probe-service.js';
 import { SelfHealService } from './self-heal-service.js';
+import { SelfUpdateService } from './self-update-service.js';
 import { KeychainReapService } from './keychain-reap-service.js';
 import { AuthSyncService } from './auth-sync-service.js';
 import { UsageSyncService } from './usage-sync-service.js';
@@ -1085,6 +1086,9 @@ export async function runDaemon(): Promise<void> {
 
   if (isEnabled('self-heal')) supervisor.register(new SelfHealService());
   else log('INFO', 'Self-heal service disabled');
+
+  if (isEnabled('self-update')) supervisor.register(new SelfUpdateService());
+  else log('INFO', 'Self-update service disabled');
 
   if (isEnabled('keychain-reap')) supervisor.register(new KeychainReapService());
   else log('INFO', 'Keychain-reap service disabled');

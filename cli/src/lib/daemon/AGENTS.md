@@ -28,18 +28,18 @@ never permission to signal it, erase its files, or launch a duplicate.
 escalates and waits again; it removes a registry marker only after death is
 observed, so a wedged duplicate cannot survive while becoming invisible.
 
-**Two runtime models coexist today (RUSH-3193 plus PHNX-3265/PHNX-3608 migrated 19 of 20
+**Two runtime models coexist today (RUSH-3193 plus PHNX-3265/PHNX-3608/PHNX-3695 migrated 20 of 21
 declared services; 1 declared service remains inline).** `cli/src/lib/daemon-services.ts`
-defines `DaemonServiceId` (20 ids:
+defines `DaemonServiceId` (21 ids:
 `secrets-broker`, `scheduler`, `catchup`, `monitors`, `browser-ipc`,
-`webhook-receiver`, `self-heal`, `keychain-reap`, `account-state`, `account-auth`,
+`webhook-receiver`, `self-heal`, `self-update`, `keychain-reap`, `account-state`, `account-auth`,
 `watchdog`, `device-probe`, `state-dir-check`, `session-index`, `auth-sync`,
 `daemon-heartbeat`, `tmux-reap`, `browser-task-reap`, `session-state`,
 `usage-sync`) — the
 catalog every id in `runDaemon()` is expected to register under, whichever
 model it uses.
 
-- **Supervised (`ServiceSupervisor`, `supervisor.ts`), 19 services:**
+- **Supervised (`ServiceSupervisor`, `supervisor.ts`), 20 services:**
   `secrets-broker` (`secrets-broker-service.ts`), `browser-ipc`
   (`browser-ipc-service.ts`), `account-state` + `account-auth`
   (`account-state-daemon-service.ts` — PHNX-3608 split the old single
@@ -57,7 +57,19 @@ model it uses.
   (`webhook-receiver-service.ts`), `daemon-heartbeat`
   (`heartbeat-service.ts`), `tmux-reap` (`tmux-reap-service.ts`), and
   `browser-task-reap` (`browser-task-reap-service.ts`), and `auth-sync`
-  (`auth-sync-service.ts`), and `usage-sync` (`usage-sync-service.ts`). Each implements the
+  (`auth-sync-service.ts`), `usage-sync` (`usage-sync-service.ts`), and — since
+  PHNX-3695 — `self-update` (`self-update-service.ts`: checks npm for a newer
+  agents-cli roughly every 75 minutes, installs + byte-verifies it with the
+  same primitives `agents upgrade` uses, best-effort pulls the `.system`
+  companion repo and reconciles with `agents sync --local`, then
+  `process.exit(0)`s so the OS supervisor — launchd `KeepAlive` / systemd
+  `Restart=always` — relaunches the daemon onto the new code; fails CLOSED on
+  any step — a failed install/verify leaves the running daemon untouched and
+  retries next tick, never exits into unverified code. No-ops on a dev build or
+  a shadowed install. Also reachable on demand via the `request-self-update`
+  browser-IPC action, which a version-skewed client now sends instead of just
+  printing `agents daemon restart` — `browser/ipc.ts`'s `reconcileDaemonVersion`).
+  Each implements the
   `DaemonService` contract (`service.ts`) — `id`,
   `start`/`stop`/`restart`/`health()`, plus `intervalMs`/`deadlineMs`/`tick()`
   for the periodic ones — and is `supervisor.register()`ed in `runDaemon()`
@@ -233,8 +245,13 @@ services — `watchdog`, `device-probe`, `self-heal`, `keychain-reap`,
 supervised total to 10. PHNX-3265 moved live-session publishing and webhook
 ingress plus every fixed-cadence maintenance loop onto the same supervisor,
 and fixed manual periodic restarts so they
-replace, rather than duplicate, the timer. `agents daemon services` now reports
-measured health for 17 of 18 declared services and infers only `scheduler`.
+replace, rather than duplicate, the timer. PHNX-3695 added `self-update` as a
+new periodic supervised service — the daemon previously ran with
+`AGENTS_CLI_DISABLE_AUTO_UPDATE=1` forced on (`bootstrap.ts`), so R5 ("the
+installed CLI auto-updates") held for the interactive CLI but silently did NOT
+hold for the one process that runs unattended for days. `agents daemon
+services` now reports measured health for 18 of 19 declared services and
+infers only `scheduler`.
 This doc's Current architecture section
 above is the source of truth for all of it.
 
