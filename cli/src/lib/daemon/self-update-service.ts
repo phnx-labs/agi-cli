@@ -125,28 +125,6 @@ export async function fetchLatestNpmMetadata(signal: AbortSignal): Promise<NpmLa
 }
 
 /**
- * Reject when `signal` aborts, so a tick that exceeds its deadline can unwind
- * out of a step whose own primitive (`downloadVerifiedTarball`,
- * `installPackageIntoPrefix`/`installPackageWithBun` in `self-update.ts`)
- * predates this service and does not accept an `AbortSignal` itself. The
- * underlying operation keeps running in the background until it settles —
- * this only stops AWAITING it — but that is exactly what the `PeriodicService`
- * contract asks for (`service.ts`): the supervisor parks/backs off on abort
- * rather than blocking forever, instead of the tick leaking a runaway install.
- */
-function raceSignal<T>(p: Promise<T>, signal: AbortSignal): Promise<T> {
-  if (signal.aborted) return Promise.reject(new Error('self-update aborted (tick deadline exceeded)'));
-  return new Promise<T>((resolve, reject) => {
-    const onAbort = () => reject(new Error('self-update aborted (tick deadline exceeded)'));
-    signal.addEventListener('abort', onAbort, { once: true });
-    p.then(
-      (v) => { signal.removeEventListener('abort', onAbort); resolve(v); },
-      (e) => { signal.removeEventListener('abort', onAbort); reject(e); },
-    );
-  });
-}
-
-/**
  * Install + byte-verify `metadata` into `packageRoot`'s install, exactly the
  * sequence `bootstrap.ts`'s `installResolvedPackage` runs for `agents
  * upgrade` (download+integrity-verify -> sweep stale staging -> package-
@@ -155,19 +133,33 @@ function raceSignal<T>(p: Promise<T>, signal: AbortSignal): Promise<T> {
  * code (argv parsing, command registration) on import, which the daemon must
  * never trigger — so this is the same primitives from `self-update.ts`
  * composed directly, not a fork of the upgrade logic.
+ *
+ * `signal` is threaded into EVERY step's own `signal` option
+ * (`downloadVerifiedTarball` / `installPackageIntoPrefix` /
+ * `installPackageWithBun`, all in `self-update.ts`) rather than raced against
+ * from the outside: those primitives kill the underlying fetch/child process
+ * on abort and their promise rejects only once that real cancellation has
+ * happened. A wrapper that merely stopped AWAITING an unkillable operation
+ * (the prior approach here) left an orphaned `npm install -g`/`bun add -g`
+ * writing into the shared global prefix — which the very next tick's fresh
+ * install (started as soon as the supervisor's backoff fires, seconds later)
+ * would then race into the same directory. Real cancellation is what makes
+ * `attemptSelfUpdateAndExit`'s `inFlightAttempt` dedupe (below) an actual
+ * guarantee instead of a guard whose lifetime is shorter than the operation
+ * it's guarding (found in review, PHNX-3695).
  */
 export async function installAndVerifyDefault(
   metadata: NpmLatestMetadata,
   packageRoot: string,
   signal: AbortSignal,
 ): Promise<void> {
-  const tarball = await raceSignal(downloadVerifiedTarball(metadata.tarball, metadata.integrity), signal);
+  const tarball = await downloadVerifiedTarball(metadata.tarball, metadata.integrity, 60_000, signal);
   try {
     sweepStaleInstallStaging(packageRoot);
     if (detectPackageManager(packageRoot) === 'bun') {
-      await raceSignal(installPackageWithBun(tarball), signal);
+      await installPackageWithBun(tarball, signal);
     } else {
-      await raceSignal(installPackageIntoPrefix(tarball, deriveGlobalPrefix(packageRoot)), signal);
+      await installPackageIntoPrefix(tarball, deriveGlobalPrefix(packageRoot), signal);
     }
   } finally {
     try {

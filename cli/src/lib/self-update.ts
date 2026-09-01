@@ -410,14 +410,22 @@ export function sweepStaleInstallStaging(packageRoot: string): string[] {
  * destination no matter which npm binary PATH resolves. `--ignore-scripts`
  * skips lifecycle scripts; the caller refreshes alias shims afterwards via
  * refreshAliasShims().
+ *
+ * `signal`, when passed, is wired into `execFile`'s own `signal` option —
+ * Node kills the child process on abort and the returned promise rejects,
+ * rather than the caller merely giving up on awaiting an orphaned process
+ * (self-update-service.ts's daemon tick needs a real kill here: on a
+ * deadline abort an un-killed `npm install -g` keeps writing into the same
+ * global prefix a subsequent retry then installs into concurrently).
  */
-export async function installPackageIntoPrefix(spec: string, prefix: string): Promise<void> {
+export async function installPackageIntoPrefix(spec: string, prefix: string, signal?: AbortSignal): Promise<void> {
   const { execFile } = await import('child_process');
   const { promisify } = await import('util');
   const execFileAsync = promisify(execFile);
   // On Windows `npm` is `npm.cmd`; execFile cannot run it without a shell (ENOENT).
   await execFileAsync('npm', ['install', '-g', '--prefix', prefix, spec, '--ignore-scripts'], {
     shell: needsWindowsShell('npm'),
+    signal,
   });
 }
 
@@ -428,8 +436,10 @@ export async function installPackageIntoPrefix(spec: string, prefix: string): Pr
  * in place. bun skips untrusted lifecycle scripts, so the caller refreshes
  * alias shims afterwards via refreshAliasShims() rather than relying on the
  * package's postinstall hook.
+ *
+ * `signal` behaves exactly as documented on {@link installPackageIntoPrefix}.
  */
-export async function installPackageWithBun(spec: string): Promise<void> {
+export async function installPackageWithBun(spec: string, signal?: AbortSignal): Promise<void> {
   const { execFile } = await import('child_process');
   const { promisify } = await import('util');
   const execFileAsync = promisify(execFile);
@@ -437,7 +447,7 @@ export async function installPackageWithBun(spec: string): Promise<void> {
   // --ignore-scripts: the tarball has already been integrity-verified, but its
   // lifecycle scripts must not run at install time (the caller refreshes shims
   // explicitly via refreshAliasShims()) — same fail-closed posture as the npm path.
-  await execFileAsync('bun', ['add', '-g', spec, '--ignore-scripts'], { shell: needsWindowsShell('bun') });
+  await execFileAsync('bun', ['add', '-g', spec, '--ignore-scripts'], { shell: needsWindowsShell('bun'), signal });
 }
 
 /**
@@ -479,13 +489,19 @@ export function verifyTarballIntegrity(tarball: Buffer, integrity: string): void
  * against the registry attestation. Fails closed: a non-200, a download error,
  * or a hash mismatch throws and no file path is returned, so the caller never
  * installs an unverified artifact.
+ *
+ * `signal`, when passed, aborts the fetch alongside the own `timeoutMs` timer
+ * (whichever fires first) — a real cancellation of the in-flight request, not
+ * just an abandoned await.
  */
 export async function downloadVerifiedTarball(
   tarballUrl: string,
   integrity: string,
   timeoutMs = 60_000,
+  signal?: AbortSignal,
 ): Promise<string> {
-  const response = await fetch(tarballUrl, { signal: AbortSignal.timeout(timeoutMs) });
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  const response = await fetch(tarballUrl, { signal: signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal });
   if (!response.ok) {
     throw new Error(`could not download tarball from ${tarballUrl} (HTTP ${response.status})`);
   }

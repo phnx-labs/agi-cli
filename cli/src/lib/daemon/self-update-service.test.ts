@@ -236,6 +236,68 @@ describe('attemptSelfUpdateAndExit', () => {
     expect(logs.some((l) => l.level === 'WARN' && l.message.includes('registry unreachable'))).toBe(true);
   });
 
+  it('a deadline abort during a real in-flight install actually kills it, not just abandons the await (PHNX-3695 review)', { timeout: 30_000 }, async () => {
+    // A prior version raced the tick's AbortSignal against the download/install
+    // promises without ever cancelling the underlying fetch/child process, so a
+    // deadline abort left an orphaned `npm install` writing into the shared
+    // prefix while the very next attempt started a fresh install into the same
+    // directory. installAndVerifyDefault now threads `signal` into
+    // downloadVerifiedTarball's own `fetch` option (self-update.ts), which Node
+    // aborts for real. Prove that here with a server that stalls the response
+    // body indefinitely and observes whether the request socket was actually
+    // torn down, not just abandoned by the client.
+    const src = makeTempDir('slow-src');
+    fs.writeFileSync(
+      path.join(src, 'package.json'),
+      JSON.stringify({ name: '@agents-cli-test/dummy', version: '2.0.0', license: 'MIT' }),
+    );
+    const tarballName = execFileSync('npm', ['pack', '--silent'], {
+      cwd: src,
+      encoding: 'utf-8',
+      shell: needsWindowsShell('npm'),
+    }).trim();
+    const bytes = fs.readFileSync(path.join(src, tarballName));
+    const integrity = sriFor(bytes);
+
+    let requestAborted = false;
+    const server = http.createServer((req, res) => {
+      req.on('aborted', () => { requestAborted = true; });
+      res.writeHead(200, { 'content-type': 'application/octet-stream' });
+      // Write a byte then stall — never call res.end() — so the request stays
+      // open until either the client aborts it or the test's own server
+      // teardown (afterEach) closes the socket.
+      res.write(Buffer.from([0]));
+    });
+    servers.push(server);
+    const tarballUrl = await new Promise<string>((resolve) => {
+      server.listen(0, '127.0.0.1', () => {
+        const addr = server.address() as { port: number };
+        resolve(`http://127.0.0.1:${addr.port}/${tarballName}`);
+      });
+    });
+
+    const packageRoot = makeInstalledPackageRoot('1.0.0');
+    const controller = new AbortController();
+    const pending = installAndVerifyDefault(
+      { version: '2.0.0', integrity, tarball: tarballUrl },
+      packageRoot,
+      controller.signal,
+    );
+    // Give the request time to actually reach the server before aborting.
+    await new Promise((r) => setTimeout(r, 200));
+    controller.abort();
+
+    await expect(pending).rejects.toThrow();
+    // The abort must have reached the real HTTP request (Node's fetch cancels
+    // the underlying socket on AbortSignal), not merely stopped the caller
+    // from awaiting a still-running download.
+    await new Promise((r) => setTimeout(r, 100));
+    expect(requestAborted).toBe(true);
+    // The old install must remain untouched — nothing here got far enough to
+    // touch the package-manager step at all, let alone corrupt it.
+    expect(readInstalledVersion(packageRoot)).toBe('1.0.0');
+  });
+
   it('a failed post-install .system/local sync does not undo an already-verified update', { timeout: 120_000 }, async () => {
     const { tarballUrl, integrity } = await packAndServe('2.0.0');
     const packageRoot = makeInstalledPackageRoot('1.0.0');
