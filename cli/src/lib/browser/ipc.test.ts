@@ -19,7 +19,7 @@ import {
 import { getHelpersDir } from '../state.js';
 import { ipcEndpoint } from '../platform/index.js';
 import { startDaemon } from '../daemon/daemon.js';
-import { scheduleSelfUpdateExit, triggerSelfUpdateInBackground } from '../daemon/self-update-service.js';
+import { scheduleSelfUpdateExit, selfUpdateSyncDeclineReason, triggerSelfUpdateInBackground } from '../daemon/self-update-service.js';
 import { getCliVersion } from '../version.js';
 
 const HELPER_DIR = `/tmp/agents-cli-browser-ipc-${process.pid}`;
@@ -61,11 +61,16 @@ vi.mock('../daemon/daemon.js', () => ({
 // that a mock of the export cannot intercept. Its default returns a resolved
 // not-updated outcome so the handler's background continuation is a no-op unless
 // a test overrides it. `scheduleSelfUpdateExit` is stubbed so an 'updated: true'
-// case does not actually end the test process.
+// case does not actually end the test process. `selfUpdateSyncDeclineReason` is
+// the instant, network-free decline gate the handler now runs FIRST — stubbed so
+// its real env probes (`detectAgentsBinaryShadows`, the dev-stamp check) don't
+// make the outcome depend on the test machine; it defaults to `null` (proceed to
+// the backgrounded install) and a decline test overrides it.
 vi.mock('../daemon/self-update-service.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../daemon/self-update-service.js')>()),
   triggerSelfUpdateInBackground: vi.fn(() => Promise.resolve({ updated: false })),
   scheduleSelfUpdateExit: vi.fn(),
+  selfUpdateSyncDeclineReason: vi.fn(() => null),
 }));
 
 // getCliVersion() is called TWICE per reconcileDaemonVersion round trip — once
@@ -862,7 +867,7 @@ describe('reconcileDaemonVersion', () => {
     // A real socket server standing in for a pre-feature daemon: it answers the
     // 'version' handshake (so a skew is detected) but replies to
     // 'request-self-update' WITHOUT `selfUpdateTriggered`, so the client takes
-    // its "did not accept" branch — PHNX-3605's advisory, unchanged.
+    // its declined branch — PHNX-3605's non-evicting advisory, unchanged.
     mkdirSync(path.dirname(getSocketPath()), { recursive: true });
     const old = net.createServer((socket) => {
       let buf = '';
@@ -885,11 +890,40 @@ describe('reconcileDaemonVersion', () => {
     try {
       await reconcileDaemonVersion();
       const written = stderr.mock.calls.map((c) => String(c[0])).join('');
-      expect(written).toContain('Daemon did not accept the self-update request');
+      expect(written).toContain('Daemon self-update declined');
+      expect(written).toContain('Continuing without evicting the daemon or its other services');
       expect(written).toContain('agents daemon restart');
     } finally {
       stderr.mockRestore();
       await new Promise<void>((resolve) => old.close(() => resolve()));
+    }
+  }, 20_000);
+
+  it('daemon behind but self-update DECLINES synchronously (dev-tail): prints the reason AND the non-evicting advisory (PHNX-3605)', async () => {
+    // The keystone regression coverage: when the daemon's instant decline gate
+    // fires (dev build / shadowed install), reconcile MUST print the reason and
+    // the "Continuing without evicting … agents daemon restart" advisory, NOT the
+    // background-triggered message. The synchronous decline gate must not be
+    // swallowed by the decouple.
+    const { BrowserIPCServer } = await import('./ipc.js');
+    const { BrowserService } = await import('./service.js');
+    vi.mocked(getCliVersion).mockReturnValueOnce('1.0.0').mockReturnValueOnce('1.1.0');
+    vi.mocked(selfUpdateSyncDeclineReason).mockReturnValueOnce('dev build — self-update is a no-op');
+
+    const server = new BrowserIPCServer(new BrowserService());
+    await server.start();
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      await reconcileDaemonVersion();
+      // The synchronous decline short-circuits before the background install.
+      expect(triggerSelfUpdateInBackground).not.toHaveBeenCalled();
+      const written = stderr.mock.calls.map((c) => String(c[0])).join('');
+      expect(written).toContain('Daemon self-update declined (dev build — self-update is a no-op)');
+      expect(written).toContain('Continuing without evicting the daemon or its other services');
+      expect(written).toContain('agents daemon restart');
+    } finally {
+      stderr.mockRestore();
+      await server.stop();
     }
   }, 20_000);
 
