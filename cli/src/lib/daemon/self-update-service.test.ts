@@ -23,8 +23,8 @@ import { readInstalledVersion } from '../self-update.js';
 import type { DaemonContext } from './service.js';
 import {
   attemptSelfUpdateAndExit,
+  beginOnDemandSelfUpdate,
   installAndVerifyDefault,
-  triggerSelfUpdateInBackground,
   type SelfUpdateDeps,
 } from './self-update-service.js';
 
@@ -396,26 +396,50 @@ describe('attemptSelfUpdateAndExit', () => {
   });
 });
 
-describe('triggerSelfUpdateInBackground (decoupled on-demand trigger, PHNX-3605)', () => {
-  it('runs the shared attempt and resolves to its outcome — the IPC handler need not await it', async () => {
+describe('beginOnDemandSelfUpdate (gate synchronous, install backgrounded — PHNX-3605)', () => {
+  it('DECLINES synchronously on a dev build — reported at once, no registry hit (the dev-tail advisory path)', async () => {
     const { ctx } = makeCtx();
-    const outcome = await triggerSelfUpdateInBackground(ctx, baseDeps({ isDevBuild: () => true }));
-    expect(outcome).toEqual({ updated: false, reason: 'dev build — self-update is a no-op' });
+    const fetchLatestMetadata = vi.fn();
+    const result = await beginOnDemandSelfUpdate(ctx, baseDeps({ isDevBuild: () => true, fetchLatestMetadata }));
+    expect(result).toEqual({ status: 'declined', reason: 'dev build — self-update is a no-op' });
+    expect(fetchLatestMetadata).not.toHaveBeenCalled();
   });
 
-  it('surfaces a fail-closed not-updated outcome when the install fails, leaving the running daemon untouched', async () => {
-    const packageRoot = makeInstalledPackageRoot('1.0.0');
+  it('DECLINES synchronously when already current — the caller gets a reason, no install', async () => {
     const { ctx } = makeCtx();
-    const outcome = await triggerSelfUpdateInBackground(
+    const installAndVerify = vi.fn();
+    const result = await beginOnDemandSelfUpdate(
+      ctx,
+      baseDeps({
+        currentVersion: () => '2.0.0',
+        fetchLatestMetadata: async () => ({ version: '2.0.0', integrity: 'sha512-x', tarball: 'http://x' }),
+        installAndVerify,
+      }),
+    );
+    expect(result).toEqual({ status: 'declined', reason: 'already current (2.0.0)' });
+    expect(installAndVerify).not.toHaveBeenCalled();
+  });
+
+  it('returns "triggered" PROMPTLY for a genuine newer version WITHOUT awaiting the install (never parks the caller)', async () => {
+    const { ctx } = makeCtx();
+    let installStarted = false;
+    // installAndVerify hangs forever — beginOnDemandSelfUpdate must NOT await it.
+    const result = await beginOnDemandSelfUpdate(
       ctx,
       baseDeps({
         currentVersion: () => '1.0.0',
-        packageRoot: () => packageRoot,
-        fetchLatestMetadata: async () => ({ version: '2.0.0', integrity: 'sha512-bogus', tarball: 'http://127.0.0.1:1/nope.tgz' }),
-        installAndVerify: async () => { throw new Error('download failed'); },
+        packageRoot: () => makeInstalledPackageRoot('1.0.0'),
+        fetchLatestMetadata: async () => ({ version: '2.0.0', integrity: 'sha512-x', tarball: 'http://x' }),
+        installAndVerify: () =>
+          new Promise<void>(() => {
+            installStarted = true;
+          }),
       }),
     );
-    expect(outcome.updated).toBe(false);
-    expect(await readInstalledVersion(packageRoot)).toBe('1.0.0');
+    // Returned as soon as the cheap gate said "proceed", not after the install.
+    expect(result).toEqual({ status: 'triggered' });
+    // The background install really was kicked off (its installAndVerify ran).
+    await new Promise((r) => setTimeout(r, 20));
+    expect(installStarted).toBe(true);
   });
 });

@@ -19,7 +19,7 @@ import {
 import { getHelpersDir } from '../state.js';
 import { ipcEndpoint } from '../platform/index.js';
 import { startDaemon } from '../daemon/daemon.js';
-import { scheduleSelfUpdateExit, triggerSelfUpdateInBackground } from '../daemon/self-update-service.js';
+import { beginOnDemandSelfUpdate } from '../daemon/self-update-service.js';
 import { getCliVersion } from '../version.js';
 
 const HELPER_DIR = `/tmp/agents-cli-browser-ipc-${process.pid}`;
@@ -43,29 +43,25 @@ vi.mock('../daemon/daemon.js', () => ({
   signalDaemonReload: vi.fn(() => false),
   getDaemonLogPath: vi.fn(() => '/tmp/agents-cli-daemon.log'),
   // ipc.ts's 'request-self-update' case imports `log` to pass into
-  // triggerSelfUpdateInBackground's DaemonContext — a full module mock must
+  // beginOnDemandSelfUpdate's DaemonContext — a full module mock must
   // provide every named export the importer touches, even ones the test
   // never asserts on, or vitest's strict mock proxy throws on access.
   log: vi.fn(),
 }));
 
-// Only the on-demand TRIGGER is stubbed — everything else in the
+// Only the on-demand entry is stubbed — everything else in the
 // 'request-self-update' case (the real socket, the real BrowserIPCServer
-// routing, the real response shape) runs unmocked. `triggerSelfUpdateInBackground`
-// (and the `attemptSelfUpdateAndExit` install path it wraps) is already covered
+// routing, the real response shape) runs unmocked. `beginOnDemandSelfUpdate`
+// (its synchronous gate, and the background install it wraps) is already covered
 // end-to-end with real installs, no mocks, in self-update-service.test.ts;
 // driving that same real install through this process's OWN running package
 // root would be unsafe in a test. It is stubbed at the EXPORT boundary the ipc.ts
-// handler imports — not `attemptSelfUpdateAndExit`, which the real
-// `triggerSelfUpdateInBackground` would call via its internal lexical binding
-// that a mock of the export cannot intercept. Its default returns a resolved
-// not-updated outcome so the handler's background continuation is a no-op unless
-// a test overrides it. `scheduleSelfUpdateExit` is stubbed so an 'updated: true'
-// case does not actually end the test process.
+// handler imports. Its default returns a `declined` result so the handler is a
+// no-op unless a test overrides it; a test drives the `triggered` branch with an
+// explicit override.
 vi.mock('../daemon/self-update-service.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../daemon/self-update-service.js')>()),
-  triggerSelfUpdateInBackground: vi.fn(() => Promise.resolve({ updated: false })),
-  scheduleSelfUpdateExit: vi.fn(),
+  beginOnDemandSelfUpdate: vi.fn(() => Promise.resolve({ status: 'declined', reason: 'already current (1.0.0)' })),
 }));
 
 // getCliVersion() is called TWICE per reconcileDaemonVersion round trip — once
@@ -744,56 +740,38 @@ describe('clearDeadSocketFile (liveness-checked unlink)', () => {
 // is already covered without mocks in self-update-service.test.ts and is
 // unsafe to run for real against this test process's own package root.
 describe("'request-self-update' action (server case)", () => {
-  it('answers "triggered" IMMEDIATELY without awaiting the install — the browser verb is never parked behind it (PHNX-3605)', async () => {
+  it('on a genuine newer version: responds selfUpdateTriggered:true (install backgrounded by beginOnDemandSelfUpdate)', async () => {
     const { BrowserIPCServer } = await import('./ipc.js');
     const { BrowserService } = await import('./service.js');
-    // The background self-update "hangs" (never resolves until the test releases
-    // it) — the whole point is that the handler must NOT wait for it.
-    let releaseInstall: (() => void) | undefined;
-    vi.mocked(triggerSelfUpdateInBackground).mockReturnValueOnce(
-      new Promise((resolve) => {
-        releaseInstall = () => resolve({ updated: true });
-      }),
-    );
+    vi.mocked(beginOnDemandSelfUpdate).mockReturnValueOnce(Promise.resolve({ status: 'triggered' }));
 
     const server = new BrowserIPCServer(new BrowserService());
     await server.start();
     try {
-      const started = Date.now();
       const response = await sendIPCRequest({ action: 'request-self-update' });
-      const elapsed = Date.now() - started;
-      // The response came back while the install is still in flight (not yet
-      // released) — proof the handler is decoupled, not blocking on it.
       expect(response).toMatchObject({ ok: true, selfUpdateTriggered: true });
-      expect(elapsed).toBeLessThan(2_000);
-      expect(triggerSelfUpdateInBackground).toHaveBeenCalledTimes(1);
-      expect(scheduleSelfUpdateExit).not.toHaveBeenCalled();
-
-      // Now let the background install finish; the exit is scheduled from the
-      // handler's continuation off the returned promise, AFTER the response.
-      releaseInstall?.();
-      await new Promise((r) => setTimeout(r, 20));
-      expect(scheduleSelfUpdateExit).toHaveBeenCalledTimes(1);
+      expect(beginOnDemandSelfUpdate).toHaveBeenCalledTimes(1);
     } finally {
       await server.stop();
     }
   }, 20_000);
 
-  it('does NOT schedule an exit when the background update reports not-updated', async () => {
+  it('on a synchronous DECLINE (dev build / already current): responds selfUpdateTriggered:false with the reason', async () => {
     const { BrowserIPCServer } = await import('./ipc.js');
     const { BrowserService } = await import('./service.js');
-    vi.mocked(triggerSelfUpdateInBackground).mockReturnValueOnce(
-      Promise.resolve({ updated: false, reason: 'already current (1.2.3)' }),
+    vi.mocked(beginOnDemandSelfUpdate).mockReturnValueOnce(
+      Promise.resolve({ status: 'declined', reason: 'dev build — self-update is a no-op' }),
     );
 
     const server = new BrowserIPCServer(new BrowserService());
     await server.start();
     try {
       const response = await sendIPCRequest({ action: 'request-self-update' });
-      expect(response).toMatchObject({ ok: true, selfUpdateTriggered: true });
-      // Give the background continuation a tick — it must not schedule an exit.
-      await new Promise((r) => setTimeout(r, 20));
-      expect(scheduleSelfUpdateExit).not.toHaveBeenCalled();
+      expect(response).toMatchObject({
+        ok: true,
+        selfUpdateTriggered: false,
+        reason: 'dev build — self-update is a no-op',
+      });
     } finally {
       await server.stop();
     }
@@ -818,14 +796,14 @@ describe('reconcileDaemonVersion', () => {
     try {
       await reconcileDaemonVersion();
       expect(stderr).not.toHaveBeenCalled();
-      expect(triggerSelfUpdateInBackground).not.toHaveBeenCalled();
+      expect(beginOnDemandSelfUpdate).not.toHaveBeenCalled();
     } finally {
       stderr.mockRestore();
       await server.stop();
     }
   }, 20_000);
 
-  it('daemon behind client: requests the background self-update over the socket and returns PROMPTLY, without waiting on the install', async () => {
+  it('daemon behind, genuine update: requests it over the socket, prints the background message, no restart hint', async () => {
     const { BrowserIPCServer } = await import('./ipc.js');
     const { BrowserService } = await import('./service.js');
     // Server's 'version' case reads getCliVersion() FIRST (call 1, reports the
@@ -833,21 +811,14 @@ describe('reconcileDaemonVersion', () => {
     // call 2 (1.1.0) — a real forward-skew, decided by the real
     // shouldRecommendDaemonRefresh, not stubbed.
     vi.mocked(getCliVersion).mockReturnValueOnce('1.0.0').mockReturnValueOnce('1.1.0');
-    // The background install never resolves within the test — reconcile must
-    // still return promptly, because the handler no longer awaits it.
-    vi.mocked(triggerSelfUpdateInBackground).mockReturnValueOnce(new Promise<never>(() => {}));
+    vi.mocked(beginOnDemandSelfUpdate).mockReturnValueOnce(Promise.resolve({ status: 'triggered' }));
 
     const server = new BrowserIPCServer(new BrowserService());
     await server.start();
     const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     try {
-      const started = Date.now();
       await reconcileDaemonVersion();
-      const elapsed = Date.now() - started;
-      // Real request-self-update round trip actually happened, and reconcile did
-      // NOT block on the (never-resolving) install.
-      expect(triggerSelfUpdateInBackground).toHaveBeenCalledTimes(1);
-      expect(elapsed).toBeLessThan(2_000);
+      expect(beginOnDemandSelfUpdate).toHaveBeenCalledTimes(1);
       const written = stderr.mock.calls.map((c) => String(c[0])).join('');
       expect(written).toContain('self-update in the background');
       expect(written).toContain('Daemon self-update requested');
@@ -858,38 +829,30 @@ describe('reconcileDaemonVersion', () => {
     }
   }, 20_000);
 
-  it('daemon that does not acknowledge the trigger (an older daemon lacking the field): degrades to the manual-restart hint', async () => {
-    // A real socket server standing in for a pre-feature daemon: it answers the
-    // 'version' handshake (so a skew is detected) but replies to
-    // 'request-self-update' WITHOUT `selfUpdateTriggered`, so the client takes
-    // its "did not accept" branch — PHNX-3605's advisory, unchanged.
-    mkdirSync(path.dirname(getSocketPath()), { recursive: true });
-    const old = net.createServer((socket) => {
-      let buf = '';
-      socket.on('data', (d) => {
-        buf += d.toString();
-        const nl = buf.indexOf('\n');
-        if (nl === -1) return;
-        const req = JSON.parse(buf.slice(0, nl));
-        buf = buf.slice(nl + 1);
-        if (req.action === 'version') socket.write(JSON.stringify({ ok: true, version: '1.0.0' }) + '\n');
-        else socket.write(JSON.stringify({ ok: true }) + '\n'); // no selfUpdateTriggered
-      });
-    });
-    await new Promise<void>((resolve, reject) => {
-      old.listen(ipcEndpoint(getSocketPath()), resolve);
-      old.on('error', reject);
-    });
-    vi.mocked(getCliVersion).mockReturnValue('1.1.0'); // client is ahead of the daemon's 1.0.0
+  it('daemon behind but self-update DECLINES (dev-tail / already current): prints the reason AND the non-evicting advisory (PHNX-3605)', async () => {
+    // The keystone regression coverage: a version-skewed reconcile whose daemon
+    // declines (a dev build, a shadowed install, already current) MUST still
+    // print "Continuing without evicting …" + "agents daemon restart", NOT the
+    // background-triggered message. The decouple must not swallow the decline.
+    const { BrowserIPCServer } = await import('./ipc.js');
+    const { BrowserService } = await import('./service.js');
+    vi.mocked(getCliVersion).mockReturnValueOnce('1.0.0').mockReturnValueOnce('1.1.0');
+    vi.mocked(beginOnDemandSelfUpdate).mockReturnValueOnce(
+      Promise.resolve({ status: 'declined', reason: 'dev build — self-update is a no-op' }),
+    );
+
+    const server = new BrowserIPCServer(new BrowserService());
+    await server.start();
     const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     try {
       await reconcileDaemonVersion();
       const written = stderr.mock.calls.map((c) => String(c[0])).join('');
-      expect(written).toContain('Daemon did not accept the self-update request');
+      expect(written).toContain('Daemon self-update did not run (dev build — self-update is a no-op)');
+      expect(written).toContain('Continuing without evicting the daemon or its other services');
       expect(written).toContain('agents daemon restart');
     } finally {
       stderr.mockRestore();
-      await new Promise<void>((resolve) => old.close(() => resolve()));
+      await server.stop();
     }
   }, 20_000);
 
@@ -903,7 +866,7 @@ describe('reconcileDaemonVersion', () => {
     try {
       await reconcileDaemonVersion();
       expect(stderr).not.toHaveBeenCalled();
-      expect(triggerSelfUpdateInBackground).not.toHaveBeenCalled();
+      expect(beginOnDemandSelfUpdate).not.toHaveBeenCalled();
     } finally {
       stderr.mockRestore();
     }
@@ -924,8 +887,9 @@ describe('reconcileDaemonVersion', () => {
       // Reset, then confirm a second real call after reset behaves fresh.
       resetVersionReconciliationForTest();
       vi.mocked(getCliVersion).mockReturnValueOnce('1.0.0').mockReturnValueOnce('1.1.0');
+      vi.mocked(beginOnDemandSelfUpdate).mockReturnValueOnce(Promise.resolve({ status: 'triggered' }));
       await reconcileDaemonVersion();
-      expect(triggerSelfUpdateInBackground).toHaveBeenCalledTimes(1);
+      expect(beginOnDemandSelfUpdate).toHaveBeenCalledTimes(1);
     } finally {
       await server.stop();
     }

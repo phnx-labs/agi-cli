@@ -237,53 +237,38 @@ export function defaultSelfUpdateDeps(): SelfUpdateDeps {
 }
 
 /**
- * Dedupes concurrent callers onto ONE in-flight attempt. The periodic tick
- * and an on-demand `request-self-update` IPC call (possibly several, if more
- * than one version-skewed client reconnects at once) can overlap in the same
- * process — without this, two concurrent `installAndVerify` calls race on the
- * same package-manager install directory. Keyed process-wide (not per-deps)
- * since production always shares one `defaultSelfUpdateDeps()` install target;
- * tests inject distinct `deps` per case and don't run concurrently with each
- * other, so this never cross-contaminates test outcomes.
+ * The self-update decision the CHEAP gate reaches: either a synchronous-ish
+ * DECLINE (dev build, shadowed install, registry unreachable, or already
+ * current) that the on-demand IPC path reports to the caller immediately, or a
+ * PROCEED with the newer version's metadata to install. Splitting the gate from
+ * the install is what lets the on-demand path answer a decline at once (keeping
+ * reconcileDaemonVersion's PHNX-3605 advisory alive) while backgrounding only
+ * the genuinely slow download→install→verify.
  */
-let inFlightAttempt: Promise<SelfUpdateOutcome> | null = null;
+type SelfUpdateGate =
+  | { kind: 'decline'; outcome: SelfUpdateOutcome }
+  | { kind: 'proceed'; metadata: NpmLatestMetadata; current: string };
 
 /**
- * Core self-update decision + action, shared by the periodic tick
- * ({@link SelfUpdateService.onTick}) and the on-demand IPC path
- * (`request-self-update`, `browser/ipc.ts`) — one implementation, so a
- * version-skew client asking "update now" runs exactly the same fail-closed
- * logic as the scheduled sweep. Returns rather than throws so callers decide
- * their own exit timing (the periodic service exits immediately; the IPC
- * handler must respond to the client on the socket BEFORE exiting, or the
- * client hangs on a socket that is closing mid-write). Concurrent callers
- * share one in-flight attempt rather than racing separate installs.
+ * The cheap, local gate: is a self-update warranted at all? Runs the
+ * dev-build / shadowed-install checks (no I/O) and the registry "is there a
+ * newer version?" check (one fast GET), and either declines with a reason or
+ * hands back the metadata to install. It performs NO download/install, so it is
+ * safe to `await` on the on-demand path before responding.
  */
-export async function attemptSelfUpdateAndExit(
-  ctx: DaemonContext,
-  signal: AbortSignal,
-  deps: SelfUpdateDeps = defaultSelfUpdateDeps(),
-): Promise<SelfUpdateOutcome> {
-  if (inFlightAttempt) return inFlightAttempt;
-  const attempt = runSelfUpdateAttempt(ctx, signal, deps);
-  inFlightAttempt = attempt;
-  try {
-    return await attempt;
-  } finally {
-    if (inFlightAttempt === attempt) inFlightAttempt = null;
-  }
-}
-
-async function runSelfUpdateAttempt(
+async function evaluateSelfUpdate(
   ctx: DaemonContext,
   signal: AbortSignal,
   deps: SelfUpdateDeps,
-): Promise<SelfUpdateOutcome> {
+): Promise<SelfUpdateGate> {
   if (deps.isDevBuild()) {
-    return { updated: false, reason: 'dev build — self-update is a no-op' };
+    return { kind: 'decline', outcome: { updated: false, reason: 'dev build — self-update is a no-op' } };
   }
   if (deps.detectShadow()) {
-    return { updated: false, reason: 'another agents binary shadows this install — self-update is a no-op' };
+    return {
+      kind: 'decline',
+      outcome: { updated: false, reason: 'another agents binary shadows this install — self-update is a no-op' },
+    };
   }
 
   const current = deps.currentVersion();
@@ -293,13 +278,29 @@ async function runSelfUpdateAttempt(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     ctx.log('WARN', `self-update: registry check failed, staying on ${current}: ${message}`);
-    return { updated: false, reason: 'registry check failed' };
+    return { kind: 'decline', outcome: { updated: false, reason: 'registry check failed' } };
   }
 
   if (compareVersions(metadata.version, current) <= 0) {
-    return { updated: false, reason: `already current (${current})` };
+    return { kind: 'decline', outcome: { updated: false, reason: `already current (${current})` } };
   }
 
+  return { kind: 'proceed', metadata, current };
+}
+
+/**
+ * The SLOW half: download→install→byte-verify the newer version, then the
+ * best-effort companion-repo + local reconcile. Fail-closed — an install/verify
+ * failure leaves the running daemon untouched and returns a not-updated outcome.
+ * Deduped by {@link runGuardedInstall}, never called directly by two racers.
+ */
+async function performSelfUpdateInstall(
+  ctx: DaemonContext,
+  signal: AbortSignal,
+  deps: SelfUpdateDeps,
+  metadata: NpmLatestMetadata,
+  current: string,
+): Promise<SelfUpdateOutcome> {
   const packageRoot = deps.packageRoot();
   try {
     await deps.installAndVerify(metadata, packageRoot, signal);
@@ -331,6 +332,56 @@ async function runSelfUpdateAttempt(
   return { updated: true };
 }
 
+/**
+ * Dedupes concurrent INSTALLS onto ONE in-flight install. The periodic tick
+ * ({@link attemptSelfUpdateAndExit}) and the on-demand IPC path
+ * ({@link beginOnDemandSelfUpdate}) can both decide to install in the same
+ * process — without this, two concurrent `installAndVerify` calls race on the
+ * same package-manager install directory. The guard is on the install (not the
+ * whole attempt) so BOTH paths share it regardless of which one ran the cheap
+ * gate: whoever reaches {@link runGuardedInstall} first owns the install, the
+ * other awaits the same promise. Keyed process-wide (not per-deps) since
+ * production always shares one `defaultSelfUpdateDeps()` install target; tests
+ * inject distinct `deps` per case and don't run concurrently with each other.
+ */
+let inFlightInstall: Promise<SelfUpdateOutcome> | null = null;
+
+function runGuardedInstall(
+  ctx: DaemonContext,
+  signal: AbortSignal,
+  deps: SelfUpdateDeps,
+  metadata: NpmLatestMetadata,
+  current: string,
+): Promise<SelfUpdateOutcome> {
+  if (inFlightInstall) return inFlightInstall;
+  const install = performSelfUpdateInstall(ctx, signal, deps, metadata, current);
+  inFlightInstall = install;
+  return install.finally(() => {
+    if (inFlightInstall === install) inFlightInstall = null;
+  });
+}
+
+/**
+ * Core self-update decision + action, shared by the periodic tick
+ * ({@link SelfUpdateService.onTick}) and the on-demand IPC path
+ * ({@link beginOnDemandSelfUpdate}) — one implementation, so a version-skew
+ * client asking "update now" runs exactly the same fail-closed logic as the
+ * scheduled sweep. Returns rather than throws so callers decide their own exit
+ * timing. The periodic tick AWAITS the whole thing (gate + install); the
+ * on-demand path instead gates synchronously and backgrounds the install (see
+ * {@link beginOnDemandSelfUpdate}). Concurrent INSTALLS share one in-flight
+ * install (via {@link runGuardedInstall}) rather than racing separate ones.
+ */
+export async function attemptSelfUpdateAndExit(
+  ctx: DaemonContext,
+  signal: AbortSignal,
+  deps: SelfUpdateDeps = defaultSelfUpdateDeps(),
+): Promise<SelfUpdateOutcome> {
+  const gate = await evaluateSelfUpdate(ctx, signal, deps);
+  if (gate.kind === 'decline') return gate.outcome;
+  return runGuardedInstall(ctx, signal, deps, gate.metadata, gate.current);
+}
+
 /** How long `scheduleSelfUpdateExit` waits before `process.exit(0)` — long enough for an IPC handler's `socket.write` to flush to the OS. */
 const SELF_UPDATE_EXIT_DELAY_MS = 250;
 
@@ -338,15 +389,15 @@ let exitScheduled = false;
 
 /**
  * Schedule the process exit for a verified self-update, exactly once, no
- * matter how many callers observe `outcome.updated` on the shared
- * `inFlightAttempt` promise. The periodic tick and an on-demand
- * `request-self-update` IPC call (`browser/ipc.ts`) can both be awaiting that
- * SAME promise — if the tick's continuation ran an immediate `process.exit(0)`
- * while the IPC handler's continuation had not yet reached `socket.write`,
- * the tick's exit could win the race and the client would see a closed socket
- * before any response (found in review, PHNX-3695). Routing every caller
- * through this one guarded, always-delayed scheduling point means the delay
- * protects EVERY caller's in-flight response, not just the IPC handler's own.
+ * matter how many callers observe `outcome.updated`. The periodic tick and an
+ * on-demand `request-self-update` IPC call (`browser/ipc.ts`) can both reach a
+ * verified update in the same process — if the tick's continuation ran an
+ * immediate `process.exit(0)` while the IPC handler's continuation had not yet
+ * reached `socket.write`, the tick's exit could win the race and the client
+ * would see a closed socket before any response (found in review, PHNX-3695).
+ * Routing every caller through this one guarded, always-delayed scheduling
+ * point means the delay protects EVERY caller's in-flight response, not just
+ * the IPC handler's own.
  */
 export function scheduleSelfUpdateExit(): void {
   if (exitScheduled) return;
@@ -354,39 +405,59 @@ export function scheduleSelfUpdateExit(): void {
   setTimeout(() => process.exit(0), SELF_UPDATE_EXIT_DELAY_MS);
 }
 
+/** What the on-demand `request-self-update` IPC handler learned synchronously. */
+export type OnDemandSelfUpdateResult =
+  | { status: 'declined'; reason?: string }
+  | { status: 'triggered' };
+
 /**
- * Fire the on-demand self-update in the BACKGROUND and return its (bounded)
- * promise WITHOUT the caller having to await it. This is what keeps the
- * `request-self-update` IPC handler (`browser/ipc.ts`) from parking a
- * version-skewed `agents browser` verb behind the full
- * check→download→install→verify: that handler routes through
- * `reconcileDaemonVersion` on every version-skewed call, so awaiting the whole
- * install there reintroduces exactly the client-stall PHNX-3605 was written to
- * prevent (tens of seconds, worst case ~15 min). The handler instead responds
- * "triggered" immediately and lets this run in the background — the daemon does
- * install→verify→exit(0) on its own, the OS supervisor relaunches it, and the
- * browser reconnects.
+ * The on-demand `request-self-update` entry (`browser/ipc.ts`). It runs the
+ * CHEAP gate to completion — dev-build / shadowed-install / registry / already-
+ * current — so a DECLINE is reported to the caller SYNCHRONOUSLY (which is what
+ * keeps reconcileDaemonVersion's PHNX-3605 "did not run … Continuing without
+ * evicting" advisory alive for the dev-tail case), and only when a genuinely
+ * newer version exists does it background the SLOW download→install→verify.
+ * That split is the whole point: because this handler sits on the path of every
+ * version-skewed `agents browser <verb>` (reconcileDaemonVersion → prepareIPC →
+ * here), awaiting the install would stall the browser verb for tens of seconds
+ * (worst case ~15 min) — the client-stall class PHNX-3605 exists to prevent —
+ * while a cheap decline or a fire-and-forget install does not.
  *
- * The work still shares the module-level {@link attemptSelfUpdateAndExit}
- * `inFlightAttempt` guard, so a concurrent trigger (or the periodic tick) can't
- * race a second install into the same prefix. It is bounded by
- * {@link SELF_UPDATE_DEADLINE_MS} via an `AbortController` nobody awaits (the
- * timer is `unref`'d so it never keeps the daemon alive on its own and never
- * dangles in a test). Fail-closed is preserved end to end:
- * `runSelfUpdateAttempt` already turns an install/verify failure into a
- * not-updated outcome that leaves the running daemon untouched. The caller
- * schedules the one decoupled {@link scheduleSelfUpdateExit} off the returned
- * promise once `updated` is true, so the exit still fires after the IPC
- * response has flushed.
+ * The backgrounded install shares the module-level {@link runGuardedInstall}
+ * guard (so a concurrent trigger or the periodic tick can't race a second
+ * install), is bounded by {@link SELF_UPDATE_DEADLINE_MS} via an
+ * `AbortController` nobody awaits (the timer is `unref`'d so it never keeps the
+ * daemon alive on its own nor dangles in a test), and schedules the one
+ * decoupled {@link scheduleSelfUpdateExit} once `updated` is true, so the exit
+ * fires after the IPC response has flushed. Fail-closed is preserved:
+ * {@link performSelfUpdateInstall} turns an install/verify failure into a
+ * not-updated outcome that leaves the running daemon untouched.
  */
-export function triggerSelfUpdateInBackground(
+export async function beginOnDemandSelfUpdate(
   ctx: DaemonContext,
   deps: SelfUpdateDeps = defaultSelfUpdateDeps(),
-): Promise<SelfUpdateOutcome> {
+): Promise<OnDemandSelfUpdateResult> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), SELF_UPDATE_DEADLINE_MS);
   if (typeof timeout.unref === 'function') timeout.unref();
-  return attemptSelfUpdateAndExit(ctx, controller.signal, deps).finally(() => clearTimeout(timeout));
+
+  const gate = await evaluateSelfUpdate(ctx, controller.signal, deps);
+  if (gate.kind === 'decline') {
+    clearTimeout(timeout);
+    return { status: 'declined', reason: gate.outcome.reason };
+  }
+
+  // Genuine newer version — background the slow install; do NOT await it here.
+  void runGuardedInstall(ctx, controller.signal, deps, gate.metadata, gate.current)
+    .then((outcome) => {
+      if (outcome.updated) scheduleSelfUpdateExit();
+    })
+    .catch((err) => {
+      ctx.log('ERROR', `self-update: background install failed: ${err instanceof Error ? err.message : String(err)}`);
+    })
+    .finally(() => clearTimeout(timeout));
+
+  return { status: 'triggered' };
 }
 
 export class SelfUpdateService extends BasePeriodicService {

@@ -69,11 +69,14 @@ model it uses.
   a shadowed install. Also reachable on demand via the `request-self-update`
   browser-IPC action, which a version-skewed client now sends instead of just
   printing `agents daemon restart` — `browser/ipc.ts`'s `reconcileDaemonVersion`.
-  That trigger is DECOUPLED from the install (PHNX-3605): the handler kicks the
-  self-update off in the background (`triggerSelfUpdateInBackground`, sharing the
-  same in-flight guard) and answers "triggered" immediately, so a version-skewed
-  `agents browser <verb>` — every one routes through this path — is never parked
-  behind the full check→download→install→verify).
+  That trigger is DECOUPLED from the install (PHNX-3605, `beginOnDemandSelfUpdate`):
+  the CHEAP gate — dev build / shadowed / registry / already-current — runs
+  SYNCHRONOUSLY and a decline is reported to the caller at once (so
+  `reconcileDaemonVersion` still prints its "Continuing without evicting" advisory
+  for the dev-tail case), while only a GENUINE newer version is backgrounded (the
+  install shares the same in-flight guard) and answered "triggered" immediately —
+  so a version-skewed `agents browser <verb>`, every one of which routes through
+  this path, is never parked behind the full check→download→install→verify).
   Each implements the
   `DaemonService` contract (`service.ts`) — `id`,
   `start`/`stop`/`restart`/`health()`, plus `intervalMs`/`deadlineMs`/`tick()`

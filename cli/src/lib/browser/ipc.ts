@@ -13,7 +13,7 @@ import {
 } from '../daemon/daemon.js';
 import { getCliVersion } from '../version.js';
 import { compareVersions } from '../agent-spec/primitives.js';
-import { scheduleSelfUpdateExit, triggerSelfUpdateInBackground } from '../daemon/self-update-service.js';
+import { beginOnDemandSelfUpdate } from '../daemon/self-update-service.js';
 import { log as daemonLog } from '../daemon/daemon.js';
 import {
   isDaemonServiceEnabled,
@@ -177,10 +177,11 @@ export interface IPCRequestOptions {
    * Opt-in client-side deadline in ms — most IPC actions (browser automation,
    * long-running recordings) have no fixed budget and must NOT get one by
    * default. Set explicitly for a request that genuinely has one, e.g.
-   * `request-self-update`, whose handler answers immediately (it kicks the
-   * install off in the background — see `triggerSelfUpdateInBackground`), so its
-   * client deadline (`DAEMON_SELF_UPDATE_TRIGGER_TIMEOUT_MS`) is a short
-   * "did the daemon accept the trigger?" bound, not a wait on the install.
+   * `request-self-update`, whose handler answers immediately (a decline is
+   * decided synchronously; a genuine install is backgrounded — see
+   * `beginOnDemandSelfUpdate`), so its client deadline
+   * (`DAEMON_SELF_UPDATE_TRIGGER_TIMEOUT_MS`) is a short "did the daemon accept
+   * or decline the trigger?" bound, not a wait on the install.
    */
   timeoutMs?: number;
 }
@@ -774,30 +775,25 @@ export class BrowserIPCServer {
         return { ok: true, version: getCliVersion() };
       }
 
-      // On-demand self-update, triggered by a client that noticed version
-      // skew (reconcileDaemonVersion below). DECOUPLED from the install
-      // (PHNX-3605): this handler MUST NOT await the check→download→install→
-      // verify, because it sits on the path of EVERY version-skewed
-      // `agents browser <verb>` (reconcileDaemonVersion → prepareIPC → here), so
-      // awaiting the whole thing would synchronously stall an ordinary browser
-      // verb for tens of seconds — worst case ~15 min — behind daemon
-      // housekeeping, exactly the client-stall PHNX-3605 exists to prevent.
-      // Instead: kick the self-update off in the BACKGROUND (bounded, and
-      // sharing the module-level in-flight guard so two triggers can't race a
-      // second install) and respond IMMEDIATELY that it was accepted. The daemon
-      // does install→verify→exit(0) on its own; the OS supervisor relaunches it
-      // and the browser reconnects. scheduleSelfUpdateExit (fired from the
-      // background continuation on a verified update) still delays the exit so
-      // this response has flushed to the socket first, and serializes against
-      // the periodic tick's own exit.
+      // On-demand self-update, triggered by a client that noticed version skew
+      // (reconcileDaemonVersion below). The DECLINE checks (dev build, shadowed
+      // install, registry unreachable, already current) run SYNCHRONOUSLY and
+      // are reported to the client at once — that is what keeps
+      // reconcileDaemonVersion's PHNX-3605 "did not run … Continuing without
+      // evicting" advisory alive (the dev-tail case). Only a genuine newer
+      // version is backgrounded (beginOnDemandSelfUpdate), because this handler
+      // sits on the path of EVERY version-skewed `agents browser <verb>`
+      // (reconcileDaemonVersion → prepareIPC → here): awaiting the slow
+      // download→install→verify would stall the browser verb for tens of seconds
+      // — worst case ~15 min — the client-stall PHNX-3605 exists to prevent. On
+      // the backgrounded path the daemon does install→verify→exit(0) on its own
+      // (exit serialized + delayed so this response flushes first); the OS
+      // supervisor relaunches it and the browser reconnects.
       case 'request-self-update': {
-        void triggerSelfUpdateInBackground({ log: daemonLog })
-          .then((outcome) => {
-            if (outcome.updated) scheduleSelfUpdateExit();
-          })
-          .catch((err) => {
-            daemonLog('ERROR', `self-update: background trigger failed: ${err instanceof Error ? err.message : String(err)}`);
-          });
+        const result = await beginOnDemandSelfUpdate({ log: daemonLog });
+        if (result.status === 'declined') {
+          return { ok: true, selfUpdateTriggered: false, reason: result.reason };
+        }
         return { ok: true, selfUpdateTriggered: true };
       }
 
@@ -1345,8 +1341,10 @@ export async function reconcileDaemonVersion(): Promise<void> {
           + 'Continuing without waiting.\n\n',
       );
     } else {
+      // The daemon DECLINED synchronously (dev build, shadowed install, already
+      // current, or a registry error) — the PHNX-3605 degrade-to-advisory path.
       process.stderr.write(
-        'Daemon did not accept the self-update request. '
+        `Daemon self-update did not run${resp.reason ? ` (${resp.reason})` : ''}. `
           + 'Continuing without evicting the daemon or its other services. '
           + 'To load current daemon code when it is safe to interrupt every hosted service: agents daemon restart\n\n',
       );
