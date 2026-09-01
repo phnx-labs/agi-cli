@@ -14,10 +14,12 @@ export const TOOL_CHANGED_MAX_CALLS = 10_000;
 export const TOOL_INDEX_LIMIT_ORDINAL = Number.MAX_SAFE_INTEGER;
 export const TOOL_TEXT_PROCESSING_MAX_BYTES = 64 * 1024;
 export const TOOL_SHELL_PARSE_MAX_BYTES = 64 * 1024;
-// Bumped to 8 for the per-call end timestamp (PHNX-3437): the extractor now
-// records when a call's result arrived, so a re-index re-derives it for rows
-// stored by an older extractor.
-export const TOOL_INDEX_VERSION = 8;
+// Bumped to 9 for Codex tool-outcome classification (PHNX-3761): Codex results
+// arrive as a string or input_text[] rather than an object, so every one used to
+// store as 'unknown' and error rates read 0%. A re-index re-derives outcome for
+// rows stored by an older extractor.
+// (8 added the per-call end timestamp, PHNX-3437.)
+export const TOOL_INDEX_VERSION = 9;
 
 const BASE64_BLOCK = /(?:[A-Za-z0-9+/]{256,}={0,2})/g;
 const SECRET_FIELD = /(?:token|secret|password|authorization|cookie|api[_-]?key|private[_-]?key)$/i;
@@ -294,8 +296,35 @@ function structuredString(source: Record<string, unknown> | undefined, name: str
   return typeof value === 'string' ? value : undefined;
 }
 
+// Codex tool results arrive as a plain string or an array of {type:'input_text',
+// text} blocks (never a plain object), so the text lives across the blocks and
+// the only outcome signal is the leading "Script completed"/"Script failed"
+// marker the exec harness prefixes onto the first block.
+function textSegments(value: unknown): string[] {
+  if (typeof value === 'string') return [value];
+  if (Array.isArray(value)) {
+    return value
+      .map((block) =>
+        block && typeof block === 'object' && typeof (block as Record<string, unknown>).text === 'string'
+          ? (block as Record<string, unknown>).text as string
+          : '',
+      )
+      .filter((text) => text.length > 0);
+  }
+  return [];
+}
+
+function codexScriptOutcome(value: unknown): ToolCallOutcome | undefined {
+  const lead = textSegments(value)[0]?.trimStart();
+  if (!lead) return undefined;
+  if (lead.startsWith('Script failed')) return 'error';
+  if (lead.startsWith('Script completed')) return 'ok';
+  return undefined;
+}
+
 function resultText(value: unknown): string {
   if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return textSegments(value).join('\n');
   const object = resultObject(value);
   if (object) {
     for (const key of ['output', 'stdout', 'content', 'text', 'message']) {
@@ -320,9 +349,14 @@ export function structuredToolResult(value: unknown): {
   const structured = resultObject(value);
   const success = structuredField(structured, 'success');
   const isError = success === false || structuredField(structured, 'is_error') === true;
+  const outcome: ToolCallOutcome = isError
+    ? 'error'
+    : success === true
+      ? 'ok'
+      : codexScriptOutcome(value) ?? 'unknown';
   return {
     text: resultText(value),
-    outcome: isError ? 'error' : success === true ? 'ok' : 'unknown',
+    outcome,
     exitCode: structuredNumber(structured, 'exit_code'),
     statusCode: structuredNumber(structured, 'status_code'),
     errorCode: structuredString(structured, 'error_code'),
