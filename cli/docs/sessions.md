@@ -133,6 +133,14 @@ The BYO path requires the `r2.backups` secrets bundle. Its `R2_SYNC_ENC_KEY` is 
 shared restore key across the user's devices, and the existing
 `sessions/<machine>/<agent>/<session>` object layout is unchanged.
 
+The managed endpoint itself (`sessions.agents-cli.sh` — the Worker + R2 bucket) is
+provisioned once, by an operator, with `agents sessions backup-setup` (Cloudflare
+credentials from the `cloudflare` secrets bundle, e.g. `agents secrets exec
+cloudflare -- agents sessions backup-setup`). It is idempotent — re-running
+redeploys the current Worker template in place. This is NOT a per-user step: a
+signed-in user backs up with zero setup; `backup-setup` is only how the first-party
+endpoint is deployed. The BYO path never touches it.
+
 ## Derived capabilities
 
 - Search and ranking operate over normalized messages and metadata. A keyword
