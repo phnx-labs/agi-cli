@@ -298,6 +298,78 @@ describe('attemptSelfUpdateAndExit', () => {
     expect(readInstalledVersion(packageRoot)).toBe('1.0.0');
   });
 
+  it('two concurrent callers share one in-flight attempt — a subsequent request never starts a second install (PHNX-3695 review)', { timeout: 30_000 }, async () => {
+    // The review's second ask: prove the inFlightAttempt guard actually
+    // dedupes overlapping callers (the periodic tick racing an on-demand
+    // request-self-update, or two skewed clients asking at once) onto ONE
+    // real install rather than starting a second one into the same prefix.
+    // Count real HTTP requests the tarball server receives: with the guard
+    // working, two concurrent attemptSelfUpdateAndExit calls download the
+    // tarball exactly once.
+    let requestCount = 0;
+    const src = makeTempDir('dedupe-src');
+    fs.writeFileSync(
+      path.join(src, 'package.json'),
+      JSON.stringify({ name: '@agents-cli-test/dummy', version: '2.0.0', license: 'MIT' }),
+    );
+    const tarballName = execFileSync('npm', ['pack', '--silent'], {
+      cwd: src,
+      encoding: 'utf-8',
+      shell: needsWindowsShell('npm'),
+    }).trim();
+    const bytes = fs.readFileSync(path.join(src, tarballName));
+    const integrity = sriFor(bytes);
+    const server = http.createServer((_req, res) => {
+      requestCount++;
+      res.writeHead(200, { 'content-type': 'application/octet-stream' });
+      res.end(bytes);
+    });
+    servers.push(server);
+    const tarballUrl = await new Promise<string>((resolve) => {
+      server.listen(0, '127.0.0.1', () => {
+        const addr = server.address() as { port: number };
+        resolve(`http://127.0.0.1:${addr.port}/${tarballName}`);
+      });
+    });
+
+    const packageRoot = makeInstalledPackageRoot('1.0.0');
+    const { ctx } = makeCtx();
+    const deps = baseDeps({
+      currentVersion: () => '1.0.0',
+      packageRoot: () => packageRoot,
+      fetchLatestMetadata: async () => ({ version: '2.0.0', integrity, tarball: tarballUrl }),
+      installAndVerify: installAndVerifyDefault,
+    });
+
+    // Two callers racing in, exactly as a tick and an on-demand IPC request
+    // would: neither awaits the other before starting.
+    const [first, second] = await Promise.all([
+      attemptSelfUpdateAndExit(ctx, new AbortController().signal, deps),
+      attemptSelfUpdateAndExit(ctx, new AbortController().signal, deps),
+    ]);
+
+    expect(first).toEqual({ updated: true });
+    expect(second).toEqual({ updated: true });
+    expect(requestCount).toBe(1);
+    expect(readInstalledVersion(packageRoot)).toBe('2.0.0');
+
+    // The guard must also release once real work is done, so a genuinely
+    // NEW attempt afterwards is not permanently swallowed by a stale guard.
+    const { tarballUrl: nextUrl, integrity: nextIntegrity } = await packAndServe('3.0.0');
+    const third = await attemptSelfUpdateAndExit(
+      ctx,
+      new AbortController().signal,
+      baseDeps({
+        currentVersion: () => '2.0.0',
+        packageRoot: () => packageRoot,
+        fetchLatestMetadata: async () => ({ version: '3.0.0', integrity: nextIntegrity, tarball: nextUrl }),
+        installAndVerify: installAndVerifyDefault,
+      }),
+    );
+    expect(third).toEqual({ updated: true });
+    expect(readInstalledVersion(packageRoot)).toBe('3.0.0');
+  });
+
   it('a failed post-install .system/local sync does not undo an already-verified update', { timeout: 120_000 }, async () => {
     const { tarballUrl, integrity } = await packAndServe('2.0.0');
     const packageRoot = makeInstalledPackageRoot('1.0.0');
