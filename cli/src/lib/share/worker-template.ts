@@ -2409,9 +2409,14 @@ async function handleCollab(request, env, url, path, ctx) {
   const obj = await env.BUCKET.get(sharePath);
   if (!obj) return collabNotFound();
 
-  // Re-derive identity SERVER-SIDE and apply the page read gate. A ticket
-  // redemption redirect is meaningless to a fetch(), so collab treats the request
-  // as its resolved identity (or anonymous) and never bounces.
+  // Re-derive identity SERVER-SIDE and apply the page read gate. Collab clients
+  // authenticate with the Bearer or the __share cookie, never a ?phoenix_ticket=
+  // (that is a page-navigation param the CLI appends when OPENING a page). So we
+  // use only the resolved identity and ignore any redirect outcome — a 302 login
+  // bounce is meaningless to a fetch(). If a ticket were present it would be
+  // redeemed (and, being single-use, consumed) here but its cookie discarded, so
+  // the request falls through as anonymous — the fail-safe (more restrictive)
+  // direction, never an escalation.
   const viewer = await resolveViewer(request, env, url);
   const identity = viewer.identity || null;
   const readDenied = await collabReadGate(request, url, obj, identity);
