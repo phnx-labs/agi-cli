@@ -36,6 +36,8 @@ import {
   putWorkerSecret,
   updateWorker,
   WORKER_PHOENIX_ID_BASE_SECRET,
+  WORKER_COLLAB_BASE_SECRET,
+  WORKER_COLLAB_SERVICE_TOKEN_SECRET,
   type CloudflareRequester,
   setWorkerSecret,
 } from '../lib/share/provision.js';
@@ -57,6 +59,7 @@ import { renderWorkerBundle } from '../lib/share/worker-template.js';
 import { analyticsEnabled } from '../lib/share/analytics.js';
 import { extractShareHttpError, formatShareHttpErrorDetail } from '../lib/share/http-error.js';
 import {
+  collabConfigForDeploy,
   phoenixIdBaseForDeploy,
   resolveShareBackend,
   shouldUseManaged,
@@ -1585,6 +1588,15 @@ export async function runShareProvision(opts: {
       );
       spin.text = `Worker '${workerName}' Phoenix ID base set`;
     }
+    // Managed collaboration backend (PHNX-3835). Dormant unless BOTH
+    // PRIX_ARTIFACT_COLLAB_BASE and ARTIFACT_COLLAB_SERVICE_TOKEN are set in the
+    // deploy env; the service token rides the Secrets API, never rendered HTML.
+    const collab = collabConfigForDeploy({ managed: opts.managed }, { baseUrl, domain });
+    if (collab.collabBase && collab.collabServiceToken) {
+      await putWorkerSecret(apiToken, accountId, workerName, WORKER_COLLAB_BASE_SECRET, collab.collabBase, provisionOpts);
+      await putWorkerSecret(apiToken, accountId, workerName, WORKER_COLLAB_SERVICE_TOKEN_SECRET, collab.collabServiceToken, provisionOpts);
+      spin.text = `Worker '${workerName}' collaboration backend set`;
+    }
     spin.succeed('Provisioned');
 
     const cfg: ShareConfig = {
@@ -1689,10 +1701,14 @@ export async function runShareUpdate(opts: {
   }
   const writeToken = readWriteToken();
   const phoenixIdBase = phoenixIdBaseForDeploy({ managed: opts.managed }, cfg);
+  const collab = collabConfigForDeploy({ managed: opts.managed }, cfg);
   const provisionOpts = {
     ...(opts.request ? { request: opts.request } : {}),
     force: opts.force,
     ...(phoenixIdBase !== undefined ? { phoenixIdBase } : {}),
+    ...(collab.collabBase !== undefined
+      ? { collabBase: collab.collabBase, collabServiceToken: collab.collabServiceToken }
+      : {}),
   };
 
   const result = await updateWorker(

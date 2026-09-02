@@ -137,6 +137,32 @@ export function phoenixIdBaseForDeploy(
 }
 
 /**
+ * Managed collaboration backend config to bind on a managed Worker deploy
+ * (PHNX-3835): `PRIX_ARTIFACT_COLLAB_BASE` (the Prix artifact-collaboration API
+ * base) and `ARTIFACT_COLLAB_SERVICE_TOKEN` (the service credential the Worker
+ * sends as `Authorization: Bearer`, NEVER surfaced to the browser). Both are read
+ * from the deploy environment.
+ *
+ * Deliberately dormant-by-default: the two secrets are applied ONLY when BOTH are
+ * present. Until the Prix API counterpart is live an operator leaves them unset,
+ * and the Worker fails `/__collab` closed (404) with the artifact page GET
+ * unaffected. A pure-BYO endpoint never gets them (it has no Phoenix identity).
+ * Unlike `phoenixIdBaseForDeploy` this never throws on absence — collaboration is
+ * additive, not required for a working managed deploy.
+ */
+export function collabConfigForDeploy(
+  opts: { managed?: boolean } = {},
+  cfg?: { baseUrl?: string; domain?: string },
+): { collabBase?: string; collabServiceToken?: string } {
+  const managed = opts.managed === true || (cfg != null && isManagedShareEndpoint(cfg));
+  if (!managed) return {};
+  const base = (process.env.PRIX_ARTIFACT_COLLAB_BASE || '').replace(/\/+$/, '').trim();
+  const token = (process.env.ARTIFACT_COLLAB_SERVICE_TOKEN || '').trim();
+  if (!base || !token) return {};
+  return { collabBase: base, collabServiceToken: token };
+}
+
+/**
  * The share surface's BYO-override signals: an explicit `--byo`, a
  * caller-supplied static write token, or `AGENTS_SHARE_BACKEND=byo`. Detecting
  * WHICH signals count is surface-specific; the managed-vs-BYO decision itself is

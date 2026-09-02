@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -2912,5 +2913,458 @@ describe('PHNX-3547 collision recovery, CAS republish, alternate handles', () =>
     expect(res.status).toBe(409);
     expect((await res.json()).error).toContain('publish conflict');
     expect(store.get('octocat/racy')!.body.toString()).toBe('v1-body');
+  });
+});
+
+// ---- Same-origin human collaboration transport (PHNX-3835) ----
+//
+// These exercise the GENERATED Worker's /__collab/* proxy end to end: the
+// object-first R2 load, server-side identity/visibility/provenance derivation,
+// page-gate reuse, the Prix upstream contract, SSE streaming, and fail-closed
+// behaviour. The Prix hop is the ONE stubbed seam (via hooks.collabFetch), the
+// same way the identity-server hop is stubbed via hooks.verifyPhoenixToken.
+
+const COLLAB_BASE = 'https://prix.test';
+const COLLAB_SECRET = 'svc-secret-do-not-leak';
+
+// A Phoenix identity per bearer token, so one override serves owner /
+// same-company / cross-company callers in the same test.
+const COLLAB_IDS: Record<string, { userId: string; email: string }> = {
+  owner: { userId: 'u1', email: 'octocat@acme.com' },
+  sameco: { userId: 'u2', email: 'alice@acme.com' },
+  crossco: { userId: 'u3', email: 'bob@evil.com' },
+};
+
+function collabEnv() {
+  const made = makeEnv();
+  (made.env as any).PHOENIX_ID_BASE = 'https://phoenix.test';
+  (made.env as any).PRIX_ARTIFACT_COLLAB_BASE = COLLAB_BASE;
+  (made.env as any).ARTIFACT_COLLAB_SERVICE_TOKEN = COLLAB_SECRET;
+  return made;
+}
+
+function setCollabIdentities(worker: any) {
+  worker.hooks.verifyPhoenixToken = async (req: Request) => {
+    const b = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '');
+    return COLLAB_IDS[b] || null;
+  };
+}
+
+interface CollabCall {
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+  body: string;
+}
+
+function recordCollab(worker: any, respond?: () => Response): CollabCall[] {
+  const calls: CollabCall[] = [];
+  worker.hooks.collabFetch = async (req: Request) => {
+    const headers: Record<string, string> = {};
+    req.headers.forEach((v, k) => { headers[k] = v; });
+    const body = req.method === 'POST' || req.method === 'PATCH' ? await req.text() : '';
+    calls.push({ url: req.url, method: req.method, headers, body });
+    return respond
+      ? respond()
+      : new Response(JSON.stringify({ ok: true, threads: [] }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  return calls;
+}
+
+// The Worker derives the share id as SHA-256 over owner + NUL + normalized path.
+function expectedShareId(owner: string, path: string): string {
+  return createHash('sha256').update(owner + '\u0000' + path).digest('hex');
+}
+
+// Publish a managed page owned by u1 (@octocat) at the given visibility.
+async function publishManaged(
+  worker: any,
+  env: any,
+  key: string,
+  visibility: string,
+  extra: Record<string, string> = {},
+) {
+  setCollabIdentities(worker);
+  const headers: Record<string, string> = {
+    authorization: 'Bearer owner',
+    'content-type': 'text/html; charset=utf-8',
+    'x-share-visibility': visibility,
+    ...extra,
+  };
+  const res = await worker.default.fetch(
+    new Request(`https://share.test/${key}`, { method: 'PUT', headers, body: '<h1>doc</h1>' }),
+    env,
+  );
+  expect(res.status).toBe(200);
+}
+
+describe('collaboration transport (/__collab)', () => {
+  it('loads the R2 object first and derives share id + revision + provenance server-side', async () => {
+    const worker = await loadWorker();
+    const { env, store } = collabEnv();
+    await publishManaged(worker, env, 'octocat/plan', 'public', {
+      'x-share-agent': 'claude',
+      'x-share-session': 'sess-123',
+      'x-share-host': 'zion',
+      'x-share-repo': 'phnx-labs/agents-cli',
+    });
+    const calls = recordCollab(worker);
+
+    const res = await worker.default.fetch(
+      new Request('https://share.test/__collab/context?share=octocat%2Fplan'),
+      env,
+    );
+    expect(res.status).toBe(200);
+    expect(calls).toHaveLength(1);
+    const call = calls[0];
+    expect(call.url).toBe(`${COLLAB_BASE}/v1/artifact-collaboration/context`);
+    expect(call.headers.authorization).toBe(`Bearer ${COLLAB_SECRET}`);
+    expect(call.headers['x-artifact-share-id']).toBe(expectedShareId('u1', 'octocat/plan'));
+    expect(call.headers['x-artifact-revision']).toBe(store.get('octocat/plan')!.etag);
+    expect(call.headers['x-artifact-visibility']).toBe('public');
+    expect(call.headers['x-artifact-owner-id']).toBe('u1');
+    expect(call.headers['x-artifact-agent']).toBe('claude');
+    expect(call.headers['x-artifact-session']).toBe('sess-123');
+    expect(call.headers['x-artifact-host']).toBe('zion');
+    expect(call.headers['x-artifact-repo']).toBe('phnx-labs/agents-cli');
+  });
+
+  it('404s a collaboration request for a share that does not exist', async () => {
+    const worker = await loadWorker();
+    const { env } = collabEnv();
+    setCollabIdentities(worker);
+    const calls = recordCollab(worker);
+    const res = await worker.default.fetch(
+      new Request('https://share.test/__collab/threads?share=octocat%2Fghost'),
+      env,
+    );
+    expect(res.status).toBe(404);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('forwards X-Artifact-Visibility verbatim for every visibility level', async () => {
+    for (const [vis, viewer, key, extra] of [
+      ['public', undefined, 'octocat/pub', {}],
+      ['unlisted', undefined, 'octocat/unl', {}],
+      ['me', 'owner', 'octocat/me', {}],
+      ['org', 'owner', 'octocat/org', {}],
+      ['private', 'owner', 'octocat/priv', { 'x-share-viewer-token': 'tok' }],
+    ] as const) {
+      const worker = await loadWorker();
+      const { env } = collabEnv();
+      await publishManaged(worker, env, key, vis, extra as Record<string, string>);
+      const calls = recordCollab(worker);
+      const headers: Record<string, string> = {};
+      if (viewer) headers.authorization = `Bearer ${viewer}`;
+      const q = vis === 'private' ? `?share=${encodeURIComponent(key)}&k=tok` : `?share=${encodeURIComponent(key)}`;
+      const res = await worker.default.fetch(
+        new Request(`https://share.test/__collab/context${q}`, { headers }),
+        env,
+      );
+      expect(res.status).toBe(200);
+      expect(calls[0].headers['x-artifact-visibility']).toBe(vis);
+    }
+  });
+
+  it('lets a same-company reader through and 404s a cross-company reader/writer/subscriber', async () => {
+    const worker = await loadWorker();
+    const { env } = collabEnv();
+    await publishManaged(worker, env, 'octocat/org', 'org');
+
+    const okCalls = recordCollab(worker);
+    const ok = await worker.default.fetch(
+      new Request('https://share.test/__collab/threads?share=octocat%2Forg', { headers: { authorization: 'Bearer sameco' } }),
+      env,
+    );
+    expect(ok.status).toBe(200);
+    expect(okCalls[0].headers['x-artifact-org-domain']).toBe('acme.com');
+    expect(okCalls[0].headers['x-phoenix-actor-id']).toBe('u2');
+    expect(okCalls[0].headers['x-phoenix-actor-email']).toBe('alice@acme.com');
+
+    const denyCalls = recordCollab(worker);
+    const read = await worker.default.fetch(
+      new Request('https://share.test/__collab/threads?share=octocat%2Forg', { headers: { authorization: 'Bearer crossco' } }),
+      env,
+    );
+    const write = await worker.default.fetch(
+      new Request('https://share.test/__collab/threads', {
+        method: 'POST',
+        headers: { authorization: 'Bearer crossco', 'content-type': 'application/json' },
+        body: JSON.stringify({ share: 'octocat/org', anchor: {}, body: 'hi' }),
+      }),
+      env,
+    );
+    const events = await worker.default.fetch(
+      new Request('https://share.test/__collab/events?share=octocat%2Forg', { headers: { authorization: 'Bearer crossco' } }),
+      env,
+    );
+    expect(read.status).toBe(404);
+    expect(write.status).toBe(404);
+    expect(events.status).toBe(404);
+    expect(denyCalls).toHaveLength(0);
+  });
+
+  it('allows an anonymous read of a public page but requires a signed-in human to write', async () => {
+    const worker = await loadWorker();
+    const { env } = collabEnv();
+    await publishManaged(worker, env, 'octocat/plan', 'public');
+
+    const readCalls = recordCollab(worker);
+    const read = await worker.default.fetch(new Request('https://share.test/__collab/threads?share=octocat%2Fplan'), env);
+    expect(read.status).toBe(200);
+    expect(readCalls).toHaveLength(1);
+    expect(readCalls[0].headers['x-phoenix-actor-id']).toBeUndefined();
+
+    const writeCalls = recordCollab(worker);
+    const anonWrite = await worker.default.fetch(
+      new Request('https://share.test/__collab/threads', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ share: 'octocat/plan', anchor: {}, body: 'hi' }),
+      }),
+      env,
+    );
+    expect(anonWrite.status).toBe(401);
+    expect(writeCalls).toHaveLength(0);
+
+    const okWrite = await worker.default.fetch(
+      new Request('https://share.test/__collab/threads', {
+        method: 'POST',
+        headers: { authorization: 'Bearer sameco', 'content-type': 'application/json' },
+        body: JSON.stringify({ share: 'octocat/plan', anchor: { block: 3 }, body: 'looks good' }),
+      }),
+      env,
+    );
+    expect(okWrite.status).toBe(200);
+    expect(writeCalls).toHaveLength(1);
+    expect(writeCalls[0].headers['x-phoenix-actor-id']).toBe('u2');
+    expect(JSON.parse(writeCalls[0].body)).toMatchObject({ share: 'octocat/plan', anchor: { block: 3 }, body: 'looks good' });
+  });
+
+  it('enforces the private viewer token on reads and still requires a Phoenix human to write', async () => {
+    const worker = await loadWorker();
+    const { env } = collabEnv();
+    await publishManaged(worker, env, 'octocat/secret', 'private', { 'x-share-viewer-token': 'tok' });
+
+    const missCalls = recordCollab(worker);
+    const noToken = await worker.default.fetch(new Request('https://share.test/__collab/threads?share=octocat%2Fsecret'), env);
+    expect(noToken.status).toBe(404);
+    expect(missCalls).toHaveLength(0);
+
+    const calls = recordCollab(worker);
+    const read = await worker.default.fetch(new Request('https://share.test/__collab/threads?share=octocat%2Fsecret&k=tok'), env);
+    expect(read.status).toBe(200);
+    // A write WITHOUT the token can't even learn the page exists — the token
+    // read gate 404s before the write-identity check.
+    const noTokenWrite = await worker.default.fetch(
+      new Request('https://share.test/__collab/threads', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ share: 'octocat/secret', anchor: {}, body: 'x' }),
+      }),
+      env,
+    );
+    expect(noTokenWrite.status).toBe(404);
+    // WITH the token but anonymous — read gate passes, but a write still needs a
+    // signed-in Phoenix human → 401.
+    const anonWrite = await worker.default.fetch(
+      new Request('https://share.test/__collab/threads?k=tok', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ share: 'octocat/secret', anchor: {}, body: 'x' }),
+      }),
+      env,
+    );
+    expect(anonWrite.status).toBe(401);
+
+    const humanWrite = await worker.default.fetch(
+      new Request('https://share.test/__collab/threads?share=octocat%2Fsecret&k=tok', {
+        method: 'POST',
+        headers: { authorization: 'Bearer sameco', 'content-type': 'application/json' },
+        body: JSON.stringify({ share: 'octocat/secret', anchor: {}, body: 'x' }),
+      }),
+      env,
+    );
+    expect(humanWrite.status).toBe(200);
+  });
+
+  it('ignores browser-supplied identity/metadata and derives everything from R2', async () => {
+    const worker = await loadWorker();
+    const { env } = collabEnv();
+    await publishManaged(worker, env, 'octocat/plan', 'public');
+    const calls = recordCollab(worker);
+
+    const res = await worker.default.fetch(
+      new Request('https://share.test/__collab/threads', {
+        method: 'POST',
+        headers: { authorization: 'Bearer sameco', 'content-type': 'application/json' },
+        body: JSON.stringify({
+          share: 'octocat/plan',
+          anchor: {},
+          body: 'hi',
+          owner: 'attacker',
+          visibility: 'org',
+          shareId: 'forged',
+          actorId: 'admin',
+          orgDomain: 'evil.com',
+        }),
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    expect(calls[0].headers['x-artifact-owner-id']).toBe('u1');
+    expect(calls[0].headers['x-artifact-visibility']).toBe('public');
+    expect(calls[0].headers['x-artifact-share-id']).toBe(expectedShareId('u1', 'octocat/plan'));
+    expect(calls[0].headers['x-phoenix-actor-id']).toBe('u2');
+    expect(calls[0].headers['x-artifact-org-domain']).toBeUndefined();
+  });
+
+  it('forwards the Idempotency-Key on mutations', async () => {
+    const worker = await loadWorker();
+    const { env } = collabEnv();
+    await publishManaged(worker, env, 'octocat/plan', 'public');
+    const calls = recordCollab(worker);
+
+    await worker.default.fetch(
+      new Request('https://share.test/__collab/threads', {
+        method: 'POST',
+        headers: { authorization: 'Bearer sameco', 'content-type': 'application/json', 'idempotency-key': 'idem-abc' },
+        body: JSON.stringify({ share: 'octocat/plan', anchor: {}, body: 'hi' }),
+      }),
+      env,
+    );
+    expect(calls[0].headers['idempotency-key']).toBe('idem-abc');
+  });
+
+  it('maps every browser sub-route to its Prix route', async () => {
+    const worker = await loadWorker();
+    const { env } = collabEnv();
+    await publishManaged(worker, env, 'octocat/plan', 'public');
+    const calls = recordCollab(worker);
+    const auth = { authorization: 'Bearer sameco', 'content-type': 'application/json' };
+
+    await worker.default.fetch(new Request('https://share.test/__collab/threads?share=octocat%2Fplan&after=cur1'), env);
+    await worker.default.fetch(new Request('https://share.test/__collab/threads/T1/replies', { method: 'POST', headers: auth, body: JSON.stringify({ share: 'octocat/plan', body: 'r' }) }), env);
+    await worker.default.fetch(new Request('https://share.test/__collab/comments/C1', { method: 'PATCH', headers: auth, body: JSON.stringify({ share: 'octocat/plan', deleted: true }) }), env);
+    await worker.default.fetch(new Request('https://share.test/__collab/threads/T1', { method: 'PATCH', headers: auth, body: JSON.stringify({ share: 'octocat/plan', status: 'resolved' }) }), env);
+
+    expect(calls[0].url).toBe(`${COLLAB_BASE}/v1/artifact-collaboration/threads?after=cur1`);
+    expect(calls[1].url).toBe(`${COLLAB_BASE}/v1/artifact-collaboration/threads/T1/replies`);
+    expect(calls[2].url).toBe(`${COLLAB_BASE}/v1/artifact-collaboration/comments/C1`);
+    expect(calls[3].url).toBe(`${COLLAB_BASE}/v1/artifact-collaboration/threads/T1`);
+  });
+
+  it('never serializes the service secret into a browser-facing response, and marks every collab response no-store', async () => {
+    const worker = await loadWorker();
+    const { env } = collabEnv();
+    await publishManaged(worker, env, 'octocat/plan', 'public');
+    recordCollab(worker, () => new Response(JSON.stringify({ threads: [{ id: 't1', body: 'hi' }] }), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    const res = await worker.default.fetch(new Request('https://share.test/__collab/threads?share=octocat%2Fplan'), env);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    const text = await res.text();
+    expect(text).not.toContain(COLLAB_SECRET);
+    expect([...res.headers.keys()]).not.toContain('authorization');
+    expect(renderWorkerScript()).not.toContain(COLLAB_SECRET);
+  });
+
+  it('streams SSE through unbuffered, forwards Last-Event-ID, and propagates client cancel', async () => {
+    const worker = await loadWorker();
+    const { env } = collabEnv();
+    await publishManaged(worker, env, 'octocat/plan', 'public');
+
+    let cancelled = false;
+    const upstreamStream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('id: 7\ndata: hello\n\n'));
+      },
+      cancel() { cancelled = true; },
+    });
+    const calls = recordCollab(worker, () => new Response(upstreamStream, {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    }));
+
+    const res = await worker.default.fetch(
+      new Request('https://share.test/__collab/events?share=octocat%2Fplan', { headers: { 'last-event-id': '7' } }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('text/event-stream');
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(res.headers.get('x-accel-buffering')).toBe('no');
+    expect(calls[0].headers['last-event-id']).toBe('7');
+    expect(calls[0].headers.accept).toBe('text/event-stream');
+
+    const reader = res.body!.getReader();
+    const first = await reader.read();
+    expect(new TextDecoder().decode(first.value as Uint8Array)).toBe('id: 7\ndata: hello\n\n');
+    await reader.cancel();
+    expect(cancelled).toBe(true);
+  });
+
+  it('fails closed (404) for the whole surface when the managed backend is unconfigured, without affecting page GET', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    await put(worker, env, 'octocat/plan', '<h1>doc</h1>');
+    const calls = recordCollab(worker);
+
+    const collab = await worker.default.fetch(new Request('https://share.test/__collab/context?share=octocat%2Fplan'), env);
+    expect(collab.status).toBe(404);
+    expect(calls).toHaveLength(0);
+
+    const page = await worker.default.fetch(new Request('https://share.test/octocat/plan'), env);
+    expect(page.status).toBe(200);
+  });
+
+  it('also fails closed when only one of the two config values is present', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    (env as any).PRIX_ARTIFACT_COLLAB_BASE = COLLAB_BASE;
+    await put(worker, env, 'octocat/plan', '<h1>doc</h1>');
+    const res = await worker.default.fetch(new Request('https://share.test/__collab/context?share=octocat%2Fplan'), env);
+    expect(res.status).toBe(404);
+  });
+
+  it('makes comments inaccessible on delete and fires a best-effort Prix purge', async () => {
+    const worker = await loadWorker();
+    const { env } = collabEnv();
+    await publishManaged(worker, env, 'octocat/plan', 'public');
+    const calls = recordCollab(worker);
+
+    const del = await worker.default.fetch(
+      new Request('https://share.test/octocat/plan', { method: 'DELETE', headers: { authorization: 'Bearer owner' } }),
+      env,
+    );
+    expect(del.status).toBe(200);
+
+    const purge = calls.find((c) => c.url.endsWith('/v1/artifact-collaboration/purge'));
+    expect(purge).toBeDefined();
+    expect(purge!.method).toBe('POST');
+    expect(purge!.headers.authorization).toBe(`Bearer ${COLLAB_SECRET}`);
+    expect(purge!.headers['x-artifact-share-id']).toBe(expectedShareId('u1', 'octocat/plan'));
+
+    const after = await worker.default.fetch(new Request('https://share.test/__collab/threads?share=octocat%2Fplan'), env);
+    expect(after.status).toBe(404);
+  });
+
+  it('does not expose /__collab as an enumerable GET (unknown sub-route 404s)', async () => {
+    const worker = await loadWorker();
+    const { env } = collabEnv();
+    await publishManaged(worker, env, 'octocat/plan', 'public');
+    recordCollab(worker);
+    const res = await worker.default.fetch(new Request('https://share.test/__collab/bogus?share=octocat%2Fplan'), env);
+    expect(res.status).toBe(404);
+  });
+
+  it('refuses a collab lookup that targets an internal __-prefixed key', async () => {
+    const worker = await loadWorker();
+    const { env } = collabEnv();
+    setCollabIdentities(worker);
+    const calls = recordCollab(worker);
+    const res = await worker.default.fetch(new Request('https://share.test/__collab/context?share=__handles%2Foctocat'), env);
+    expect(res.status).toBe(404);
+    expect(calls).toHaveLength(0);
   });
 });

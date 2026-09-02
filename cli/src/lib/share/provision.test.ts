@@ -512,6 +512,57 @@ describe('updateWorker', () => {
     ]);
   });
 
+  it('applies both collaboration secrets after the script upload when configured (PHNX-3835)', async () => {
+    const seen: CloudflareRequest[] = [];
+    await updateWorker('cf-token', 'acct_1', 'worker-one', 'bucket-one', script, 'tok', 'stale-hash', {
+      collabBase: 'https://prix.example.test',
+      collabServiceToken: 'svc-secret',
+      request: async (req) => { seen.push(req); return {}; },
+    });
+
+    const secretNames = seen
+      .filter((r) => r.pathname.endsWith('/secrets'))
+      .map((r) => (r.body as { name?: string }).name);
+    expect(secretNames).toEqual(['WRITE_TOKEN', 'PRIX_ARTIFACT_COLLAB_BASE', 'ARTIFACT_COLLAB_SERVICE_TOKEN']);
+    const base = seen.find((r) => (r.body as { name?: string })?.name === 'PRIX_ARTIFACT_COLLAB_BASE');
+    const token = seen.find((r) => (r.body as { name?: string })?.name === 'ARTIFACT_COLLAB_SERVICE_TOKEN');
+    expect(base?.body).toEqual({ name: 'PRIX_ARTIFACT_COLLAB_BASE', text: 'https://prix.example.test', type: 'secret_text' });
+    expect(token?.body).toEqual({ name: 'ARTIFACT_COLLAB_SERVICE_TOKEN', text: 'svc-secret', type: 'secret_text' });
+  });
+
+  it('leaves collaboration dormant — a deploy with neither collab value never touches those secrets', async () => {
+    const seen: CloudflareRequest[] = [];
+    await updateWorker('cf-token', 'acct_1', 'worker-one', 'bucket-one', script, 'tok', 'stale-hash', {
+      request: async (req) => { seen.push(req); return {}; },
+    });
+    const names = seen.map((r) => (r.body as { name?: string } | undefined)?.name);
+    expect(names).not.toContain('PRIX_ARTIFACT_COLLAB_BASE');
+    expect(names).not.toContain('ARTIFACT_COLLAB_SERVICE_TOKEN');
+  });
+
+  it('a half-configured collaboration deploy (one value without the other) fails loud', async () => {
+    const seen: CloudflareRequest[] = [];
+    await expect(
+      updateWorker('cf-token', 'acct_1', 'worker-one', 'bucket-one', script, 'tok', 'stale-hash', {
+        collabBase: 'https://prix.example.test',
+        request: async (req) => { seen.push(req); return {}; },
+      }),
+    ).rejects.toThrow(/Managed collaboration needs BOTH/);
+  });
+
+  it('a matching-hash update still re-applies collaboration secrets (heals a wiped secret without --force)', async () => {
+    const seen: CloudflareRequest[] = [];
+    const currentHash = hashWorkerScript(script);
+    const result = await updateWorker('cf-token', 'acct_1', 'worker-one', 'bucket-one', script, 'tok', currentHash, {
+      collabBase: 'https://prix.example.test',
+      collabServiceToken: 'svc-secret',
+      request: async (req) => { seen.push(req); return {}; },
+    });
+    expect(result.skipped).toBe(true);
+    const names = seen.map((r) => (r.body as { name?: string }).name);
+    expect(names).toEqual(['PRIX_ARTIFACT_COLLAB_BASE', 'ARTIFACT_COLLAB_SERVICE_TOKEN']);
+  });
+
   it('when the secret re-apply fails after a successful deploy, fails loud with a re-run hint (RUSH-2453)', async () => {
     // Script upload succeeds; Secrets API then throws (network blip, expired API
     // token, rate limit). The live Worker now has no WRITE_TOKEN, so every

@@ -14,6 +14,7 @@ import {
   managedShareBaseUrl,
   isManagedShareEndpoint,
   phoenixIdBaseForDeploy,
+  collabConfigForDeploy,
   SHARE_BACKEND_ENV,
 } from './backend.js';
 
@@ -62,6 +63,35 @@ describe('ShareBackend chooser (RUSH-3135)', () => {
     expect(phoenixIdBaseForDeploy({ managed: true }, { baseUrl: 'https://share.test' })).toBe(
       PHOENIX_ID_BASE.replace(/\/+$/, ''),
     );
+  });
+
+  it('collabConfigForDeploy is dormant unless BOTH env vars are set on a managed endpoint (PHNX-3835)', () => {
+    const prevBase = process.env.PRIX_ARTIFACT_COLLAB_BASE;
+    const prevToken = process.env.ARTIFACT_COLLAB_SERVICE_TOKEN;
+    try {
+      // Not managed → never enabled, whatever the env holds.
+      process.env.PRIX_ARTIFACT_COLLAB_BASE = 'https://prix.test/';
+      process.env.ARTIFACT_COLLAB_SERVICE_TOKEN = 'svc';
+      expect(collabConfigForDeploy({}, { baseUrl: 'https://share.test' })).toEqual({});
+
+      // Managed + both present → both returned, base trailing slash trimmed.
+      expect(collabConfigForDeploy({ managed: true }, { baseUrl: 'https://share.test' })).toEqual({
+        collabBase: 'https://prix.test',
+        collabServiceToken: 'svc',
+      });
+
+      // Managed but one missing → dormant (fails closed, never half-configured).
+      delete process.env.ARTIFACT_COLLAB_SERVICE_TOKEN;
+      expect(collabConfigForDeploy({ managed: true }, { baseUrl: 'https://share.test' })).toEqual({});
+      delete process.env.PRIX_ARTIFACT_COLLAB_BASE;
+      process.env.ARTIFACT_COLLAB_SERVICE_TOKEN = 'svc';
+      expect(collabConfigForDeploy({ managed: true }, { baseUrl: 'https://share.test' })).toEqual({});
+    } finally {
+      if (prevBase === undefined) delete process.env.PRIX_ARTIFACT_COLLAB_BASE;
+      else process.env.PRIX_ARTIFACT_COLLAB_BASE = prevBase;
+      if (prevToken === undefined) delete process.env.ARTIFACT_COLLAB_SERVICE_TOKEN;
+      else process.env.ARTIFACT_COLLAB_SERVICE_TOKEN = prevToken;
+    }
   });
 
   it('sanitizeShareNamespace matches the Worker: lowercase, [a-z0-9-]+', () => {
