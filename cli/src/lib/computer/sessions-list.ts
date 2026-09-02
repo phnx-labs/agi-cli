@@ -62,6 +62,7 @@ import { query, truncate, type EventRecord } from '../feed/events.js';
 import { formatRelativeTime } from '../session/relative-time.js';
 import type { SessionMeta } from '../session/types.js';
 import { getSessionById, listComputerSessionRecords, pruneToolSessions } from '../session/db.js';
+import { sessionHeadline } from '../session/title.js';
 import {
   buildLaunchSessionIndex,
   resolveLaunchSession,
@@ -404,7 +405,7 @@ export function renderComputerSessionRows(rows: ComputerRunRow[]): string {
     const label = r.task ? truncate(r.task, 60) : (r.bundle ?? `pid ${r.pid}`);
     const link =
       r.linkStatus === 'linked' && r.linkedSession
-        ? `${r.linkedSession.agent} — ${r.linkedSession.label || r.linkedSession.topic || r.linkedSession.shortId}`
+        ? `${r.linkedSession.agent} — ${sessionHeadline(r.linkedSession) || r.linkedSession.shortId}`
         : r.linkStatus === 'unresolved'
           ? 'unresolved (session not indexed here)'
           : 'unlinked';

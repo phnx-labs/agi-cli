@@ -34,6 +34,7 @@ import {
   stats, getLogsPath, rotate,
 } from '../lib/feed/events.js';
 import { addEventsReadOptions, runEventsCommand, type EventsOptions } from './events.js';
+import { sessionHeadline } from '../lib/session/title.js';
 
 interface LogsOptions {
   device?: string;
@@ -60,7 +61,7 @@ function candidateLabel(c: Candidate): string {
   }
   const s = c.session;
   const ver = s.version ? chalk.gray(`@${s.version}`) : '';
-  const title = (s as { label?: string }).label || s.topic || '';
+  const title = sessionHeadline(s) || '';
   return `${chalk.gray('sess')} ${s.shortId.padEnd(9)} ${(s.agent + ver).padEnd(14)} ${chalk.gray(s.timestamp.slice(0, 16))}  ${title.slice(0, 40)}`;
 }
 

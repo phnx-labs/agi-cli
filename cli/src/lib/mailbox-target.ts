@@ -6,6 +6,7 @@
  */
 import type { ActiveSession } from './session/active.js';
 import type { HostTask } from './hosts/tasks.js';
+import { sessionHeadline } from './session/title.js';
 
 export type MessageResolution =
   | { kind: 'cloud'; id: string }
@@ -24,7 +25,7 @@ export function mailboxIdForActiveSession(s: ActiveSession): string | undefined 
 }
 
 function labelFor(s: ActiveSession): string {
-  return s.label ?? s.topic ?? s.teamName ?? s.host ?? s.context;
+  return sessionHeadline(s) ?? s.teamName ?? s.host ?? s.context;
 }
 
 /**

@@ -22,6 +22,7 @@ import {
 import { formatUsd, PRICING_VERSION } from '../lib/pricing/index.js';
 import { formatDuration } from '../lib/session/render.js';
 import { terminalWidth, truncateToWidth, stringWidth, padToWidth } from '../lib/session/width.js';
+import { sessionHeadline } from '../lib/session/title.js';
 
 interface CostOptions {
   json?: boolean;
@@ -141,7 +142,7 @@ async function costAction(options: CostOptions): Promise<void> {
     for (const t of top) {
       const cost = formatUsd(t.costUsd).padStart(costW);
       const dur = t.durationMs > 0 ? formatDuration(t.durationMs) : '—';
-      const label = (t.meta.label || t.meta.topic || '(untitled)').replace(/\s+/g, ' ').trim();
+      const label = (sessionHeadline(t.meta) || '(untitled)').replace(/\s+/g, ' ').trim();
       const proj = showProject && t.meta.project ? chalk.gray(` ${t.meta.project}`) : '';
       const prefix = `  ${chalk.green(cost)}  ${chalk.gray(t.meta.shortId)}  ${chalk.cyan(t.meta.agent.padEnd(7))} `;
       const suffix = proj + chalk.gray(`  ${dur}`);
