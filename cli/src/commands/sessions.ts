@@ -969,19 +969,37 @@ export function renderActiveRowLines(s: ActiveSession, indent: string, termW: nu
   // Line 2: label/topic + checklist (the identity, no longer buried) then the
   // jump locator. Skipped entirely when there is nothing to say. desc may carry a
   // clickable project link, so it also goes through fitCell.
+  const contIndent = indent + ' '.repeat(ROW_ID_W);
   const desc = formatActiveRowDescription(s);
   const loc = locatorBadge(s);
-  if (!desc && !loc) return lines;
-  const contIndent = indent + ' '.repeat(ROW_ID_W);
-  const room2 = Math.max(0, termW - stringWidth(contIndent) - 2);
-  const locCell = fitCell(loc, room2);
-  const locW = stringWidth(locCell);
-  const descRoom = Math.max(0, room2 - (locW ? locW + 2 : 0));
-  const descCell = chalk.white(fitCell(desc || '-', descRoom));
-  let line2 = contIndent + chalk.dim('└ ') + descCell;
-  if (locCell) line2 += '  ' + locCell;
-  if (stringWidth(line2) > termW) line2 = truncateToWidth(line2, termW);
-  lines.push(line2);
+  if (desc || loc) {
+    const room2 = Math.max(0, termW - stringWidth(contIndent) - 2);
+    const locCell = fitCell(loc, room2);
+    const locW = stringWidth(locCell);
+    const descRoom = Math.max(0, room2 - (locW ? locW + 2 : 0));
+    const descCell = chalk.white(fitCell(desc || '-', descRoom));
+    let line2 = contIndent + chalk.dim('└ ') + descCell;
+    if (locCell) line2 += '  ' + locCell;
+    if (stringWidth(line2) > termW) line2 = truncateToWidth(line2, termW);
+    lines.push(line2);
+  }
+
+  // Secondary line (PHNX-3797 owner feedback): surface the most important recent
+  // agent message when it is a pending QUESTION or a NEEDS-YOU block — the urgency
+  // a rolling activity preview buries. Plain `activity` is already the preview on
+  // line 2, so it earns no extra line here; the full ranked message still rides
+  // the JSON/mirror feed for AGI EXT via `s.importantMessage`.
+  const important = s.importantMessage;
+  if (important && (important.kind === 'question' || important.kind === 'needs_you')) {
+    const glyph = important.kind === 'question' ? '? ' : '! ';
+    const room3 = Math.max(0, termW - stringWidth(contIndent) - 2 - glyph.length);
+    const msgCell = fitCell(cleanPreview(important.text), room3);
+    if (msgCell) {
+      let line3 = contIndent + chalk.dim(glyph + msgCell);
+      if (stringWidth(line3) > termW) line3 = truncateToWidth(line3, termW);
+      lines.push(line3);
+    }
+  }
   return lines;
 }
 

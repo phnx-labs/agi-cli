@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { resolveCwds, enrichProvenance, LSOF_CONCURRENCY, agentKindFromComm, sessionAgentComms, activeStatusFromCloudStatus, resolveFallbackStatus, lifecycleStatus, ABANDONED_STALE_MS, resolvePaneIdentity, matchOriginDevice, annotateOrchestratorLabels, summarizeMission, deriveSessionRecap, foldRecap, isReapableOrphan, backfillActiveRowsFromMeta } from './active.js';
+import { resolveCwds, enrichProvenance, LSOF_CONCURRENCY, agentKindFromComm, sessionAgentComms, activeStatusFromCloudStatus, resolveFallbackStatus, lifecycleStatus, ABANDONED_STALE_MS, resolvePaneIdentity, matchOriginDevice, annotateOrchestratorLabels, summarizeMission, deriveSessionRecap, deriveImportantMessage, foldRecap, isReapableOrphan, backfillActiveRowsFromMeta } from './active.js';
 import type { ActiveSession } from './active.js';
 import { SESSION_AGENTS } from './types.js';
 import type { HookSessionIndex } from './hook-sessions.js';
@@ -394,6 +394,41 @@ describe('deriveSessionRecap (headline ladder — a user-anchored NAME, never th
     }];
     foldRecap(rows);
     expect(rows[0]).toMatchObject({ title: 'Daemon titler wiring', recapSource: 'generated', lastAgentLine: 'did the thing' });
+    // The secondary line is folded on beside the headline (PHNX-3797).
+    expect(rows[0].importantMessage).toEqual({ text: 'did the thing', kind: 'activity' });
+  });
+});
+
+describe('deriveImportantMessage (the ranked secondary line — PHNX-3797 owner feedback)', () => {
+  it('a pending question outranks everything', () => {
+    const m = deriveImportantMessage({
+      status: 'input_required',
+      awaitingReason: 'question',
+      question: { text: 'Which region should I deploy to?', reason: 'question' },
+      preview: 'reading config',
+    });
+    expect(m).toEqual({ text: 'Which region should I deploy to?', kind: 'question' });
+  });
+
+  it('a plan-review / permission / input-required wait is a needs-you', () => {
+    expect(deriveImportantMessage({ status: 'running', awaitingReason: 'plan_review', preview: 'drafted a plan' }))
+      .toEqual({ text: 'drafted a plan', kind: 'needs_you' });
+    // No recent line to show → a spelled-out wait, never an empty secondary line.
+    expect(deriveImportantMessage({ status: 'input_required' }))
+      .toEqual({ text: 'Waiting for you', kind: 'needs_you' });
+    expect(deriveImportantMessage({ status: 'running', awaitingReason: 'permission' }))
+      .toEqual({ text: 'Waiting on a permission decision', kind: 'needs_you' });
+  });
+
+  it('falls back to the current activity (preview, else last agent line) when nothing blocks', () => {
+    expect(deriveImportantMessage({ status: 'running', activity: 'working', preview: 'editing db.ts' }))
+      .toEqual({ text: 'editing db.ts', kind: 'activity' });
+    expect(deriveImportantMessage({ status: 'running', lastAgentLine: 'ran the tests' }))
+      .toEqual({ text: 'ran the tests', kind: 'activity' });
+  });
+
+  it('is undefined when the agent has said nothing yet and is not blocked', () => {
+    expect(deriveImportantMessage({ status: 'running' })).toBeUndefined();
   });
 
   // PHNX-3939: the prompt rung used to classify the already-collapsed `topic`,
