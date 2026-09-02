@@ -3832,7 +3832,7 @@ function printTeamsView(
   // degradation the --active teams rows use (active.ts resolveOrchestratorLabels).
   const labelById = new Map<string, string>();
   for (const s of pool) {
-    const label = (s as any).label || s.topic;
+    const label = sessionHeadline(s);
     if (label) labelById.set(s.id, cleanPreview(label));
   }
 
@@ -5097,7 +5097,7 @@ async function renderArtifactsGlobal(
       spinner.stop();
       console.error(chalk.red(`Multiple sessions match "${query}":`));
       for (const m of queryMatches.slice(0, 10)) {
-        console.error(chalk.cyan(`  ${m.shortId}  ${m.id}  ${(m as any).label ?? m.topic ?? ''}`));
+        console.error(chalk.cyan(`  ${m.shortId}  ${m.id}  ${sessionHeadline(m) ?? ''}`));
       }
       console.error(chalk.gray(ambiguityHint(byId, completeId)));
       process.exit(1);
@@ -5255,7 +5255,7 @@ async function renderOneSession(
         spinner.stop();
         console.error(chalk.red(`Multiple sessions match "${query}":`));
         for (const match of queryMatches.slice(0, 10)) {
-          console.error(chalk.cyan(`  ${match.shortId}  ${match.id}  ${(match as any).label ?? match.topic ?? ''}`));
+          console.error(chalk.cyan(`  ${match.shortId}  ${match.id}  ${sessionHeadline(match) ?? ''}`));
         }
         console.error(chalk.gray(ambiguityHint(byId, completeId)));
         process.exit(1);
@@ -5796,7 +5796,7 @@ export async function resolveSessionMetadata(
     for (const candidate of outcome.candidates) {
       const session = candidate.hits[0].session;
       const machines = candidate.hits.map(hit => hit.machine).join(', ');
-      console.error(chalk.cyan(`  ${session.shortId}  ${session.id}`) + chalk.gray(`  ${machines}  ${(session as any).label ?? session.topic ?? ''}`));
+      console.error(chalk.cyan(`  ${session.shortId}  ${session.id}`) + chalk.gray(`  ${machines}  ${sessionHeadline(session) ?? ''}`));
     }
     console.error(chalk.gray(looksLikeSessionId(selector) ? 'Pass a longer ID to narrow it down.' : 'Narrow the keywords to one session.'));
     process.exit(1);
@@ -5873,7 +5873,7 @@ export async function resolveSessionAcrossFleet(
     console.error(chalk.red(`Multiple sessions match "${query}" across the fleet:`));
     for (const candidate of candidates) {
       const s = candidate.hits[0].session;
-      const label = (s as any).label ?? s.topic ?? '';
+      const label = sessionHeadline(s) ?? '';
       const machines = candidate.hits.map(hit => hit.machine).join(', ');
       console.error(chalk.cyan(`  ${s.shortId}  ${s.id}`) + chalk.gray(`  ${machines}  ${s.agent}${s.version ? ` ${s.version}` : ''}  ${label}`));
     }
