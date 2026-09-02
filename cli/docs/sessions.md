@@ -192,16 +192,24 @@ endpoint is deployed. The BYO path never touches it.
   `deriveSessionRecap` (`lib/session/active.ts`) for live rows and
   `sessionHeadline` (`lib/session/title.ts`) for indexed rows, so the CLI list,
   the picker, `sessions watch --json`, and AGI EXT can never disagree about a
-  session's name. `generatedTitle` is a 3-6 word technical title produced by the
-  daemon's `session-title` service with a cheap model (`--model cheap`,
-  read-only plan mode), generated **once** per session and persisted in the index
-  against a hash of the user text it came from — so a titled session costs no
-  further model calls, and it regenerates only when that first user message
-  changes or on an explicit `agents sessions backfill titles --refresh`. Until it
-  runs, the row honestly shows the user's own first message. The agent's rolling
-  last line stays where a live status belongs: `lastAgentLine` / the preview pane.
-  Each box titles its own sessions and publishes them on the fleet session mirror,
-  so a peer's rows carry the same headline with no per-row SSH.
+  session's name. `generatedTitle` is a short, descriptive **action + object
+  headline** ("Triage the AGI board", not just "Triage") produced by the daemon's
+  `session-title` service through a swappable `SessionTitleProvider` — the shipped
+  default is the cheap cloud model (`--model cheap`, read-only plan mode), and a
+  local model backend can be dropped in later without touching the tick. It is
+  generated **once** per session and persisted in the index against a hash of the
+  user text it came from — so a titled session costs no further model calls, and
+  it regenerates only when that first user message changes or on an explicit
+  `agents sessions backfill titles --refresh`. Until it runs, the row honestly
+  shows the user's own first message. The agent's rolling last line stays where a
+  live status belongs: `lastAgentLine` / the preview pane. Each box titles its own
+  sessions and publishes them on the fleet session mirror, so a peer's rows carry
+  the same headline with no per-row SSH.
+- Beside the headline, a live row carries a ranked **secondary line**
+  (`importantMessage`): the single most important recent agent message — a pending
+  question, then a needs-you block (plan review / permission / input-required),
+  then the current activity. It rides the same watch/mirror feed as the title, so
+  a client renders a bold title over a dim secondary line without a second query.
 - Rendering and sharing redact credential-shaped values and local identity by default.
 - Export/import preserves provenance and stable IDs while treating indexes as rebuildable.
 - Off-box backup (`sessions export --to-r2` / `import --from-r2`) is **managed-first**:
