@@ -35,17 +35,46 @@ const HAND_ROLLED = /\blabel\b[^;\n]{0,40}(\|\||\?\?)[^;\n]{0,40}\btopic\b/;
 const REBUILT_LITERAL = /\blabel\s*:[^,;]{1,40},[^;]{0,60}\btopic\s*:/;
 
 /**
- * Deliberate, reviewed exemptions — each is NOT a session headline. Keep this
- * list short and justified; a new entry needs a reason, not a silencer.
+ * Marker a single line carries when its `label ... topic` is a REVIEWED
+ * non-headline use — put it on the line, or the line directly above, with a
+ * reason: `// ladder-exempt: <why>`. This is deliberately per-LINE, not
+ * per-file: `commands/sessions.ts` and `lib/session/active.ts` are the very
+ * files that shipped this bug eight times, so a whole-file pass would hand the
+ * highest-churn headline code a standing silencer and defeat the guard for
+ * every future edit. A marker exempts exactly one line and no more.
  */
-const EXEMPT: Array<{ file: string; why: string }> = [
-  { file: 'commands/sessions.ts', why: 'the compact --active preview base (preview || label || topic), a different field from the row title' },
-  { file: 'lib/session/active.ts', why: 'deriveSessionRecap IS the ladder for live rows; orchestratorLabel runs before any index backfill' },
-  { file: 'lib/session/title.ts', why: 'sessionHeadline IS the ladder for indexed rows' },
-  { file: 'lib/session/remote/watch.ts', why: 'previousRowTitle IS the ladder for durable history rows' },
+const LADDER_EXEMPT_MARKER = 'ladder-exempt';
+
+/**
+ * Whole-file exemptions reserved for subsystems that are NOT the session
+ * headline at all — a different consumer with its own contract. Keep this list
+ * to genuine cross-subsystem boundaries; a line inside a headline-rendering file
+ * uses {@link LADDER_EXEMPT_MARKER} instead, so the rest of that file stays
+ * guarded. (The three ladder implementations themselves — `deriveSessionRecap`,
+ * `sessionHeadline`, `previousRowTitle` — need no entry: their own
+ * `label || generatedTitle || topic` lines name `generatedTitle` and are skipped
+ * by the check below.)
+ */
+const EXEMPT_FILES: Array<{ file: string; why: string }> = [
   { file: 'lib/session/db.ts', why: 'populates the FTS session_text search index, not a rendered headline' },
   { file: 'lib/traces/sync.ts', why: 'the Phoenix Evals console shard — a distinct consumer with its own Untitled fallback' },
 ];
+
+/**
+ * True when line `i` hand-rolls / rebuilds a headline ladder without the
+ * `generatedTitle` rung and is not exempted (a docblock, a `generatedTitle`-naming
+ * line, or a {@link LADDER_EXEMPT_MARKER} on the line or directly above it). The
+ * ONE predicate both the file scan and its own proof-test use, so they can never
+ * drift apart.
+ */
+function flagsLadderViolation(lines: string[], i: number): boolean {
+  const line = lines[i];
+  const code = line.trim();
+  if (code.startsWith('*') || code.startsWith('//') || code.startsWith('/*')) return false;
+  if (line.includes('generatedTitle')) return false;
+  if (line.includes(LADDER_EXEMPT_MARKER) || (i > 0 && lines[i - 1].includes(LADDER_EXEMPT_MARKER))) return false;
+  return HAND_ROLLED.test(line) || REBUILT_LITERAL.test(line);
+}
 
 function sourceFiles(dir: string, out: string[] = []): string[] {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -80,20 +109,29 @@ describe('the session headline ladder is the only ladder (SES-14c)', () => {
   // mutation-proven (weakening the guard to `T`, and over-tightening it to
   // `never`, each break the build).
 
+  it('the per-line marker is load-bearing — an UNMARKED hand-rolled ladder is still caught in a headline file', () => {
+    // Proof the narrowing (whole-file exemption → per-line marker) did not turn
+    // into a blanket silencer: only the unmarked offender is flagged; a marker on
+    // the line, or on the line directly above, exempts exactly that one line.
+    const sample = [
+      `const a = s.label || s.topic;`,                                 // 0: offender
+      `const b = s.label || s.topic; // ladder-exempt: not a headline`, // 1: marked inline
+      `// ladder-exempt: not a headline`,                              // 2: marker line
+      `const c = s.label || s.topic;`,                                 // 3: marked by line above
+    ];
+    const flagged = sample.map((_, i) => i).filter((i) => flagsLadderViolation(sample, i));
+    expect(flagged).toEqual([0]);
+  });
+
   it('no source file re-derives OR rebuilds a headline without the generatedTitle rung', () => {
-    const exempt = new Set(EXEMPT.map((e) => path.join(SRC, e.file)));
+    const exemptFiles = new Set(EXEMPT_FILES.map((e) => path.join(SRC, e.file)));
     const offenders: string[] = [];
     for (const file of sourceFiles(SRC)) {
-      if (exempt.has(file)) continue;
+      if (exemptFiles.has(file)) continue;
       const lines = fs.readFileSync(file, 'utf8').split('\n');
       lines.forEach((line, i) => {
-        const code = line.trim();
-        // A docblock that NAMES the anti-pattern (this file, and the projections
-        // that explain why they carry the rung) is documentation, not a ladder.
-        if (code.startsWith('*') || code.startsWith('//') || code.startsWith('/*')) return;
-        if (line.includes('generatedTitle')) return;
-        if (HAND_ROLLED.test(line) || REBUILT_LITERAL.test(line)) {
-          offenders.push(`${path.relative(SRC, file)}:${i + 1}  ${code}`);
+        if (flagsLadderViolation(lines, i)) {
+          offenders.push(`${path.relative(SRC, file)}:${i + 1}  ${line.trim()}`);
         }
       });
     }

@@ -2903,6 +2903,7 @@ export function annotateOrchestratorLabels(sessions: ActiveSession[]): void {
   for (const s of sessions) {
     if (!s.orchestratorSessionId) continue;
     const orch = byId.get(s.orchestratorSessionId);
+    // ladder-exempt: the team orchestrator's LABEL, resolved before any index backfill (no generatedTitle exists yet); not a headline render.
     if (orch) s.orchestratorLabel = orch.label || orch.topic || undefined;
   }
 }
