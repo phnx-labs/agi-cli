@@ -11,6 +11,7 @@
  * else. Nothing caught that but a human reading the diff; this does.
  */
 import { describe, expect, it } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -53,9 +54,37 @@ function sourceFiles(dir: string, out: string[] = []): string[] {
 describe('the session headline ladder is the only ladder (SES-14c)', () => {
   it('resolves label > generatedTitle > topic', () => {
     expect(sessionHeadline({ label: 'a', generatedTitle: 'b', topic: 'c' })).toBe('a');
-    expect(sessionHeadline({ generatedTitle: 'b', topic: 'c' })).toBe('b');
-    expect(sessionHeadline({ topic: 'c' })).toBe('c');
+    expect(sessionHeadline({ label: undefined, generatedTitle: 'b', topic: 'c' })).toBe('b');
+    expect(sessionHeadline({ label: undefined, generatedTitle: undefined, topic: 'c' })).toBe('c');
   });
+
+  it('REFUSES TO COMPILE for a row type that dropped the generatedTitle rung', () => {
+    // The bug this catches shipped once: the watchdog's SessionOutcome copied
+    // label/name/topic off the session and left generatedTitle behind, so the
+    // call site read correctly while sessionHeadline silently degraded to
+    // `label || topic`. Structural typing makes that invisible to a reviewer AND
+    // to the lexical scan below, so the type system has to be the guard — and a
+    // guard nobody proved can fail is not a guard. This runs the REAL compiler.
+    const fixture = path.join(SRC, 'lib/session/__tests__/title-rung-guard.fixture.ts');
+    expect(fs.existsSync(fixture)).toBe(true);
+    let failed = false;
+    let output = '';
+    try {
+      execFileSync(
+        path.join(SRC, '..', 'node_modules/.bin/tsc'),
+        // --ignoreConfig: the fixture is deliberately excluded from tsconfig,
+        // and naming files on the command line without it is a tsc error (TS5112).
+        ['--noEmit', '--ignoreConfig', '--strict', '--skipLibCheck', '--target', 'es2022',
+          '--module', 'esnext', '--moduleResolution', 'bundler', fixture],
+        { encoding: 'utf8', cwd: path.join(SRC, '..') },
+      );
+    } catch (err) {
+      failed = true;
+      output = String((err as { stdout?: string }).stdout ?? '');
+    }
+    expect(failed, 'a projection without generatedTitle compiled — the type guard is gone').toBe(true);
+    expect(output).toMatch(/not assignable to parameter of type 'never'/);
+  }, 60_000);
 
   it('no source file re-derives `label || topic` for a headline', () => {
     const exempt = new Set(EXEMPT.map((e) => path.join(SRC, e.file)));
@@ -64,8 +93,12 @@ describe('the session headline ladder is the only ladder (SES-14c)', () => {
       if (exempt.has(file)) continue;
       const lines = fs.readFileSync(file, 'utf8').split('\n');
       lines.forEach((line, i) => {
+        const code = line.trim();
+        // A docblock that NAMES the anti-pattern (this file, and the projections
+        // that explain why they carry the rung) is documentation, not a ladder.
+        if (code.startsWith('*') || code.startsWith('//') || code.startsWith('/*')) return;
         if (line.includes('generatedTitle')) return;
-        if (HAND_ROLLED.test(line)) offenders.push(`${path.relative(SRC, file)}:${i + 1}  ${line.trim()}`);
+        if (HAND_ROLLED.test(line)) offenders.push(`${path.relative(SRC, file)}:${i + 1}  ${code}`);
       });
     }
     expect(

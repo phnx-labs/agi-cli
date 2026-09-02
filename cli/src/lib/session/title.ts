@@ -151,15 +151,36 @@ export function sanitizeGeneratedTitle(raw: string | null | undefined): string |
 }
 
 /**
+ * Compile-time guard: resolves to `T` only when `T` actually declares a
+ * `generatedTitle` key, and to `never` otherwise.
+ *
+ * This exists because structural typing makes the obvious signature useless. A
+ * parameter typed `{ generatedTitle?: string }` is satisfied by an object type
+ * that has no such property at all, so passing a projection that DROPPED the
+ * field — the watchdog's `SessionOutcome`, which copied `label`/`name`/`topic`
+ * off the session and left `generatedTitle` behind — compiles cleanly and
+ * silently degrades {@link sessionHeadline} back to `label || topic`. That is a
+ * real bug this feature shipped once and a lexical lint cannot see, since the
+ * call site looks correct. `keyof` includes optional keys, so every legitimate
+ * carrier (`SessionMeta`, `ActiveSession`, a `Pick<>` that names it) still
+ * passes; only a type that never modelled the rung is rejected.
+ */
+type CarriesTitleRung<T> = 'generatedTitle' extends keyof T ? T : never;
+
+/**
  * The headline for an INDEXED session row, on the same ladder the live path uses
  * (`deriveSessionRecap`, active.ts): `/rename` label → daemon-generated title →
  * first-prompt topic. Every `agents sessions` surface that shows "what this
  * session is" reads it from here, so the CLI and the watch stream can never
  * disagree about a session's name (PHNX-3797).
+ *
+ * A caller whose row type does not carry `generatedTitle` fails to compile
+ * (see {@link CarriesTitleRung}) — fix the projection to carry the field rather
+ * than casting past this.
  */
-export function sessionHeadline(
-  row: { label?: string | null; generatedTitle?: string | null; topic?: string | null },
-): string | undefined {
+export function sessionHeadline<
+  T extends { label?: string | null; generatedTitle?: string | null; topic?: string | null },
+>(row: CarriesTitleRung<T>): string | undefined {
   return row.label || row.generatedTitle || row.topic || undefined;
 }
 

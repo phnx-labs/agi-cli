@@ -62,6 +62,11 @@ export interface ToolSessionEvidence {
   cwd?: string;
   topic?: string;
   label?: string;
+  /** The daemon-generated headline (PHNX-3797). Carried so a consumer of this
+   * envelope names a session the same way every other surface does; a
+   * projection that drops it silently degrades `sessionHeadline` to
+   * `label || topic`. */
+  generatedTitle?: string;
   filePath?: string;
   calls: ToolCallEvidence[];
 }
@@ -1078,6 +1083,7 @@ export function searchToolCalls(
       cwd: session.cwd,
       topic: session.topic,
       label: session.label,
+      generatedTitle: session.generatedTitle,
       calls: selected,
     });
     if (matched.length >= resultLimit) break;

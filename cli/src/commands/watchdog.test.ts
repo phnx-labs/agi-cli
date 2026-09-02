@@ -97,6 +97,27 @@ describe('watchdog tick output', () => {
     expect(text).not.toContain('healthy-full');
   });
 
+  it('headlines a session by its generated title, not the raw first prompt (PHNX-3797)', () => {
+    // Regression: the first fix here called sessionHeadline() on a SessionOutcome
+    // that never carried `generatedTitle`, so it silently collapsed back to
+    // `label || topic` and the report kept showing the raw prompt. The call site
+    // read correctly — only the projection was wrong.
+    const withTitle: WatchdogTickResult = {
+      ...result,
+      outcomes: [{
+        sessionId: 'gen-title-full', kind: 'claude', host: 'tmux', machine: 'zion',
+        topic: 'the sessions list headline shows the agent latest message, fix it',
+        generatedTitle: 'Session headline ladder fix',
+        activity: 'idle', status: 'idle', policy: 'keep', stall: 'stalled',
+        stalledForMs: 1_200_000, decision: 'nudge', reason: 'would nudge (dry)',
+        lastActivityMs: atMs - 1_200_000,
+      }],
+    };
+    const text = formatWatchdogTickLines(withTitle, false).join('\n');
+    expect(text).toContain('gen-titl · Session headline ladder fix');
+    expect(text).not.toContain('the sessions list headline shows the agent latest message');
+  });
+
   it('shows every session with verbose output', () => {
     expect(formatWatchdogTickLines(result, false, true).join('\n')).toContain('healthy-');
   });
