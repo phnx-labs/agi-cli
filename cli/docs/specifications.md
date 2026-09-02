@@ -399,11 +399,22 @@ SSH access (§7); rendering sessions that no harness produced.
   `toPreviousSessionWatchRow` (`lib/session/remote/watch.ts`) for durable history
   — so no surface may re-derive its own ordering (PHNX-3797).
 
+  `generatedTitle` MUST read as a short, descriptive ACTION + OBJECT headline
+  ("Triage the AGI board", "Rename browser profile — default confusion"), not a
+  single terse noun and not a full sentence — the prompt asks for 4–8 words and
+  `sanitizeGeneratedTitle` enforces the ceiling.
+
   `generatedTitle` MUST be produced by the daemon, ONCE per session: the
-  `session-title` service (`lib/daemon/session-title-service.ts`) calls a cheap
-  model through the normal `agents run --model cheap --mode plan` resolution and
-  persists the result plus `sessionTitleSourceKey` — a hash of the user text it
-  was derived from — in `sessions.generated_title{,_key,_at}`. A sweep that finds
+  `session-title` service (`lib/daemon/session-title-service.ts`) runs a
+  `SessionTitleProvider` and persists the result plus `sessionTitleSourceKey` — a
+  hash of the user text it was derived from — in
+  `sessions.generated_title{,_key,_at}`. The generation backend MUST sit behind
+  that one small interface (`generate(input) → raw reply`) so a local model can
+  replace the default without touching the tick; the shipped default is
+  `CloudSessionTitleProvider`, which renders the shared prompt and calls a cheap
+  model through the normal `agents run --model cheap --mode plan` resolution. The
+  tick — candidate selection, the source-key cache, `sanitizeGeneratedTitle`, and
+  persistence — MUST stay provider-agnostic. A sweep that finds
   a stored key equal to the row's current user text MUST NOT call the model
   again; regeneration happens only when that first user message changes or on an
   explicit `agents sessions backfill titles --refresh`. The service MUST NOT
@@ -416,6 +427,16 @@ SSH access (§7); rendering sessions that no harness produced.
   forwards a peer's rows verbatim, and the PHNX-3792 session mirror carries each
   box's own titles fleet-wide — so no client generates or merges titles itself.
 
+  A row SHOULD also carry a SECONDARY line distinct from the headline:
+  `ActiveSession.importantMessage`, the single most important recent agent message
+  ranked by `deriveImportantMessage` — a pending `question`, then a `needs_you`
+  block (plan review / permission / input-required), then the current `activity`.
+  It is folded on beside `title` in `foldRecap` and rides the SAME feed (the row
+  spread carries it onto `sessions watch --json` and the mirror), so a client
+  renders a bold title over a dim secondary line without a second query; the CLI
+  `--active` render surfaces the `question` / `needs_you` line and leaves plain
+  `activity` to the existing preview.
+
   Given a live row with a tail, a topic, and no label or generated title, When
   `foldRecap` runs, Then `title` is the topic and `recapSource` is `prompt`.
   Given the index later supplies a `generatedTitle`, When
@@ -423,7 +444,8 @@ SSH access (§7); rendering sessions that no harness produced.
   Tests: `lib/session/active.test.ts`, `lib/session/title.test.ts`,
   `lib/session/title.tick.test.ts`, `lib/daemon/session-title-service.test.ts`,
   `lib/session/remote/watch.test.ts`, `lib/session/mirror.test.ts`,
-  `lib/session/db.migrate-v48.test.ts`.
+  `lib/session/db.migrate-v48.test.ts`, `lib/session/db.migrate-v46-to-48.test.ts`,
+  `commands/sessions.active-row.test.ts`.
 - **SES-15 (MUST).** A timestamp-less source MUST fall back to file mtime and
   MUST NOT bind NULL into the `NOT NULL` timestamp column
   (`lib/session/discover.ts:4198-4202,1238-1243`).
