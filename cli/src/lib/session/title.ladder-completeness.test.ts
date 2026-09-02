@@ -11,7 +11,6 @@
  * else. Nothing caught that but a human reading the diff; this does.
  */
 import { describe, expect, it } from 'vitest';
-import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -68,40 +67,18 @@ describe('the session headline ladder is the only ladder (SES-14c)', () => {
     expect(sessionHeadline({ label: undefined, generatedTitle: undefined, topic: 'c' })).toBe('c');
   });
 
-  it('REFUSES TO COMPILE for a row type that dropped the generatedTitle rung', () => {
-    // The bug this catches shipped once: the watchdog's SessionOutcome copied
-    // label/name/topic off the session and left generatedTitle behind, so the
-    // call site read correctly while sessionHeadline silently degraded to
-    // `label || topic`. Structural typing makes that invisible to a reviewer AND
-    // to the lexical scan below, so the type system has to be the guard — and a
-    // guard nobody proved can fail is not a guard. This runs the REAL compiler.
-    const fixture = path.join(SRC, 'lib/session/__tests__/title-rung-guard.fixture.ts');
-    expect(fs.existsSync(fixture)).toBe(true);
-    let failed = false;
-    let output = '';
-    try {
-      execFileSync(
-        path.join(SRC, '..', 'node_modules/.bin/tsc'),
-        // --ignoreConfig: the fixture is deliberately excluded from tsconfig,
-        // and naming files on the command line without it is a tsc error (TS5112).
-        ['--noEmit', '--ignoreConfig', '--strict', '--skipLibCheck', '--target', 'es2022',
-          '--module', 'esnext', '--moduleResolution', 'bundler', fixture],
-        { encoding: 'utf8', cwd: path.join(SRC, '..') },
-      );
-    } catch (err) {
-      failed = true;
-      output = String((err as { stdout?: string }).stdout ?? '');
-    }
-    expect(failed, 'a projection without generatedTitle compiled — the type guard is gone').toBe(true);
-    // `failed` alone is a weak assertion: ANY error in the fixture satisfies it
-    // (a stray syntax error once did — a `**\/` glob inside its docblock closed
-    // the comment early). Require the guard's OWN diagnostic, and require that
-    // it is the only complaint, so the fixture can never pass for a bystander
-    // reason.
-    expect(output).toMatch(/not assignable to parameter of type 'never'/);
-    const fixtureErrors = output.split('\n').filter((l) => l.includes('title-rung-guard.fixture.ts'));
-    expect(fixtureErrors, `expected exactly the rung diagnostic, got:\n${output}`).toHaveLength(1);
-  }, 60_000);
+  // The TYPE half of this guard — that a projection which dropped
+  // `generatedTitle` cannot be passed to sessionHeadline at all — is asserted in
+  // `title.ts` itself (`_rungLessRowIsRejected` / `_realCarrierIsAccepted`),
+  // because `tsconfig.json` excludes `src/**\/*.test.ts` and a test therefore
+  // cannot typecheck anything without spawning its own compiler. This file used
+  // to do exactly that, and one `tsc` subprocess cost ~15s of the required
+  // check's 240s budget — the single slowest thing PHNX-3797 added. Moving the
+  // assertion into typechecked source made it both free and STRONGER: it now
+  // runs on every `bun run build`, not only on the CI runs where impact
+  // selection happens to pick this test file up. Both directions are
+  // mutation-proven (weakening the guard to `T`, and over-tightening it to
+  // `never`, each break the build).
 
   it('no source file re-derives OR rebuilds a headline without the generatedTitle rung', () => {
     const exempt = new Set(EXEMPT.map((e) => path.join(SRC, e.file)));

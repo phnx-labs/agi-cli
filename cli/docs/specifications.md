@@ -423,7 +423,7 @@ SSH access (§7); rendering sessions that no harness produced.
   Tests: `lib/session/active.test.ts`, `lib/session/title.test.ts`,
   `lib/session/title.tick.test.ts`, `lib/daemon/session-title-service.test.ts`,
   `lib/session/remote/watch.test.ts`, `lib/session/mirror.test.ts`,
-  `lib/session/db.migrate-v47.test.ts`.
+  `lib/session/db.migrate-v48.test.ts`.
 - **SES-15 (MUST).** A timestamp-less source MUST fall back to file mtime and
   MUST NOT bind NULL into the `NOT NULL` timestamp column
   (`lib/session/discover.ts:4198-4202,1238-1243`).

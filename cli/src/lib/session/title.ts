@@ -184,6 +184,34 @@ export function sessionHeadline<
   return row.label || row.generatedTitle || row.topic || undefined;
 }
 
+/*
+ * Proof that {@link CarriesTitleRung} still does its job, checked by the ORDINARY
+ * `tsc` run (`bun run build`, CI's `check:typecheck`) rather than by a test.
+ *
+ * A guard nobody proved can fail is not a guard, so this has to be asserted
+ * somewhere. It deliberately lives in typechecked SOURCE and not in a
+ * `*.test.ts`: `tsconfig.json` excludes `src/**\/*.test.ts`, so a test could only
+ * check a type by spawning its own compiler — which is what this feature did
+ * first, at ~15s of required-CI wall time for one assertion (PHNX-3797). Here the
+ * same two properties cost nothing and are verified on every build, not only on
+ * the runs where impact selection happens to pick that test file up.
+ *
+ * Weakening the guard to `type CarriesTitleRung<T> = T` breaks the build on
+ * `_rungLessRowIsRejected`; over-tightening it so a legitimate optional carrier
+ * resolves to `never` breaks it on `_realCarrierIsAccepted`.
+ */
+type IsNever<T> = [T] extends [never] ? true : false;
+type AssertTrue<T extends true> = T;
+type AssertFalse<T extends false> = T;
+
+/** The shape of a projection that dropped the rung — the watchdog's old `SessionOutcome`. */
+type RungLessRow = { label?: string | null; topic?: string | null };
+
+// A row type that never modelled `generatedTitle` must NOT be callable.
+type _rungLessRowIsRejected = AssertTrue<IsNever<CarriesTitleRung<RungLessRow>>>;
+// A real carrier — optional key included — must still be callable.
+type _realCarrierIsAccepted = AssertFalse<IsNever<CarriesTitleRung<SessionTitleCandidateRow>>>;
+
 /**
  * Runs the cheap model once and returns its raw stdout. Injectable so tests
  * exercise the whole tick — candidate selection, key comparison, persistence —
