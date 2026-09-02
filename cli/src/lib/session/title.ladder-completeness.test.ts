@@ -26,6 +26,16 @@ const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const HAND_ROLLED = /\blabel\b[^;\n]{0,40}(\|\||\?\?)[^;\n]{0,40}\btopic\b/;
 
 /**
+ * A REBUILT session object: an object literal that re-lists `label` and `topic`
+ * as properties. TypeScript does not flag a missing OPTIONAL property, so such a
+ * literal silently drops `generatedTitle` and degrades the headline to the raw
+ * topic — even though the receiving signature names the field. The `agents
+ * sessions fork` call site did exactly this (PHNX-3797). Pass the session whole
+ * instead of re-listing its fields.
+ */
+const REBUILT_LITERAL = /\blabel\s*:[^,;]{1,40},[^;]{0,60}\btopic\s*:/;
+
+/**
  * Deliberate, reviewed exemptions — each is NOT a session headline. Keep this
  * list short and justified; a new entry needs a reason, not a silencer.
  */
@@ -86,7 +96,7 @@ describe('the session headline ladder is the only ladder (SES-14c)', () => {
     expect(output).toMatch(/not assignable to parameter of type 'never'/);
   }, 60_000);
 
-  it('no source file re-derives `label || topic` for a headline', () => {
+  it('no source file re-derives OR rebuilds a headline without the generatedTitle rung', () => {
     const exempt = new Set(EXEMPT.map((e) => path.join(SRC, e.file)));
     const offenders: string[] = [];
     for (const file of sourceFiles(SRC)) {
@@ -98,7 +108,9 @@ describe('the session headline ladder is the only ladder (SES-14c)', () => {
         // that explain why they carry the rung) is documentation, not a ladder.
         if (code.startsWith('*') || code.startsWith('//') || code.startsWith('/*')) return;
         if (line.includes('generatedTitle')) return;
-        if (HAND_ROLLED.test(line)) offenders.push(`${path.relative(SRC, file)}:${i + 1}  ${code}`);
+        if (HAND_ROLLED.test(line) || REBUILT_LITERAL.test(line)) {
+          offenders.push(`${path.relative(SRC, file)}:${i + 1}  ${code}`);
+        }
       });
     }
     expect(

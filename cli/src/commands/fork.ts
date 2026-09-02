@@ -128,10 +128,12 @@ export async function runFork(
   }
   const digest = data?.preview ?? undefined;
 
-  // Most sessions have no explicit --name label; fall back to the auto-derived
-  // topic the rest of the CLI shows, not the raw short id (forkLabelFor is the
-  // shared 3-tier resolver, and preview's --json now carries `topic`).
-  const label = forkLabelFor({ label: source.label, topic: source.topic, shortId: source.shortId });
+  // Most sessions have no explicit --name label; fall back to the shared headline
+  // ladder the rest of the CLI shows, not the raw short id. Pass `source` whole
+  // rather than re-listing fields: an object literal that omits `generatedTitle`
+  // still type-checks (the key is optional) and would silently drop the
+  // daemon-generated title rung — the PHNX-3797 bug shape.
+  const label = forkLabelFor(source);
   const recap = buildForkRecap({
     agent: source.agent,
     label,

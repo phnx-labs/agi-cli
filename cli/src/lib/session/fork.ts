@@ -56,7 +56,15 @@ function trimLastLine(text: string): string {
   return `${collapsed.slice(0, LAST_LINE_CAP).trimEnd()}…`;
 }
 
-/** Resolve the human display label the caller passes in from a raw SessionMeta. */
+/**
+ * Resolve the human display label the caller passes in from a raw SessionMeta.
+ *
+ * Pass the session WHOLE. A caller that re-lists fields into an object literal
+ * can legally omit the optional `generatedTitle` — the type system does not
+ * flag a missing optional property — and the headline then silently degrades to
+ * `topic`. That is what the fork call site did (PHNX-3797); the rebuilt-literal
+ * shape is caught by `title.ladder-completeness.test.ts`.
+ */
 export function forkLabelFor(session: Pick<SessionMeta, 'label' | 'generatedTitle' | 'topic' | 'shortId'>): string {
   return sessionHeadline(session) || session.shortId;
 }
