@@ -12,6 +12,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { Server, type Connection } from 'ssh2';
+import { sessionHeadline } from '../title.js';
 import {
   REMOTE_STDOUT_MAX_BYTES,
   REMOTE_TOOL_AGGREGATE_MAX_BYTES,
@@ -173,6 +174,22 @@ describe('parseRemoteList', () => {
     expect(out).toHaveLength(2);
     expect(out.every((s) => s.machine === 'zion')).toBe(true);
     expect(out[0].id).toBe('a');
+  });
+
+  it('carries a peer\'s daemon-generated title through the fan-out (PHNX-3797)', () => {
+    // "A remote session shows the SAME title in the viewer" rests on this parse
+    // SPREADING the peer's row rather than re-listing known fields: a re-listed
+    // projection silently drops the generatedTitle rung and the remote row
+    // headlines its raw prompt instead.
+    const stdout = JSON.stringify([{
+      id: 'a', shortId: 'a', agent: 'claude', timestamp: '2026-07-01T00:00:00Z',
+      filePath: '/peer/a.jsonl',
+      topic: 'the fleet list headline is the agent last message',
+      generatedTitle: 'Session headline ladder fix',
+    }]);
+    const [row] = parseRemoteList(stdout, 'zion');
+    expect(row.generatedTitle).toBe('Session headline ladder fix');
+    expect(sessionHeadline(row)).toBe('Session headline ladder fix');
   });
 
   it('marks every parsed row _remote so it routes read/resume back over SSH', () => {

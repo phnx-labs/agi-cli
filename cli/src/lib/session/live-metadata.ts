@@ -55,6 +55,12 @@ export function activeSessionToSessionMeta(
     cwd: active.cwd,
     project: active.project ?? undefined,
     label: active.label,
+    // Carried even though this projection only runs for a session with NO indexed
+    // row (so the value is `undefined` today): a hand-built SessionMeta that
+    // omits the rung is exactly the shape that silently degrades the headline the
+    // moment its reachability changes (PHNX-3797). Neither guard can see it here
+    // — it calls no ladder, and its fields sit on separate lines.
+    generatedTitle: active.generatedTitle,
     topic: active.topic,
     firstUserMessage: active.firstUserMessage,
     version: active.version,
