@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>PHNX-3797 — session headline, before and after</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 34px 36px 40px; background: #0a0a0a; color: #e5e5e5;
+         font-family: Inter, -apple-system, system-ui, sans-serif; }
+  h1 { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 19px;
+        font-weight: 600; margin: 0 0 7px; color: #fafafa; letter-spacing: -0.2px; }
+  .lede { color: #a1a1aa; font-size: 13.5px; margin: 0 0 26px; max-width: 108ch; line-height: 1.65; }
+  code { font-family: 'JetBrains Mono', ui-monospace, monospace; color: #d4d4d8; font-size: 0.94em; }
+  .grid { display: grid; gap: 18px; grid-template-columns: 1fr 1fr; align-items: start; }
+  .grid > .full { grid-column: 1 / -1; }
+  .panel { border: 1px solid #262626; border-radius: 10px; padding: 15px 18px 17px; background: #0f0f0f; }
+  .panel.before { border-color: #40201f; }
+  .panel.after { border-color: #2d3d17; }
+  h2 { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; margin: 0 0 3px; }
+  .before h2 { color: #f87171; }
+  .after h2 { color: #a3e635; }
+  .sub { color: #71717a; font-size: 11.5px; margin: 0 0 12px;
+          font-family: 'JetBrains Mono', ui-monospace, monospace; }
+  .term { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+           font-size: 12.5px; line-height: 1.78; white-space: pre; overflow-x: hidden; }
+  .row { display: flex; gap: 14px; }
+  .n { color: #3f3f46; width: 2ch; text-align: right; flex: none; }
+  .src { flex: none; width: 10ch; }
+  .t { color: #d4d4d8; overflow: hidden; text-overflow: ellipsis; }
+  .t.bad { color: #fca5a5; }
+  .dim { color: #52525b; }
+  .show { padding: 9px 0; border-top: 1px solid #1c1c1c; }
+  .show:first-of-type { border-top: none; }
+  .shead { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #52525b; margin-bottom: 5px; }
+  .was, .now { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; line-height: 1.6; }
+  .was { color: #a1a1aa; }
+  .now { color: #a3e635; margin-top: 3px; }
+  .tag { display: inline-block; width: 5ch; color: #52525b; }
+  .tag.ok { color: #4d7c0f; }
+  .legend { margin-top: 22px; color: #71717a; font-size: 11.5px; line-height: 2;
+             font-family: 'JetBrains Mono', ui-monospace, monospace; }
+</style></head>
+<body>
+  <h1>PHNX-3797 &mdash; the session-row headline</h1>
+  <p class="lede">Real <code>agents sessions --active --json</code> from one machine, the same live sessions
+  captured minutes apart: the installed CLI first, then this branch's build. This <code>title</code> field is
+  the bold headline in the AGI EXT Sessions/Fleet list and in every <code>agents sessions</code> render.
+  Session ids, paths, and hostnames are masked; headline text is verbatim. Rows that resolve to no session id
+  (a bare process with no transcript yet) are omitted &mdash; they have no headline in either build.</p>
+  <div class="grid">
+    <section class="panel before"><h2>BEFORE — installed CLI: title = the agent&#x27;s latest message</h2><p class="sub">label: 3  last: 7  none: 1</p><div class="term"><div class="row"><span class="n"> 1</span><span class="src" style="color:#f87171">last</span><span class="t bad">Both seams verified on the **real shipped artifacts** (not per-track green): **SEAM 1 — PHNX…</span></div><div class="row"><span class="n"> 2</span><span class="src" style="color:#f87171">last</span><span class="t bad">All tasks complete, PR merged, fleet clean. Here&#x27;s the wrap-up. ## Summary Three things happ…</span></div><div class="row"><span class="n"> 3</span><span class="src" style="color:#f87171">last</span><span class="t bad">All green. Now the commands surface, which touches the picker/backfill/sessions renders:</span></div><div class="row"><span class="n"> 4</span><span class="src" style="color:#f87171">last</span><span class="t bad">The Stop hook flags `&lt;device&gt;:~/…`, but that file is a byte-identical copy of the exact HTML…</span></div><div class="row"><span class="n"> 5</span><span class="src" style="color:#f87171">last</span><span class="t bad">**PHNX-3613 fully shipped** — closed the loop end to end: - PR **#33** merged (`test(ext): s…</span></div><div class="row"><span class="n"> 6</span><span class="src" style="color:#7dd3fc">label</span><span class="t">agi-ext-55</span></div><div class="row"><span class="n"> 7</span><span class="src" style="color:#7dd3fc">label</span><span class="t">Prix - Dispatch</span></div><div class="row"><span class="n"> 8</span><span class="src" style="color:#7dd3fc">label</span><span class="t">Prix - Test</span></div><div class="row"><span class="n"> 9</span><span class="src" style="color:#f87171">last</span><span class="t bad">Please run /login · API Error: 401 OAuth access token has expired. Re-authenticate to contin…</span></div><div class="row"><span class="n">10</span><span class="src" style="color:#6b7280">—</span><span class="t"><span class="dim">(no headline)</span></span></div><div class="row"><span class="n">11</span><span class="src" style="color:#f87171">last</span><span class="t bad">Now the remaining findings — the wrong comment, dead `repoRoot`, the recap gap, and the labe…</span></div></div></section>
+    <section class="panel after"><h2>AFTER — this branch: title = a user-anchored name</h2><p class="sub">label: 5  last: 3   (every remaining &#x27;last&#x27; row is a PEER still running the installed CLI, forwarded verbatim)</p><div class="term"><div class="row"><span class="n"> 1</span><span class="src" style="color:#7dd3fc">label</span><span class="t">Triage</span></div><div class="row"><span class="n"> 2</span><span class="src" style="color:#7dd3fc">label</span><span class="t">Rename browser profile to avoid default confusion</span></div><div class="row"><span class="n"> 3</span><span class="src" style="color:#7dd3fc">label</span><span class="t">phnx-3797-session-title-85</span></div><div class="row"><span class="n"> 4</span><span class="src" style="color:#7dd3fc">label</span><span class="t">Workweave</span></div><div class="row"><span class="n"> 5</span><span class="src" style="color:#7dd3fc">label</span><span class="t">AGI - Refactor</span></div><div class="row"><span class="n"> 6</span><span class="src" style="color:#f87171">last</span><span class="t bad">The independent review found a real blocking false-positive in the inherited containment mat…</span></div><div class="row"><span class="n"> 7</span><span class="src" style="color:#f87171">last</span><span class="t bad">The blocker is fixed and pushed; the re-review is running. Status: **PR https://github.com/p…</span></div><div class="row"><span class="n"> 8</span><span class="src" style="color:#f87171">last</span><span class="t bad">Please run /login · API Error: 401 OAuth access token has expired. Re-authenticate to contin…</span></div></div></section>
+    <section class="panel after full"><h2>The generated rung, on real sessions</h2><p class="sub">one cheap-model call each, generated once and persisted in the index</p><div class="show"><div class="shead">kimi session · no /rename label</div><div class="was"><span class="tag">was</span>You are a staff engineer producing an INDEPENDENT design plan. Do NOT look for or defer to any existing plan — I want your own thinking. Output a writ…</div><div class="now"><span class="tag ok">now</span>Resolve remote agent session ID tracking</div></div><div class="show"><div class="shead">kimi session · no /rename label</div><div class="was"><span class="tag">was</span>You are a senior product designer reviewing the marketing website for **agi-cli** (live at https://agi-cli.sh). Your ONE job: propose concrete, high-i…</div><div class="now"><span class="tag ok">now</span>agi-cli.sh website UX improvement ideas</div></div></section>
+  </div>
+  <div class="legend">
+    <b style="color:#7dd3fc">label</b> &mdash; an explicit /rename or harness title, always wins &nbsp;&middot;&nbsp;
+    <b style="color:#a3e635">generated</b> &mdash; the daemon's 3-6 word technical title, generated once per session &nbsp;&middot;&nbsp;
+    <b style="color:#fbbf24">prompt</b> &mdash; the user's own first message, the honest fallback &nbsp;&middot;&nbsp;
+    <b style="color:#f87171">last</b> &mdash; the agent's latest transcript line, <b>removed as a headline</b> by this change
+  </div>
+</body></html>
