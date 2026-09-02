@@ -14,6 +14,7 @@
  * owns only the pure recap text the resolved data folds into.
  */
 import type { SessionMeta } from './types.js';
+import { sessionHeadline } from './title.js';
 
 /** File-change tally as `sessions preview --json` serializes it (digest.changes). */
 export interface ForkRecapChanges {
@@ -56,8 +57,8 @@ function trimLastLine(text: string): string {
 }
 
 /** Resolve the human display label the caller passes in from a raw SessionMeta. */
-export function forkLabelFor(session: Pick<SessionMeta, 'label' | 'topic' | 'shortId'>): string {
-  return session.label || session.topic || session.shortId;
+export function forkLabelFor(session: Pick<SessionMeta, 'label' | 'generatedTitle' | 'topic' | 'shortId'>): string {
+  return sessionHeadline(session) || session.shortId;
 }
 
 /**

@@ -29,6 +29,7 @@ import {
   type ComputerAction,
 } from '../lib/computer/sessions-list.js';
 import { formatRelativeTime } from '../lib/session/relative-time.js';
+import { sessionHeadline } from '../lib/session/title.js';
 
 export interface ComputerSessionsCommandOpts {
   machine?: string;
@@ -45,7 +46,7 @@ export interface ComputerSessionsCommandOpts {
 function rowLinkSummary(row: ComputerRunRow): string {
   if (row.linkStatus === 'linked' && row.linkedSession) {
     const s = row.linkedSession;
-    return chalk.cyan(s.agent) + ' — ' + (s.label || s.topic || s.shortId);
+    return chalk.cyan(s.agent) + ' — ' + (sessionHeadline(s) || s.shortId);
   }
   if (row.linkStatus === 'unresolved') {
     return chalk.yellow(`owner ${row.agent ?? 'unknown'} (session not indexed here)`);

@@ -37,6 +37,7 @@ import { isWatchdogRotateEnabled, listRotateStates, setWatchdogRotateEnabled } f
 import { loadWatchdogSessions, runWatchdogPass } from '../lib/watchdog/service.js';
 import { readWatchdogEvents, WATCHDOG_LOG_PATH } from '../lib/watchdog/log.js';
 import { selectWatchdogHistory } from '../lib/watchdog/history.js';
+import { sessionHeadline } from '../lib/session/title.js';
 
 /** Default state dir the runner and these subcommands share. */
 function stateDir(): string {
@@ -114,7 +115,9 @@ export function formatWatchdogTickLines(
       : o.decision === 'nudge' ? 'WOULD-NUDGE'
       : 'skip';
     const id = o.sessionId?.slice(0, 8) ?? 'no-session-id';
-    const title = o.label || o.name || o.topic;
+    // `name` is the `agents run --name` launch handle — a user-given name, so it
+    // ranks with the label; everything below it is the shared headline ladder.
+    const title = o.label || o.name || sessionHeadline(o);
     lines.push(`  ${tag.padEnd(11)} ${id}${title ? ` · ${title}` : ''}`);
     const metadata = [
       o.kind,
