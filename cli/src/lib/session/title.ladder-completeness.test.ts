@@ -93,7 +93,14 @@ describe('the session headline ladder is the only ladder (SES-14c)', () => {
       output = String((err as { stdout?: string }).stdout ?? '');
     }
     expect(failed, 'a projection without generatedTitle compiled — the type guard is gone').toBe(true);
+    // `failed` alone is a weak assertion: ANY error in the fixture satisfies it
+    // (a stray syntax error once did — a `**\/` glob inside its docblock closed
+    // the comment early). Require the guard's OWN diagnostic, and require that
+    // it is the only complaint, so the fixture can never pass for a bystander
+    // reason.
     expect(output).toMatch(/not assignable to parameter of type 'never'/);
+    const fixtureErrors = output.split('\n').filter((l) => l.includes('title-rung-guard.fixture.ts'));
+    expect(fixtureErrors, `expected exactly the rung diagnostic, got:\n${output}`).toHaveLength(1);
   }, 60_000);
 
   it('no source file re-derives OR rebuilds a headline without the generatedTitle rung', () => {
