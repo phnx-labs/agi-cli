@@ -358,6 +358,50 @@ billing (follow-up). Enforcement is **managed-only**: a **BYO** deployment (a
 operator's own cost and **skips all four limits** — a deliberate policy, not a
 silent gap.
 
+## Collaboration — same-origin human review transport (PHNX-3835)
+
+A managed share can host **human-to-human collaboration** (review comments) on the
+artifact itself. The Worker exposes a same-origin `/__collab/*` transport that the
+served page's browser JS calls; the Worker proxies each request to the Prix
+artifact-collaboration API. The Worker stays the trust boundary exactly as it is
+for the page GET:
+
+- **Object-first.** Every `/__collab` request loads the R2 share object **before**
+  anything else. A share that was never published, or was just deleted, `404`s —
+  so share existence is never enumerable, and a deleted share's comments become
+  inaccessible the instant its object is gone (no separate revocation step).
+- **Server-derived identity.** The share id (`SHA-256(ownerId + NUL + normalized
+  R2 path)`), current revision (the object etag), owner, visibility, org domain,
+  and producer provenance (`agent`/`session`/`host`/`repo`) are all re-derived
+  **server-side** from R2 metadata. The browser-supplied `share` value is a lookup
+  key only, never trusted as identity — a raw private access token is never sent as
+  identity.
+- **The exact page read gate, denials as 404.** `me`/`org` reuse the identity gate,
+  `private` reuses the viewer-token (`?k=`) gate; any denial is a plain `404`
+  (never a `302` login bounce or a `401`), so an out-of-scope viewer can't tell the
+  share exists. Public/unlisted readers may read **anonymously**; **every write
+  requires a verified signed-in Phoenix human**; `private` still requires its share
+  token. Visibility is re-checked per request, so a downgrade is immediate.
+- **Prix proxy.** Requests forward to `${PRIX_ARTIFACT_COLLAB_BASE}/v1/artifact-collaboration`
+  (`GET /context`, `GET /threads?after=`, `POST /threads`, `POST /threads/:id/replies`,
+  `PATCH /comments/:id`, `PATCH /threads/:id`, `GET /events`, and a best-effort
+  authenticated `POST /purge` on share delete) with the service token
+  (`ARTIFACT_COLLAB_SERVICE_TOKEN`) in `Authorization` — **never** surfaced to the
+  browser — plus trusted `X-Artifact-*` / `X-Phoenix-Actor-*` headers. The client
+  `Idempotency-Key` and `Last-Event-ID` ride through; SSE bodies stream **unbuffered**
+  (`X-Accel-Buffering: no`, cancel/disconnect propagated); every collaboration
+  response is `no-store`.
+- **Fail closed.** Missing `PRIX_ARTIFACT_COLLAB_BASE` or
+  `ARTIFACT_COLLAB_SERVICE_TOKEN` disables the whole surface (`404`) **without
+  affecting the artifact page GET**. A **BYO** endpoint has no Phoenix identity, so
+  managed collaboration correctly does not exist there. The surface stays **dormant**
+  until an operator sets both secrets; `agents artifacts share setup` / `update` bind
+  them on a managed deploy (both or neither, read from the deploy environment).
+
+The Prix API counterpart owns the durable thread/comment store, notifications, and
+future agent mentions/wake-up. No Worker timer, scheduler, durable queue, or
+separate pub/sub is added here — the Worker is a pure trust-boundary proxy.
+
 ## Related
 
 - [observability.md](observability.md) — the publication boundary (bearer-gated

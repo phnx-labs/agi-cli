@@ -174,6 +174,7 @@ import jetbrainsMono from '@fontsource/jetbrains-mono/files/jetbrains-mono-latin
 export const hooks = {
   verifyPhoenixToken: defaultVerifyPhoenixToken,
   renderOgCard: renderOgCard,
+  collabFetch: defaultCollabFetch,
 };
 
 export default {
@@ -188,6 +189,19 @@ export default {
     }
 
     const firstSeg = path.split('/').filter(Boolean)[0] || '';
+
+    // Same-origin human collaboration transport (PHNX-3835). Every /__collab/*
+    // verb loads the R2 share object FIRST, re-derives identity/visibility/
+    // provenance server-side, reuses the exact page read gate, then proxies to
+    // the Prix artifact-collaboration API with the service token (never surfaced
+    // to the browser). Routed BEFORE the __-prefix GET 404 guard below because
+    // GET /__collab/context|threads|events are first-class. Fails closed (404)
+    // when the managed backend is unconfigured — BYO has no Phoenix identity, so
+    // managed collaboration correctly does not exist there.
+    if (firstSeg === '__collab') {
+      return handleCollab(request, env, url, path, ctx);
+    }
+
     if ((request.method === 'GET' || request.method === 'HEAD') && firstSeg.startsWith('__')) {
       return new Response('not found', { status: 404, headers: { 'content-type': 'text/plain' } });
     }
@@ -924,6 +938,26 @@ export default {
           refund: typeof doomed.size === 'number' ? doomed.size : 0,
           freeCanonical: delSegs.length === 2,
         });
+      }
+      // PHNX-3835: best-effort purge of the deleted share's collaboration
+      // threads. Object-first gating already makes comments inaccessible the
+      // instant the R2 object is gone (every /__collab request 404s on the
+      // missing object), so this is durable cleanup on the Prix side, never the
+      // security boundary. Fire-and-forget so a purge failure never fails the
+      // delete. Only a managed (Phoenix) canonical page (2 segments, not a
+      // cover, not an internal __-key) can carry collaboration.
+      const collabCfgDel = collabConfig(env);
+      if (
+        collabCfgDel &&
+        auth.kind === 'phoenix' &&
+        !isCover &&
+        !firstSeg.startsWith('__') &&
+        path.split('/').filter(Boolean).length === 2
+      ) {
+        const purgeOwner = (doomed && doomed.customMetadata && doomed.customMetadata.owner) || auth.owner;
+        const purge = purgeCollab(env, collabCfgDel, purgeOwner, path);
+        if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(purge);
+        else await purge;
       }
       return json({ ok: true, deleted: path }, 200);
     }
@@ -2235,6 +2269,240 @@ async function authorizeWrite(request, env) {
     return { kind: 'phoenix', owner: cookieId.userId, email: typeof cookieId.email === 'string' ? cookieId.email : '' };
   }
   return { error: json({ error: 'unauthorized' }, 401) };
+}
+
+// ---- Same-origin human collaboration transport (PHNX-3835) ----
+//
+// The Worker is the trust boundary for collaboration exactly as it is for the
+// page GET. For every /__collab/* request it:
+//   1. loads the R2 share object FIRST (object-first) and 404s if absent — share
+//      existence is never enumerable, and a deleted share drops its comments the
+//      instant the object is gone (no separate revocation step);
+//   2. re-derives share identity, current revision (etag), owner, visibility,
+//      org domain, and producer provenance SERVER-SIDE from R2 metadata, ignoring
+//      anything the browser supplied (the 'share' field is a LOOKUP key only,
+//      never trusted as identity);
+//   3. reuses the EXACT page read gate (me/org identity gate + private token
+//      gate), mapping any denial to 404 so an out-of-scope viewer cannot tell the
+//      share exists; every WRITE additionally requires a verified signed-in
+//      Phoenix human;
+//   4. proxies to the Prix artifact-collaboration API with the service token in
+//      Authorization (never surfaced to the browser) plus trusted X-Artifact-* /
+//      X-Phoenix-* headers, streaming SSE through without buffering.
+//
+// Missing PRIX_ARTIFACT_COLLAB_BASE or ARTIFACT_COLLAB_SERVICE_TOKEN disables the
+// whole surface (404) without touching artifact page GET.
+
+var COLLAB_VISIBILITIES = ['public', 'unlisted', 'private', 'me', 'org'];
+
+// The managed collaboration backend, or null when unconfigured. Both the base
+// URL and the service token must be present; either missing fails the whole
+// surface closed.
+function collabConfig(env) {
+  const base = typeof env.PRIX_ARTIFACT_COLLAB_BASE === 'string' ? env.PRIX_ARTIFACT_COLLAB_BASE.replace(/\\/+$/, '').trim() : '';
+  const token = typeof env.ARTIFACT_COLLAB_SERVICE_TOKEN === 'string' ? env.ARTIFACT_COLLAB_SERVICE_TOKEN : '';
+  if (!base || !token) return null;
+  return { base: base, token: token };
+}
+
+// No collaboration response may be cached (visibility can downgrade on any
+// request), and every collab body is JSON unless overridden (SSE).
+function collabHeaders(extra) {
+  const h = new Headers(extra || {});
+  if (!h.has('content-type')) h.set('content-type', 'application/json');
+  h.set('cache-control', 'no-store');
+  return h;
+}
+
+function collabError(message, status) {
+  return new Response(JSON.stringify({ error: message }), { status: status, headers: collabHeaders() });
+}
+
+// A collab denial is ALWAYS a 404 — never a 302 login bounce or a 401 for a read
+// — so an out-of-scope viewer cannot enumerate share existence.
+function collabNotFound() {
+  return collabError('not found', 404);
+}
+
+// The page READ gate, reused verbatim for collaboration reads/subscriptions but
+// with every denial normalized to 404. Returns null when the read is allowed.
+async function collabReadGate(request, url, obj, identity) {
+  const visibility = (obj.customMetadata && obj.customMetadata.visibility) || 'public';
+  // Unknown visibility fails closed.
+  if (COLLAB_VISIBILITIES.indexOf(visibility) === -1) return collabNotFound();
+  if (isIdentityGated(visibility)) {
+    // me/org: require a matching identity; a missing/wrong viewer 404s (never the
+    // page GET's 302 login bounce, which is meaningless to a fetch()).
+    if (!identity || !viewerMayRead(visibility, obj.customMetadata, identity)) return collabNotFound();
+    return null;
+  }
+  if (visibility === 'private') {
+    // private: require the viewer token, exactly as the page GET does.
+    const denied = await gateTokenRead(request, url, obj, identity);
+    if (denied) return collabNotFound();
+    return null;
+  }
+  return null; // public | unlisted — readable when the object exists
+}
+
+// Map a browser /__collab sub-route to the Prix artifact-collaboration route +
+// method. Returns null for any unsupported shape (fail loud, never a wrong path).
+// Only the cursor rides through as a query param; the browser's own \`share\`
+// param is dropped (Prix derives identity from the trusted header, not the path).
+function collabTarget(rest, method, url) {
+  if (rest.length === 1 && rest[0] === 'context' && method === 'GET') {
+    return { path: '/context', search: '', sse: false };
+  }
+  if (rest.length === 1 && rest[0] === 'threads') {
+    if (method === 'GET') {
+      const after = url.searchParams.get('after');
+      return { path: '/threads', search: after ? '?after=' + encodeURIComponent(after) : '', sse: false };
+    }
+    if (method === 'POST') return { path: '/threads', search: '', sse: false };
+  }
+  if (rest.length === 2 && rest[0] === 'threads' && method === 'PATCH') {
+    return { path: '/threads/' + encodeURIComponent(rest[1]), search: '', sse: false };
+  }
+  if (rest.length === 3 && rest[0] === 'threads' && rest[2] === 'replies' && method === 'POST') {
+    return { path: '/threads/' + encodeURIComponent(rest[1]) + '/replies', search: '', sse: false };
+  }
+  if (rest.length === 2 && rest[0] === 'comments' && method === 'PATCH') {
+    return { path: '/comments/' + encodeURIComponent(rest[1]), search: '', sse: false };
+  }
+  if (rest.length === 1 && rest[0] === 'events' && method === 'GET') {
+    return { path: '/events', search: '', sse: true };
+  }
+  return null;
+}
+
+async function handleCollab(request, env, url, path, ctx) {
+  const cfg = collabConfig(env);
+  // Fail closed: no managed backend → the surface does not exist.
+  if (!cfg) return collabNotFound();
+
+  const segs = path.split('/').filter(Boolean); // ['__collab', ...]
+  const rest = segs.slice(1);
+  const method = request.method;
+
+  // Resolve the share path. GET carries it in ?share=, mutations in the JSON
+  // body — read that body ONCE here so \`share\` extraction and verbatim upstream
+  // forwarding share a single read.
+  const isMutation = method === 'POST' || method === 'PATCH';
+  let sharePath = '';
+  let bodyText = '';
+  if (isMutation) {
+    bodyText = await request.text();
+    let parsed;
+    try { parsed = JSON.parse(bodyText || '{}'); } catch { return collabError('body must be JSON', 400); }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return collabError('body must be a JSON object', 400);
+    sharePath = typeof parsed.share === 'string' ? parsed.share : '';
+  } else {
+    sharePath = url.searchParams.get('share') || '';
+  }
+  sharePath = String(sharePath).replace(/^\\/+/, '');
+  const shareFirst = sharePath.split('/').filter(Boolean)[0] || '';
+  // Never let a collab lookup reach an internal __-key or an empty share.
+  if (!sharePath || shareFirst.startsWith('__')) return collabNotFound();
+
+  // OBJECT-FIRST: load the share before deriving anything. A missing share
+  // (never provisioned, or just deleted) 404s.
+  const obj = await env.BUCKET.get(sharePath);
+  if (!obj) return collabNotFound();
+
+  // Re-derive identity SERVER-SIDE and apply the page read gate. A ticket
+  // redemption redirect is meaningless to a fetch(), so collab treats the request
+  // as its resolved identity (or anonymous) and never bounces.
+  const viewer = await resolveViewer(request, env, url);
+  const identity = viewer.identity || null;
+  const readDenied = await collabReadGate(request, url, obj, identity);
+  if (readDenied) return readDenied;
+
+  // Every write requires a verified signed-in Phoenix human, ON TOP of the read
+  // gate (public/unlisted readers may read anonymously but never write).
+  if (isMutation && (!identity || !identity.userId)) {
+    return collabError('sign in with Phoenix to comment', 401);
+  }
+
+  const target = collabTarget(rest, method, url);
+  if (!target) return collabError('unsupported collaboration route', 404);
+
+  // Trusted, server-derived values. owner + NUL + normalized path → a stable
+  // share id; the raw private access token is NEVER used as identity.
+  const meta = obj.customMetadata || {};
+  const visibility = meta.visibility || 'public';
+  const owner = meta.owner || '';
+  const shareId = await sha256Hex(owner + '\\u0000' + sharePath);
+  const revision = obj.etag || '';
+
+  const headers = new Headers();
+  headers.set('authorization', 'Bearer ' + cfg.token);
+  headers.set('x-artifact-share-id', shareId);
+  if (revision) headers.set('x-artifact-revision', revision);
+  headers.set('x-artifact-visibility', visibility);
+  if (owner) headers.set('x-artifact-owner-id', owner);
+  if (meta.org_domain) headers.set('x-artifact-org-domain', meta.org_domain);
+  if (identity && identity.userId) headers.set('x-phoenix-actor-id', identity.userId);
+  if (identity && identity.email) headers.set('x-phoenix-actor-email', identity.email);
+  // Preserve existing R2 producer provenance (RUSH-2683) so Prix can attribute a
+  // comment thread to the run that made the artifact.
+  if (meta.agent) headers.set('x-artifact-agent', meta.agent);
+  if (meta.session) headers.set('x-artifact-session', meta.session);
+  if (meta.host) headers.set('x-artifact-host', meta.host);
+  if (meta.repo) headers.set('x-artifact-repo', meta.repo);
+  // Idempotency + resumable-SSE headers ride through unchanged.
+  const idem = request.headers.get('idempotency-key');
+  if (idem) headers.set('idempotency-key', idem);
+  const lastEvent = request.headers.get('last-event-id');
+  if (lastEvent) headers.set('last-event-id', lastEvent);
+  if (target.sse) headers.set('accept', 'text/event-stream');
+  else if (isMutation) headers.set('content-type', 'application/json');
+
+  const init = { method: method, headers: headers };
+  if (isMutation) init.body = bodyText;
+  // Propagate a client disconnect to the upstream fetch (SSE cancel).
+  if (request.signal) init.signal = request.signal;
+
+  let upstream;
+  try {
+    upstream = await hooks.collabFetch(new Request(cfg.base + '/v1/artifact-collaboration' + target.path + target.search, init));
+  } catch (e) {
+    return collabError('collaboration backend unavailable', 502);
+  }
+
+  // Forward Prix status + body. Never echo the service token; every collab
+  // response is no-store. SSE streams through unbuffered — event IDs and content
+  // type ride the bytes, and disabling proxy buffering keeps the stream live.
+  const ct = upstream.headers.get('content-type');
+  const outHeaders = collabHeaders();
+  if (target.sse) {
+    outHeaders.set('content-type', ct || 'text/event-stream');
+    outHeaders.set('x-accel-buffering', 'no');
+  } else if (ct) {
+    outHeaders.set('content-type', ct);
+  }
+  return new Response(upstream.body, { status: upstream.status, headers: outHeaders });
+}
+
+// Best-effort authenticated purge of a deleted share's collaboration threads.
+// Swallows every error — a purge failure must never fail the share delete, and
+// object-first gating already made the comments inaccessible.
+async function purgeCollab(env, cfg, owner, sharePath) {
+  try {
+    const shareId = await sha256Hex((owner || '') + '\\u0000' + sharePath);
+    const headers = new Headers();
+    headers.set('authorization', 'Bearer ' + cfg.token);
+    headers.set('x-artifact-share-id', shareId);
+    await hooks.collabFetch(new Request(cfg.base + '/v1/artifact-collaboration/purge', { method: 'POST', headers: headers }));
+  } catch (e) {
+    // best-effort: a purge failure must never fail the share delete
+  }
+}
+
+// The real upstream hop to Prix. Overridable in tests (like verifyPhoenixToken)
+// so the generated Worker's derivation/gating is exercised against a simulated
+// backend without a live network.
+async function defaultCollabFetch(request) {
+  return fetch(request);
 }
 `;
 }

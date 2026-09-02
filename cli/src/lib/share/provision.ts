@@ -197,6 +197,11 @@ export interface UpdateWorkerResult {
 /** Cloudflare `secret_text` name the Worker reads as `env.PHOENIX_ID_BASE`. */
 export const WORKER_PHOENIX_ID_BASE_SECRET = 'PHOENIX_ID_BASE';
 
+/** Cloudflare `secret_text` name the Worker reads as `env.PRIX_ARTIFACT_COLLAB_BASE`. */
+export const WORKER_COLLAB_BASE_SECRET = 'PRIX_ARTIFACT_COLLAB_BASE';
+/** Cloudflare `secret_text` name the Worker reads as `env.ARTIFACT_COLLAB_SERVICE_TOKEN`. */
+export const WORKER_COLLAB_SERVICE_TOKEN_SECRET = 'ARTIFACT_COLLAB_SERVICE_TOKEN';
+
 export type UpdateWorkerOpts = ProvisionOptions & {
   force?: boolean;
   /**
@@ -206,6 +211,14 @@ export type UpdateWorkerOpts = ProvisionOptions & {
    * fails loud — do not pass a blank to "skip".
    */
   phoenixIdBase?: string;
+  /**
+   * Managed collaboration backend (PHNX-3835). BOTH must be present to enable
+   * `/__collab`; pass neither to leave the surface disabled (the Worker fails it
+   * closed). The service token rides Cloudflare's Secrets API, never rendered
+   * HTML or browser JS. Applied like `phoenixIdBase` — only when defined.
+   */
+  collabBase?: string;
+  collabServiceToken?: string;
 };
 
 /**
@@ -255,6 +268,7 @@ export async function updateWorker(
     if (opts.phoenixIdBase !== undefined) {
       await applyPhoenixIdBaseSecret(apiToken, accountId, workerName, opts.phoenixIdBase, opts);
     }
+    await applyCollabSecrets(apiToken, accountId, workerName, opts);
     return { templateHash, skipped: true };
   }
   await deployWorker(apiToken, accountId, workerName, worker, bucketName, opts);
@@ -280,7 +294,40 @@ export async function updateWorker(
       );
     }
   }
+  // The script upload wiped bindings/secrets (see JSDoc above), so re-apply the
+  // collaboration secrets too — but only when the caller provided them. An
+  // ordinary deploy with collaboration still dormant passes neither and the
+  // Worker keeps failing `/__collab` closed.
+  try {
+    await applyCollabSecrets(apiToken, accountId, workerName, opts);
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e);
+    throw new Error(
+      `Worker deployed but the collaboration secrets failed to re-apply — \`/__collab\` stays disabled until you re-run \`agents artifacts share update\`. (${detail})`,
+    );
+  }
   return { templateHash, skipped: false };
+}
+
+/**
+ * Bind the managed collaboration secrets (PHNX-3835) — both or neither. A no-op
+ * when the caller passed neither (collaboration dormant), so a plain managed
+ * deploy never touches them; fails loud on a half-config (one without the other).
+ */
+async function applyCollabSecrets(
+  apiToken: string,
+  accountId: string,
+  workerName: string,
+  opts: UpdateWorkerOpts,
+): Promise<void> {
+  if (opts.collabBase === undefined && opts.collabServiceToken === undefined) return;
+  if (opts.collabBase === undefined || opts.collabServiceToken === undefined) {
+    throw new Error(
+      'Managed collaboration needs BOTH PRIX_ARTIFACT_COLLAB_BASE and ARTIFACT_COLLAB_SERVICE_TOKEN — set both or neither.',
+    );
+  }
+  await putWorkerSecret(apiToken, accountId, workerName, WORKER_COLLAB_BASE_SECRET, opts.collabBase, opts);
+  await putWorkerSecret(apiToken, accountId, workerName, WORKER_COLLAB_SERVICE_TOKEN_SECRET, opts.collabServiceToken, opts);
 }
 
 /** Add/update a secret_text binding using Cloudflare's Workers Secrets API. */
