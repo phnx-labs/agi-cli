@@ -532,6 +532,7 @@ export function buildSessionDescription(s: ActiveSession): string {
     return cleanPreview(parts.filter(Boolean).join(' · '));
   }
   // Terminal, headless, or sub-agent: todos + live preview, then label, then topic.
+  // ladder-exempt: the compact --active preview BASE (a live snippet), not the row's headline title.
   const base = s.preview || s.label || s.topic || '';
   return cleanPreview([todo, base].filter(Boolean).join(' · '));
 }
