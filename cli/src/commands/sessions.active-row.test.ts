@@ -68,6 +68,49 @@ describe('renderActiveRowLines', () => {
     }
   });
 
+  it('renders a dim secondary line for a pending question / needs-you (PHNX-3797)', () => {
+    const q = active({
+      status: 'input_required',
+      topic: 'add a widget',
+      importantMessage: { text: 'Which region should I deploy to?', kind: 'question' },
+    });
+    const lines = renderActiveRowLines(q, '  ', 120);
+    // header + identity + the ranked secondary line.
+    expect(lines).toHaveLength(3);
+    expect(lines[2]).toContain('Which region should I deploy to?');
+
+    const n = active({
+      status: 'input_required',
+      topic: 'ship it',
+      importantMessage: { text: 'Waiting for you', kind: 'needs_you' },
+    });
+    expect(renderActiveRowLines(n, '  ', 120).join('\n')).toContain('Waiting for you');
+  });
+
+  it('adds no secondary line for plain activity — the preview already carries it', () => {
+    const a = active({
+      status: 'running',
+      topic: 'edit the db',
+      importantMessage: { text: 'editing db.ts', kind: 'activity' },
+    });
+    const lines = renderActiveRowLines(a, '  ', 120);
+    expect(lines).toHaveLength(2); // header + identity only
+    expect(lines.join('\n')).not.toContain('editing db.ts');
+  });
+
+  it('keeps the secondary question line within terminal width', () => {
+    const q = active({
+      status: 'input_required',
+      topic: 'a very long topic '.repeat(20).trim(),
+      importantMessage: { text: 'Which region should I deploy to? '.repeat(12).trim(), kind: 'question' },
+    });
+    for (const termW of [40, 60, 80, 120]) {
+      for (const line of renderActiveRowLines(q, '  ', termW)) {
+        expect(stringWidth(line), `width ${termW} overflow: <${line}>`).toBeLessThanOrEqual(termW);
+      }
+    }
+  });
+
   it('emits a single line when there is no label/topic/project/locator to show', () => {
     // cwd cleared too: formatActiveRowDescription surfaces the project (basename cwd)
     // when present, which would otherwise fill line 2.

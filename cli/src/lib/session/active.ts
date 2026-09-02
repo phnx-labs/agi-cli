@@ -333,6 +333,33 @@ export type SessionPhase = 'running' | 'waiting' | 'failed' | 'done' | 'idle';
  */
 export type RecapSource = 'label' | 'generated' | 'prompt';
 
+/**
+ * How urgent a row's secondary line is (PHNX-3797 owner feedback), best-first:
+ *   - `question`  — the agent asked something and is parked on the answer;
+ *   - `needs_you` — blocked on the operator (a plan review, a permission, or a
+ *                   generic input-required wait) — the "needs you" case;
+ *   - `activity`  — nothing blocking; just what the agent is doing right now.
+ *
+ * `question`/`needs_you` are the signals a plain rolling activity preview buries,
+ * which is why they get their own ranked line distinct from the {@link ActiveSession.title}
+ * headline.
+ */
+export type ImportantMessageKind = 'question' | 'needs_you' | 'activity';
+
+/**
+ * The single most important recent agent message for a row's secondary line
+ * (PHNX-3797 owner feedback). Distinct from the headline ({@link ActiveSession.title}),
+ * which says what the session IS: this says what the agent is doing or waiting on
+ * RIGHT NOW, ranked by {@link deriveImportantMessage} so a blocking question or a
+ * needs-you beats generic activity.
+ */
+export interface SessionImportantMessage {
+  /** The message to show, trimmed + capped for a single line. */
+  text: string;
+  /** Its urgency class — drives ordering and any glyph/color the renderer adds. */
+  kind: ImportantMessageKind;
+}
+
 export interface ActiveSession {
   context: ActiveContext;
   kind: string;
@@ -402,6 +429,15 @@ export interface ActiveSession {
   lastAgentLine?: string;
   /** Live preview: the latest turn (agent message or tool action), from the state engine. */
   preview?: string;
+  /**
+   * The row's SECONDARY line (PHNX-3797 owner feedback): the most important recent
+   * agent message — a pending question, a needs-you block, or the current activity —
+   * ranked by {@link deriveImportantMessage}. Distinct from the {@link title}
+   * headline; folded on beside it in {@link foldRecap} and carried on the same
+   * `sessions watch --json` / mirror feed (via spread) so AGI EXT can render a bold
+   * title over a dim secondary line without a second query.
+   */
+  importantMessage?: SessionImportantMessage;
   /** Inferred activity: working / waiting_input / idle (from the transcript tail). */
   activity?: SessionActivity;
   /**
@@ -2752,6 +2788,49 @@ export function deriveSessionRecap(
   };
 }
 
+/**
+ * The row's SECONDARY line (PHNX-3797 owner feedback): the most important recent
+ * agent message, ranked so the operator sees a block before generic chatter —
+ * a pending question, then a needs-you wait (plan review / permission /
+ * input-required), then the current activity (the agent's latest line). Returns
+ * `undefined` only when there is nothing recent to show at all.
+ *
+ * Pure over the fields it reads so the ranking is unit-tested directly; folded
+ * onto every row by {@link applyRecap} beside the {@link deriveSessionRecap} title.
+ */
+export function deriveImportantMessage(
+  row: Pick<ActiveSession, 'status' | 'activity' | 'awaitingReason' | 'question' | 'preview' | 'lastAgentLine'>,
+): SessionImportantMessage | undefined {
+  // The agent's latest words — the fallback text for every kind. `lastAgentLine`
+  // is already trimmed/capped; `preview` (a live tool/turn line) is not.
+  const recent = recapLine(row.preview) ?? row.lastAgentLine;
+
+  // A pending question is the single most important thing an agent can be saying.
+  if (row.awaitingReason === 'question' || row.question) {
+    const text = recapLine(row.question?.text) ?? recent;
+    if (text) return { text, kind: 'question' };
+  }
+
+  // Blocked on the operator: a plan review, a permission decision, or a bare
+  // input-required wait. The "needs you" case the Fleet has to make loud.
+  const needsYou = row.awaitingReason === 'plan_review'
+    || row.awaitingReason === 'permission'
+    || row.status === 'input_required'
+    || row.activity === 'waiting_input';
+  if (needsYou) {
+    const fallback = row.awaitingReason === 'plan_review'
+      ? 'Waiting on plan review'
+      : row.awaitingReason === 'permission'
+        ? 'Waiting on a permission decision'
+        : 'Waiting for you';
+    return { text: recent ?? fallback, kind: 'needs_you' };
+  }
+
+  // Nothing blocking — just what the agent is doing now.
+  if (recent) return { text: recent, kind: 'activity' };
+  return undefined;
+}
+
 /** Write one row's recap fields from its current label/generatedTitle/topic/tail. */
 function applyRecap(s: ActiveSession): void {
   const recap = deriveSessionRecap(s);
@@ -2761,6 +2840,9 @@ function applyRecap(s: ActiveSession): void {
   s.userPromptKind = recap.userPromptKind;
   s.lastAgentLine = recap.lastAgentLine;
   if (recap.request) s.request = recap.request;
+  // The secondary line rides the same fold as the headline (PHNX-3797), so every
+  // consumer that reads `title` off a row reads `importantMessage` beside it.
+  s.importantMessage = deriveImportantMessage(s);
 }
 
 /** Fold the recap ladder onto every row (see {@link deriveSessionRecap}). */
