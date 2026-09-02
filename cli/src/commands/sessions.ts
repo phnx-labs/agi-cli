@@ -44,6 +44,7 @@ import { inferSessionState } from '../lib/session/state.js';
 import { discoverSessions, queryIndexedSessions, countSessionsInScope, resolveSessionById, isCompleteSessionId, looksLikeSessionId, searchContentIndex, parseTimeFilter, getSessionRoots, scopeToManaged, type DiscoverOptions, type ScanProgress } from '../lib/session/discover.js';
 import { findSessionsById, querySessions, getSessionById, readSessionContent, readArchivedSessionPreview } from '../lib/session/db.js';
 import { liveSessionMetas, fleetExecutionMachineById, reconcileLiveMetaMachine } from '../lib/session/live-metadata.js';
+import { sessionHeadline } from '../lib/session/title.js';
 import {
   filterTeamSessions,
   shouldShowTeamSessions,
@@ -2534,7 +2535,7 @@ export function printToolSearch(envelope: ToolSearchEnvelope): void {
       ? truncate(sanitizeForTerminal(session.machine).replace(/\s+/g, ' '), 80)
       : '';
     const machine = machineName ? ` @ ${machineName}` : '';
-    const rawHeading = session.label || session.topic || session.project || session.shortId;
+    const rawHeading = sessionHeadline(session) || session.project || session.shortId;
     const heading = truncate(
       sanitizeForTerminal(rawHeading).replace(/\s+/g, ' '),
       Math.max(30, terminalWidth() - 20),
@@ -3962,7 +3963,7 @@ function renderArchivedSession(
   const shown = sessionDisplayAgent(session);
   const agentColor = colorAgent(shown);
   const absTime = formatAbsoluteTime(session.timestamp);
-  const title = (session as any).label || session.topic;
+  const title = sessionHeadline(session);
   console.log('');
   if (title) console.log(chalk.bold.white(title));
   console.log(
@@ -4029,9 +4030,10 @@ async function renderSession(
     const branchStr = session.gitBranch ? chalk.gray(` (${session.gitBranch})`) : '';
     const absTime = formatAbsoluteTime(session.timestamp);
 
-    // Auto-inferred title headline (user /rename > Claude ai-title > first-prompt
-    // topic) — the fastest way to recognize which task this session is.
-    const title = (session as any).label || session.topic;
+    // Auto-inferred title headline (user /rename > Claude ai-title >
+    // daemon-generated title > first-prompt topic) — the fastest way to
+    // recognize which task this session is.
+    const title = sessionHeadline(session);
     if (title) {
       const badges = signalBadges(metaSignals(session));
       console.log(chalk.bold.white(title) + (badges ? '  ' + badges : ''));

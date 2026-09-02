@@ -186,6 +186,22 @@ endpoint is deployed. The BYO path never touches it.
   redacted (only `--no-redact` opts out) and terminal escapes always stripped —
   because the row is also published into the git-tracked fleet mirror
   (SES-54a).
+- Every session row's **headline is a user-anchored name, never the agent's latest
+  message** (PHNX-3797). One ladder decides it everywhere — `/rename` label →
+  `generatedTitle` → the first-prompt `topic` — implemented once in
+  `deriveSessionRecap` (`lib/session/active.ts`) for live rows and
+  `sessionHeadline` (`lib/session/title.ts`) for indexed rows, so the CLI list,
+  the picker, `sessions watch --json`, and AGI EXT can never disagree about a
+  session's name. `generatedTitle` is a 3-6 word technical title produced by the
+  daemon's `session-title` service with a cheap model (`--model cheap`,
+  read-only plan mode), generated **once** per session and persisted in the index
+  against a hash of the user text it came from — so a titled session costs no
+  further model calls, and it regenerates only when that first user message
+  changes or on an explicit `agents sessions backfill titles --refresh`. Until it
+  runs, the row honestly shows the user's own first message. The agent's rolling
+  last line stays where a live status belongs: `lastAgentLine` / the preview pane.
+  Each box titles its own sessions and publishes them on the fleet session mirror,
+  so a peer's rows carry the same headline with no per-row SSH.
 - Rendering and sharing redact credential-shaped values and local identity by default.
 - Export/import preserves provenance and stable IDs while treating indexes as rebuildable.
 - Off-box backup (`sessions export --to-r2` / `import --from-r2`) is **managed-first**:

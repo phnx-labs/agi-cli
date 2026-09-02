@@ -107,6 +107,41 @@ describe('session mirror (real DB + real shared-state files)', () => {
     expect(row.mirror_source).toBe('yosemite-m5');
   });
 
+  it('carries the peer\'s daemon-generated title both ways, so a remote row shows the SAME headline (PHNX-3797)', async () => {
+    const root = getUserAgentsDir();
+    const id = 'a1a1a1a1-0000-0000-0000-000000000011';
+    seedLocalSession({ id, topic: 'wire the session titler' });
+    db.setSessionGeneratedTitle(id, 'Daemon session titler', 'key-1');
+
+    // Publish: this box's own title rides its shared-state file.
+    await mirror.publishSessionMirrorToSharedStore({ userAgentsDir: root });
+    const published = readFleetSharedDeviceStates(root).states
+      .find((s) => s.device === self)!.sessions!.rows.find((r) => r.id === id)!;
+    expect(published.title).toBe('Daemon session titler');
+
+    // Consume: a peer's title lands on the mirror row this box renders.
+    const peerId = 'b2b2b2b2-0000-0000-0000-000000000012';
+    updateFleetSharedDeviceState('yosemite-m3', {
+      sessions: {
+        rows: [{
+          id: peerId,
+          shortId: 'b2b2b2b2',
+          agent: 'claude',
+          machine: 'yosemite-m3',
+          topic: 'the fleet list headline is the agent last message',
+          title: 'Session headline ladder fix',
+          firstUser: 'Every row shows the agent latest message. Make it a real title.',
+          lastActivity: '2026-09-01T13:00:00.000Z',
+          timestamp: '2026-09-01T12:00:00.000Z',
+          capturedAt: Date.now(),
+        }],
+      },
+    }, root);
+    mirror.consumeSessionMirrorFromSharedStore({ userAgentsDir: root, device: self, role: 'personal' });
+    expect(rawRow(peerId).generated_title).toBe('Session headline ladder fix');
+    expect(db.getSessionById(peerId)?.generatedTitle).toBe('Session headline ladder fix');
+  });
+
   it('OVERWRITES a host-dispatch stub\'s [host/peer] placeholder label with the synced topic', () => {
     const root = getUserAgentsDir();
     // A local host-dispatch stub: peer machine, empty file, placeholder label, no topic.

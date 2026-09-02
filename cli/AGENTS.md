@@ -1483,6 +1483,21 @@ render a right/bottom **preview pane** built by `buildPreview(session)` in
 `Health` (errors + test verdict), `Cost` (msgs/tokens + tool mix), `Latest` (the
 full last message, wrapped), and one width-capped `Details ▸` fold (session id,
 skills, plugins, hooks, links, dirs, repos).
+The card leads with the session's **headline**, and that headline is one ladder
+everywhere (PHNX-3797): `/rename` label → the daemon-generated `generatedTitle` →
+the first-prompt topic — **never** the agent's latest transcript line, which is a
+rolling monologue and belongs to the live preview/`lastAgentLine` slot instead.
+Live rows resolve it in `deriveSessionRecap` (`src/lib/session/active.ts`),
+indexed rows in `sessionHeadline` (`src/lib/session/title.ts`); no surface
+re-derives its own ordering. `generatedTitle` is produced ONCE per session by the
+daemon's `session-title` service with a cheap model and persisted in
+`sessions.generated_title` beside the hash of the user text it came from, so a
+titled session never costs another model call and re-titles only when that first
+user message changes (or on `agents sessions backfill titles --refresh`). It
+rides the existing streams — the watch row spread and the PHNX-3792 session
+mirror — so remote rows show the same title with no per-row SSH and no client
+generates one itself.
+
 `agents sessions preview <uuid-or-prefix>` uses the same card without the picker.
 ID-shaped selectors go through the indexed fleet resolver, remote cards render on
 their owning peer, and the normalized digest is cached in SQLite against the

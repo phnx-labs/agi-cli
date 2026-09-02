@@ -33,6 +33,7 @@ import { recordSubsystemOk, recordSubsystemError, recordSubsystemErrorReason, re
 import { ServiceSupervisor } from './supervisor.js';
 import { SessionIndexService } from './session-index-service.js';
 import { SessionSummarizerService } from './session-summarizer-service.js';
+import { SessionTitleService } from './session-title-service.js';
 import { MonitorEngineService } from './monitor-engine-service.js';
 import { AccountUsageService, AccountAuthService } from './account-state-daemon-service.js';
 import { CatchupService } from './catchup-service.js';
@@ -1084,6 +1085,11 @@ export async function runDaemon(): Promise<void> {
   // idempotency truth across daemon restarts.
   if (isEnabled('attention-notify')) supervisor.register(new AttentionNotifyService());
   else log('INFO', 'Attention-notify service disabled');
+
+  // Session titles (PHNX-3797) — generates each session row's headline once,
+  // with a cheap model, off the request path.
+  if (isEnabled('session-title')) supervisor.register(new SessionTitleService());
+  else log('INFO', 'Session-title service disabled');
 
   // Watchdog, device-probe, and self-heal are all periodic services managed
   // by the ServiceSupervisor (RUSH-3193 P3). Each is gated the same way as

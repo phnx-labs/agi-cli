@@ -40,7 +40,7 @@ const DB_PATH = getSessionsDbPath();
 /** Current schema version; bumped when migrations are added. Exported so tests
  * assert against the constant instead of hardcoding a number that every bump
  * then has to chase (docs/sessions.md calls the constant the source of truth). */
-export const SCHEMA_VERSION = 49;
+export const SCHEMA_VERSION = 50;
 
 /**
  * Bump to force the content extractor (assistant-answer text, alongside the
@@ -168,7 +168,18 @@ CREATE TABLE IF NOT EXISTS sessions (
   -- by age without touching real rows; mirror_source names the publishing
   -- device. A row keeps a NULL mirror_synced_at once it gains a real transcript.
   mirror_synced_at INTEGER,
-  mirror_source TEXT
+  mirror_source TEXT,
+  -- Daemon-generated session TITLE (PHNX-3797): a short technical label for what
+  -- the session worked on, produced once by the session-title daemon service and
+  -- read by every headline surface. Deliberately NOT transcript-derived, so the
+  -- scanner's upsert omits these columns entirely (an omitted column keeps its
+  -- prior value) and only the titler writes them. generated_title_key is the
+  -- hash of the user text the title was derived from, so the titler can tell
+  -- "already titled" from "the first user message changed"; generated_title_at
+  -- is when it was produced.
+  generated_title TEXT,
+  generated_title_key TEXT,
+  generated_title_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_timestamp ON sessions(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_sessions_cwd ON sessions(cwd);
@@ -618,6 +629,15 @@ interface SessionRow {
   /** Epoch ms last written from a peer's fleet session mirror (PHNX-3792); NULL for a local row. */
   mirror_synced_at?: number | null;
   mirror_source?: string | null;
+  /**
+   * Daemon-generated title (PHNX-3797) and the {@link sessionTitleSourceKey} of
+   * the user text it was derived from. Optional for the same reason as
+   * `archived_at`: the scanner's upsert payload never names these columns, so a
+   * rescan preserves them and only the titler writes them.
+   */
+  generated_title?: string | null;
+  generated_title_key?: string | null;
+  generated_title_at?: number | null;
 }
 
 /** File stat snapshot used to detect changes between scan runs. */
@@ -1483,11 +1503,16 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     // block (fresh DBs skip migrations), alongside idx_sessions_last_activity.
   }
 
-  if (fromVersion < 49) {
+  if (fromVersion < 47) {
+    // v46 -> v47: carry the actor's Phoenix id (PHNX-3798). Additive, write-once
+    // launch metadata joined from the actor sidecar — never transcript-derived,
+    // exactly like actor/initiated_by (v19) — so there is no ledger wipe: a rescan
+    // can't backfill it and forcing a full re-parse would be pure churn. Existing
+    // rows stay NULL until the sidecar-join fills them (the ON CONFLICT COALESCEs).
     const cols = new Set(
-      (db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map(c => c.name),
+      (db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map((c) => c.name),
     );
-    if (!cols.has('account_id')) db.exec(`ALTER TABLE sessions ADD COLUMN account_id TEXT`);
+    if (!cols.has('phoenix_id')) db.exec(`ALTER TABLE sessions ADD COLUMN phoenix_id TEXT`);
   }
 
   if (fromVersion < 48) {
@@ -1511,16 +1536,27 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     if (!cols.has('last_user_message')) db.exec(`ALTER TABLE sessions ADD COLUMN last_user_message TEXT`);
   }
 
-  if (fromVersion < 47) {
-    // v46 -> v47: carry the actor's Phoenix id (PHNX-3798). Additive, write-once
-    // launch metadata joined from the actor sidecar — never transcript-derived,
-    // exactly like actor/initiated_by (v19) — so there is no ledger wipe: a rescan
-    // can't backfill it and forcing a full re-parse would be pure churn. Existing
-    // rows stay NULL until the sidecar-join fills them (the ON CONFLICT COALESCEs).
+  if (fromVersion < 49) {
+    // v48 -> v49: account-first storage (PHNX-3940).
+    const cols = new Set(
+      (db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map(c => c.name),
+    );
+    if (!cols.has('account_id')) db.exec(`ALTER TABLE sessions ADD COLUMN account_id TEXT`);
+  }
+
+  if (fromVersion < 50) {
+    // v49 -> v50: the daemon-generated session title (PHNX-3797). Additive
+    // columns, no ledger wipe: nothing in a transcript produces them — the
+    // session-title service writes them and the scanner's upsert never names
+    // them — so re-parsing every indexed transcript would be pure churn. Rows
+    // stay NULL until the titler reaches them, which the recap ladder handles by
+    // falling back to the user's own first message.
     const cols = new Set(
       (db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map((c) => c.name),
     );
-    if (!cols.has('phoenix_id')) db.exec(`ALTER TABLE sessions ADD COLUMN phoenix_id TEXT`);
+    if (!cols.has('generated_title')) db.exec(`ALTER TABLE sessions ADD COLUMN generated_title TEXT`);
+    if (!cols.has('generated_title_key')) db.exec(`ALTER TABLE sessions ADD COLUMN generated_title_key TEXT`);
+    if (!cols.has('generated_title_at')) db.exec(`ALTER TABLE sessions ADD COLUMN generated_title_at INTEGER`);
   }
 
 }
@@ -3108,6 +3144,7 @@ function rowToMeta(row: SessionRow): SessionMeta {
     topic: row.topic ?? undefined,
     firstUserMessage: row.first_user_message ?? undefined,
     lastUserMessage: row.last_user_message ?? undefined,
+    generatedTitle: row.generated_title ?? undefined,
     label: row.label ?? undefined,
     isTeamOrigin: row.is_team_origin === 1,
     prUrl: row.pr_url ?? undefined,
@@ -4078,6 +4115,8 @@ export interface LocalMirrorSource {
   topic: string | null;
   firstUserMessage: string | null;
   label: string | null;
+  /** The daemon-generated headline (PHNX-3797), so a peer row shows the same title. */
+  generatedTitle: string | null;
   lastActivity: string | null;
   timestamp: string;
   ticketId: string | null;
@@ -4098,7 +4137,7 @@ export interface LocalMirrorSource {
 export function queryLocalOriginSessionsForMirror(self: string, limit: number): LocalMirrorSource[] {
   const rows = getDB().prepare(`
     SELECT id, short_id, agent, version, machine, cwd, topic, first_user_message,
-           label, last_activity, timestamp, ticket_id, pr_url
+           label, generated_title, last_activity, timestamp, ticket_id, pr_url
     FROM sessions
     WHERE mirror_synced_at IS NULL
       AND file_path IS NOT NULL AND file_path <> ''
@@ -4110,11 +4149,13 @@ export function queryLocalOriginSessionsForMirror(self: string, limit: number): 
   `).all(self, limit) as Array<{
     id: string; short_id: string; agent: string; version: string | null; machine: string | null;
     cwd: string | null; topic: string | null; first_user_message: string | null; label: string | null;
+    generated_title: string | null;
     last_activity: string | null; timestamp: string; ticket_id: string | null; pr_url: string | null;
   }>;
   return rows.map((r) => ({
     id: r.id, shortId: r.short_id, agent: r.agent, version: r.version, machine: r.machine,
     cwd: r.cwd, topic: r.topic, firstUserMessage: r.first_user_message, label: r.label,
+    generatedTitle: r.generated_title,
     lastActivity: r.last_activity, timestamp: r.timestamp, ticketId: r.ticket_id, prUrl: r.pr_url,
     // Ride the daemon-computed summary alongside the digest so a peer renders it
     // without a transcript (PHNX-3939); only a summarized session carries one.
@@ -4134,6 +4175,8 @@ export interface MirrorSessionUpsert {
   topic?: string | null;
   firstUser?: string | null;
   label?: string | null;
+  /** The publisher's daemon-generated headline (PHNX-3797); undefined when it has none yet. */
+  generatedTitle?: string | null;
   lastActivity?: string | null;
   timestamp: string;
   ticketId?: string | null;
@@ -4161,11 +4204,11 @@ export function upsertMirrorSession(row: MirrorSessionUpsert, source: string, sy
   const result = db.prepare(`
     INSERT INTO sessions (
       id, short_id, agent, origin, version, timestamp, last_activity, cwd,
-      topic, first_user_message, label, message_count, file_path, scanned_at,
+      topic, first_user_message, label, generated_title, message_count, file_path, scanned_at,
       is_team_origin, ticket_id, pr_url, machine, mirror_synced_at, mirror_source
     ) VALUES (
       @id, @short_id, @agent, 'cli', @version, @timestamp, @last_activity, @cwd,
-      @topic, @first_user, @label, NULL, '', @scanned_at,
+      @topic, @first_user, @label, @generated_title, NULL, '', @scanned_at,
       0, @ticket_id, @pr_url, @machine, @synced_at, @source
     )
     ON CONFLICT(id) DO UPDATE SET
@@ -4183,6 +4226,12 @@ export function upsertMirrorSession(row: MirrorSessionUpsert, source: string, sy
       -- symptom this feature fixes. A null peer label clears it so the list falls
       -- back to the synced topic.
       label = excluded.label,
+      -- Same rule for the generated headline (PHNX-3797): the publishing box owns
+      -- its sessions' titles, and this box's titler never generates for a mirror
+      -- row, so the peer's value wins outright and a peer that has not titled the
+      -- session yet clears it (the ladder then falls back to the synced first
+      -- user message, never to an agent line).
+      generated_title = excluded.generated_title,
       ticket_id = COALESCE(excluded.ticket_id, sessions.ticket_id),
       pr_url = COALESCE(excluded.pr_url, sessions.pr_url),
       machine = excluded.machine,
@@ -4200,6 +4249,7 @@ export function upsertMirrorSession(row: MirrorSessionUpsert, source: string, sy
     topic: row.topic ?? null,
     first_user: row.firstUser ?? null,
     label: row.label ?? null,
+    generated_title: row.generatedTitle ?? null,
     ticket_id: row.ticketId ?? null,
     pr_url: row.prUrl ?? null,
     machine: row.machine,
@@ -4235,6 +4285,104 @@ export function upsertMirrorSession(row: MirrorSessionUpsert, source: string, sy
     });
   }
   return true;
+}
+
+/** One indexed session the daemon titler may generate a headline for (PHNX-3797). */
+export interface SessionTitleCandidateRow {
+  id: string;
+  agent: string;
+  cwd: string | null;
+  project: string | null;
+  topic: string | null;
+  firstUserMessage: string | null;
+  label: string | null;
+  ticketId: string | null;
+  gitBranch: string | null;
+  generatedTitle: string | null;
+  generatedTitleKey: string | null;
+}
+
+/**
+ * The most-recently-active LOCAL sessions the titler may consider (PHNX-3797).
+ *
+ * Deliberately not "every untitled row": the caller decides which of these still
+ * needs work by comparing each row's stored `generatedTitleKey` against the key
+ * of its current user text, so a first-user-message change re-titles without a
+ * second stored copy of that text. Rows excluded here can never be titled:
+ *  - a peer MIRROR row — its owning box generates its title and publishes it;
+ *  - a row with no user text at all — there is nothing user-anchored to title;
+ *  - a row that already carries a `/rename`-style `label`, which outranks a
+ *    generated title in the ladder, so generating one would buy nothing.
+ * `sinceMs` bounds the work to sessions recent enough to still be shown.
+ */
+export function querySessionTitleCandidates(
+  limit: number,
+  opts: { sinceMs?: number; id?: string } = {},
+): SessionTitleCandidateRow[] {
+  const clauses = [
+    `mirror_synced_at IS NULL`,
+    `(first_user_message IS NOT NULL OR topic IS NOT NULL)`,
+  ];
+  const params: unknown[] = [];
+  if (opts.id) {
+    clauses.push(`(id = ? OR short_id = ?)`);
+    params.push(opts.id, opts.id);
+  } else {
+    // An explicitly requested session is titled even when it carries a label or
+    // is older than the window; the periodic sweep honours both bounds.
+    clauses.push(`(label IS NULL OR trim(label) = '')`);
+    if (opts.sinceMs != null) {
+      clauses.push(`COALESCE(last_activity, timestamp) >= ?`);
+      params.push(new Date(opts.sinceMs).toISOString());
+    }
+  }
+  const rows = getDB().prepare(`
+    SELECT id, agent, cwd, project, topic, first_user_message, label, ticket_id,
+           git_branch, generated_title, generated_title_key
+    FROM sessions
+    WHERE ${clauses.join(' AND ')}
+    ORDER BY COALESCE(last_activity, timestamp) DESC
+    LIMIT ?
+  `).all(...params, limit) as Array<{
+    id: string; agent: string; cwd: string | null; project: string | null;
+    topic: string | null; first_user_message: string | null; label: string | null;
+    ticket_id: string | null; git_branch: string | null;
+    generated_title: string | null; generated_title_key: string | null;
+  }>;
+  return rows.map((r) => ({
+    id: r.id,
+    agent: r.agent,
+    cwd: r.cwd,
+    project: r.project,
+    topic: r.topic,
+    firstUserMessage: r.first_user_message,
+    label: r.label,
+    ticketId: r.ticket_id,
+    gitBranch: r.git_branch,
+    generatedTitle: r.generated_title,
+    generatedTitleKey: r.generated_title_key,
+  }));
+}
+
+/**
+ * Persist one generated title against the source key it was derived from
+ * (PHNX-3797). `sourceKey` is what makes generation once-per-session: the next
+ * sweep sees a stored key equal to the row's current user text and skips it,
+ * and regenerates only when that text changed. Never touches a mirror row —
+ * the publishing box owns its own sessions' titles.
+ */
+export function setSessionGeneratedTitle(
+  id: string,
+  title: string,
+  sourceKey: string,
+  now: number = Date.now(),
+): boolean {
+  const result = getDB().prepare(`
+    UPDATE sessions
+    SET generated_title = ?, generated_title_key = ?, generated_title_at = ?
+    WHERE id = ? AND mirror_synced_at IS NULL
+  `).run(title, sourceKey, now, id);
+  return result.changes > 0;
 }
 
 /**

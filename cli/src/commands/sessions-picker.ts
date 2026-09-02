@@ -120,6 +120,7 @@ function sanitizeMeta(s: SessionMeta): SessionMeta {
     topic: clean(s.topic),
     firstUserMessage: clean(s.firstUserMessage),
     label: clean(s.label),
+    generatedTitle: clean(s.generatedTitle),
     ticketId: clean(s.ticketId),
     prUrl: clean(s.prUrl),
     // A remote row's meta is peer-supplied JSON that parseRemoteList hands over
@@ -358,6 +359,7 @@ function previewCacheKey(session: SessionMeta, remote: string | undefined): stri
   // independently (label/ticket/PR/live scanner enrichment) also rides the key.
   return JSON.stringify([
     remote ?? '', remoteDigestState, session.id, fileStamp, session.lastActivity, session.label,
+    session.generatedTitle,
     session.topic, session.ticketId, session.prUrl, session.messageCount,
     session.tokenCount, session.model, session.todos, session.plan,
     session.recentDirectoriesTouched, session.skillsUsed,
@@ -553,13 +555,14 @@ function formatHeader(session: SessionMeta, events: SessionEvent[]): string {
   }
 
   // Lead with the session's human title: `session.label` — an agent-generated
-  // name / `/rename`, else the `--name` launch handle. NOT `session.topic`: the
-  // topic is the derived first-prompt, already shown on the `Prompt:` line, so
-  // using it here too would print the same text twice. Unlabelled sessions keep
-  // that `Prompt:` line as their topic indicator and simply lead with the agent
-  // line. Wrapped to the pane (the header sits at column 0, full terminal width);
-  // nothing renders when there is no label.
-  const title = (session.label || '').trim();
+  // name / `/rename`, else the `--name` launch handle — else the daemon-generated
+  // title (PHNX-3797), which is a short technical NAME, not a restatement of the
+  // prompt. NOT `session.topic`: the topic is the derived first-prompt, already
+  // shown on the `Prompt:` line, so using it here too would print the same text
+  // twice. A session with neither keeps that `Prompt:` line as its topic
+  // indicator and simply leads with the agent line. Wrapped to the pane (the
+  // header sits at column 0, full terminal width).
+  const title = (session.label || session.generatedTitle || '').trim();
   const titleLines = title
     ? wrapToWidth(title, terminalWidth()).map(l => chalk.bold.white(l))
     : [];

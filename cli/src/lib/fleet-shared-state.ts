@@ -40,6 +40,8 @@ export interface SessionMirrorRow {
   cwd?: string;
   topic?: string;
   label?: string;
+  /** The publisher's daemon-generated headline (PHNX-3797), when it has produced one. */
+  title?: string;
   firstUser?: string;
   lastActivity?: string;
   timestamp: string;

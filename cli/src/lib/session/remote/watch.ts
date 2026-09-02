@@ -97,6 +97,17 @@ export function previousSessionWatchRowKey(scope: string, sessionId: string): st
   return createHash('sha256').update(`${scope}\0previous\0${sessionId}`).digest('base64url').slice(0, 22);
 }
 
+/**
+ * The headline for a durable history row, on the same ladder a live row uses
+ * ({@link deriveSessionRecap}): an explicit `/rename` label, then the
+ * daemon-generated title (PHNX-3797), then the daemon-folded request headline
+ * (`request.headline` — the user's own sentence with attachment noise pulled
+ * out, PHNX-3939) when the transcript cache has one, else the raw `topic`.
+ */
+function previousRowTitle(session: SessionMeta, foldedHeadline: string | undefined): string | undefined {
+  return session.label || session.generatedTitle || foldedHeadline || session.topic || undefined;
+}
+
 /** Project one durable indexed session into the same canonical watch contract
  * as live sessions. This is the only history backfill consumed by AGI EXT. */
 export function toPreviousSessionWatchRow(scope: string, session: SessionMeta): SessionWatchRow {
@@ -123,6 +134,7 @@ export function toPreviousSessionWatchRow(scope: string, session: SessionMeta): 
   // transcript-keyed cache the live merge reads (PHNX-3939), so a closed session
   // still shows the request it was given and what the agent did — no re-parse.
   const folded = readSessionTimelineAny(session.id);
+  const title = previousRowTitle(session, folded?.request?.headline);
   return {
     context: 'recent',
     kind: session.agent,
@@ -130,14 +142,13 @@ export function toPreviousSessionWatchRow(scope: string, session: SessionMeta): 
     sessionId: session.id,
     ...(session.cwd ? { cwd: session.cwd } : {}),
     ...(session.project ? { project: session.project } : {}),
-    // `request.headline` is the user's own sentence with the attachment noise
-    // pulled out, so it beats the raw `topic` for the row title — a `/model` echo
-    // or a skill body can no longer become a session's name (PHNX-3939).
-    ...(session.label
-      ? { label: session.label, title: session.label }
-      : folded?.request?.headline
-        ? { title: folded.request.headline }
-        : session.topic ? { title: session.topic } : {}),
+    // Same headline ladder as a live row (`deriveSessionRecap`, PHNX-3797):
+    // `/rename` label → the daemon-generated title → `request.headline` (the
+    // user's own sentence with attachment noise pulled out, PHNX-3939) →
+    // the raw `topic`. See {@link previousRowTitle}.
+    ...(session.label ? { label: session.label } : {}),
+    ...(session.generatedTitle ? { generatedTitle: session.generatedTitle } : {}),
+    ...(title ? { title } : {}),
     ...(session.topic ? { topic: session.topic } : {}),
     ...(session.firstUserMessage ? { firstUserMessage: session.firstUserMessage } : {}),
     ...(session.version ? { version: session.version } : {}),

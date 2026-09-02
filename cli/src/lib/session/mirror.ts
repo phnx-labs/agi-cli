@@ -10,8 +10,9 @@
  * delivers fleet-wide with no operator step. The consuming device folds peer
  * digests into its local `sessions` index as mirror rows, so the picker/list/
  * focus read a LOCAL row instead of dialing the peer. No transcript is shipped —
- * only topic/label, a first-user-message snippet, last-activity, agent+version,
- * cwd, ticket, and PR — and the mirror is bounded and pruned by age.
+ * only topic/label, the peer's daemon-generated title (PHNX-3797), a
+ * first-user-message snippet, last-activity, agent+version, cwd, ticket, and
+ * PR — and the mirror is bounded and pruned by age.
  *
  * Direction is deliberately the inverse of usage-sync: EVERY box publishes its
  * own local sessions (workers are exactly where the remote sessions the personal
@@ -126,6 +127,7 @@ export async function publishSessionMirrorToSharedStore(
     ...(s.cwd ? { cwd: s.cwd } : {}),
     ...(snippet(s.topic, 200) ? { topic: snippet(s.topic, 200) } : {}),
     ...(s.label ? { label: s.label } : {}),
+    ...(snippet(s.generatedTitle, 200) ? { title: snippet(s.generatedTitle, 200) } : {}),
     ...(snippet(s.firstUserMessage) ? { firstUser: snippet(s.firstUserMessage) } : {}),
     ...(s.lastActivity ? { lastActivity: s.lastActivity } : {}),
     timestamp: s.timestamp,
@@ -205,7 +207,7 @@ function isString(v: unknown): v is string {
  */
 function toUpsert(raw: unknown): {
   id: string; shortId: string; agent: string; version?: string; machine: string;
-  cwd?: string; topic?: string; firstUser?: string; label?: string;
+  cwd?: string; topic?: string; firstUser?: string; label?: string; generatedTitle?: string;
   lastActivity?: string; timestamp: string; ticketId?: string; prUrl?: string;
   summary?: import('./db.js').SessionSummaryEntry;
   timeline?: import('./db.js').SessionTimelineProjection;
@@ -228,6 +230,7 @@ function toUpsert(raw: unknown): {
     topic: cap(r.topic, 400),
     firstUser: cap(r.firstUser, SESSION_MIRROR_SNIPPET_MAX),
     label: cap(r.label, 400),
+    generatedTitle: cap(r.title, 200),
     lastActivity: isString(r.lastActivity) ? r.lastActivity : undefined,
     timestamp,
     ticketId: cap(r.ticketId, 64),

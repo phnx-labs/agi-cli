@@ -28,6 +28,7 @@ export type DaemonServiceId =
   | 'device-probe'
   | 'state-dir-check'
   | 'session-index'
+  | 'session-title'
   | 'auth-sync'
   | 'usage-sync'
   | 'daemon-heartbeat'
@@ -140,6 +141,11 @@ export const DAEMON_SERVICES: DaemonServiceDef[] = [
     id: 'attention-notify',
     title: 'Attention desktop banners',
     description: 'Posts one actionable desktop banner per new attention item (question / permission / plan review / stall) so the macOS helper can answer it through agents feed answer (PHNX-4004).',
+  },
+  {
+    id: 'session-title',
+    title: 'Session titles',
+    description: 'Generates the short technical title shown as each session row\'s headline, once per session, with a cheap model — so a row is named by what the user asked for, never by the agent\'s latest message.',
   },
   {
     id: 'auth-sync',

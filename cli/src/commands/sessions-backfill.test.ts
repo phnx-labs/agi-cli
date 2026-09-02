@@ -6,9 +6,9 @@ import * as path from 'path';
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-sessions-backfill-'));
 process.env.HOME = TEST_HOME;
 
-const { closeDB, getDB, upsertSession } = await import('../lib/session/db.js');
+const { closeDB, getDB, getSessionById, upsertSession } = await import('../lib/session/db.js');
 const { discoverSessions } = await import('../lib/session/discover.js');
-const { backfillToolsLocal, runToolsBackfill } = await import('./sessions-backfill.js');
+const { backfillToolsLocal, runToolsBackfill, runTitlesBackfill } = await import('./sessions-backfill.js');
 type SessionMeta = import('../lib/session/types.js').SessionMeta;
 
 afterAll(() => {
@@ -86,5 +86,39 @@ describe('sessions backfill tools', () => {
     const second = await runToolsBackfill({ local: true, unmanaged: true, agent: 'codex' });
     expect(second.complete).toBe(true);
     expect(second.machines[0].indexedFiles).toBeGreaterThan(0);
+  });
+});
+
+describe('sessions backfill titles (the explicit-refresh half of PHNX-3797)', () => {
+  const id = 'title-backfill-session';
+
+  it('generates a headline for an untitled session on demand, then cache-hits', async () => {
+    upsertSession({
+      id, shortId: 'titlebf', agent: 'codex',
+      timestamp: new Date().toISOString(), lastActivity: new Date().toISOString(),
+      filePath: path.join(TEST_HOME, 'titles.jsonl'),
+      topic: 'the sessions list headline is the agent last message',
+      firstUserMessage: 'Every row headlines the agent latest message. Make it a real title.',
+    } as SessionMeta, 'make it a real title');
+
+    let calls = 0;
+    const run = async () => { calls++; return 'Session headline ladder fix'; };
+
+    const first = await runTitlesBackfill({ session: id, run });
+    expect(first).toMatchObject({ kind: 'titles-backfill', generated: 1, failed: 0 });
+    expect(getSessionById(id)?.generatedTitle).toBe('Session headline ladder fix');
+
+    const second = await runTitlesBackfill({ session: id, run });
+    expect(second).toMatchObject({ generated: 0, cached: 1 });
+    expect(calls).toBe(1);
+
+    const refreshed = await runTitlesBackfill({ session: id, refresh: true, run: async () => 'Regenerated headline' });
+    expect(refreshed.generated).toBe(1);
+    expect(getSessionById(id)?.generatedTitle).toBe('Regenerated headline');
+  });
+
+  it('rejects a non-positive --limit loudly instead of silently doing nothing', async () => {
+    await expect(runTitlesBackfill({ limit: '0' })).rejects.toThrow(/--limit must be a positive integer/);
+    await expect(runTitlesBackfill({ limit: 'many' })).rejects.toThrow(/--limit must be a positive integer/);
   });
 });
