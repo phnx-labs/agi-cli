@@ -664,6 +664,7 @@ agents send [text]  Deliver a message through a channel provider (imessage, slac
 agents sessions [query]                    Find, browse, and read agent conversation transcripts. Live roster: `agents sessions --active`.
 agents sessions backfill                   Populate derived session data explicitly.
 agents sessions backfill resources         Derive historical skill/slash-command usage once into the local SQLite index.
+agents sessions backfill titles            Generate the session-row headline (a short technical title) now, instead of waiting for the daemon.
 agents sessions backfill tools             Parse historical tool calls once into the local SQLite index.
 agents sessions backup-setup               (operator) Provision the managed session-backup Worker + R2 bucket — NOT a per-user step; signing in with `agents auth login` backs sessions up with zero setup
 agents sessions bookmark [ids...]          Bookmark sessions so they are easy to find again — list them with --bookmarks, or `b` in the browser.

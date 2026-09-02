@@ -106,6 +106,38 @@ describe('durable Previous rows on the canonical watch stream', () => {
     expect(projected.lastActivityMs - projected.startedAtMs!).toBe(120_000);
   });
 
+  it('headlines a history row on the same ladder as a live row (PHNX-3797)', () => {
+    const generated = toPreviousSessionWatchRow('zion', indexed('history-2', {
+      topic: 'the sessions list headline is wrong, fix it',
+      generatedTitle: 'Session headline ladder fix',
+    }));
+    expect(generated.title).toBe('Session headline ladder fix');
+    expect(generated.generatedTitle).toBe('Session headline ladder fix');
+
+    const renamed = toPreviousSessionWatchRow('zion', indexed('history-3', {
+      label: 'ship the auth fix',
+      generatedTitle: 'Session headline ladder fix',
+      topic: 'the sessions list headline is wrong, fix it',
+    }));
+    expect(renamed.title).toBe('ship the auth fix');
+
+    const untitled = toPreviousSessionWatchRow('zion', indexed('history-4', {
+      topic: 'the sessions list headline is wrong, fix it',
+    }));
+    expect(untitled.title).toBe('the sessions list headline is wrong, fix it');
+  });
+
+  it('a LIVE row carries its generated title verbatim onto the stream, for local and forwarded remote rows alike', () => {
+    const live = toSessionWatchRow('mark-1', {
+      context: 'terminal', kind: 'claude', sessionId: 'live-1', status: 'running', cwd: '/repo',
+      generatedTitle: 'Fleet mirror preview sync', title: 'Fleet mirror preview sync', recapSource: 'generated',
+      lastAgentLine: 'Both seams verified on the real shipped artifacts…',
+    });
+    expect(live.title).toBe('Fleet mirror preview sync');
+    expect(live.generatedTitle).toBe('Fleet mirror preview sync');
+    expect(live.lastAgentLine).toBe('Both seams verified on the real shipped artifacts…');
+  });
+
   it('uses the same faithful-resume harness boundary as session recovery', () => {
     expect(sessionAgentSupportsResume('codex')).toBe(true);
     expect(sessionAgentSupportsResume('kimi')).toBe(false);

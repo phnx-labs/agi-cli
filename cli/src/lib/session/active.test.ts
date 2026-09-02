@@ -355,20 +355,31 @@ describe('annotateOrchestratorLabels (team lineage — which session spun up a t
   });
 });
 
-describe('deriveSessionRecap (recap ladder — show what the agent DID, not the first prompt)', () => {
+describe('deriveSessionRecap (headline ladder — a user-anchored NAME, never the agent\'s latest turn)', () => {
   it('prefers a /rename label over everything', () => {
-    const r = deriveSessionRecap({ label: 'ship the auth fix', topic: 'first prompt', tail: ['agent last line'] });
+    const r = deriveSessionRecap({
+      label: 'ship the auth fix', generatedTitle: 'Auth token refresh', topic: 'first prompt', tail: ['agent last line'],
+    });
     expect(r).toMatchObject({ title: 'ship the auth fix', recapSource: 'label' });
   });
 
-  it('uses the last agent line when there is no label (the always-current fix)', () => {
-    const r = deriveSessionRecap({ topic: 'add a widget', tail: ['opened PR #123', 'now fixing CI'] });
-    expect(r).toMatchObject({ title: 'now fixing CI', recapSource: 'last', lastAgentLine: 'now fixing CI' });
+  it('uses the daemon-generated title when there is no label', () => {
+    const r = deriveSessionRecap({ generatedTitle: 'Widget rollout flag', topic: 'add a widget', tail: ['now fixing CI'] });
+    expect(r).toMatchObject({ title: 'Widget rollout flag', recapSource: 'generated' });
   });
 
-  it('falls back to the first-prompt topic only as a last resort', () => {
-    const r = deriveSessionRecap({ topic: 'add a widget' });
+  it('falls back to the first-prompt topic — NOT the last agent line (PHNX-3797)', () => {
+    const r = deriveSessionRecap({ topic: 'add a widget', tail: ['opened PR #123', 'now fixing CI'] });
     expect(r).toMatchObject({ title: 'add a widget', recapSource: 'prompt' });
+    // The live line is still carried, just not as the headline.
+    expect(r.lastAgentLine).toBe('now fixing CI');
+  });
+
+  it('shows nothing rather than an agent line when the user text is missing entirely', () => {
+    const r = deriveSessionRecap({ tail: ['Both seams verified on the real shipped artifacts…'] });
+    expect(r.title).toBeUndefined();
+    expect(r.recapSource).toBeUndefined();
+    expect(r.lastAgentLine).toBe('Both seams verified on the real shipped artifacts…');
   });
 
   it('cleans an image-path first prompt into the userPrompt fields', () => {
@@ -377,9 +388,12 @@ describe('deriveSessionRecap (recap ladder — show what the agent DID, not the 
   });
 
   it('foldRecap writes the fields onto every row', () => {
-    const rows: ActiveSession[] = [{ context: 'terminal', kind: 'claude', status: 'running', tail: ['did the thing'] }];
+    const rows: ActiveSession[] = [{
+      context: 'terminal', kind: 'claude', status: 'running',
+      topic: 'wire the titler', generatedTitle: 'Daemon titler wiring', tail: ['did the thing'],
+    }];
     foldRecap(rows);
-    expect(rows[0]).toMatchObject({ title: 'did the thing', recapSource: 'last' });
+    expect(rows[0]).toMatchObject({ title: 'Daemon titler wiring', recapSource: 'generated', lastAgentLine: 'did the thing' });
   });
 
   // PHNX-3939: the prompt rung used to classify the already-collapsed `topic`,
@@ -508,5 +522,33 @@ describe('backfillActiveRowsFromMeta (firstUserMessage rides live rows, PHNX-362
     ];
     backfillActiveRowsFromMeta(rows, new Map([['s1', { firstUserMessage: 'index value' }]]));
     expect(rows[0].firstUserMessage).toBe('live value');
+  });
+
+  it('backfills the daemon-generated title AND re-derives the shown headline (PHNX-3797)', () => {
+    // The live row was folded with a tail already; only the index knows the
+    // title, so the backfill has to re-run the ladder or `title` never updates.
+    const rows: ActiveSession[] = [
+      { context: 'terminal', kind: 'claude', sessionId: 's1', status: 'running', topic: 'fix the headline', tail: ['now fixing CI'] },
+    ];
+    foldRecap(rows);
+    expect(rows[0].title).toBe('fix the headline');
+
+    backfillActiveRowsFromMeta(rows, new Map([['s1', { generatedTitle: 'Session headline ladder fix' }]]));
+    expect(rows[0].generatedTitle).toBe('Session headline ladder fix');
+    expect(rows[0].title).toBe('Session headline ladder fix');
+    expect(rows[0].recapSource).toBe('generated');
+    // The agent's live line is still on the row — just not as the headline.
+    expect(rows[0].lastAgentLine).toBe('now fixing CI');
+  });
+
+  it('an indexed /rename label still outranks the generated title after backfill', () => {
+    const rows: ActiveSession[] = [
+      { context: 'terminal', kind: 'claude', sessionId: 's1', status: 'running', topic: 'fix the headline' },
+    ];
+    backfillActiveRowsFromMeta(rows, new Map([
+      ['s1', { label: 'ship the auth fix', generatedTitle: 'Session headline ladder fix' }],
+    ]));
+    expect(rows[0].title).toBe('ship the auth fix');
+    expect(rows[0].recapSource).toBe('label');
   });
 });

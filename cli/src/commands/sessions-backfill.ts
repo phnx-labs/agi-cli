@@ -8,6 +8,7 @@ import { SESSION_AGENTS, type SessionAgentId } from '../lib/session/types.js';
 import { ensureToolIndex, readToolIndexCoverage, type ToolIndexCoverage } from '../lib/session/tool-index.js';
 import { NO_FANOUT_ENV } from '../lib/session/remote-active.js';
 import { backfillResourceUsage, type QueryOptions } from '../lib/session/db.js';
+import { runSessionTitleTick, SESSION_TITLE_MAX_PER_TICK, type SessionTitleRunner } from '../lib/session/title.js';
 
 const BACKFILL_REMOTE_TIMEOUT_MS = 10 * 60_000;
 
@@ -238,6 +239,53 @@ export async function runResourceBackfill(options: ResourceBackfillOptions): Pro
   };
 }
 
+interface TitleBackfillOptions {
+  session?: string;
+  limit?: string;
+  refresh?: boolean;
+  json?: boolean;
+  /** The injectable model call (`SessionTitleRunner`); not a CLI flag — tests pass it. */
+  run?: SessionTitleRunner;
+}
+
+export interface TitleBackfillEnvelope {
+  schemaVersion: 1;
+  kind: 'titles-backfill';
+  generatedAt: string;
+  machine: string;
+  scanned: number;
+  cached: number;
+  generated: number;
+  failed: number;
+  titles: Array<{ id: string; title: string }>;
+}
+
+/**
+ * Generate session headlines NOW instead of waiting for the daemon's sweep — the
+ * explicit-refresh half of PHNX-3797. Same code path the `session-title` service
+ * ticks, so there is one generator: this only changes when it runs, how many it
+ * does, and (with `--refresh`) whether an already-current title is regenerated.
+ */
+export async function runTitlesBackfill(options: TitleBackfillOptions): Promise<TitleBackfillEnvelope> {
+  const parsedLimit = options.limit ? Number.parseInt(options.limit, 10) : undefined;
+  if (options.limit !== undefined && (!Number.isFinite(parsedLimit) || (parsedLimit as number) < 1)) {
+    throw new Error(`--limit must be a positive integer (got "${options.limit}")`);
+  }
+  const result = await runSessionTitleTick({
+    ...(options.session ? { id: options.session } : {}),
+    ...(options.run ? { run: options.run } : {}),
+    limit: parsedLimit ?? (options.session ? 1 : SESSION_TITLE_MAX_PER_TICK * 5),
+    force: Boolean(options.refresh),
+  });
+  return {
+    schemaVersion: 1,
+    kind: 'titles-backfill',
+    generatedAt: new Date().toISOString(),
+    machine: machineId(),
+    ...result,
+  };
+}
+
 export function registerSessionsBackfillCommand(sessionsCmd: Command): void {
   const backfill = sessionsCmd.command('backfill').description('Populate derived session data explicitly.');
   const tools = backfill.command('tools').description('Parse historical tool calls once into the local SQLite index.');
@@ -314,6 +362,52 @@ export function registerSessionsBackfillCommand(sessionsCmd: Command): void {
         );
         if (envelope.failed > 0) {
           console.log(chalk.yellow(`${envelope.failed.toLocaleString()} transcript${envelope.failed === 1 ? '' : 's'} could not be parsed; rerun to retry.`));
+        }
+      }
+    } catch (error) {
+      console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+      process.exitCode = 1;
+    }
+  });
+
+  const titles = backfill
+    .command('titles')
+    .description('Generate the session-row headline (a short technical title) now, instead of waiting for the daemon.')
+    .option('--session <id>', 'Title one session (full or short id), even if it is old or already titled')
+    .option('--limit <n>', 'Maximum titles to generate in this run')
+    .option('--refresh', 'Regenerate even when the stored title still matches the session\'s first user message')
+    .option('--json', 'Emit the machine-readable result');
+  setHelpSections(titles, {
+    examples: `
+      # Catch this machine up now (the daemon otherwise does a couple every 2 min)
+      agents sessions backfill titles
+
+      # Re-title one session after correcting its first message
+      agents sessions backfill titles --session 6fc1db18 --refresh
+
+      # Machine-readable
+      agents sessions backfill titles --limit 20 --json
+    `,
+    notes: `
+      - The headline ladder is: \`/rename\` label > this generated title > the user's first message. It is never the agent's latest turn.
+      - One cheap-model call per session (\`--model cheap\`, read-only plan mode), generated ONCE and persisted; a session whose first message has not changed is a pure cache hit.
+      - Local-only: each box titles its own sessions and publishes them to the fleet via the session mirror, so a peer's rows already carry their titles.
+      - Best-effort. With no signed-in harness nothing is generated and rows keep showing the user's own words.
+    `,
+  });
+  titles.action(async (_options: unknown, command: Command) => {
+    const options = command.optsWithGlobals() as TitleBackfillOptions;
+    try {
+      const envelope = await runTitlesBackfill(options);
+      if (options.json) process.stdout.write(JSON.stringify(envelope, null, 2) + '\n');
+      else {
+        console.log(
+          `${envelope.machine}: generated ${envelope.generated.toLocaleString()} title${envelope.generated === 1 ? '' : 's'}; ` +
+            `${envelope.cached.toLocaleString()} already current, ${envelope.scanned.toLocaleString()} scanned.`,
+        );
+        for (const { id, title } of envelope.titles) console.log(`  ${chalk.cyan(id.slice(0, 8))}  ${title}`);
+        if (envelope.failed > 0) {
+          console.log(chalk.yellow(`${envelope.failed.toLocaleString()} session${envelope.failed === 1 ? '' : 's'} produced no usable title; rerun to retry.`));
         }
       }
     } catch (error) {
