@@ -76,6 +76,7 @@ function agentToFormat(agent: string): SessionAgentId | null {
   if (agent === 'codex') return 'codex';
   if (agent === 'rush') return 'rush';
   if (agent === 'droid') return 'droid';
+  if (agent === 'opencode') return 'opencode';
   return null;
 }
 
@@ -164,7 +165,7 @@ export async function ensureCloudSessionCached(
     throw new Error(`session.jsonl fetch ${res.status}: ${body.slice(0, 200)}`);
   }
   const format = (res.headers.get('X-Session-Format') || '').toLowerCase();
-  if (!['claude', 'codex', 'rush'].includes(format)) {
+  if (!['claude', 'codex', 'rush', 'opencode'].includes(format)) {
     throw new Error(`Unknown X-Session-Format on cloud response: "${format}"`);
   }
 
