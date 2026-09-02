@@ -209,6 +209,9 @@ export interface SessionOutcome {
   project?: string | null;
   label?: string;
   name?: string;
+  /** The daemon-generated headline (PHNX-3797); carried so the report renders the
+   * same name every other surface shows, not the raw first prompt. */
+  generatedTitle?: string;
   topic?: string;
   preview?: string;
   activity?: ActiveSession['activity'];
@@ -720,6 +723,7 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
       project: session.project,
       label: session.label,
       name: session.name,
+      generatedTitle: session.generatedTitle,
       topic: session.topic,
       preview: session.preview,
       activity: session.activity,
