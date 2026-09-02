@@ -19,8 +19,9 @@ const { getSessionsDir } = await import('../state.js');
 fs.mkdirSync(getSessionsDir(), { recursive: true });
 
 const db = await import('./db.js');
-const { runSessionTitleTick, SESSION_TITLE_PROMPT_MARKER } = await import('./title.js');
+const { runSessionTitleTick, SESSION_TITLE_PROMPT_MARKER, CloudSessionTitleProvider } = await import('./title.js');
 const { machineId } = await import('./sync/config.js');
+import type { SessionTitleProvider } from './title.js';
 
 const self = machineId();
 
@@ -123,6 +124,55 @@ describe('runSessionTitleTick (real index, injected model call)', () => {
     // so the value must survive (the scanner never names those columns).
     seed(id, { messageCount: 42 });
     expect(db.getSessionById(id)?.generatedTitle).toBe('Durable across rescan');
+  });
+});
+
+describe('swappable title provider (PHNX-3797)', () => {
+  it('generates through an injected provider — the seam a local backend drops into', async () => {
+    const id = '88888888-0000-0000-0000-000000000008';
+    seed(id, { firstUserMessage: 'wire up the local title backend' });
+    let seen: { name: string; input?: string } = { name: '' };
+    const provider: SessionTitleProvider = {
+      name: 'fake-local',
+      async generate(input) {
+        seen = { name: 'fake-local', input: input.firstUserMessage ?? undefined };
+        return 'Wire up the local backend';
+      },
+    };
+    const result = await runSessionTitleTick({ id, provider });
+    expect(result.generated).toBe(1);
+    expect(seen.name).toBe('fake-local');
+    // The provider receives the session's user text, not a pre-rendered prompt.
+    expect(seen.input).toBe('wire up the local title backend');
+    expect(db.getSessionById(id)?.generatedTitle).toBe('Wire up the local backend');
+  });
+
+  it('an explicit provider takes precedence over the run shortcut', async () => {
+    const id = '99999999-0000-0000-0000-000000000009';
+    seed(id, { firstUserMessage: 'provider beats run' });
+    let ranRunner = false;
+    const provider: SessionTitleProvider = { name: 'p', async generate() { return 'Provider wins'; } };
+    const result = await runSessionTitleTick({
+      id,
+      provider,
+      run: async () => { ranRunner = true; return 'Runner wins'; },
+    });
+    expect(result.generated).toBe(1);
+    expect(ranRunner).toBe(false);
+    expect(db.getSessionById(id)?.generatedTitle).toBe('Provider wins');
+  });
+
+  it('the cloud provider renders the shared prompt through its runner', async () => {
+    let promptSeen = '';
+    const provider = new CloudSessionTitleProvider(async (prompt) => {
+      promptSeen = prompt;
+      return 'Cloud default title';
+    });
+    const reply = await provider.generate({ firstUserMessage: 'name this session' });
+    expect(provider.name).toBe('cloud');
+    expect(reply).toBe('Cloud default title');
+    expect(promptSeen).toContain(SESSION_TITLE_PROMPT_MARKER);
+    expect(promptSeen).toContain('name this session');
   });
 });
 

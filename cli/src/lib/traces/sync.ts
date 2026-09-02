@@ -481,7 +481,7 @@ export type SessionKind = 'utility' | 'agent';
  */
 const UTILITY_PROMPT_SIGNATURES: RegExp[] = [
   /generate a 3-4 word title/i, // title generation
-  /generate a 3-6 word technical title/i, // session-title daemon service (PHNX-3797)
+  /generate a concise session headline/i, // session-title daemon service (PHNX-3797)
   /you are a watchdog|watchdog monitoring/i, // watchdog tick
   /conventional[- ]commit/i, // commit-message writer
   /factory worker/i, // dispatched factory worker
