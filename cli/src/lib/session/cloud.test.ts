@@ -49,6 +49,31 @@ describe('cloud session cache path safety', () => {
     expect(fs.readFileSync(cachedPath, 'utf-8')).toBe('{"role":"user"}\n');
   });
 
+  it('accepts the opencode session format and caches it as session.opencode.jsonl', async () => {
+    const { ensureCloudSessionCached } = await import('./cloud.js');
+    globalThis.fetch = vi.fn(async () => new Response('{"role":"user","part_type":"text"}\n', {
+      headers: { 'X-Session-Format': 'opencode' },
+    })) as any;
+
+    const cachedPath = await ensureCloudSessionCached('c07ec355-d841-45fc-b2eb-f500355e15c6');
+
+    expect(cachedPath).toBe(path.join(cacheRoot, 'cloud-runs', 'c07ec355-d841-45fc-b2eb-f500355e15c6', 'session.opencode.jsonl'));
+  });
+
+  it('surfaces opencode cloud runs from discovery (agentToFormat maps opencode)', async () => {
+    const { discoverCloudSessions } = await import('./cloud.js');
+    globalThis.fetch = vi.fn(async () => Response.json({
+      executions: [
+        { execution_id: 'c07ec355-d841-45fc-b2eb-f500355e15c6', agent: 'opencode', status: 'completed' },
+      ],
+    })) as any;
+
+    const sessions = await discoverCloudSessions();
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].agent).toBe('opencode');
+    expect(sessions[0].filePath).toContain('session.opencode.jsonl');
+  });
+
   it('rejects invalid execution ids returned by cloud listing', async () => {
     const { discoverCloudSessions } = await import('./cloud.js');
     globalThis.fetch = vi.fn(async () => Response.json({

@@ -14,6 +14,7 @@ import Database from '../sqlite.js';
 import { isSyntheticUserMessage, extractSlashCommandName, extractSlashCommandFromToolInput, unwrapUserQuery } from './prompt.js';
 import type { SessionAgentId, SessionEvent, SessionVerbClass } from './types.js';
 import { structuredToolResult, commandsFromCodexExec } from './tool-calls.js';
+import { isCloudSessionPath } from './cloud.js';
 
 /**
  * Largest session file we will load into memory. Above this we throw a clean
@@ -181,7 +182,12 @@ const TRANSCRIPT_PARSERS: Record<SessionAgentId, (filePath: string, opts: ParseS
   codex: (filePath) => parseCodex(filePath),
   gemini: (filePath) => parseGemini(filePath),
   antigravity: (filePath) => parseAntigravity(filePath),
-  opencode: (filePath) => parseOpenCode(filePath),
+  // Cloud-captured opencode sessions are normalized JSONL (produced by the
+  // factory at capture time), NOT the local `opencode.db#<session>` SQLite
+  // composite the offline parser reads — route by whether the path is in the
+  // cloud session cache (PHNX-3845).
+  opencode: (filePath) =>
+    isCloudSessionPath(filePath) ? parseOpencodeCloud(filePath) : parseOpenCode(filePath),
   grok: (filePath) => parseGrok(filePath),
   rush: (filePath) => parseRush(filePath),
   openclaw: () => [], // OpenClaw sessions don't have parseable files yet
@@ -244,7 +250,7 @@ export function detectAgent(filePath: string): SessionAgentId | null {
     return 'muse';
   }
   // Cloud convention: cloud-sessions/<id>/session.<format>.jsonl
-  const cloudMatch = filePath.match(/session\.(claude|codex|rush)\.jsonl(?:$|[?#])/);
+  const cloudMatch = filePath.match(/session\.(claude|codex|rush|opencode)\.jsonl(?:$|[?#])/);
   if (cloudMatch) return cloudMatch[1] as SessionAgentId;
   if (filePath.includes('opencode.db')) return 'opencode';
 
@@ -1914,6 +1920,142 @@ export function parseOpenCode(filePath: string): SessionEvent[] {
       tool: 'todo_write',
       args: { todos },
     });
+  }
+
+  return events;
+}
+
+// ---------------------------------------------------------------------------
+// OpenCode parser — cloud (normalized JSONL)
+// ---------------------------------------------------------------------------
+//
+// OpenCode stores sessions in a SQLite DB, so the offline path reads a
+// `opencode.db#<session>` composite (parseOpenCode above). The CLOUD path is
+// different: the factory converts that DB into a flat, normalized JSONL
+// transcript at capture time (prix/factory opencode-capture.ts, PHNX-3845), so
+// the whole cloud pipeline stays SQLite-free downstream. This parser reads that
+// JSONL; it's routed from TRANSCRIPT_PARSERS only when the file lives in the
+// cloud session cache (isCloudSessionPath).
+//
+// Each line is one of:
+//   transcript row:
+//     { role: "user"|"assistant", part_type: "text"|"reasoning"|"tool",
+//       part_data: <json string>, time_created: <ms number> }
+//   todo snapshot (at most one, emitted last):
+//     { part_type: "todo", todos: [{content,status}], time_created: <ms> }
+//
+// The per-part logic mirrors parseOpenCode's post-query switch (and prix/api's
+// server-side parseOpencode) so the event stream is identical to the offline
+// path. NOTE: the shell tool is named `bash` on real opencode (>=1.18.x), not
+// `shell` — map `command` for both so a shell step reads by its command line.
+export function parseOpencodeCloud(filePath: string): SessionEvent[] {
+  const content = safeReadSessionFile(filePath);
+  const lines = content.split('\n').filter(l => l.trim());
+  const events: SessionEvent[] = [];
+
+  for (const line of lines) {
+    let raw: any;
+    try {
+      raw = JSON.parse(line);
+    } catch {
+      /* malformed JSONL line, skip */
+      continue;
+    }
+
+    const partType = typeof raw.part_type === 'string' ? raw.part_type : '';
+    const timeMs = typeof raw.time_created === 'number'
+      ? raw.time_created
+      : parseInt(String(raw.time_created), 10);
+    const timestamp = Number.isFinite(timeMs)
+      ? new Date(timeMs).toISOString()
+      : new Date().toISOString();
+
+    // Todo snapshot: emit one `todo_write` tool_use so the shared enrichment
+    // (`extractTodoProgressFromEvents`) derives `todos` the same way it does for
+    // every other harness — the offline parser emits the identical event.
+    if (partType === 'todo') {
+      const todos = Array.isArray(raw.todos) ? raw.todos : [];
+      if (todos.length) {
+        events.push({
+          type: 'tool_use',
+          agent: 'opencode',
+          timestamp,
+          tool: 'todo_write',
+          args: { todos },
+        });
+      }
+      continue;
+    }
+
+    let partData: any;
+    try {
+      partData = JSON.parse(typeof raw.part_data === 'string' ? raw.part_data : '');
+    } catch {
+      /* malformed part data, skip */
+      continue;
+    }
+
+    switch (partType) {
+      case 'text': {
+        const text = (partData.text || '').trim();
+        if (text) {
+          events.push({
+            type: 'message',
+            agent: 'opencode',
+            timestamp,
+            role: raw.role === 'user' ? 'user' : 'assistant',
+            content: text,
+          });
+        }
+        break;
+      }
+      case 'reasoning': {
+        const text = (partData.text || '').trim();
+        if (text) {
+          events.push({
+            type: 'thinking',
+            agent: 'opencode',
+            timestamp,
+            content: text,
+          });
+        }
+        break;
+      }
+      case 'tool': {
+        const toolName = partData.tool || 'unknown';
+        const state = partData.state || {};
+        const input = state.input || {};
+        const output = state.output || '';
+        const callId = typeof partData.callID === 'string' ? partData.callID : undefined;
+
+        events.push({
+          type: 'tool_use',
+          agent: 'opencode',
+          timestamp,
+          tool: toolName,
+          callId,
+          args: input,
+          command: toolName === 'bash' || toolName === 'shell' ? input.command : undefined,
+          path: input.filePath || input.path || undefined,
+        });
+
+        if (state.status === 'completed' || state.status === 'error') {
+          const outputStr = typeof output === 'string' ? output : JSON.stringify(output);
+          events.push({
+            type: state.status === 'error' ? 'error' : 'tool_result',
+            agent: 'opencode',
+            timestamp,
+            tool: toolName,
+            callId,
+            success: state.status === 'completed',
+            output: outputStr,
+          });
+        }
+        break;
+      }
+      // step-start / step-finish / patch / file never reach the JSONL (dropped
+      // at capture time) — nothing to handle here.
+    }
   }
 
   return events;
