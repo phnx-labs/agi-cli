@@ -8,10 +8,12 @@
  *
  *  1. INSTANT, free: the user's own first message (already in the index) is the
  *     honest fallback shown from the moment the session appears.
- *  2. UPGRADED, once: this module asks a CHEAP model (the `cheap` tier — haiku
- *     on Claude — through the same `agents run --model <tier>` resolution every
- *     other call uses) for a 3-6 word TECHNICAL title of what the session worked
- *     on, and persists it in the session index.
+ *  2. UPGRADED, once: this module asks a CHEAP model (via a swappable
+ *     {@link SessionTitleProvider}; the default {@link CloudSessionTitleProvider}
+ *     uses the `cheap` tier — haiku on Claude — through the same
+ *     `agents run --model <tier>` resolution every other call uses) for a short
+ *     ACTION + OBJECT headline of what the session is doing, and persists it in
+ *     the session index.
  *
  * Generation happens ONCE per session, in the daemon, and is keyed by
  * {@link sessionTitleSourceKey} — a hash of the user text the title was derived
@@ -41,8 +43,14 @@ import type { SessionTitleCandidateRow } from './db.js';
  * uses it to keep the titler from titling its OWN spawned sessions — which
  * would otherwise be a runaway loop, since each generation creates one more
  * untitled session.
+ *
+ * It is a STABLE sentinel, not the human-readable instruction: keep it exact and
+ * keep `traces/sync.ts`'s matching regex in sync when it changes. The surrounding
+ * prompt (see {@link renderSessionTitlePrompt}) asks for an action+object headline
+ * of 4–8 words; the sentinel deliberately carries no word budget so the two never
+ * drift.
  */
-export const SESSION_TITLE_PROMPT_MARKER = 'Generate a 3-6 word technical title';
+export const SESSION_TITLE_PROMPT_MARKER = 'Generate a concise session headline';
 
 /** Hard ceiling on a stored title; the prompt asks for far less. */
 export const SESSION_TITLE_MAX_CHARS = 60;
@@ -100,7 +108,16 @@ export function isSessionTitlePrompt(...values: Array<string | null | undefined>
   return values.some((v) => typeof v === 'string' && v.includes(SESSION_TITLE_PROMPT_MARKER));
 }
 
-/** The one-shot prompt handed to the cheap model. */
+/**
+ * The one-shot prompt handed to the cheap model.
+ *
+ * It asks for a descriptive ACTION + OBJECT headline (a verb phrase naming the
+ * concrete task, "Triage the AGI board", "Rename browser profile — default
+ * confusion"), not a single terse noun ("Triage") and not a full sentence — the
+ * headline slot has to tell the person who started the run what the session is
+ * doing at a glance. The word budget is soft in the prompt and hard-enforced by
+ * {@link sanitizeGeneratedTitle}'s {@link SESSION_TITLE_MAX_WORDS} ceiling.
+ */
 export function renderSessionTitlePrompt(input: SessionTitleInput): string {
   const text = sessionTitleSourceText(input);
   const context = [
@@ -109,9 +126,12 @@ export function renderSessionTitlePrompt(input: SessionTitleInput): string {
     input.gitBranch ? `Branch: ${input.gitBranch}` : null,
   ].filter(Boolean);
   return [
-    `${SESSION_TITLE_PROMPT_MARKER} naming what this coding session worked on.`,
-    'Name the concrete feature, component, or fix — not the person, not the pleasantries.',
-    'Respond IMMEDIATELY with only the title. Do NOT investigate, do NOT read files, do NOT use any tools.',
+    `${SESSION_TITLE_PROMPT_MARKER} naming what this coding session is working on.`,
+    'Write an ACTION + OBJECT headline of 4 to 8 words — a verb phrase naming the concrete task,',
+    'e.g. "Triage the AGI board" or "Rename browser profile — default confusion".',
+    'NOT a single noun, NOT a full sentence. Name the concrete feature, component, or fix —',
+    'not the person, not the pleasantries.',
+    'Respond IMMEDIATELY with only the headline. Do NOT investigate, do NOT read files, do NOT use any tools.',
     'No quotes, no trailing punctuation, no explanation.',
     ...(context.length ? ['', ...context] : []),
     '',
@@ -259,6 +279,50 @@ export async function defaultSessionTitleRunner(prompt: string, signal?: AbortSi
   return stdout;
 }
 
+/**
+ * A pluggable backend that turns a session's user text into a raw headline reply
+ * — the ONE part of title generation that varies by model host (PHNX-3797).
+ *
+ * The tick decides WHICH sessions need a title, caches by source key, sanitizes,
+ * and persists — none of that is provider-specific, so only the model call itself
+ * sits behind this interface. The shipped default is
+ * {@link CloudSessionTitleProvider} (one cheap cloud-model subprocess). A LOCAL
+ * backend — e.g. an ollama 1–3B instruct model over HTTP — is a drop-in: implement
+ * `generate` and hand the instance to {@link runSessionTitleTick} (or construct
+ * {@link SessionTitleService} with it). No call site inside the tick changes, and
+ * the shared {@link sanitizeGeneratedTitle} still enforces the word/character
+ * ceilings on whatever text the backend returns.
+ *
+ * `generate` returns the model's RAW reply (the tick owns sanitizing). It MAY
+ * throw — harness missing, signed out, timed out — and the tick treats a throw as
+ * "no title this sweep", leaving the row on the user's own words and backing off.
+ */
+export interface SessionTitleProvider {
+  /** Stable id for logs/diagnostics (e.g. `'cloud'`, `'ollama'`). */
+  readonly name: string;
+  /** Produce a raw headline reply for one session's user text, or throw. */
+  generate(input: SessionTitleInput, signal?: AbortSignal): Promise<string>;
+}
+
+/**
+ * The default, shipped provider: render the shared prompt and run it through a
+ * {@link SessionTitleRunner} — by default {@link defaultSessionTitleRunner}, the
+ * one cheap `agents run --model cheap` subprocess. Tests inject a fake runner (or
+ * a whole fake provider) to exercise the tick without spawning a harness.
+ */
+export class CloudSessionTitleProvider implements SessionTitleProvider {
+  readonly name = 'cloud';
+  constructor(private readonly runner: SessionTitleRunner = defaultSessionTitleRunner) {}
+  generate(input: SessionTitleInput, signal?: AbortSignal): Promise<string> {
+    return this.runner(renderSessionTitlePrompt(input), signal);
+  }
+}
+
+/** The provider used when a caller injects neither a `provider` nor a `run`. */
+export function defaultSessionTitleProvider(): SessionTitleProvider {
+  return new CloudSessionTitleProvider();
+}
+
 export interface SessionTitleTickOptions {
   /** Max sessions generated for in this sweep. */
   limit?: number;
@@ -266,7 +330,17 @@ export interface SessionTitleTickOptions {
   id?: string;
   /** Regenerate even when the stored key still matches the row's user text. */
   force?: boolean;
-  /** Injected model call; defaults to {@link defaultSessionTitleRunner}. */
+  /**
+   * The generation backend. Defaults to {@link defaultSessionTitleProvider}
+   * (the cheap cloud model). Swap this for a local model without touching the
+   * tick. Takes precedence over {@link SessionTitleTickOptions.run}.
+   */
+  provider?: SessionTitleProvider;
+  /**
+   * Shortcut seam for the cloud provider's raw model call — wrapped in a
+   * {@link CloudSessionTitleProvider} when no {@link provider} is given. Kept for
+   * the daemon service and the tests that inject only the subprocess.
+   */
   run?: SessionTitleRunner;
   signal?: AbortSignal;
   nowMs?: number;
@@ -348,12 +422,15 @@ export async function runSessionTitleTick(
   result.cached = cached;
   if (pending.length === 0) return result;
 
-  const run = options.run ?? defaultSessionTitleRunner;
+  // The provider is the ONLY thing that varies by model host; everything above
+  // (candidate selection, the source-key cache) and below (sanitize, persist) is
+  // shared. A local backend is dropped in here, not woven through the tick.
+  const provider = options.provider ?? new CloudSessionTitleProvider(options.run);
   for (const { row, sourceKey } of pending) {
     if (options.signal?.aborted) break;
     let title: string | undefined;
     try {
-      title = sanitizeGeneratedTitle(await run(renderSessionTitlePrompt(row), options.signal));
+      title = sanitizeGeneratedTitle(await provider.generate(row, options.signal));
     } catch {
       // Harness unavailable, signed out, or over its deadline. Best-effort: the
       // row keeps showing the user's own words, and the caller backs off.

@@ -81,6 +81,16 @@ describe('renderSessionTitlePrompt', () => {
     // The marker is what keeps the titler from titling its own spawned session.
     expect(isSessionTitlePrompt(prompt)).toBe(true);
   });
+
+  it('asks for a descriptive action+object headline, not a single terse noun', () => {
+    const prompt = renderSessionTitlePrompt({ firstUserMessage: 'triage the board' });
+    // The owner feedback: titles must be descriptive ("Triage the AGI board"),
+    // not one word ("Triage"). Pin the instruction so a future reword can't
+    // silently drop it.
+    expect(prompt).toContain('ACTION + OBJECT');
+    expect(prompt).toContain('4 to 8 words');
+    expect(prompt).toMatch(/NOT a single noun/);
+  });
 });
 
 describe('sanitizeGeneratedTitle', () => {

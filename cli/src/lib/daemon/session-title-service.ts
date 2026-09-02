@@ -4,7 +4,8 @@
  * Every session row's headline used to be the agent's latest transcript line.
  * This service replaces it with a user-anchored NAME: it sweeps the local
  * session index for recent sessions whose title is still the raw first user
- * message, asks a cheap model for a 3-6 word technical title, and persists it
+ * message, asks a {@link SessionTitleProvider} (the cloud cheap-model call by
+ * default) for a short action+object headline, and persists it
  * (`lib/session/title.ts`). Because the value lands in the index, every consumer
  * — the CLI list, the picker, `sessions watch --json`, the fleet mirror, AGI EXT
  * — reads one title that was generated exactly once.
