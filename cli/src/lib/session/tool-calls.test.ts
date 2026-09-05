@@ -9,6 +9,7 @@ import {
   collectCodexToolCalls,
   toolCallsFromEvents,
   sanitizeToolEvidenceText,
+  structuredToolResult,
 } from './tool-calls.js';
 
 describe('ToolCallCollector', () => {
@@ -287,5 +288,46 @@ describe('ToolCallCollector', () => {
     expect(calls[0].errorCode).not.toContain(credential);
     expect(calls[0].errorCode).not.toContain('\x1b');
     expect(Buffer.byteLength(calls[0].errorCode ?? '')).toBeLessThanOrEqual(512);
+  });
+});
+
+// PHNX-3761: Codex exec/apply_patch results are a string or input_text[], never
+// an object, so before this they always classified 'unknown' and the console
+// error rate read 0%. The only signal is the leading "Script failed"/"Script
+// completed" marker. Shapes below are copied from real ~/.codex/sessions rows.
+describe('structuredToolResult — Codex output shapes', () => {
+  it('classifies a leading "Script failed" string as an error', () => {
+    expect(structuredToolResult('Script failed\nWall time 0.1 seconds\nOutput:\n').outcome).toBe('error');
+  });
+
+  it('classifies a leading "Script completed" string as ok', () => {
+    expect(structuredToolResult('Script completed\nWall time 0.0 seconds\nOutput:\n').outcome).toBe('ok');
+  });
+
+  it('reads the marker from the first block of an input_text[] result and joins the text', () => {
+    const result = structuredToolResult([
+      { type: 'input_text', text: 'Script failed\nWall time 0.3 seconds\nOutput:\n' },
+      { type: 'input_text', text: 'error: apply_patch verification failed: Failed to find expected lines' },
+    ]);
+    expect(result.outcome).toBe('error');
+    expect(result.text).toContain('Script failed');
+    expect(result.text).toContain('apply_patch verification failed');
+  });
+
+  it('classifies a completed input_text[] result as ok', () => {
+    expect(structuredToolResult([
+      { type: 'input_text', text: 'Script completed\nWall time 9.6 seconds\nOutput:\n' },
+      { type: 'input_text', text: '{"chunk_id":"b7deb4","exit_code":0}' },
+    ]).outcome).toBe('ok');
+  });
+
+  it('leaves an async "Script running" cell unknown (no outcome yet)', () => {
+    expect(structuredToolResult('Script running with cell ID 25\nWall time 11.0 seconds\nOutput:\n').outcome).toBe('unknown');
+  });
+
+  it('still honours the object success/is_error path (Claude)', () => {
+    expect(structuredToolResult({ is_error: true, content: 'CONFLICT' }).outcome).toBe('error');
+    expect(structuredToolResult({ success: true, exit_code: 0 }).outcome).toBe('ok');
+    expect(structuredToolResult({ success: false, exit_code: 1 })).toMatchObject({ outcome: 'error', exitCode: 1 });
   });
 });
