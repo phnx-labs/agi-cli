@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.22.77
+
+- **`agents repo pull` / `agents sync` no longer wedge on a CLI-regenerated `~/.agents/agents.yaml` (PHNX-3968).** The shared central config was rewritten by config commands without being committed, so between the daemon's publish ticks the tree sat dirty on `agents.yaml`; an incoming peer commit that also touched it made the pull refuse with *"incoming changes touch uncommitted paths: agents.yaml"*, forcing manual autostash gymnastics on the fleet. Central config edits are now committed synchronously by the command that makes them (after the meta lock releases, skipped for the daemon whose own publish tick owns its commits), so the tree is clean at rest and the trip cannot occur. A genuinely dirty-and-differing central file now *refuses* the pull (data-safe, self-heals on the next commit) rather than silently taking the remote copy. The user-repo `CHANGELOG.md` (a duplicate of the shipped one) is de-tracked via `.git/info/exclude` so it stops churning the tree. Source: `cli/src/lib/state.ts`, `cli/src/lib/git.ts`, `cli/src/lib/browser/registry.ts`, `cli/src/lib/project-resources.ts`.
+
 ## 1.22.76
 
 - **Per-session summarizer: bound the mirror publish (PHNX-3939 follow-up).** The fleet session mirror now caps `checkpoints`/`summaryChecklist` on the **publish** side (50/100 items, 400-char text) exactly as it already did on consume, so a box's own summarizer output can never ride unbounded into the git-synced `daemon-state.json` every peer fetches — matching the `snippet()` cap already applied to `goal`. Source: `cli/src/lib/session/mirror.ts`.

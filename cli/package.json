@@ -1,6 +1,6 @@
 {
   "name": "@phnx-labs/agents-cli",
-  "version": "1.22.76",
+  "version": "1.22.77",
   "description": "One CLI for all your AI coding agents - versions, config, cloud dispatch, sessions, and teams (now with first-class Grok Build CLI support)",
   "type": "module",
   "main": "dist/index.js",
