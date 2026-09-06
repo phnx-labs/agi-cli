@@ -46,7 +46,7 @@ describe('pid session registry', () => {
     }
   });
 
-  it('never derives authority from an ambiguous populated legacy registry', () => {
+  it('requires kernel authority for a populated legacy registry without enrolling on observation', () => {
     if (process.platform !== 'linux') return;
     const claim = path.join(getTerminalsDir(), 'process-view.json');
     const original = fs.readFileSync(claim, 'utf8');
@@ -54,9 +54,10 @@ describe('pid session registry', () => {
     const dir = path.join(getTerminalsDir(), 'by-pid');
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, `${process.pid}.json`), JSON.stringify({ pid: process.pid, sessionId: 'retained', startedAtMs: Date.now() }));
-    expect(hostProcessView()).toBeUndefined();
+    const initialHost = fs.readlinkSync('/proc/self/ns/pid') === 'pid:[4026531836]';
+    expect(!!hostProcessView()).toBe(initialHost);
     expect(fs.existsSync(claim)).toBe(false);
-    if (fs.readlinkSync('/proc/self/ns/pid') === 'pid:[4026531836]') {
+    if (initialHost) {
       // The initial namespace has affirmative kernel authority; a merely
       // visible numeric PID in an arbitrary container does not.
       expect(() => recordDaemonProcessView()).not.toThrow();
