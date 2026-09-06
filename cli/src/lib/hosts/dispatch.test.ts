@@ -558,6 +558,7 @@ describe('withActorEnv — forward actor provenance across the SSH hop (RUSH-202
   // inherited-actor tests short-circuit before any resolver, so this doesn't
   // change their behavior.
   beforeEach(() => {
+    delete process.env.AGENTS_RUNTIME;
     setActorResolvers({ whois: () => undefined, self: () => undefined, session: () => null });
   });
   afterEach(() => {
@@ -614,6 +615,21 @@ describe('withActorEnv — forward actor provenance across the SSH hop (RUSH-202
     // put an empty join key in the remote registry.
     process.env.AGENT_TERMINAL_ID = '   ';
     expect('AGENT_TERMINAL_ID' in withActorEnv()).toBe(false);
+  });
+
+  it.each(['terminal', 'headless', 'teams'])('forwards %s launch lineage without transferring the parent editor tab', runtime => {
+    process.env.AGENTS_RUNTIME = runtime;
+    process.env.AGENT_TERMINAL_ID = 'parent-tab';
+    process.env.AGENT_LAUNCH_ID = 'parent-launch';
+    process.env.AGENTS_SESSION_ID = 'parent-session';
+    process.env.AGENTS_PARENT_SESSION_ID = 'grandparent-session';
+    process.env.AGENTS_PARENT_LAUNCH_ID = 'grandparent-launch';
+    const env = withActorEnv();
+    expect(env.AGENT_TERMINAL_ID).toBeUndefined();
+    expect(env).toMatchObject({ AGENTS_PARENT_LAUNCH_ID: 'parent-launch', AGENTS_PARENT_SESSION_ID: 'parent-session', AGENTS_ORIGIN_TERMINAL_ID: 'parent-tab' });
+    const cmd = buildRemoteAgentsInvocation(['run', 'codex'], undefined, undefined, env);
+    expect(cmd).not.toContain('export AGENT_TERMINAL_ID=');
+    expect(cmd).toContain('export AGENTS_PARENT_LAUNCH_ID=parent-launch');
   });
 
   it('merges the actor UNDER a caller env — the caller value wins, the doctor PATH coexists', () => {

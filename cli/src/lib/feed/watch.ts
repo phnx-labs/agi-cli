@@ -1,3 +1,4 @@
+import { SessionProjection } from '../session/projection.js';
 import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -36,6 +37,73 @@ export class FeedWatchState {
   constructor(streamId = randomUUID()) { this.streamId = streamId; }
   emit(event: FeedWatchPayload): FeedWatchEnvelope {
     return { v: 1, streamId: this.streamId, sequence: ++this.sequence, ...event } as unknown as FeedWatchEnvelope;
+  }
+}
+
+/** Reuse session ownership reconciliation for the combined operator stream. */
+export class FeedSessionProjection {
+  private readonly sessions = new SessionProjection();
+  private readonly observations = new Map<string, Map<string, AttentionItem>>();
+  private projectedAttention = new Map<string, { scope: string; item: AttentionItem }>();
+  constructor(private readonly state = new FeedWatchState()) {}
+
+  apply(event: FeedWatchEnvelope): FeedWatchEnvelope[] {
+    const scope = normalizeHost(event.scope);
+    const base = { version: 1 as const, streamId: event.streamId, sequence: event.sequence, capturedAt: 'capturedAt' in event ? event.capturedAt : Date.now(), scope };
+    let sessionEvent: SessionWatchEnvelope | undefined;
+    if (event.type === 'reset') {
+      sessionEvent = { ...base, type: 'reset', rows: event.agents };
+      const attention = new Map<string, AttentionItem>();
+      for (const row of event.agents) {
+        const item = event.attention.find(item => item.sessionId === row.sessionId);
+        if (item && !row.previous) attention.set(row.rowKey, item);
+      }
+      this.observations.set(scope, attention);
+    } else if (event.type === 'agent.upsert') {
+      sessionEvent = { ...base, type: 'upsert', rowKey: event.rowKey, row: event.agent };
+    } else if (event.type === 'agent.remove') {
+      sessionEvent = { ...base, type: 'remove', rowKey: event.rowKey };
+      this.observations.get(scope)?.delete(event.rowKey);
+    } else if (event.type === 'attention.upsert') {
+      if (!this.observations.has(scope)) this.observations.set(scope, new Map());
+      this.observations.get(scope)!.set(event.rowKey, event.attention);
+    } else if (event.type === 'attention.remove') {
+      this.observations.get(scope)?.delete(event.rowKey);
+    } else {
+      const { v: _v, streamId: _streamId, sequence: _sequence, ...payload } = event;
+      return [this.state.emit(payload)];
+    }
+    const projected = sessionEvent ? this.sessions.apply(sessionEvent) : [];
+    const next = new Map<string, { scope: string; item: AttentionItem }>();
+    for (const [observer, items] of this.observations) for (const [rowKey, item] of items) {
+      const row = this.sessions.rowForObservation(observer, rowKey);
+      if (row && !row.previous && row.sourceDevice === observer) next.set(item.key, { scope: observer, item });
+    }
+    const result: FeedWatchEnvelope[] = [];
+    const resetScopes = new Set<string>();
+    for (const rowEvent of projected) {
+      if (rowEvent.type === 'reset') {
+        resetScopes.add(rowEvent.scope);
+        result.push(this.state.emit({ type: 'reset', scope: rowEvent.scope, capturedAt: rowEvent.capturedAt, agents: rowEvent.rows,
+          attention: [...next.values()].filter(value => value.scope === rowEvent.scope).map(value => value.item) }));
+      } else if (rowEvent.type === 'upsert') {
+        result.push(this.state.emit({ type: 'agent.upsert', scope: rowEvent.scope, rowKey: rowEvent.rowKey, agent: rowEvent.row }));
+      } else if (rowEvent.type === 'remove') {
+        result.push(this.state.emit({ type: 'agent.remove', scope: rowEvent.scope, rowKey: rowEvent.rowKey }));
+      }
+    }
+    // Attention has its own stable generation key, also used by feed answer.
+    // Never substitute the projected agent row key: reset consumers key by item.key.
+    for (const [key, previous] of this.projectedAttention) {
+      if (!next.has(key) && !resetScopes.has(previous.scope)) result.push(this.state.emit({ type: 'attention.remove', scope: previous.scope, rowKey: key }));
+    }
+    for (const [key, value] of next) {
+      if (!resetScopes.has(value.scope) && JSON.stringify(this.projectedAttention.get(key)) !== JSON.stringify(value)) {
+        result.push(this.state.emit({ type: 'attention.upsert', scope: value.scope, rowKey: key, attention: value.item }));
+      }
+    }
+    this.projectedAttention = next;
+    return result;
   }
 }
 
@@ -230,9 +298,9 @@ function remoteFeedWatchCommand(os: string): string {
 
 export async function watchFleetFeed(options: { signal: AbortSignal; emit: (event: FeedWatchEnvelope) => void; reconnectMs?: number }): Promise<void> {
   const coordinator = new FeedWatchState();
+  const projection = new FeedSessionProjection(coordinator);
   const forward = (event: FeedWatchEnvelope) => {
-    const { v: _v, streamId: peerStreamId, sequence: peerSequence, ...payload } = event;
-    options.emit(coordinator.emit({ ...payload, peerStreamId, peerSequence } as unknown as FeedWatchPayload));
+    for (const projected of projection.apply(event)) options.emit(projected);
   };
   const local = watchLocalFeed({ scope: machineId(), signal: options.signal, emit: forward });
   let devices: Awaited<ReturnType<typeof loadDevices>>;

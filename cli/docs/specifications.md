@@ -1026,6 +1026,17 @@ SSH access (§7); rendering sessions that no harness produced.
   row deltas from the canonical snapshot writer's journal
   (`lib/session/session-cache.ts:190-230`; `lib/session/remote/watch.ts:141-211`;
   `lib/session/remote/watch.test.ts:30-61`; `commands/sessions-watch.ts:27-43`).
+- **SES-43a (MUST, PHNX-3939).** Both fleet session and feed streams MUST use
+  the same execution-owner projection (`lib/session/projection.ts`). Exact
+  session id, harness and execution device identify a canonical row; cwd and
+  prefixes MUST NOT join observations. Worker lifecycle/content MUST win over
+  launcher or history richness/recency. Observer-local terminal/viewing/reply
+  facts MUST remain separate in `observerTerminals`. Owner disconnect MUST retain its
+  last facts; reset/upsert/remove MUST converge without stale launcher resurrection
+  after an owner has answered. Genuine owner history MUST remain visible when
+  the owner no longer reports live state. Raw `--local` observations remain the
+  coordinator input; this adds no gather, polling or daemon service.
+
 - **SES-44 (MUST).** A one-shot `agents sessions ... --json` listing is distinct
   from the incremental stream, but MUST expose the same picker-facing lifecycle,
   device, viewing, and recovery metadata in each durable row. Consumers MUST NOT
@@ -2794,6 +2805,22 @@ and host/lease dispatch (`--device`/`--remote-cwd`/`--no-follow`/
   the stable join key threaded through `options.env` for the lifetime of one
   launch — the pid-registry / hook-session-index reconciliation depends on
   it never changing mid-launch (`lib/exec.ts:396-399,1407-1409`).
+- **EXEC-COMPAT-2a (MUST).** A nested CLI launch MUST NOT inherit its
+  parent's editor ownership (`AGENT_TERMINAL_ID`) or session/mailbox identity.
+  `AGENTS_RUNTIME` identifies a harness descendant; an editor's initial
+  `AGENT_SESSION_ID` alone does not. The initial launch and its SSH continuation
+  retain the terminal join; descendants retain `parentSessionId`,
+  `parentLaunchId`, and `originTerminalId` as provenance instead
+  (`lib/launch-identity.ts`, `lib/exec.ts`, `lib/hosts/dispatch.ts`,
+  `lib/event-provenance.ts`).
+- **EXEC-COMPAT-2b (MUST).** Exact launch resolution MUST share the local hook
+  index, including fresh deployed `state/sessions/<pid>.json` records joined
+  through durable launch registry entries. Missing legacy `terminal_id` MUST
+  NOT discard a known launch relationship. A conflicting launch id or stale
+  hook record MUST NOT resolve through a reused editor terminal or cwd.
+  The internal `sessions --resolve-launch-id <id> --json --local` reply is
+  `{launchId, sessionId: string | null}` and MUST NOT probe/prune host processes
+  (`lib/session/hook-sessions.ts`, `lib/hosts/remote-session-id.ts`).
 - **EXEC-COMPAT-3 (MUST).** The `full` mode spelling MUST continue to be accepted
   as a permanent silent alias for `skip` (`normalizeMode`,
   `lib/exec.ts:50-58`) — not a deprecation to remove.
@@ -3911,3 +3938,25 @@ location/activity context, while healthy rows are summarized until `--verbose` i
   `lib/session/active.ts`). Planned.
 - **WD-GAP-4.** No default `watchdog/WORKFLOW.md` decider ships in this repo; absent
   one, the built-in `WATCHDOG_SYSTEM_PROMPT` runs.
+
+
+#### PHNX-3939 registry ownership constraint
+
+Destructive PID-registry pruning on Linux requires the writer's boot id, PID
+namespace and namespace-init start time to match a trustworthy current process
+view. Namespace inodes can be recycled within one boot. `ESRCH` from a nested
+namespace is unknown liveness for a host record and MUST NOT delete it. Kernel
+start ticks distinguish reused PIDs. Legacy records without namespace provenance
+remain retained until an authoritative writer replaces them; unreadable/corrupt
+records are not proof of death. Regression coverage executes real nested namespaces
+with isolated registry state (`lib/session/pid-registry.test.ts`).
+
+Fresh private homes MAY enroll their measured namespace. Legacy migration and
+reboot recovery require the initial host namespace or kernel-verified live daemon
+ownership. A foreign or replaced private-container namespace MUST NOT take over
+the recorded HOME, even after its former writer exits; CLI refusal MUST explain
+that automatic reuse across namespaces is unsupported. Hooks withhold writes
+while preserving session-context output. No namespace-lifetime protocol
+or lifecycle helper is provided. The separate-init/child-CLI regression proves
+foreign ownership cannot be stolen, not automatic takeover
+(`lib/session/process-view.test.ts`).

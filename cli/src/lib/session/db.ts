@@ -18,7 +18,7 @@ import { query as queryEvents, queryToolUsageForSessions } from '../feed/events.
 import { machineForSessionFile } from '../origin-machine.js';
 import { loadSessionActorIndex, readSessionActorRecord } from './actor-sidecar.js';
 import { scanEventToolCalls, type IndexedToolCall } from './tool-calls.js';
-import { persistToolCalls, planEventToolResume, toolEvidenceSourcePath, type ToolScanResumePoint } from './tool-store.js';
+import { persistToolCalls, planEventToolResume, purgeToolCalls, toolEvidenceSourcePath, type ToolScanResumePoint } from './tool-store.js';
 import { buildClaudeAccountIndex, resolveClaudeAccount } from './claude-accounts.js';
 import {
   extractBackgroundShells,
@@ -57,8 +57,9 @@ export const SCHEMA_VERSION = 50;
  * genuine first-user-turn extractor was added.
  * v4 (PHNX-3621 leftover) invalidates Grok rows stamped before the bounded
  * chat_history.jsonl prefix read filled firstUserMessage.
+ * v5 (PHNX-3939) restores first-meta Codex fork ownership, including cold files.
  */
-export const CONTENT_INDEX_VERSION = 4;
+export const CONTENT_INDEX_VERSION = 5;
 
 /**
  * Bump to force `agents sessions backfill resources` to re-derive every
@@ -2650,6 +2651,30 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
   txn();
 }
 
+/** A verified Codex rollout has one native owner. An older last-meta scan may
+ * have indexed its child bytes under the parent id. Reconcile only paths that
+ * were successfully written, after the whole batch, so a real parent rollout
+ * repaired in the same transaction keeps its own row regardless of scan order. */
+function reconcileCodexFileOwners(db: Database.Database, metas: SessionMeta[]): void {
+  const owners = new Map(metas.filter(meta => meta.agent === 'codex' && meta.filePath).map(meta => [meta.filePath, meta.id]));
+  const paths = [...owners.keys()];
+  for (let i = 0; i < paths.length; i += 500) {
+    const chunk = paths.slice(i, i + 500);
+    const rows = db.prepare(`SELECT id, file_path FROM sessions WHERE agent = 'codex' AND file_path IN (${chunk.map(() => '?').join(',')})`)
+      .all(...chunk) as Array<{ id: string; file_path: string }>;
+    for (const row of rows) {
+      if (owners.get(row.file_path) === row.id) continue;
+      db.prepare('DELETE FROM sessions WHERE id = ?').run(row.id);
+      for (const table of ['session_text', 'session_preview_cache', 'session_summaries', 'session_insights', 'session_topics', 'session_phenotypes', 'session_resource_usage', 'resource_scan_ledger']) {
+        db.prepare(`DELETE FROM ${table} WHERE session_id = ?`).run(row.id);
+      }
+      // The tool ledger has a unique file path too; release the wrong binding
+      // before the child evidence is persisted below. Transcript files stay put.
+      purgeToolCalls(db, row.id);
+    }
+  }
+}
+
 /** Batch-upsert sessions with their FTS5 content and scan stamps in a single transaction. */
 export function upsertSessionsBatch(
   entries: Array<{
@@ -2942,6 +2967,7 @@ export function upsertSessionsBatch(
         }
       }
     }
+    reconcileCodexFileOwners(db, writtenEntries.map(entry => entry.meta));
   });
   txn(enrichedEntries);
   // Tool evidence shares the transcript parse above but owns an independent

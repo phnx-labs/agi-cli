@@ -1,3 +1,4 @@
+import { SessionProjection } from '../projection.js';
 import { createHash, randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -35,6 +36,8 @@ export type SessionWatchEnvelope =
 
 export interface SessionWatchRow extends Omit<ActiveSession, 'viewingIn' | 'context'> {
   context: ActiveSession['context'] | 'recent';
+  /** Observer-local terminal/reply facts; never overwrite execution-owner state. */
+  observerTerminals?: { device: string; terminalId?: string; launchId?: string; viewingIn: string | null; provenance?: ActiveSession['provenance'] }[];
   /** Flat durable branch for history rows that are not currently in a worktree. */
   branch?: string;
   rowKey: string;
@@ -466,7 +469,9 @@ function remoteWatchCommand(os: string): string {
  * peer resets only its own scope. There is no recurring fleet list command.
  */
 export async function watchFleetSessions(options: WatchFleetOptions): Promise<void> {
-  const local = watchLocalSessions({ scope: machineId(), signal: options.signal, emit: options.emit });
+  const projection = new SessionProjection();
+  const emit = (event: SessionWatchEnvelope) => { for (const projected of projection.apply(event)) options.emit(projected); };
+  const local = watchLocalSessions({ scope: machineId(), signal: options.signal, emit });
   let devices: Awaited<ReturnType<typeof loadDevices>>;
   try { devices = await loadDevices(); }
   catch { await local; return; }
@@ -488,11 +493,11 @@ export async function watchFleetSessions(options: WatchFleetOptions): Promise<vo
         try {
           const event = JSON.parse(line) as SessionWatchEnvelope;
           if (event.version !== SESSION_WATCH_VERSION || typeof event.sequence !== 'number') return false;
-          options.emit(event);
+          emit(event);
           return true;
         } catch { return false; /* incomplete/non-protocol peer output is not state */ }
       },
-      onUnavailable: (reason) => options.emit(state.scope(scope, 'unavailable', reason)),
+      onUnavailable: (reason) => emit(state.scope(scope, 'unavailable', reason)),
     });
   });
   await Promise.all([local, ...peerTasks]);

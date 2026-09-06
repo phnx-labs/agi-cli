@@ -21,6 +21,8 @@ describe('stampProvenance', () => {
       AGENTS_AGENT_NAME: 'codex',
       AGENT_LAUNCH_ID: 'launch-1',
       AGENTS_PARENT_SESSION_ID: 'parent-session',
+      AGENTS_PARENT_LAUNCH_ID: 'parent-launch',
+      AGENTS_ORIGIN_TERMINAL_ID: 'origin-tab',
     });
 
     expect(provenance).toMatchObject({
@@ -30,6 +32,8 @@ describe('stampProvenance', () => {
       agent: 'codex',
       launchId: 'launch-1',
       parentSessionId: 'parent-session',
+      parentLaunchId: 'parent-launch',
+      originTerminalId: 'origin-tab',
     });
   });
 });

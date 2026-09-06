@@ -249,6 +249,19 @@ title. `SessionMeta.lastUserMessage` (schema v48) carries the latest genuine tur
 beside `firstUserMessage`, and `deriveSessionRecap` classifies that raw turn —
 with the row's attachments in hand — rather than the already-collapsed `topic`.
 
+Fleet stream ownership is projected by `src/lib/session/projection.ts` for both
+`watchFleetSessions` and `watchFleetFeed`. A session is keyed by execution device,
+harness and exact session id. Worker observations own lifecycle and content;
+`observerTerminals` carry observer-local terminal/viewing/reply metadata. Peer loss
+retains state until the next owner reset; an answered owner's absent row cannot
+be resurrected by a stale launcher or mirrored history.
+
+Linux process-view ownership protects host snapshots and PID records from foreign
+namespaces. Initial-host or kernel-verified daemon authority permits legacy
+migration/reboot recovery. Reusing a private-container HOME across namespaces is
+unsupported even after its former writer exits; refuse with a diagnostic, never
+infer namespace death from process invisibility (`session/process-view.ts`).
+
 ### Per-session summarizer (PHNX-3939)
 
 Each session can carry a daemon-computed **`goal`** (1–2 lines), progress

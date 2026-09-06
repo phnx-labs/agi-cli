@@ -28,7 +28,7 @@ import { machineId } from './machine-id.js';
 import { isValidMailboxId } from './mailbox.js';
 import {
   listPidSessionEntries,
-  readPidSessionEntry,
+  readLivePidSessionEntry as readPidSessionEntry,
   type PidSessionEntry,
 } from './session/pid-registry.js';
 

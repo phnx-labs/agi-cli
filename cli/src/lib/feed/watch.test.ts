@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { ActiveSession } from '../session/active.js';
 import type { SessionMeta } from '../session/types.js';
-import { SessionWatchState } from '../session/watch.js';
-import { FeedWatchState, projectSessionEnvelope } from './watch.js';
+import { SessionWatchState, toSessionWatchRow } from '../session/watch.js';
+import { FeedSessionProjection, FeedWatchState, projectSessionEnvelope } from './watch.js';
 
 function session(id: string, extra: Partial<ActiveSession> = {}): ActiveSession {
   return { context: 'headless', kind: 'kimi', host: 'worker-a', sessionId: id, status: 'running', ...extra } as ActiveSession;
@@ -59,5 +59,55 @@ describe('feed watch operator projection', () => {
     }, new FeedWatchState('coordinator'));
     expect(projected.map((event) => event.type)).toEqual(['agent.remove', 'attention.remove']);
     expect(projected.map((event) => event.rowKey)).toEqual(['live-row', 'live-row']);
+  });
+});
+
+
+describe('fleet feed shares canonical session ownership', () => {
+  it('clears live attention when a raw removal leaves canonical history', async () => {
+    const projection = new FeedSessionProjection();
+    const sessions = new SessionWatchState();
+    const feed = new FeedWatchState();
+    const initial = (await projectSessionEnvelope(sessions.reset('worker', [session('same', { machine: 'worker', activity: 'waiting_input', awaitingReason: 'plan_review', question: { text: 'Review?', reason: 'plan_review' } })]), feed)).flatMap(event => projection.apply(event));
+    const reset = initial.find(event => event.type === 'reset');
+    const attentionKey = reset?.type === 'reset' ? reset.attention[0]?.key : undefined;
+    expect(attentionKey).toBeTruthy();
+    const results = [];
+    for (const delta of sessions.update('worker', [])) for (const event of await projectSessionEnvelope(delta, feed)) results.push(...projection.apply(event));
+    expect(results).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'agent.upsert', agent: expect.objectContaining({ previous: true }) }), expect.objectContaining({ type: 'attention.remove', scope: 'worker' })]));
+    expect(results.filter(e => e.type === 'attention.remove').at(-1)?.rowKey).toBe(attentionKey);
+  });
+
+  it('ignores history attention cleanup while an authoritative live row remains', () => {
+    const projection = new FeedSessionProjection();
+    const state = new FeedWatchState();
+    const live = toSessionWatchRow('worker', session('same'));
+    const history = { ...live, rowKey: 'history', previous: true };
+    projection.apply(state.emit({ type: 'reset', scope: 'worker', capturedAt: 1, agents: [live, history], attention: [] }));
+    expect(projection.apply(state.emit({ type: 'agent.upsert', scope: 'worker', rowKey: history.rowKey, agent: { ...history, preview: 'new historical text' } }))).toEqual([]);
+    expect(projection.apply(state.emit({ type: 'attention.remove', scope: 'worker', rowKey: history.rowKey }))).toEqual([]);
+    expect(projection.apply(state.emit({ type: 'attention.remove', scope: 'worker', rowKey: live.rowKey }))).toEqual([]);
+  });
+
+  it('moves attention with the owner and converges resets, upserts and removals', async () => {
+    const projection = new FeedSessionProjection();
+    const launcher = new SessionWatchState('launcher');
+    const owner = new SessionWatchState('owner');
+    const sourceFeed = new FeedWatchState();
+    const project = async (event: Parameters<typeof projectSessionEnvelope>[0]) => (await projectSessionEnvelope(event, sourceFeed)).flatMap(e => projection.apply(e));
+    await project(launcher.reset('desktop', [session('same', { machine: 'worker', terminalId: 'tab' })]));
+    const first = await project(owner.reset('worker', [session('same', { machine: 'worker', preview: 'worker preview', activity: 'waiting_input', awaitingReason: 'plan_review', question: { text: 'Review?', reason: 'plan_review' } })]));
+    const reset = first.find(e => e.type === 'reset');
+    expect(reset).toMatchObject({ scope: 'worker', agents: [{ preview: 'worker preview', sourceDevice: 'worker', observerTerminals: expect.arrayContaining([expect.objectContaining({ device: 'desktop', terminalId: 'tab' })]) }], attention: [{ sessionId: 'same' }] });
+    const changes = owner.update('worker', [session('same', { machine: 'worker', preview: 'next', activity: 'waiting_input', awaitingReason: 'plan_review', question: { text: 'Next?', reason: 'plan_review' } })]);
+    const events = (await Promise.all(changes.map(project))).flat();
+    const upsert = events.find(e => e.type === 'agent.upsert');
+    const attention = events.find(e => e.type === 'attention.upsert');
+    expect(upsert).toBeDefined();
+    expect(attention).toMatchObject({ scope: 'worker' });
+    if (attention?.type === 'attention.upsert') expect(attention.rowKey).toBe(attention.attention.key);
+    expect(attention!.sequence).toBeGreaterThan(upsert!.sequence);
+    expect(await project(owner.reset('worker', []))).toMatchObject([{ type: 'reset', scope: 'worker', agents: [], attention: [] }]);
+    expect(await project(launcher.reset('desktop', [session('same', { machine: 'worker' })]))).toMatchObject([{ type: 'reset', scope: 'desktop', agents: [], attention: [] }]);
   });
 });

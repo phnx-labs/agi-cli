@@ -1,3 +1,5 @@
+import { daemonProcessViewAllowed, recordDaemonProcessView } from '../session/process-view.js';
+
 /**
  * Daemon lifecycle management for the routines scheduler.
  *
@@ -501,6 +503,12 @@ export function isDaemonRunning(): boolean {
  * liveness check and the write.
  */
 export function claimDaemonInstance(): boolean {
+  // A nested caller cannot interpret legacy numeric lock/PID files. Authenticate
+  // before acquiring the lock (whose stale-PID cleanup itself mutates state).
+  if (!daemonProcessViewAllowed()) {
+    console.error('Daemon startup requires the owning process namespace. Automatic reuse of a private-container HOME across namespaces is unsupported; run in its owning namespace or use a fresh HOME.');
+    return false;
+  }
   // A stop owns this same lock through teardown. Waiting here is load-bearing:
   // returning false while stopDaemon() holds it lets this replacement exit 0,
   // then the stop completes with no singleton left alive. The bounded lifecycle
@@ -510,6 +518,9 @@ export function claimDaemonInstance(): boolean {
   const release = acquireLifecycleLock();
   if (!release) return false;
   try {
+    // Recheck under lifecycle serialization; invocation is not provenance.
+    if (!daemonProcessViewAllowed()) return false;
+    recordDaemonProcessView();
     // Do not overwrite a live-but-uninspectable owner. This is the non-
     // destructive side of the same fail-closed rule stopDaemon applies.
     if (unverifiedLiveDaemonPid() !== null) return false;
@@ -1757,6 +1768,9 @@ function assertDaemonLaunchHomeAllowed(): void {
 
 /** Start the daemon via launchd, systemd, or as a detached process. */
 export function startDaemon(agentsBin?: string): { pid: number | null; method: string } {
+  // The public launcher must obey the same namespace boundary as its child:
+  // even probing/repairing legacy PID state or pruning a lock can mutate it.
+  if (!daemonProcessViewAllowed()) throw new Error('Daemon startup requires the owning process namespace. Automatic reuse of a private-container HOME across namespaces is unsupported; run in its owning namespace or use a fresh HOME.');
   if (isDaemonRunning()) {
     const pid = readDaemonPid();
     return { pid, method: 'already-running' };

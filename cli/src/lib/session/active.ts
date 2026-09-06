@@ -1,3 +1,4 @@
+import { hostProcessView } from './process-view.js';
 /**
  * Active-session detection across every context an agent can run in:
  *
@@ -26,7 +27,7 @@ import type { CloudTaskStatus } from '../cloud/types.js';
 import { AgentManager } from '../teams/agents.js';
 import { getTerminalsDir } from '../state.js';
 import {
-  readPidSessionEntry,
+  readLivePidSessionEntry as readPidSessionEntry,
   listPidSessionEntries,
   prunePidSessionRegistry,
   sessionIdFromLivePid,
@@ -2286,8 +2287,9 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
   // split) resolves to its own agent. Newest launch wins a pane (pid reuse), and
   // only live pids count — a dead agent's stale entry can't light up its old pane.
   const liveByPane = new Map<string, PidSessionEntry>();
-  for (const e of listPidSessionEntries()) {
-    if (!e.tmuxPane || !isPidAlive(e.pid, e.startedAtMs)) continue;
+  for (const recorded of listPidSessionEntries()) {
+    const e = readPidSessionEntry(recorded.pid);
+    if (!e?.tmuxPane) continue;
     const prev = liveByPane.get(e.tmuxPane);
     if (!prev || e.startedAtMs > prev.startedAtMs) liveByPane.set(e.tmuxPane, e);
   }
@@ -2415,6 +2417,10 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
  * terminal/headless row for the same session id.
  */
 export async function getActiveSessions(opts: ActiveQueryOptions = {}): Promise<ActiveSession[]> {
+  if (!hostProcessView()) {
+    const { loadLocalActiveSessions } = await import('./session-cache.js');
+    return (await loadLocalActiveSessions()).sessions;
+  }
   const [tmuxAgents, teams, terminals, cloud] = await Promise.all([
     listTmuxAgentSessions().catch(() => [] as ActiveSession[]),
     listTeamsActive({ localOnly: opts.localOnly }).catch(() => [] as ActiveSession[]),
