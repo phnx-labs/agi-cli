@@ -8,11 +8,14 @@ harness: codex
 agent: Codex
 context: Remote conversations launched from an interactive desktop
 tracking: PHNX-3939
-status: implementation in progress
+status: extension and hook merged; CLI release pending
 date: "2026-09-06"
 links:
   - https://github.com/phnx-labs/agi-ext/pull/52
   - https://github.com/phnx-labs/agi-cli/pull/3490
+  - https://github.com/phnx-labs/agi-cli/pull/3497
+  - https://github.com/phnx-labs/agi-ext/pull/58
+  - https://github.com/phnx-labs/.agents/pull/442
 assets:
   - remote-session-component.png
 ---
@@ -21,7 +24,7 @@ assets:
 
 The user should see the worker's actual conversation while retaining its remote execution metadata. The CLI owns session identity, cross-device reconciliation and previews. The extension subscribes and renders; it must not recreate those mechanisms.
 
-<aside class="artifact-callout artifact-callout-warn">Delivery checkpoint: the activity-reader CPU fix is merged, not released. The session identity and extension changes are still under implementation and review. No task fix is installed in the user's editor, and the editor window has not been reloaded.</aside>
+<aside class="artifact-callout artifact-callout-warn">Delivery checkpoint, September 6: the extension, canonical identity hook and activity-reader CPU fix are merged. The hook is installed and verified; extension 0.9.365 is packaged. The CLI change awaits a green runtime-budget check and release. No task fix is loaded in the user's editor, and the editor window has not been reloaded.</aside>
 
 <figure class="artifact-figure artifact-figure-diagram artifact-figure-wide">
 <svg class="artifact-diagram" viewBox="0 0 960 230" role="img" aria-label="The worker transcript flows through the CLI's canonical session projection and one demand-gated extension monitor to the visible conversation row.">
@@ -80,14 +83,16 @@ The canonical activity reader reparsed historical tails before applying its curs
 | CPU used during a bounded 15-second native feed run | 2.75 seconds | 1.19 seconds |
 | Independently rerun activity tests | — | 85 passed |
 
-These gains are specific to the measured corpus. The bounded cache can thrash above 1,024 file/budget entries; correctness remains covered, but universal CPU elimination is not claimed. The required CI check was green at 65 seconds, exceeding the repository's 60-second target; no gate was relaxed.
+These gains are specific to the measured corpus. Installed-desktop verification then found 1,293 logs, above the cache's 1,024-entry limit. Sixty warmed future-cursor reads took 6,540.81 ms and returned zero events. The sequential scan still churns the cache at that scale, so a bounded-memory summary-retention correction is required before the extension feed is restored. This desktop result must not be compared directly with the smaller worker corpus. The original required CI check was green at 65 seconds, exceeding the repository's 60-second target; no gate was relaxed.
 
 ```text
 PR #3490: MERGED
 Merge commit: f9e36d645a42ee3ef1d7edc05cff8e267df48e4c
 Independent review: APPROVE
 Activity tests: 85 passed
-Release and installed verification: pending
+Release: 1.22.83, verified to contain the merge commit
+Installed desktop: 1.22.83, real activity reader exercised
+Desktop-scale cache correction: in progress
 ```
 
 ### Review found meaningful integration failures
@@ -100,7 +105,7 @@ Release and installed verification: pending
 | SessionStart rewrites a launcher PID entry | The hook discarded newly added provenance fields; a sidecar and canonical hook protection are required. |
 | A private container restarts with persistent home | Kernel boot stays the same while its PID namespace changes; a permanent namespace pin would reject the replacement. |
 
-These are review findings and acceptance cases, not claims that every fix has passed or shipped.
+These findings were resolved or explicitly scoped out before approval. Passing source checks and a merged PR are not claims of installed delivery.
 
 The composed CLI projection and extension store now preserve worker previews and distinguish two desktops using the same terminal identifier. Successive attention generations also pass through both the live store and late-follower replay. The actual terminal-hydration and fork callers now supply the observer hostname. Independent verification passed 31 focused tests and returned the expected identities through the real functions:
 
@@ -110,11 +115,25 @@ The composed CLI projection and extension store now preserve worker previews and
 
 These identifiers are synthetic. The hydration/attention contract review is approved. Independent lifecycle verification passed 38 tests, including two real editor-window processes and three real producer/descendant termination scenarios. Its scope is graceful handoff and cleanup within the owned POSIX process group—not abrupt extension-host death, escaped groups, Windows descendants, or the pre-existing bootstrap election race.
 
-The broader UI composition check then caught two additional defects: one canonical worker session attached to a local editor tab produced two Sessions rows, while both were hidden from the default live view when the execution context was `headless`. The fix must compose the tab onto its canonical session once and retain attachment as separate presentation metadata. This composed UI regression is still under implementation.
+The broader UI composition check caught two additional defects: one canonical worker session attached to a local editor tab produced two Sessions rows, while both were hidden from the default live view when the execution context was `headless`. The merged extension now composes the tab onto its canonical session once and retains attachment as separate presentation metadata. Independent UI verification passed 186 tests.
 
-The identity review is now approved: 54 focused tests pass, the canonical hook namespace/native scripts pass, and five native daemon startup/migration checks pass. Ownership compares boot ID, namespace ID and init start ticks consistently, so a recycled namespace ID cannot inherit a previous namespace's authority. These are source-level and real-process checks; the changes are not installed yet.
+The identity review is approved. Ownership compares boot ID, namespace ID and init start ticks consistently, so a recycled namespace ID cannot inherit a previous namespace's authority. The canonical hook is merged, synced and registered on the interactive desktop and execution workers; source and installed hashes match. Real integration tests using the installed hook passed 21 tests. The CLI half is not released yet.
 
-Scope decision: automatic takeover of a persistent private-container home is not part of this physical-worker fix. A CLI running beneath a separate container init cannot prove that an invisible namespace is dead. The experimental PID-1 lease is being removed; foreign namespace writes must fail safely, while verified native-host migration and reboot recovery remain supported. Namespace-local ephemeral stores would be a separate design if automatic container-home reuse is needed.
+Scope decision: automatic takeover of a persistent private-container home is not part of this physical-worker fix. A CLI running beneath a separate container init cannot prove that an invisible namespace is dead. The experimental PID-1 lease was removed; foreign namespace writes fail safely, while verified native-host migration and reboot recovery remain supported. Namespace-local ephemeral stores would be a separate design if automatic container-home reuse is needed.
+
+### Final platform checks and remaining release gate
+
+The macOS run exposed a genuine teardown defect: signalling a zombie-only process group returned `EPERM` in 100 of 100 probes. The extension now accepts that result only after successful inspection proves there are no live group members. Live members and inspection failures still reject cleanup. A real-process regression first observes the zombie and `EPERM`, then verifies cleanup and socket removal.
+
+| Check | Verified result |
+| --- | --- |
+| Combined extension lifecycle and identity checks, three scheduled repetitions | macOS: 222 passed; Linux: 219 passed, 3 Darwin-only skipped |
+| Independent subprocess and handoff rerun | 9 passed |
+| Final macOS package | 0.9.365, 25.34 MB; runtime native dependencies verified |
+| CLI affected checks on worker | 2,854 passed, 7 skipped; complete impact run 120 seconds |
+| CLI hosted check | 2,842 passed, 19 environment-specific skips; failed total runtime gate at 263 seconds against 240 seconds |
+
+The hosted failure is a timing failure, not a failing assertion. The limit remains unchanged and the PR is not being merged while red. These results are recorded on [CLI PR #3497](https://github.com/phnx-labs/agi-cli/pull/3497) and [extension PR #58](https://github.com/phnx-labs/agi-ext/pull/58).
 
 ## Recommendations
 
@@ -134,4 +153,6 @@ The user's no-reload constraint remains binding. Packaging or installing a VSIX 
 - PHNX-3939: existing umbrella ticket; unrelated sections remain open.
 - [Original extension regression, PR #52](https://github.com/phnx-labs/agi-ext/pull/52).
 - [Merged activity CPU fix, PR #3490](https://github.com/phnx-labs/agi-cli/pull/3490).
-- Session identity, canonical hook and extension integration PRs: pending.
+- [CLI identity and worker projection, PR #3497](https://github.com/phnx-labs/agi-cli/pull/3497): awaiting green CI and release.
+- [Canonical identity hook, PR #442](https://github.com/phnx-labs/.agents/pull/442): merged, installed and verified.
+- [Extension integration, PR #58](https://github.com/phnx-labs/agi-ext/pull/58): merged and packaged; not loaded in the active editor.
