@@ -51,6 +51,7 @@ import { hostIdentityArgs, sshTargetFor } from '../lib/hosts/types.js';
 import { deviceIdentityArgs } from '../lib/devices/connect.js';
 import { machineId, normalizeHost } from '../lib/session/sync/config.js';
 import { findAmbiguousDevicePins } from '../lib/scheduling/routines.js';
+import { findLeakedDaemons } from '../lib/daemon/leaked-daemons.js';
 import chalk from 'chalk';
 import { checkAllClis, collectTeamsDoctorData, type TeamsDoctorEntry } from '../lib/teams/agents.js';
 import { AGENTS, ALL_AGENT_IDS, resolveAgentName, formatAgentError, getAccountInfo, type AccountInfo } from '../lib/agents.js';
@@ -610,6 +611,10 @@ async function runDevicesDoctor(opts: DoctorOptions): Promise<void> {
         // remote boxes self-report it in their own `agents doctor --json`.
         ownerSink: await probeOwnerSink(readMeta()),
         binaryShadows: detectAgentsBinaryShadows(),
+        // A `__daemon-run` no unit main PID or daemon.pid owns (W4, PHNX-3736) —
+        // the /tmp/pin-e2e leak class the registry-scoped duplicate check cannot
+        // see. Local only: a remote box self-reports in its own doctor.
+        leakedDaemons: findLeakedDaemons(),
       }));
       accounts[localName] = r.inventory?.signIn ?? {};
       continue;
@@ -1711,6 +1716,8 @@ export function registerDoctorCommand(program: Command): void {
           // Can the owner-delivery lane (feed/notify) escalate a block from this
           // box? A factory that cannot escalate is not healthy (RUSH-2262).
           ownerSink: await probeOwnerSink(readMeta()),
+          // A `__daemon-run` no unit main PID or daemon.pid owns (W4, PHNX-3736).
+          leakedDaemons: findLeakedDaemons(),
         });
 
         if (opts.json) {

@@ -28,6 +28,25 @@ never permission to signal it, erase its files, or launch a duplicate.
 escalates and waits again; it removes a registry marker only after death is
 observed, so a wedged duplicate cannot survive while becoming invisible.
 
+**A daemon launch under a redirected HOME is refused (W4, PHNX-3736).**
+`startDaemon()` throws `RedirectedHomeDaemonError` when `isolatedHomeSuffix()`
+detects HOME pointing away from the account's real home, unless the caller opted
+in with `AGENTS_ALLOW_TEST_DAEMON=1` (the deliberate test/e2e seam — a harness
+that sets it owns stopping what it starts). The explicit start commands
+(`daemon start`, `routines start`) fail loud; auto-start side effects
+(`routines add`, webhook fires, `monitors add`) catch the refusal, state it,
+and leave the foreground command green — the same tier split as the auto-start
+circuit breaker. A daemon launched under a temp HOME
+keeps its own pid file there, so the real install's pid-file takeover can never
+see it: the `HOME=/tmp/pin-e2e-<pid>` daemon a headless e2e session leaked ran
+4+ days on yosemite-s1 invisible to every existing surface. Detection lives in
+`leaked-daemons.ts` (`findLeakedDaemons`): any same-uid `__daemon-run` whose pid
+is neither the service manager's unit main PID nor the recorded `daemon.pid` —
+checked against BOTH this process's HOME and the real account home, so a
+redirected-HOME caller never accuses the production daemon — is surfaced by
+`agents doctor` as a `leaked-daemon` warning with the process's HOME, start
+time, and a `kill <pid>` remediation.
+
 **Two runtime models coexist today (RUSH-3193 plus PHNX-3265/PHNX-3608/PHNX-3695
 migrated every declared service but one onto the supervisor; 1 declared service
 remains inline).** `cli/src/lib/daemon-services.ts` defines `DaemonServiceId` —

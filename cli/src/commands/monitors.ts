@@ -19,6 +19,7 @@ import {
   isDaemonRunning,
   signalDaemonReload,
   startDaemon,
+  RedirectedHomeDaemonError,
 } from '../lib/daemon/daemon.js';
 import { findDuplicateMonitor, monitorFingerprint } from '../lib/monitors/fingerprint.js';
 import { gatherFleetMonitors, NO_MONITOR_FANOUT_ENV, type RemoteMonitor, type RemoteMonitorDisplay } from '../lib/monitors/remote.js';
@@ -271,7 +272,19 @@ function ensureDaemonRunning(): boolean {
     stderrLine(chalk.gray('Daemon reloaded'));
     return true;
   }
-  const result = startDaemon();
+  let result: { pid: number | null; method: string };
+  try {
+    result = startDaemon();
+  } catch (err) {
+    // The redirected-HOME refusal (W4) is an auto-start policy, not a failure
+    // of the monitor just added — state it and leave the foreground command
+    // green. Anything else (a genuinely unspawnable binary) still fails loud.
+    if (err instanceof RedirectedHomeDaemonError) {
+      stderrLine(chalk.yellow((err as Error).message));
+      return true;
+    }
+    throw err;
+  }
   if (result.pid) {
     console.log(chalk.green(`Daemon started (PID: ${result.pid}). It will watch monitors in the background.`));
     console.log(chalk.gray('Disable only monitor polling with: agents daemon services disable monitors'));

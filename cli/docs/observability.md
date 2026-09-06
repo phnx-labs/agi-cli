@@ -192,7 +192,7 @@ drift.
 `never-synced`, `stale`, `repo-behind`, `repo-drift`, `fleet-resource-gap`,
 `version-skew`, `orphan`, `duplicate-hook`, `duplicate-hook-drift`, `host-cli-missing`,
 `host-cli-invalid`, `rc-secret-export`, `env-secret-export`, `auth-bundle-wrong-backend`, `exec-policy`, `stale-cli`,
-`binary-shadow`.
+`binary-shadow`, `leaked-daemon`.
 
 The split is provability and blast radius: a critical is something the operator can act
 on right now with a known fix, while a warning is drift that one sweep resolves.
