@@ -234,7 +234,14 @@ a harness could report a successful sync while nothing was written at all
 - **`--json`** — every payload that can carry a decline sets `ok` from it and
   includes a `declined: string[]`: `mode: 'agent'`, `mode: 'agent-all'` (per
   version, under `versions[]`), and `mode: 'umbrella'`. A payload that runs no
-  sync (`nothing to sync`, any dry run, `repo-git`, `launch`) keeps `ok: true`.
+  sync (`nothing to sync`, a **scoped** dry run, `repo-git`, `launch`) keeps
+  `ok: true`. The one exception is `--dry-run` on the **umbrella** verb (bare
+  `agents sync`): it has no non-mutating preview — the machine-wide sync only
+  composes mutating stages (repo pull, reconcile, device sync, repair) — so it
+  refuses up front with `{ ok: false, mode: 'umbrella', dryRun: true, error,
+  hint, installedAgents }` and exit 1, rather than running a real sync (the
+  PHNX-3923 mutate-on-dry-run bug) or faking a preview. Scope it to an agent
+  (`agents sync <agent> --dry-run`) for a real preview (PHNX-3923).
 - **Fleet fan-out** — `agents sync --device all` injects `--json` per peer, so a
   box that refused a write renders as `N not written` instead of `ok`.
 
