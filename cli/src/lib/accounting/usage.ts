@@ -346,6 +346,13 @@ const NO_DATA = '\u2504';
 /** Discriminator for usage window types. */
 export type UsageWindowKey = 'session' | 'week' | 'sonnet_week' | 'month';
 
+/**
+ * How this box obtained a usage row (delta-spec D8). Distinct from
+ * {@link UsageSnapshot.source} (`live` | `last_seen`), which is how the
+ * number was collected from the harness/API.
+ */
+export type UsageCaptureSource = 'poll' | 'statusline' | 'sync';
+
 /** A single rate-limit window with utilization percentage and reset time. */
 export interface UsageWindow {
   key: UsageWindowKey;
@@ -396,6 +403,16 @@ export interface UsageSnapshot {
   unavailable?: {
     reason: 'session_limit' | 'out_of_credits';
     resetsAt?: Date;
+  };
+  /**
+   * D8 freshness provenance. A `sync` row arrived from the account's poller
+   * through the fleet store and is trusted for the sync cadence; `poll` and
+   * `statusline` are local captures and keep the 5-minute decision bar.
+   */
+  freshness?: {
+    source: UsageCaptureSource;
+    /** Device that polled or ingested the authoritative reading. */
+    poller?: string;
   };
 }
 
@@ -460,6 +477,13 @@ interface UsageOptions {
    * an unattended loop never transmits the interactive login to Anthropic.
    */
   allowInteractiveLogin?: boolean;
+  /**
+   * Headed usage poller: skip the setup-token and the ACL keychain, and read
+   * only `<home>/.claude/.credentials.json` (the native rotating blob). A
+   * setup-token 403s on `/api/oauth/usage`; the keychain pops Touch ID. The
+   * file blob is the Linux headed native login, and a no-op when absent.
+   */
+  nativeFileLogin?: boolean;
 }
 
 /** Canonical input for a single usage fetch operation. */
@@ -565,6 +589,10 @@ export interface CachedUsageSnapshot {
    * usage bucket.
    */
   modelRefusals?: Record<string, CachedModelRefusal>;
+  /** D8: `poll` | `statusline` | `sync`. Survives export → ingest. */
+  freshnessSource?: UsageCaptureSource;
+  /** D8: device that polled or ingested the authoritative reading. */
+  pollerDevice?: string;
 }
 
 /** Parsed rate-limit data extracted from a Codex session file. */
@@ -701,6 +729,8 @@ export interface UsageLookupOptions {
    * `loadClaudeOauth`. Unset for every other lookup.
    */
   allowInteractiveLogin?: boolean;
+  /** Headed poller: native `.credentials.json` only, never the setup-token. */
+  nativeFileLogin?: boolean;
 }
 
 export async function getUsageInfoByIdentity(
@@ -765,6 +795,7 @@ export async function getUsageInfoForIdentity(
       organizationId: input.info.organizationId,
       fileOnly: opts?.fileOnly,
       allowInteractiveLogin: opts?.allowInteractiveLogin,
+      nativeFileLogin: opts?.nativeFileLogin,
       signal: opts?.signal,
     });
   }
@@ -804,6 +835,7 @@ export async function getUsageInfoForIdentity(
   // Explicit refresh: block on the shared device collector.
   return fetchLiveUsageDeduped(input, usageKey, cached, opts?.fileOnly === true, {
     allowInteractiveLogin: opts?.allowInteractiveLogin === true,
+    nativeFileLogin: opts?.nativeFileLogin === true,
     signal: opts?.signal,
   });
 }
@@ -818,7 +850,7 @@ async function fetchLiveUsageDeduped(
   usageKey: string,
   cached: UsageSnapshot | null,
   fileOnly: boolean,
-  opts?: { allowInteractiveLogin?: boolean; signal?: AbortSignal },
+  opts?: { allowInteractiveLogin?: boolean; nativeFileLogin?: boolean; signal?: AbortSignal },
 ): Promise<UsageInfo> {
   const existing = inFlightLiveFetches.get(usageKey);
   if (existing) return existing;
@@ -843,6 +875,7 @@ async function fetchLiveUsageDeduped(
         usageScope: usageKey,
         fileOnly,
         allowInteractiveLogin: opts?.allowInteractiveLogin === true,
+        nativeFileLogin: opts?.nativeFileLogin === true,
         signal: opts?.signal,
       });
 
@@ -1394,9 +1427,10 @@ async function getClaudeUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
     // requires (the setup-token is user:inference → 403, RUSH-2392). It is unset
     // for every background caller, so the RUSH-1822 guarantee is untouched there.
     const oauth = await loadClaudeOauth(options?.home, {
-      accessTokenCache: true,
-      fileOnly: options?.fileOnly === true,
+      accessTokenCache: options?.nativeFileLogin !== true,
+      fileOnly: options?.fileOnly === true || options?.nativeFileLogin === true,
       allowInteractiveLogin: options?.allowInteractiveLogin === true,
+      nativeFileLogin: options?.nativeFileLogin === true,
     });
     if (!oauth?.accessToken) {
       // NOT the shared no-credential message: "sign in" is not a remedy here.
@@ -2169,10 +2203,35 @@ function deleteCachedClaudeOauth(service: string): void {
  * `.credentials.json` only. Used by the daemon usage refresher so a background
  * tick can never pop Touch ID.
  */
+/** True when `<home>/.claude/.credentials.json` is a native rotating OAuth blob. */
+export function claudeHomeHasNativeOauthFile(home?: string): boolean {
+  return readClaudeNativeCredentialsFile(home) !== null;
+}
+
+function readClaudeNativeCredentialsFile(home?: string): ClaudeOauthCredentials | null {
+  const credsPath = path.join(home ?? os.homedir(), '.claude', '.credentials.json');
+  try {
+    if (!fs.existsSync(credsPath)) return null;
+    const parsed = parseClaudeOauthPayload(fs.readFileSync(credsPath, 'utf-8'));
+    // A native rotating blob has a refresh token. A setup-token-shaped file
+    // (access only) is not a native login and must not be polled as one.
+    if (!parsed?.accessToken?.trim() || !parsed.refreshToken?.trim()) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 export async function loadClaudeOauth(
   home?: string,
-  opts?: { accessTokenCache?: boolean; fileOnly?: boolean; allowInteractiveLogin?: boolean }
+  opts?: { accessTokenCache?: boolean; fileOnly?: boolean; allowInteractiveLogin?: boolean; nativeFileLogin?: boolean }
 ): Promise<ClaudeOauthCredentials | null> {
+  // Headed usage poller: the native rotating blob in `.credentials.json` is
+  // the only credential that carries `user:profile` without opening the ACL
+  // keychain (Touch ID) or firing a setup-token that 403s on /oauth/usage.
+  if (opts?.nativeFileLogin === true) {
+    return readClaudeNativeCredentialsFile(home);
+  }
   // Read-only usage/probe callers (accessTokenCache) authenticate ONLY with a
   // file-based setup-token from the `auth` bundle — never Claude Code's
   // interactive login. The usage endpoint accepts any sk-ant-oat01 bearer, and
@@ -2561,6 +2620,8 @@ function serializeClaudeUsageSnapshot(snapshot: UsageSnapshot): CachedUsageSnaps
       resetsAt: window.resetsAt?.toISOString() || null,
       windowMinutes: window.windowMinutes,
     })),
+    freshnessSource: snapshot.freshness?.source,
+    pollerDevice: snapshot.freshness?.poller,
   };
 }
 
@@ -2637,6 +2698,9 @@ function deserializeClaudeUsageSnapshot(
     plan: snapshot.plan ?? null,
     refreshHint: snapshot.refreshHint ?? null,
     unavailable,
+    freshness: snapshot.freshnessSource
+      ? { source: snapshot.freshnessSource, poller: snapshot.pollerDevice }
+      : undefined,
   };
 }
 
