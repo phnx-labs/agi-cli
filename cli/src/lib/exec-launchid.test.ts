@@ -1,6 +1,59 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { spawnSync } from 'child_process';
-import { buildExecEnv, isHarnessKnownSessionId } from './exec.js';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { buildExecEnv, buildTmuxAgentCommand, writeTmuxEnvFile, isHarnessKnownSessionId } from './exec.js';
+import { launchIdentityEnv } from './launch-identity.js';
+
+describe('launch editor ownership', () => {
+  const saved = { ...process.env };
+  afterEach(() => {
+    for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key];
+    Object.assign(process.env, saved);
+  });
+
+  it.skipIf(process.platform === 'win32')('clears stale tmux-server identity in both launch forms while keeping terminal plumbing', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'launch-identity-'));
+    try {
+      for (const fileMode of [false, true]) {
+        const env = { PATH: process.env.PATH, AGENT_LAUNCH_ID: 'new-launch' };
+        const envFile = fileMode ? path.join(dir, 'env') : undefined;
+        if (envFile) writeTmuxEnvFile(env, envFile);
+        const cmd = buildTmuxAgentCommand(process.execPath, ['-e', 'console.log(JSON.stringify({terminal:process.env.AGENT_TERMINAL_ID,session:process.env.AGENT_SESSION_ID,launch:process.env.AGENT_LAUNCH_ID,tmux:process.env.TMUX}))'], env, { envFile });
+        const child = spawnSync('sh', ['-c', cmd], { encoding: 'utf8', env: { ...process.env, AGENT_TERMINAL_ID: 'stale-tab', AGENT_SESSION_ID: 'stale-session', TMUX: 'server-socket' } });
+        expect(child.status, child.stderr).toBe(0);
+        expect(JSON.parse(child.stdout)).toEqual({ launch: 'new-launch', tmux: 'server-socket' });
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['terminal', 'headless', 'teams'])('keeps an initial editor session distinct from its %s descendant launch', runtime => {
+    delete process.env.AGENTS_RUNTIME;
+    delete process.env.AGENTS_PARENT_SESSION_ID;
+    process.env.AGENT_TERMINAL_ID = 'editor-tab';
+    process.env.AGENT_SESSION_ID = 'parent-session';
+    expect(launchIdentityEnv().AGENT_TERMINAL_ID).toBe('editor-tab');
+    const initial = buildExecEnv({ agent: 'codex', mode: 'auto', effort: 'auto' });
+    expect(initial.AGENT_TERMINAL_ID).toBe('editor-tab');
+    expect(initial.AGENTS_PARENT_SESSION_ID).toBeUndefined();
+    process.env.AGENTS_RUNTIME = runtime;
+    process.env.AGENT_LAUNCH_ID = 'parent-launch';
+    process.env.AGENTS_PARENT_LAUNCH_ID = 'grandparent-launch';
+    process.env.AGENTS_PARENT_SESSION_ID = 'grandparent-session';
+    delete process.env.AGENTS_SESSION_ID;
+    const env = buildExecEnv({ agent: 'codex', mode: 'auto', effort: 'auto', prompt: 'child task', env: { AGENT_LAUNCH_ID: 'child-launch' } });
+    const child = spawnSync(process.execPath, ['-e', 'console.log(JSON.stringify(Object.fromEntries(Object.entries(process.env).filter(([k]) => /^(AGENT_|AGENTS_PARENT|AGENTS_ORIGIN)/.test(k)))))'], { env, encoding: 'utf8' });
+    expect(child.status).toBe(0);
+    const delivered = JSON.parse(child.stdout);
+    expect(delivered.AGENT_TERMINAL_ID).toBeUndefined();
+    expect(delivered.AGENT_SESSION_ID).toBeUndefined();
+    expect(env.AGENTS_SESSION_ID).toBeUndefined();
+    expect(delivered).toMatchObject({ AGENT_LAUNCH_ID: 'child-launch', AGENTS_PARENT_LAUNCH_ID: 'parent-launch', AGENTS_PARENT_SESSION_ID: 'parent-session', AGENTS_ORIGIN_TERMINAL_ID: 'editor-tab' });
+  });
+});
 
 // The launchId join only works if AGENT_LAUNCH_ID actually reaches the agent
 // process (so its SessionStart hook records the same id). spawnAgent injects it

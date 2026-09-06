@@ -151,6 +151,7 @@ interface SessionsOptions extends SessionFilterOptions {
   resolve?: string;
   /** Versioned internal peer protocol; old/unsafe peers must reject it. */
   resolveSafeV1?: string;
+  resolveLaunchId?: string;
   limit?: string;
   sort?: string;
   json?: boolean;
@@ -2717,6 +2718,16 @@ async function sessionsAction(
   // of hardcoding `~/.claude|.codex|.gemini`. Always local; ignores other flags.
   if (options.roots) {
     process.stdout.write(JSON.stringify(getSessionRoots(), null, 2) + '\n');
+    return;
+  }
+
+  if (options.resolveLaunchId !== undefined) {
+    if (!options.json) throw new Error('--resolve-launch-id requires --json.');
+    const launchId = options.resolveLaunchId.trim();
+    if (!launchId) throw new Error('--resolve-launch-id requires a non-empty launch id.');
+    const { loadHookSessionIndex } = await import('../lib/session/hook-sessions.js');
+    const record = loadHookSessionIndex().byLaunchId.get(launchId);
+    process.stdout.write(JSON.stringify({ launchId, sessionId: record?.session_id ?? null }) + '\n');
     return;
   }
 
@@ -5926,6 +5937,7 @@ export function registerSessionsCommands(program: Command): void {
     .option('--query <clause>', 'Search text; repeat with --include tools to require distinct matching calls', collectQueryClause, [])
     .option('--resolve <selector>', 'Resolve one full ID, unique prefix, or keyword query to safe session metadata (requires --json; searches the fleet unless --local)')
     .addOption(new Option('--resolve-safe-v1 <selector>').hideHelp())
+    .addOption(new Option('--resolve-launch-id <id>').hideHelp())
     .description(
       'Find, browse, and read agent conversation transcripts. Live roster: `agents sessions --active`.',
     )

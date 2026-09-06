@@ -14,6 +14,8 @@ export interface EventProvenance {
   agent?: string;
   launchId?: string;
   parentSessionId?: string;
+  parentLaunchId?: string;
+  originTerminalId?: string;
 }
 
 interface AuditOrigin {
@@ -59,6 +61,8 @@ export function stampProvenance(env: NodeJS.ProcessEnv = process.env): EventProv
   if (env.AGENTS_AGENT_NAME) provenance.agent = env.AGENTS_AGENT_NAME;
   if (env.AGENT_LAUNCH_ID) provenance.launchId = env.AGENT_LAUNCH_ID;
   if (env.AGENTS_PARENT_SESSION_ID) provenance.parentSessionId = env.AGENTS_PARENT_SESSION_ID;
+  if (env.AGENTS_PARENT_LAUNCH_ID) provenance.parentLaunchId = env.AGENTS_PARENT_LAUNCH_ID;
+  if (env.AGENTS_ORIGIN_TERMINAL_ID) provenance.originTerminalId = env.AGENTS_ORIGIN_TERMINAL_ID;
   return provenance;
 }
 

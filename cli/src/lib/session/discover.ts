@@ -1141,7 +1141,8 @@ function collectChangedFilesInLeafDirs(
         let hot = isLiveRoot;
         if (!hot && stamps) {
           const s = stamps.get(filePath);
-          hot = s?.scannedAt !== undefined && now - s.scannedAt <= HOT_FILE_WINDOW_MS;
+          hot = s?.extractorVersion !== CONTENT_INDEX_VERSION
+            || (s?.scannedAt !== undefined && now - s.scannedAt <= HOT_FILE_WINDOW_MS);
         }
         if (!hot) continue;
         const stat = safeStatSync(filePath);
@@ -4625,7 +4626,10 @@ function applyCodexLine(state: CodexParseState, parsed: any): void {
 
   if (parsed.type === 'session_meta') {
     const payload = parsed.payload || {};
-    state.sessionId = payload.id || state.sessionId;
+    // Native forks prepend child ownership before inherited parent metadata.
+    // The first valid identity owns this file in both full and resumed scans.
+    if (state.sessionId || typeof payload.id !== 'string' || !payload.id.trim()) return;
+    state.sessionId = payload.id;
     state.timestamp = payload.timestamp || parsed.timestamp || state.timestamp;
     state.cwd = payload.cwd || state.cwd;
     state.gitBranch = payload.git?.branch || state.gitBranch;

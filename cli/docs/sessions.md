@@ -224,3 +224,32 @@ queryable when a run failed before session creation.
 
 Raw transcripts are private machine state and are never committed as documentation or
 attached directly to public work.
+
+
+### Remote stream ownership
+
+Fleet `sessions watch --json` and `feed watch --json` publish one row per exact
+session id, harness and execution device. `sourceDevice` and `machine` identify
+the execution owner. The worker's state and preview win over the origin launcher,
+even when that launcher is newer or has more fields. Observer-local terminal ids,
+viewing information and reply provenance live in `observerTerminals`; they do not
+replace the worker's execution metadata. Disconnect retains the last owner state;
+reconnect resets it. Once an owner has answered, stale launcher/history copies
+cannot resurrect a session that the owner removed. `--local` remains the raw
+observation stream used by the fleet coordinator.
+
+### Process namespace ownership
+
+On Linux, PID-keyed session state belongs to the recorded boot, PID namespace and
+init process start time. The init stamp distinguishes recycled namespace inodes.
+A foreign observer reads the existing host snapshot without gathering, pruning,
+or replacing it. An invisible process is not evidence that it died; each record's
+kernel start time also protects against PID reuse.
+
+Legacy migration and reboot recovery require the initial host namespace or a
+live canonical daemon verified through kernel socket credentials. A fresh private
+HOME can enroll its own namespace. Automatic reuse of a private-container HOME
+across namespaces is unsupported, including after the prior namespace exits.
+CLI writers are refused with a diagnostic; hooks withhold PID writes and retain
+their session-context output. Run in the owning namespace or use a fresh HOME.
+There is no automatic namespace takeover or container lifecycle helper.

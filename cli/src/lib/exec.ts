@@ -1,3 +1,4 @@
+import { captureLaunchBinding, recordCompletedLaunch } from './session/hook-sessions.js';
 /**
  * Agent execution -- command building, process spawning, and rate-limit fallback.
  *
@@ -18,6 +19,7 @@ import { isTierToken, resolveTier } from './model-tiers.js';
 import { emit, emitStart, createTimer, redactPrompt, redactArgs, type EventPayload } from './feed/events.js';
 import { sanitizeProcessEnv } from './secrets-client.js';
 import { resolveActor, actorEnv } from './actor.js';
+import { launchIdentityEnv, LAUNCH_IDENTITY_KEYS } from './launch-identity.js';
 import { expandLocalHome } from './project-root.js';
 import { getShimsDir, getHistoryDir, getUserAgentsDir, getRuntimeStateDir } from './state.js';
 import { readCodexConfiguredModel } from './installations/shims.js';
@@ -579,6 +581,15 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
     stripForeignConfigDir(result);
   }
 
+  // A new harness must not inherit its spawner's own session/mailbox or editor
+  // ownership. Keep those relationships as lineage, including across SSH.
+  delete result.AGENT_SESSION_ID;
+  delete result.AGENTS_SESSION_ID;
+  delete result.AGENTS_MAILBOX_DIR;
+  delete result.AGENT_TERMINAL_ID;
+  const launchIdentity = launchIdentityEnv();
+  Object.assign(result, launchIdentity);
+
   // Point the agent at its own mailbox so the PreToolUse `mailbox-inject` hook
   // knows which box to drain and inject mid-run. Keyed by the session id — the
   // same id the writer resolves via mailboxIdForActiveSession(). A loop run
@@ -595,9 +606,9 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
   // (events.ts::resolveProvenance) reads AGENTS_PARENT_SESSION_ID and stamps it on
   // every event the child emits. `options.sessionId` is the CHILD's id, so read the
   // spawner from the live env; guard a same-session resume from naming itself parent.
-  // Local-spawn scope here; forwarding it across the `--device` SSH hop is Phase 4.
+  // An SSH continuation has no runtime marker; keep its forwarded parent edge.
   delete result.AGENTS_PARENT_SESSION_ID;
-  const spawnerSessionId = process.env.AGENTS_SESSION_ID || process.env.AGENT_SESSION_ID;
+  const spawnerSessionId = launchIdentity.AGENTS_PARENT_SESSION_ID;
   if (spawnerSessionId && spawnerSessionId !== options.sessionId) {
     result.AGENTS_PARENT_SESSION_ID = spawnerSessionId;
   }
@@ -1481,7 +1492,7 @@ async function execShimPassthroughLeased(
         actor: resolveActor().id,
         initiatedBy: resolveActor().kind,
         launchId,
-        terminalId: process.env.AGENT_TERMINAL_ID,
+        terminalId: launchIdentityEnv().AGENT_TERMINAL_ID,
         startedAtMs: Date.now(),
       });
       // Durable sessionId -> actor record (RUSH-2019) so the scanner can attribute
@@ -1698,6 +1709,7 @@ export function buildTmuxAgentCommand(
   opts: { redactEnvValues?: boolean; envFile?: string } = {},
 ): string {
   const agentCmd = [executable, ...args].map(shellQuote).join(' ');
+  const absentIdentity = LAUNCH_IDENTITY_KEYS.filter(key => env[key] === undefined);
   // envFile: source the values instead of inlining them, so no VALUE ever lands
   // in the pane's argv. `exec env K=V …` put every resolved secret into the
   // process table, readable by any process of this user — on one fleet box six
@@ -1712,13 +1724,13 @@ export function buildTmuxAgentCommand(
     // strands the plaintext env (incl. the secrets-store master passphrase) on
     // disk on any source failure, worse than the argv leak this replaces
     // (RUSH-2100). Capture the source rc, unlink, then honor it.
-    return `set -a; . ${f}; __agents_rc=$?; set +a; rm -f ${f}; [ "$__agents_rc" -eq 0 ] || exit 1; exec ${agentCmd}`;
+    return `${absentIdentity.length ? `unset ${absentIdentity.join(' ')}; ` : ''}set -a; . ${f}; __agents_rc=$?; set +a; rm -f ${f}; [ "$__agents_rc" -eq 0 ] || exit 1; exec ${agentCmd}`;
   }
   const envPrefix = Object.entries(env)
     .filter(([k, v]) => v !== undefined && EXEC_ENV_KEY_PATTERN.test(k))
     .map(([k, v]) => `${k}=${opts.redactEnvValues ? '<redacted>' : shellQuote(String(v))}`)
     .join(' ');
-  return `exec env ${envPrefix} ${agentCmd}`;
+  return `exec env ${absentIdentity.map(key => `-u ${key}`).join(' ')} ${envPrefix} ${agentCmd}`;
 }
 
 /**
@@ -1851,9 +1863,14 @@ async function runInTmux(options: ExecOptions, executable: string, args: string[
    * "the session went away underneath us", so an attach that skips this cannot
    * do better than assume success — which is exactly the defect EXEC-23b fixes.
    */
+  let paneLaunchBinding: ReturnType<typeof captureLaunchBinding>;
+  const bindCompletedPane = () => {
+    recordCompletedLaunch(paneLaunchBinding);
+  };
   const resolveAfterAttach = async (pane: string | undefined): Promise<{ exitCode: number; stderr: string; stdout: string }> => {
     const after = pane ? await paneExitStatus(pane, socket) : { found: false, dead: false, status: undefined };
     if (after.dead) {
+      bindCompletedPane();
       // Positive proof of a genuinely completed pane (paneExitStatus confirmed
       // dead) — capture its scrollback as refusal evidence for the caller
       // (classifyClaudeRunRefusal etc.) BEFORE tearing the session down.
@@ -1994,10 +2011,11 @@ async function runInTmux(options: ExecOptions, executable: string, args: string[
       // pid) reconciles by launchId. This pane's pid usually IS the agent pid,
       // but the launchId join is robust even when it isn't.
       launchId: options.env?.AGENT_LAUNCH_ID,
-      terminalId: process.env.AGENT_TERMINAL_ID,
+      terminalId: launchIdentityEnv().AGENT_TERMINAL_ID,
       tmuxPane: pane,
       startedAtMs: Date.now(),
     });
+    paneLaunchBinding = captureLaunchBinding(panePid, options.env?.AGENT_LAUNCH_ID ?? '');
     if (options.sessionId) {
       writeSessionActorRecord({
         sessionId: options.sessionId,
@@ -2015,6 +2033,7 @@ async function runInTmux(options: ExecOptions, executable: string, args: string[
   // already-dead pane — surface its output + status directly and tear down.
   const before = pane ? await paneExitStatus(pane, socket) : { found: false, dead: false, status: undefined };
   if (before.dead) {
+    bindCompletedPane();
     // Positive proof of a genuinely completed pane — capture scrollback as
     // refusal evidence before tearing the session down (see the matching
     // comment in resolveAfterAttach).
@@ -2476,10 +2495,11 @@ async function spawnAgentLeased(options: ExecOptions): Promise<SpawnResult> {
       actor: resolveActor().id,
       initiatedBy: resolveActor().kind,
       launchId,
-      terminalId: process.env.AGENT_TERMINAL_ID,
+      terminalId: launchIdentityEnv().AGENT_TERMINAL_ID,
       tmuxPane: process.env.TMUX_PANE,
       startedAtMs: Date.now(),
     });
+    const launchBinding = captureLaunchBinding(child.pid, launchId);
     if (options.sessionId) {
       writeSessionActorRecord({
         sessionId: options.sessionId,
@@ -2554,6 +2574,7 @@ async function spawnAgentLeased(options: ExecOptions): Promise<SpawnResult> {
       reject(err);
     });
     child.on('close', (code) => {
+      recordCompletedLaunch(launchBinding);
       if (timeoutTimer) clearTimeout(timeoutTimer);
       // Clear the budget-kill SIGKILL escalation timer (mirror the --timeout
       // timer cleanup) so a programmatic caller reusing execAgent (the #332 loop

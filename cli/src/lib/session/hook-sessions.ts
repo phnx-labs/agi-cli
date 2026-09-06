@@ -19,7 +19,8 @@
  * NOT import the session-tracker package (a separate, workspace-less package;
  * see packages/session-tracker/CLAUDE.md) — mirroring AGI EXT's own
  * hand-copied reader in apps/ext/src/core/liveSession.ts. It only READS the
- * existing dir/schema; it never writes or moves anything, so it is safe across a
+ * existing dir/schema. The owning launcher also records a completed launch
+ * binding in that schema before returning; readers remain read-only across a
  * fleet where old hooks and a new CLI coexist.
  *
  * The whole state dir is scanned ONCE per active-scan into an index (the listing
@@ -27,8 +28,13 @@
  * re-scan per candidate.
  */
 import fs from 'fs';
+import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import { atomicWriteFileSync } from '../fs-atomic.js';
+import { hostProcessView } from './process-view.js';
 import path from 'path';
 import { getTerminalsDir, getRuntimeStateDir } from '../state.js';
+import { listPidSessionEntries, pidSessionEntryMatchesLiveProcess, readLivePidSessionEntry, readPidSessionEntry, type PidSessionEntry } from './pid-registry.js';
 
 /** The subset of the hook's on-disk record this reader relies on. Extra fields are ignored. */
 export interface HookSessionRecord {
@@ -39,6 +45,7 @@ export interface HookSessionRecord {
   launch_id?: string;
   terminal_id?: string;
   ts?: number;
+  completed?: boolean;
 }
 
 /** Pre-built lookup maps over one scan of the hook state dir. */
@@ -118,6 +125,85 @@ function keepNewest(map: Map<string | number, HookSessionRecord>, key: string | 
   if (!prev || (rec.ts ?? 0) > (prev.ts ?? 0)) map.set(key, rec);
 }
 
+let clockTicks: number | undefined;
+
+/** Recover an already-running launch after an old reader removed its registry.
+ * Enumerate live PIDs, not the hook's unbounded graveyard. Only decode the one
+ * allowed environment key; no unrelated environment value escapes this reader.
+ * Kernel incarnation and namespace are checked on both sides of the reads. */
+function liveUnregisteredHookRecords(): HookSessionRecord[] {
+  const scope = hostProcessView();
+  if (process.platform !== 'linux' || !scope?.pidNamespace) return [];
+  try {
+    clockTicks ??= Number(execFileSync('getconf', ['CLK_TCK'], { encoding: 'utf8', timeout: 1000 }));
+    if (!Number.isFinite(clockTicks) || clockTicks <= 0) return [];
+    const bootSeconds = Number(fs.readFileSync('/proc/stat', 'utf8').match(/^btime (\d+)$/m)?.[1]);
+    if (!Number.isFinite(bootSeconds)) return [];
+    const result: HookSessionRecord[] = [];
+    const identity = (pid: number) => {
+      if (fs.readlinkSync(`/proc/${pid}/ns/pid`) !== scope.pidNamespace) return undefined;
+      const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+      const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+      return fields[0] !== 'Z' && /^\d+$/.test(fields[19]) ? fields[19] : undefined;
+    };
+    const prefix = Buffer.from('AGENT_LAUNCH_ID=');
+    for (const name of fs.readdirSync('/proc')) {
+      if (!/^\d+$/.test(name)) continue;
+      const pid = Number(name);
+      try {
+        if (!fs.existsSync(stateSessionRecordPath(pid))) continue;
+        const before = identity(pid);
+        if (!before) continue;
+        const rec = readStateSessionRecord(pid);
+        const startedSeconds = bootSeconds + Number(before) / clockTicks;
+        if (!rec || rec.pid !== pid || typeof rec.ts !== 'number'
+          || rec.ts < Math.floor(startedSeconds) || rec.ts > Date.now() / 1000) continue;
+        const environment = fs.readFileSync(`/proc/${pid}/environ`);
+        let launchId: string | undefined;
+        for (let start = 0; start < environment.length;) {
+          const end = environment.indexOf(0, start);
+          const limit = end < 0 ? environment.length : end;
+          if (environment.subarray(start, start + prefix.length).equals(prefix)) {
+            launchId = environment.subarray(start + prefix.length, limit).toString('utf8').trim();
+            break;
+          }
+          start = limit + 1;
+        }
+        if (!launchId || launchId.length > 512 || /[\x00-\x20]/.test(launchId)
+          || (rec.launch_id && rec.launch_id !== launchId) || identity(pid) !== before) continue;
+        result.push({ ...rec, launch_id: launchId });
+      } catch { /* exited, inaccessible, or procfs raced: unknown, never prune */ }
+    }
+    return result;
+  } catch { return []; }
+}
+
+/** Capture ownership while the launched wrapper is alive. The deployed hook
+ * walks ancestors to this registry entry and preserves these launcher fields. */
+export function captureLaunchBinding(pid: number | undefined, launchId: string): PidSessionEntry | undefined {
+  if (!pid) return undefined;
+  const entry = readLivePidSessionEntry(pid);
+  return entry?.launchId === launchId ? structuredClone(entry) : undefined;
+}
+
+/** Completion consumes the hook's launcher-keyed registry update, never a
+ * numeric-PID metadata guess. The hook PID can be any descendant of the wrapper.
+ * Ownership was measured before exit; matching the unique launch and preserved
+ * start timestamp prevents a reused slot from supplying another run's id. */
+export function recordCompletedLaunch(binding: PidSessionEntry | undefined): void {
+  if (!binding?.launchId || !hostProcessView()) return;
+  const entry = readPidSessionEntry(binding.pid);
+  if (!entry?.sessionId || entry.pid !== binding.pid || entry.launchId !== binding.launchId
+    || entry.startedAtMs !== binding.startedAtMs || entry.agent !== binding.agent) return;
+  const rec: HookSessionRecord = { session_id: entry.sessionId, pid: entry.pid, agent: entry.agent,
+    launch_id: binding.launchId, terminal_id: binding.terminalId, ts: Date.now() / 1000, completed: true };
+  try {
+    fs.mkdirSync(hookSessionsDir(), { recursive: true });
+    const name = createHash('sha256').update(binding.launchId).digest('hex');
+    atomicWriteFileSync(path.join(hookSessionsDir(), `launch-${name}.json`), JSON.stringify(rec), 'utf8');
+  } catch { /* completion must preserve the child exit status */ }
+}
+
 /**
  * Scan the hook state dir once and index every record by launch_id, terminal_id,
  * and pid. Returns empty maps if the dir is absent. Newest-by-`ts` wins a key
@@ -131,7 +217,7 @@ export function loadHookSessionIndex(): HookSessionIndex {
   try {
     files = fs.readdirSync(hookSessionsDir()).filter(f => f.endsWith('.json'));
   } catch {
-    return { byLaunchId, byTerminalId, byPid };
+    files = [];
   }
   for (const f of files) {
     let rec: HookSessionRecord | undefined;
@@ -141,9 +227,35 @@ export function loadHookSessionIndex(): HookSessionIndex {
       /* raced with the hook / pruner — skip */
     }
     if (!rec) continue;
-    if (typeof rec.pid === 'number') keepNewest(byPid as Map<string | number, HookSessionRecord>, rec.pid, rec);
+    if (!rec.completed && typeof rec.pid === 'number') keepNewest(byPid as Map<string | number, HookSessionRecord>, rec.pid, rec);
     if (rec.launch_id) keepNewest(byLaunchId as Map<string | number, HookSessionRecord>, rec.launch_id, rec);
-    if (rec.terminal_id) keepNewest(byTerminalId as Map<string | number, HookSessionRecord>, rec.terminal_id, rec);
+    if (!rec.completed && rec.terminal_id) keepNewest(byTerminalId as Map<string | number, HookSessionRecord>, rec.terminal_id, rec);
+  }
+  // Deployed legacy hooks contain only a pid/session id. Join their targeted
+  // records with launch facts instead of requiring a terminal_id they never
+  // wrote. This is read-only: an observer cannot infer host PID liveness.
+  for (const entry of listPidSessionEntries()) {
+    if (!entry.launchId || pidSessionEntryMatchesLiveProcess(entry) !== true) continue;
+    const rec: HookSessionRecord | undefined = entry.sessionId
+      ? { session_id: entry.sessionId, pid: entry.pid, ts: entry.startedAtMs / 1000, agent: entry.agent }
+      : readStateSessionRecord(entry.pid, entry.startedAtMs);
+    if (!rec || !kindMatches(rec.agent, entry.agent)) continue;
+    if (rec.launch_id && rec.launch_id !== entry.launchId) continue;
+    const joined = { ...rec, agent: rec.agent ?? entry.agent, launch_id: entry.launchId, terminal_id: entry.terminalId };
+    if (!byLaunchId.has(entry.launchId)) byLaunchId.set(entry.launchId, joined);
+    if (!byPid.has(entry.pid)) byPid.set(entry.pid, joined);
+    if (entry.terminalId && !byTerminalId.has(entry.terminalId)) byTerminalId.set(entry.terminalId, joined);
+  }
+  const recovered = new Map<string, HookSessionRecord | null>();
+  for (const rec of liveUnregisteredHookRecords()) {
+    if (!byPid.has(rec.pid)) byPid.set(rec.pid, rec);
+    const previous = recovered.get(rec.launch_id!);
+    // Inherited launch metadata cannot disambiguate two different native
+    // sessions. Keep their exact PID identities but refuse the ambiguous join.
+    recovered.set(rec.launch_id!, previous === null || (previous && previous.session_id !== rec.session_id) ? null : rec);
+  }
+  for (const [launchId, rec] of recovered) {
+    if (rec && !byLaunchId.has(launchId)) byLaunchId.set(launchId, rec);
   }
   return { byLaunchId, byTerminalId, byPid };
 }
@@ -183,13 +295,14 @@ export interface ResolveOpts {
 export function resolveHookSessionRecord(index: HookSessionIndex, opts: ResolveOpts): HookSessionRecord | undefined {
   const { pid, kind, launchId, terminalId, childPids } = opts;
   const take = (rec: HookSessionRecord | undefined): HookSessionRecord | undefined =>
-    rec?.session_id && kindMatches(rec.agent, kind) ? rec : undefined;
+    rec?.session_id && kindMatches(rec.agent, kind)
+      && (!launchId || !rec.launch_id || rec.launch_id === launchId) ? rec : undefined;
 
   if (launchId) {
     const hit = take(index.byLaunchId.get(launchId));
     if (hit) return hit;
   }
-  if (terminalId) {
+  if (terminalId && !launchId) {
     const hit = take(index.byTerminalId.get(terminalId));
     if (hit) return hit;
   }
