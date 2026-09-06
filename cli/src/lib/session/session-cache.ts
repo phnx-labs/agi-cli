@@ -24,7 +24,7 @@
  * through to a live gather.
  */
 import * as fs from 'fs';
-import { hostProcessView, requireHostProcessView, requireWriterProcessView } from './process-view.js';
+import { writerProcessView, requireWriterProcessView } from './process-view.js';
 import * as path from 'path';
 
 import { createMemoryCache } from '../memory-cache.js';
@@ -654,10 +654,10 @@ export async function loadLocalActiveSessions(
   const readCache = opts.readCache ?? readActiveSessionsCache;
   const writeCache = opts.writeCache ?? writeActiveSessionsCache;
 
-  if (!hostProcessView()) {
+  if (!writerProcessView()) {
     const cached = readCache('local');
-    if (!cached) requireHostProcessView();
-    return { sessions: cached!.sessions, servedFromCache: true, capturedAt: cached!.capturedAt };
+    if (cached) return { sessions: cached.sessions, servedFromCache: true, capturedAt: cached.capturedAt };
+    requireWriterProcessView();
   }
 
   if (!opts.forceRefresh) {
@@ -734,10 +734,10 @@ export async function loadFleetActiveSessions(
   const readCache = opts.readCache ?? readActiveSessionsCache;
   const writeCache = opts.writeCache ?? writeActiveSessionsCache;
 
-  if (!hostProcessView()) {
+  if (!writerProcessView()) {
     const cached = readCache('fleet');
-    if (!cached) requireHostProcessView();
-    return { sessions: cached!.sessions, remoteDeviceCount: cached!.remoteDeviceCount ?? 0, servedFromCache: true, capturedAt: cached!.capturedAt };
+    if (cached) return { sessions: cached.sessions, remoteDeviceCount: cached.remoteDeviceCount ?? 0, servedFromCache: true, capturedAt: cached.capturedAt };
+    requireWriterProcessView();
   }
 
   if (!opts.forceRefresh) {

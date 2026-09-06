@@ -15,9 +15,27 @@ try {
   }
   if (mode === 'daemon') recordDaemonProcessView();
   if (mode === 'read') {
-    if (hostProcessView()) throw new Error('unexpected owner');
-    console.log('unowned');
+    console.log(hostProcessView() ? 'owned' : 'unowned');
     process.exit(0);
+  }
+  if (mode === 'publish' || mode === 'snapshot') {
+    const { loadLocalActiveSessions, loadFleetActiveSessions, writeActiveSessionsCache } = await import('../session-cache.js');
+    if (mode === 'publish') {
+      writeActiveSessionsCache('local', [], { capturedAt: 1 });
+      writeActiveSessionsCache('fleet', [], { capturedAt: 1 });
+    } else {
+      const gather = async (): Promise<never> => { throw new Error('foreign observer gathered'); };
+      const local = await loadLocalActiveSessions({ forceRefresh: true, gather });
+      const fleet = await loadFleetActiveSessions({ forceRefresh: true, gather });
+      if (!local.servedFromCache || !fleet.servedFromCache || local.capturedAt !== 1 || fleet.capturedAt !== 1) throw new Error('foreign snapshot changed');
+      console.log('observed');
+      process.exit(0);
+    }
+  }
+  if (mode === 'sessions') {
+    const { loadLocalActiveSessions } = await import('../session-cache.js');
+    const result = await loadLocalActiveSessions({ forceRefresh: true });
+    if (result.servedFromCache || !Array.isArray(result.sessions)) throw new Error('cold discovery did not run');
   }
   requireWriterProcessView();
   console.log('owned');

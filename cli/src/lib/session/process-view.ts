@@ -83,12 +83,16 @@ export function hostProcessView(): HostProcessView | undefined {
   try {
     const owner = JSON.parse(fs.readFileSync(path.join(getTerminalsDir(), 'process-view.json'), 'utf8')) as HostProcessView;
     return sameProcessView(owner, view) ? view : undefined;
-  } catch { return undefined; }
+  } catch (error) {
+    // The initial kernel namespace is authoritative before any daemon has
+    // enrolled this HOME. This observation itself must remain read-only.
+    return (error as NodeJS.ErrnoException).code === 'ENOENT' && isInitialPidNamespace(view) ? view : undefined;
+  }
 }
 
 /** Explicit writers may enroll a fresh HOME in their measured namespace.
  * Foreign ownership remains protected even when the prior writer is invisible.
- * Legacy migration belongs to the authenticated daemon startup path. */
+ * The initial host may enroll legacy state before daemon startup. */
 export function writerProcessView(): HostProcessView | undefined {
   const view = currentProcessView();
   if (!view || process.platform !== 'linux') return view;
@@ -98,6 +102,9 @@ export function writerProcessView(): HostProcessView | undefined {
       const owner = JSON.parse(fs.readFileSync(file, 'utf8')) as HostProcessView;
       return sameProcessView(owner, view) ? view : undefined;
     }
+    // A foreign observer of legacy state must not even create a directory or
+    // claim lock. Repeat this preflight under the lock before enrollment.
+    if (hasLegacyState() && !isInitialPidNamespace(view)) return undefined;
     fs.mkdirSync(getTerminalsDir(), { recursive: true });
     return withFileLock(file, () => {
       if (fs.existsSync(file)) {
@@ -105,7 +112,7 @@ export function writerProcessView(): HostProcessView | undefined {
         return sameProcessView(owner, view) ? view : undefined;
       }
       // Unowned nonempty registry is not evidence this caller owns the host.
-      if (hasLegacyState()) return undefined;
+      if (hasLegacyState() && !isInitialPidNamespace(view)) return undefined;
       atomicWriteFileSync(file, JSON.stringify(view), 'utf8');
       return view;
     }, { realpath: false, acquireTimeoutMs: 0 });

@@ -1,4 +1,4 @@
-import { hostProcessView } from './process-view.js';
+import { writerProcessView } from './process-view.js';
 /**
  * Active-session detection across every context an agent can run in:
  *
@@ -2417,7 +2417,7 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
  * terminal/headless row for the same session id.
  */
 export async function getActiveSessions(opts: ActiveQueryOptions = {}): Promise<ActiveSession[]> {
-  if (!hostProcessView()) {
+  if (!writerProcessView()) {
     const { loadLocalActiveSessions } = await import('./session-cache.js');
     return (await loadLocalActiveSessions()).sessions;
   }
