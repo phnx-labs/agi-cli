@@ -334,7 +334,6 @@ function readTail(file: string, maxBytes: number): string | undefined {
 // sessions or directories a long-lived consumer visits. Never expose cached
 // objects: callers enrich and mutate returned events (including nested values).
 const ACTIVITY_CACHE_BYTES = 32 * 1024 * 1024;
-const ACTIVITY_CACHE_FILES = 1024;
 interface ActivityTail {
   stamp: string;
   events?: ActivityEvent[];
@@ -342,12 +341,66 @@ interface ActivityTail {
   weight: number;
 }
 const activityTails = new Map<string, ActivityTail>();
+// A separate LRU of payload references lets pressure release parsed events
+// without repeatedly walking thousands of summaries that cannot shrink.
+const activityTailPayloads = new Map<string, ActivityTail>();
 let activityTailBytes = 0;
+let activityTailReads = 0;
+
+/** Read-only process-local diagnostics; no event content or file paths. */
+export function getActivityCacheStats(): { entries: number; parsedTails: number; bytes: number; maxBytes: number; tailReads: number } {
+  return {
+    entries: activityTails.size,
+    parsedTails: activityTailPayloads.size,
+    bytes: activityTailBytes,
+    maxBytes: ACTIVITY_CACHE_BYTES,
+    tailReads: activityTailReads,
+  };
+}
 
 function forgetActivityTail(key: string): void {
   const old = activityTails.get(key);
   if (old) activityTailBytes -= old.weight;
   activityTails.delete(key);
+  activityTailPayloads.delete(key);
+}
+
+function activitySummaryWeight(key: string, stamp: string): number {
+  return (key.length + stamp.length) * 2 + 256;
+}
+
+function retainActivityTail(key: string, result: ActivityTail, sinceMs: number): void {
+  const summaryWeight = activitySummaryWeight(key, result.stamp);
+  // Even metadata is byte-bounded. A tail whose summary cannot fit still
+  // returns normally, but must not evict the cache or be retained over budget.
+  if (summaryWeight > ACTIVITY_CACHE_BYTES) return;
+  const retained = { ...result };
+  if (result.newestMs < sinceMs || result.weight > ACTIVITY_CACHE_BYTES / 2) {
+    retained.events = undefined;
+    retained.weight = summaryWeight;
+  }
+  // Prefer compact history over payloads, retaining all summaries that fit
+  // instead of imposing a file-count cap that thrashes on each directory scan.
+  for (const [oldKey, old] of activityTailPayloads) {
+    if (activityTailBytes + retained.weight <= ACTIVITY_CACHE_BYTES) break;
+    const weight = activitySummaryWeight(oldKey, old.stamp);
+    activityTailBytes -= old.weight - weight;
+    old.events = undefined;
+    old.weight = weight;
+    activityTailPayloads.delete(oldKey);
+  }
+  // If all existing entries are summaries, sacrifice the incoming payload
+  // before evicting history. The current caller still receives result.events.
+  if (activityTailBytes + retained.weight > ACTIVITY_CACHE_BYTES) {
+    retained.events = undefined;
+    retained.weight = summaryWeight;
+  }
+  while (activityTailBytes + retained.weight > ACTIVITY_CACHE_BYTES) {
+    forgetActivityTail(activityTails.keys().next().value!);
+  }
+  activityTails.set(key, retained);
+  if (retained.events) activityTailPayloads.set(key, retained);
+  activityTailBytes += retained.weight;
 }
 
 function activityStamp(file: string): string {
@@ -369,9 +422,14 @@ function readActivityTail(file: string, maxBytes: number, sinceMs = -Infinity): 
   if (cached?.stamp === stamp && (cached.events || cached.newestMs < sinceMs)) {
     activityTails.delete(key);
     activityTails.set(key, cached);
+    if (cached.events) {
+      activityTailPayloads.delete(key);
+      activityTailPayloads.set(key, cached);
+    }
     return cached;
   }
   forgetActivityTail(key);
+  activityTailReads++;
   const text = readTail(file, maxBytes);
   // Transient I/O failure is not an empty file snapshot; retry next read.
   if (text === undefined) return { stamp, events: [], newestMs: -Infinity, weight: 0 };
@@ -393,25 +451,12 @@ function readActivityTail(file: string, maxBytes: number, sinceMs = -Infinity): 
   }
   // Bound retained source-derived strings, objects, and entry overhead. Large
   // one-off tails still read normally, but cannot displace the entire cache.
-  const weight = text.length * 2 + events.length * 1024 + key.length * 2 + 256;
+  const weight = text.length * 2 + events.length * 1024 + activitySummaryWeight(key, stamp);
   const result = { stamp, events, newestMs, weight };
   try {
     // A writer racing the read must not pin a mixed snapshot as unchanged.
     if (activityStamp(file) === stamp) {
-      if (activityTails.size >= ACTIVITY_CACHE_FILES) forgetActivityTail(activityTails.keys().next().value!);
-      const summaryWeight = key.length * 2 + 256;
-      const retained = weight <= ACTIVITY_CACHE_BYTES / 2 ? { ...result } : { ...result, events: undefined, weight: summaryWeight };
-      // Retain timestamp summaries even when parsed tails exceed the budget:
-      // otherwise a large historical corpus thrashes on every cursor poll.
-      for (const [oldKey, old] of activityTails) {
-        if (activityTailBytes + retained.weight <= ACTIVITY_CACHE_BYTES) break;
-        const summary = oldKey.length * 2 + 256;
-        activityTailBytes -= old.weight - summary;
-        old.events = undefined;
-        old.weight = summary;
-      }
-      activityTails.set(key, retained);
-      activityTailBytes += retained.weight;
+      retainActivityTail(key, result, sinceMs);
     }
   } catch { /* Deleted during the read: return this snapshot without caching. */ }
   return result;
