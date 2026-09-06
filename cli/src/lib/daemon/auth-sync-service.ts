@@ -27,9 +27,9 @@ import { BasePeriodicService, type DaemonContext } from './service.js';
 import type { DaemonServiceId } from '../daemon-services.js';
 import { USAGE_SYNC_TICK_MS } from './usage-sync-service.js';
 
-const AUTH_SYNC_TICK_MS = 15 * 60_000;
+export const AUTH_SYNC_TICK_MS = 15 * 60_000;
 const AUTH_SYNC_DEADLINE_MS = 2 * 60_000;
-const AUTH_SYNC_KICKOFF_MS = 60_000;
+export const AUTH_SYNC_KICKOFF_MS = 60_000;
 
 export class AuthSyncService extends BasePeriodicService {
   readonly id: DaemonServiceId = 'auth-sync';

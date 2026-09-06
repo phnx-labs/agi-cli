@@ -2839,13 +2839,17 @@ its weekly limit MUST also persist a `rate_limited`
 `collectRunCandidates` sees it and `hasUsageAvailable` excludes the account
 (`lib/accounting/rotate.ts:226-247`).
 
-**GWT-E5d — Entirely stale usage is never auto-picked (PHNX-2526).**
+**GWT-E5d — Entirely stale usage is never auto-picked (PHNX-2526 / W3).**
 Given a `balanced`/`available` pool where EVERY eligible account carries a usage
-snapshot older than `USAGE_DECISION_MAX_AGE_MS` (5 min) and none is verified
+snapshot older than its freshness bar and none is verified
 (the yosemite-s1 failing-refresh incident); When `resolveRunVersion` resolves a
 version; Then it MUST NOT auto-pick on the stale number — it returns
 `version: null` with `noVerifiedUsage: true` (`lib/accounting/rotate.ts`,
 `preferVerified` computing `verified.length === 0 && pool.some(hasStaleUsage)`).
+The freshness bar is `USAGE_DECISION_MAX_AGE_MS` (5 min) for a locally
+captured row (`poll` / `statusline`) and `USAGE_SYNC_TRUST_MS` (the 15-minute
+usage-sync cadence) for a row whose `freshness.source` is `sync` — a worker
+that only ever sees poller-pushed rows MUST still auto-pick (D8).
 An INTERACTIVE run (TTY, not `--json`/`--headless`) MUST then show the account
 picker; an UNATTENDED run MUST fail loud with an error containing the literal
 `NO_VERIFIED_USAGE` (`formatNoVerifiedUsageError`), for both `agents run`

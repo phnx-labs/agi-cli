@@ -27,16 +27,24 @@
  */
 import { BasePeriodicService, type DaemonContext } from './service.js';
 import type { DaemonServiceId } from '../daemon-services.js';
+import { USAGE_SYNC_INTERVAL_MS } from '../accounting/usage-sync.js';
 
 /**
  * The usage-sync tick cadence. Exported because auth-sync's credential-push
  * freshness gate is the CONSUMER of this producer's cadence: it skips the
  * pushes when the last exchange is older than one usage-sync interval, so it
  * must track this constant rather than its own equal-by-coincidence literal.
+ * Sourced from `usage-sync.ts`'s `USAGE_SYNC_INTERVAL_MS` rather than a
+ * second literal, so the two files can't drift out of sync with each other.
  */
-export const USAGE_SYNC_TICK_MS = 15 * 60_000;
+export const USAGE_SYNC_TICK_MS = USAGE_SYNC_INTERVAL_MS;
 const USAGE_SYNC_DEADLINE_MS = 2 * 60_000;
-const USAGE_SYNC_KICKOFF_MS = 90_000;
+/**
+ * Offset from auth-sync's 60s kickoff so the two never contend for the
+ * shared-repo lock. Auth fires at T+1m, T+16m, …; usage at T+8m, T+23m, …
+ * The git exchange deadline is 45s, so a 7-minute gap is the whole point.
+ */
+export const USAGE_SYNC_KICKOFF_MS = 8 * 60_000;
 
 export class UsageSyncService extends BasePeriodicService {
   readonly id: DaemonServiceId = 'usage-sync';
