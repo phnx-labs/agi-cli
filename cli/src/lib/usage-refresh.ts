@@ -407,10 +407,6 @@ export interface UsagePollCandidate {
 }
 
 /**
- * Whether this box is the poller for `candidate`. A worker / unmarked box
- * never polls. A headed box polls only native logins it holds, and defers
- * when another headed device already claims the account in the shared store.
- */
 /** Daemon auth-health may hit `/oauth/usage` only on a headed box, unless forceLive. */
 export function mayIssueUsageEndpointProbe(opts: {
   role: ConfiguredDeviceRole | undefined;
@@ -420,19 +416,44 @@ export function mayIssueUsageEndpointProbe(opts: {
   return isHeadedDeviceRole(opts.role);
 }
 
+/**
+ * Sticky one-poller election: lex-least among this box (if it holds a native
+ * login) and peer devices that published a `freshnessSource=poll` row. Statusline
+ * ingest does not claim. Two headed boxes therefore converge on one poller
+ * instead of each deferring to the other.
+ */
+export function electUsagePoller(opts: {
+  selfDevice: string;
+  selfHoldsNativeLogin: boolean;
+  peerPollers?: string[];
+}): string | null {
+  const names = new Set<string>();
+  if (opts.selfHoldsNativeLogin) names.add(normalizeHost(opts.selfDevice));
+  for (const peer of opts.peerPollers ?? []) names.add(normalizeHost(peer));
+  if (names.size === 0) return null;
+  return [...names].sort()[0];
+}
+
 export function shouldPollUsageAccount(
   candidate: Pick<UsagePollCandidate, 'usageKey' | 'holdsNativeLogin'>,
   opts: {
     role: ConfiguredDeviceRole | undefined;
     selfDevice: string;
+    peerPollers?: string[];
+    /** @deprecated use peerPollers; kept so older tests that pass claimedBy still compile */
     claimedBy?: Record<string, string>;
   },
 ): boolean {
   if (!isHeadedDeviceRole(opts.role)) return false;
   if (!candidate.holdsNativeLogin) return false;
-  const owner = opts.claimedBy?.[candidate.usageKey];
-  if (owner && normalizeHost(owner) !== normalizeHost(opts.selfDevice)) return false;
-  return true;
+  const peerPollers = opts.peerPollers
+    ?? (opts.claimedBy?.[candidate.usageKey] ? [opts.claimedBy[candidate.usageKey]] : []);
+  const elected = electUsagePoller({
+    selfDevice: opts.selfDevice,
+    selfHoldsNativeLogin: true,
+    peerPollers,
+  });
+  return elected === normalizeHost(opts.selfDevice);
 }
 
 /** Native rotating login on this home — Claude's `.credentials.json` blob, else a credential file. */
@@ -441,19 +462,23 @@ export function homeHoldsNativeLogin(agentId: AgentId, home: string): boolean {
   return credentialPresence(agentId, home).perVersion;
 }
 
-/** usageKey → poller device from headed peers' published snapshots. */
+/** usageKey → devices that published a `poll` row (statusline/sync do not claim). */
 export function pollerClaimsFromSharedStore(
   selfDevice: string,
   userAgentsDir = getUserAgentsDir(),
-): Record<string, string> {
-  const claims: Record<string, string> = {};
+): Record<string, string[]> {
+  const claims: Record<string, string[]> = {};
   const read = readFleetSharedDeviceStates(userAgentsDir);
+  const self = normalizeHost(selfDevice);
   for (const state of read.states) {
-    if (normalizeHost(state.device) === normalizeHost(selfDevice) || !state.usage) continue;
+    if (!state.usage) continue;
     for (const [key, row] of Object.entries(state.usage.rows)) {
-      const poller = row.pollerDevice ?? state.device;
-      if (!poller || claims[key]) continue;
-      claims[key] = poller;
+      if (row.freshnessSource !== 'poll') continue;
+      const poller = normalizeHost(row.pollerDevice ?? state.device);
+      if (!poller || poller === self) continue;
+      const list = claims[key] ?? [];
+      if (!list.includes(poller)) list.push(poller);
+      claims[key] = list;
     }
   }
   return claims;
@@ -560,7 +585,7 @@ export interface BuildLocalUsageAccountsOpts {
   device?: string;
   userAgentsDir?: string;
   holdsNativeLogin?: (agentId: AgentId, home: string) => boolean;
-  claimedBy?: Record<string, string>;
+  claimedBy?: Record<string, string[]>;
 }
 
 /**
@@ -596,7 +621,7 @@ export async function buildLocalUsageAccounts(
       const home = fetchInput.home ?? getVersionHomePath(agentId, fetchInput.cliVersion ?? '');
       if (!shouldPollUsageAccount(
         { usageKey, holdsNativeLogin: nativeAt(agentId, home) },
-        { role, selfDevice, claimedBy },
+        { role, selfDevice, peerPollers: claimedBy[usageKey] },
       )) continue;
       accounts.push({
         usageKey,
