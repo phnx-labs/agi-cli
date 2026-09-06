@@ -69,6 +69,7 @@ import type { AgentId } from './types.js';
 import { isHeadedDeviceRole, selfConfiguredDeviceRole, type ConfiguredDeviceRole } from './device-config.js';
 import { machineId, normalizeHost } from './session/sync/config.js';
 import { readFleetSharedDeviceStates } from './fleet-shared-state.js';
+import { USAGE_SYNC_INTERVAL_MS } from './accounting/usage-sync.js';
 
 /**
  * Default schedule between successful (or attempted) live usage fetches for one
@@ -474,6 +475,8 @@ export function pollerClaimsFromSharedStore(
     if (!state.usage) continue;
     for (const [key, row] of Object.entries(state.usage.rows)) {
       if (row.freshnessSource !== 'poll') continue;
+      const capturedMs = row.capturedAt ? Date.parse(row.capturedAt) : NaN;
+      if (!Number.isFinite(capturedMs) || Date.now() - capturedMs > USAGE_SYNC_INTERVAL_MS) continue;
       const poller = normalizeHost(row.pollerDevice ?? state.device);
       if (!poller || poller === self) continue;
       const list = claims[key] ?? [];
