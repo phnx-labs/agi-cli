@@ -14,7 +14,9 @@ import * as path from 'node:path';
 
 import {
   consumeUsageSnapshotsFromSharedStore,
+  mergeUsageRowsForPublish,
   publishUsageSnapshotToSharedStore,
+  USAGE_PUBLISH_HEARTBEAT_MS,
   USAGE_SYNC_INTERVAL_MS,
 } from './accounting/usage-sync.js';
 import {
@@ -171,7 +173,7 @@ describe('W3.1 / W3.4 worker with only setup tokens makes zero usage API calls',
     expect(result.failed).toBe(0);
   });
 
-  it('shouldPollUsageAccount: setup-token-only and peer-claimed accounts never poll', () => {
+  it('shouldPollUsageAccount: setup-token-only never polls; two headed boxes elect lex-least', () => {
     expect(shouldPollUsageAccount(
       { usageKey: 'claude:org=a', holdsNativeLogin: true },
       { role: 'worker', selfDevice: 'worker-a' },
@@ -180,13 +182,19 @@ describe('W3.1 / W3.4 worker with only setup tokens makes zero usage API calls',
       { usageKey: 'claude:org=a', holdsNativeLogin: false },
       { role: 'personal', selfDevice: 'zion' },
     )).toBe(false);
+    // desktop < zion — desktop is the sticky poller, zion defers.
     expect(shouldPollUsageAccount(
       { usageKey: 'claude:org=a', holdsNativeLogin: true },
-      { role: 'personal', selfDevice: 'yosemite-s1', claimedBy: { 'claude:org=a': 'zion' } },
+      { role: 'personal', selfDevice: 'zion', peerPollers: ['desktop'] },
     )).toBe(false);
     expect(shouldPollUsageAccount(
       { usageKey: 'claude:org=a', holdsNativeLogin: true },
-      { role: 'personal', selfDevice: 'zion', claimedBy: { 'claude:org=a': 'zion' } },
+      { role: 'desktop', selfDevice: 'desktop', peerPollers: ['zion'] },
+    )).toBe(true);
+    // A statusline-only peer is not a poller claim — this box still polls.
+    expect(shouldPollUsageAccount(
+      { usageKey: 'claude:org=a', holdsNativeLogin: true },
+      { role: 'personal', selfDevice: 'zion', peerPollers: [] },
     )).toBe(true);
   });
 
@@ -246,6 +254,25 @@ describe('W3.2 auth-sync and usage-sync do not starve each other on the shared l
         throw new Error(`auth-sync and usage-sync both fire at t=${t}`);
       }
     }
+  });
+});
+
+describe('W3.2 same-window statusline ingest does not dirty the published store', () => {
+  it('mergeUsageRowsForPublish keeps the prior capturedAt inside the heartbeat', () => {
+    const prior = { 'claude:org=a': row('2026-09-06T12:00:00.000Z', 20, { pollerDevice: 'zion', freshnessSource: 'statusline' }) };
+    const next = { 'claude:org=a': row('2026-09-06T12:00:30.000Z', 20, { pollerDevice: 'zion', freshnessSource: 'statusline' }) };
+    const now = Date.parse('2026-09-06T12:00:30.000Z');
+    const merged = mergeUsageRowsForPublish(prior, next, now);
+    expect(merged['claude:org=a'].capturedAt).toBe('2026-09-06T12:00:00.000Z');
+    expect(USAGE_PUBLISH_HEARTBEAT_MS).toBeGreaterThan(60_000);
+  });
+
+  it('mergeUsageRowsForPublish republishes when usedPercent moves', () => {
+    const prior = { 'claude:org=a': row('2026-09-06T12:00:00.000Z', 20, { pollerDevice: 'zion' }) };
+    const next = { 'claude:org=a': row('2026-09-06T12:00:30.000Z', 21, { pollerDevice: 'zion' }) };
+    const merged = mergeUsageRowsForPublish(prior, next, Date.parse('2026-09-06T12:00:30.000Z'));
+    expect(merged['claude:org=a'].capturedAt).toBe('2026-09-06T12:00:30.000Z');
+    expect(merged['claude:org=a'].windows[0].usedPercent).toBe(21);
   });
 });
 

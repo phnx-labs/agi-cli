@@ -22,6 +22,44 @@ import {
 
 /** Cadence of the usage-sync git tick — the trust window for a `sync` snapshot. */
 export const USAGE_SYNC_INTERVAL_MS = 15 * 60_000;
+/** Re-publish an unchanged windowed row at least this often so workers' 15-min trust does not lapse. */
+export const USAGE_PUBLISH_HEARTBEAT_MS = 10 * 60_000;
+
+function usageMeterSignature(row: CachedUsageSnapshot): string {
+  return JSON.stringify({
+    windows: row.windows,
+    plan: row.plan ?? null,
+    unavailable: row.unavailable ?? null,
+    freshnessSource: row.freshnessSource ?? null,
+    pollerDevice: row.pollerDevice ?? null,
+  });
+}
+
+/**
+ * Keep the previously published `capturedAt` when meters have not moved and
+ * the last publish is still inside the heartbeat. Stops statusline re-renders
+ * from dirtying the shared store (and taking the git lock) every few seconds.
+ */
+export function mergeUsageRowsForPublish(
+  previous: Record<string, CachedUsageSnapshot> | undefined,
+  next: Record<string, CachedUsageSnapshot>,
+  nowMs: number = Date.now(),
+): Record<string, CachedUsageSnapshot> {
+  if (!previous) return next;
+  const out: Record<string, CachedUsageSnapshot> = {};
+  for (const [key, row] of Object.entries(next)) {
+    const prior = previous[key];
+    if (prior && usageMeterSignature(prior) === usageMeterSignature(row)) {
+      const priorMs = prior.capturedAt ? Date.parse(prior.capturedAt) : NaN;
+      if (Number.isFinite(priorMs) && nowMs - priorMs < USAGE_PUBLISH_HEARTBEAT_MS) {
+        out[key] = { ...row, capturedAt: prior.capturedAt };
+        continue;
+      }
+    }
+    out[key] = row;
+  }
+  return out;
+}
 
 /** Legacy hidden ingest/export envelope kept for older fleet CLI compatibility. */
 export interface UsageSyncPayload {
@@ -60,16 +98,22 @@ export async function publishUsageSnapshotToSharedStore(
     result.skipped = 'this device is not a usage publisher (mark it personal or desktop)';
     return result;
   }
-  const rows = exportClaudeUsageCacheRows(options.cachePath);
-  if (Object.keys(rows).length === 0) {
+  const rawRows = exportClaudeUsageCacheRows(options.cachePath);
+  if (Object.keys(rawRows).length === 0) {
     result.skipped = 'no local usage snapshot to publish';
     return result;
   }
   try {
+    const device = options.device ?? machineId();
+    const userAgentsDir = options.userAgentsDir ?? getUserAgentsDir();
+    const prior = readFleetSharedDeviceStates(userAgentsDir).states
+      .find((state) => normalizeHost(state.device) === normalizeHost(device))
+      ?.usage?.rows;
+    const rows = mergeUsageRowsForPublish(prior, rawRows);
     const write = await updateFleetSharedDeviceStateAsync(
-      options.device ?? machineId(),
+      device,
       { usage: { rows } },
-      options.userAgentsDir ?? getUserAgentsDir(),
+      userAgentsDir,
     );
     result.published = true;
     result.changed = write.changed;
