@@ -25,7 +25,6 @@ import { detectOverdueJobs, notifyOverdue } from '../overdue.js';
 import { runCatchup } from '../catchup.js';
 import { notifyRoutineStart, notifyRoutineFinish, notifyRoutineStartFailed } from '../routine-notify.js';
 import { notifyOwnerRoutineFinish, notifyOwnerRoutineStartFailed } from '../routine-notify-owner.js';
-import { BrowserService } from '../browser/service.js';
 import { getSocketPath as getBrowserIpcSocketPath } from '../browser/ipc.js';
 import { redactSecrets } from '../redact.js';
 import { getAgentsBinPath, getCliLaunch, BUN_VIRTUAL_ROOT } from '../cli-entry.js';
@@ -33,27 +32,6 @@ import { localBinDir } from '../platform/posixpath.js';
 import { isSchedulerEnabled, assertSchedulerEnabled, isDaemonEnabled } from '../device-config.js';
 import { recordSubsystemOk, recordSubsystemError, recordSubsystemErrorReason, readSubsystemHealth, SUBSYSTEM_DAEMON_START } from '../daemon-health.js';
 import { ServiceSupervisor } from './supervisor.js';
-import { SessionIndexService } from './session-index-service.js';
-import { SessionSummarizerService } from './session-summarizer-service.js';
-import { SessionTitleService } from './session-title-service.js';
-import { MonitorEngineService } from './monitor-engine-service.js';
-import { AccountUsageService, AccountAuthService } from './account-state-daemon-service.js';
-import { CatchupService } from './catchup-service.js';
-import { BrowserIPCService } from './browser-ipc-service.js';
-import { WatchdogService } from './watchdog-service.js';
-import { DeviceProbeService } from './device-probe-service.js';
-import { SelfHealService } from './self-heal-service.js';
-import { SelfUpdateService } from './self-update-service.js';
-import { HarnessUpdateService } from './harness-update-service.js';
-import { AuthSyncService } from './auth-sync-service.js';
-import { UsageSyncService } from './usage-sync-service.js';
-import { StateDirCheckService } from './state-dir-check-service.js';
-import { SessionStateService } from './session-state-service.js';
-import { AttentionNotifyService } from './attention-notify-service.js';
-import { WebhookReceiverService } from './webhook-receiver-service.js';
-import { HeartbeatService } from './heartbeat-service.js';
-import { TmuxReapService } from './tmux-reap-service.js';
-import { BrowserTaskReapService } from './browser-task-reap-service.js';
 import type { ServiceHealth } from './service.js';
 import { emit, emitAsync, emitRoutineEnd } from '../feed/events.js';
 import { readDaemonServicesConfig, isDaemonServiceEnabled, drainDaemonServiceRestartQueue, type DaemonServiceId } from '../daemon-services.js';
@@ -914,6 +892,56 @@ export async function runDaemon(): Promise<void> {
   // HOME override must refuse to run against the operator's real state rather than
   // schedule against the real host. No-op in production (the marker is never set).
   assertTestDaemonHome();
+
+  // Lifecycle readers and launchers do not run services. Load their code only
+  // in the daemon process, before it claims or publishes lifecycle state.
+  const [
+    { BrowserService },
+    { SessionIndexService },
+    { SessionSummarizerService },
+    { SessionTitleService },
+    { MonitorEngineService },
+    { AccountUsageService, AccountAuthService },
+    { CatchupService },
+    { BrowserIPCService },
+    { WatchdogService },
+    { DeviceProbeService },
+    { SelfHealService },
+    { SelfUpdateService },
+    { HarnessUpdateService },
+    { AuthSyncService },
+    { UsageSyncService },
+    { StateDirCheckService },
+    { SessionStateService },
+    { AttentionNotifyService },
+    { WebhookReceiverService },
+    { HeartbeatService },
+    { TmuxReapService },
+    { BrowserTaskReapService },
+  ] = await Promise.all([
+    import('../browser/service.js'),
+    import('./session-index-service.js'),
+    import('./session-summarizer-service.js'),
+    import('./session-title-service.js'),
+    import('./monitor-engine-service.js'),
+    import('./account-state-daemon-service.js'),
+    import('./catchup-service.js'),
+    import('./browser-ipc-service.js'),
+    import('./watchdog-service.js'),
+    import('./device-probe-service.js'),
+    import('./self-heal-service.js'),
+    import('./self-update-service.js'),
+    import('./harness-update-service.js'),
+    import('./auth-sync-service.js'),
+    import('./usage-sync-service.js'),
+    import('./state-dir-check-service.js'),
+    import('./session-state-service.js'),
+    import('./attention-notify-service.js'),
+    import('./webhook-receiver-service.js'),
+    import('./heartbeat-service.js'),
+    import('./tmux-reap-service.js'),
+    import('./browser-task-reap-service.js'),
+  ]);
 
   // Install the shared-daemon reload signal boundary BEFORE publishing our PID
   // in claimDaemonInstance(). Browser/routines clients use that PID to decide a
