@@ -27,7 +27,7 @@
  *              fleet-resource-gap · hook-runtime-visibility-unavailable · orphan · duplicate-hook ·
  *              duplicate-hook-drift · host-cli-missing · host-cli-invalid ·
  *              rc-secret-export · env-secret-export · auth-bundle-wrong-backend · exec-policy · stale-cli ·
- *              binary-shadow.
+ *              binary-shadow · leaked-daemon.
  *   (RUSH-2162 moved never-synced and duplicate-hook-drift to WARNING: both are
  *   stale-sync states one `agents sync` resolves, not "needs you now".)
  *
@@ -38,6 +38,7 @@
  * format, so the layout is unit-tested against fixtures with no live fleet.
  */
 import chalk from 'chalk';
+import * as path from 'path';
 import { AGENTS, ALL_AGENT_IDS, supportsAccountInspection } from '../agents.js';
 import { blocksLocalScripts } from '../platform/winpath.js';
 import { loginHint } from '../signin-badge.js';
@@ -46,6 +47,7 @@ import { padToWidth, stringWidth } from '../text/width.js';
 import type { AgentId } from '../types.js';
 import type { DuplicateVersionHook } from '../hooks/install.js';
 import type { AgentsBinaryShadow } from '../binary-shadow.js';
+import type { LeakedDaemon } from '../daemon/leaked-daemons.js';
 import type { RcSecretFinding } from '../secrets-types.js';
 import type { OwnerSinkStatus } from '../channels/owner-sink.js';
 import { windowsSshEnrollmentProblem, type WindowsSshEnrollmentAudit } from './windows-ssh-enrollment.js';
@@ -150,6 +152,7 @@ export const ALL_FINDING_KINDS = [
   'stale-cli',
   'binary-shadow',         // another agents binary on PATH or in a well-known dir shadows the running copy
   'owner-sink-unreachable', // the feed/notify owner-delivery lane can't reach the owner from this box
+  'leaked-daemon',         // a `__daemon-run` process no owner record names (not the unit main PID, not daemon.pid)
 ] as const;
 
 /**
@@ -199,6 +202,12 @@ export const FINDING_SEVERITY: Record<FindingKind, FindingSeverity> = {
   'ssh-key-enrollment': 'critical',
   'stale-cli': 'warning',
   'binary-shadow': 'warning',
+  // A stray `__daemon-run` under its own (usually temp) HOME: it shares nothing
+  // with this install's state, so it cannot double-fire the real box's work —
+  // but it is a leak nothing owns and it outlives whatever launched it (W4,
+  // PHNX-3736). A human reads its HOME/start time and kills it; nothing is
+  // blocked right now.
+  'leaked-daemon': 'warning',
 };
 
 /** A machine-stable class for a finding. Derived from the runtime list above so
@@ -358,6 +367,11 @@ export function remediationFor(finding: DoctorFinding): string {
       return 'upgrade';
     case 'binary-shadow':
       return 'remove or repoint the shadowing agents install(s)';
+    case 'leaked-daemon':
+      // The builder emits the concrete `kill <pid>` — the pid is a property of
+      // the row it builds, not of anything remediationFor can see. This is the
+      // shape only, for a kind constructed through finding() by a future caller.
+      return 'kill <pid>';
     case 'owner-sink-unreachable':
       // The lane delivers over the rush-backed owner channel, which needs rush on
       // PATH AND a usable session in THIS context. Non-interactive shells miss a
@@ -462,6 +476,11 @@ export interface LocalFindingInputs {
   ownerSink?: OwnerSinkStatus;
   /** `agents` binaries that shadow the currently running CLI (RUSH-2431). */
   binaryShadows?: AgentsBinaryShadow[];
+  /** `__daemon-run` processes no owner record names — neither the service
+   *  manager's unit main PID nor the recorded daemon.pid (W4, PHNX-3736).
+   *  Collected by `findLeakedDaemons` in the command (it runs `ps` and reads
+   *  /proc, so it stays out of this pure module). */
+  leakedDaemons?: LeakedDaemon[];
 }
 
 /**
@@ -715,6 +734,25 @@ export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
         ? `agents binary shadowed by ${examples}`
         : `${shadows.length} agents binaries may shadow the running copy (incl. ${examples})`,
     }));
+  }
+
+  // Leaked daemons (warning) — a `__daemon-run` no owner record names. One row
+  // per pid: the remediation is pid-specific, and the HOME + start time are
+  // what let the operator tell a leaked test fixture from something they meant
+  // to run before they kill it (W4, PHNX-3736). Built directly, not through
+  // finding(): the remediation carries this row's own pid.
+  for (const d of input.leakedDaemons ?? []) {
+    const home = d.home ?? 'unknown HOME';
+    const started = d.startedAt ? `, started ${d.startedAt}` : '';
+    // The launch entry names WHICH install leaked the daemon — part of what
+    // the operator judges before killing. Only a real path: for a stand-in
+    // (`node -e '<code>' __daemon-run`) the token is the code blob.
+    const entry = d.entry && path.isAbsolute(d.entry) ? ` · ${d.entry}` : '';
+    out.push({
+      severity: FINDING_SEVERITY['leaked-daemon'], kind: 'leaked-daemon', device,
+      message: `stray agents daemon (pid ${d.pid}) no unit or pid file owns — HOME=${home}${started}${entry}`,
+      remediation: `kill ${d.pid}`,
+    });
   }
 
   return collapseAcrossVersions(out, new Set(input.isolatedVersions ?? []));

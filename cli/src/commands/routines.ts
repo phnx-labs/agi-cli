@@ -22,6 +22,7 @@ import {
   readDaemonLog,
   getDaemonStatus,
   getDaemonLogPath,
+  RedirectedHomeDaemonError,
 } from '../lib/daemon/daemon.js';
 import { isDaemonServiceEnabled, setDaemonServiceEnabled } from '../lib/daemon-services.js';
 import {
@@ -439,7 +440,20 @@ function ensureSchedulerRunning(opts: { quiet?: boolean; stderr?: boolean } = {}
     }
     return;
   }
-  const result = startDaemon();
+  let result: { pid: number | null; method: string };
+  try {
+    result = startDaemon();
+  } catch (err) {
+    // The redirected-HOME refusal (W4) is an auto-start policy, not a failure
+    // of the routine just added — state it and leave the foreground command
+    // green, the same tier split as the auto-start circuit breaker. Anything
+    // else (a genuinely unspawnable binary) still fails loud.
+    if (err instanceof RedirectedHomeDaemonError) {
+      if (!opts.quiet) log(chalk.yellow((err as Error).message));
+      return;
+    }
+    throw err;
+  }
   if (opts.quiet) return;
   if (result.pid) {
     log(chalk.green(`Scheduler started (PID: ${result.pid}). It will run in the background and fire routines on schedule.`));
@@ -2020,9 +2034,20 @@ export function registerRoutinesCommands(program: Command): void {
         if (!isDaemonEnabled()) {
           console.log(chalk.yellow(`Daemon is disabled (daemon.enabled=false) — run(s) below fire but are not monitored. Re-enable with: agents daemon enable`));
         } else {
-          const started = startDaemon();
-          if (started.pid) {
-            console.log(chalk.gray(`Started scheduler (PID: ${started.pid}) so webhook runs are monitored.`));
+          try {
+            const started = startDaemon();
+            if (started.pid) {
+              console.log(chalk.gray(`Started scheduler (PID: ${started.pid}) so webhook runs are monitored.`));
+            }
+          } catch (err) {
+            // Same contract as the daemon.enabled=false branch above: a refused
+            // auto-start (W4's redirected-HOME guard) never cancels the fire —
+            // the runs below fire but are not monitored. Anything else rethrows.
+            if (err instanceof RedirectedHomeDaemonError) {
+              console.log(chalk.yellow((err as Error).message));
+            } else {
+              throw err;
+            }
           }
         }
       }
@@ -2365,7 +2390,18 @@ export function registerRoutinesCommands(program: Command): void {
         process.exit(1);
       }
       setDaemonServiceEnabled('scheduler', true);
-      const result = startDaemon();
+      let result: { pid: number | null; method: string };
+      try {
+        result = startDaemon();
+      } catch (err) {
+        // The redirected-HOME refusal (W4) is user-actionable — print it
+        // without a stack, same as the asserts above.
+        if (err instanceof RedirectedHomeDaemonError) {
+          console.error(chalk.red((err as Error).message));
+          process.exit(1);
+        }
+        throw err;
+      }
       if (result.method === 'already-running') {
         // Signal a reload even here: if the daemon booted while this device had
         // scheduler.enabled=false, the reload re-evaluates the gate and boots

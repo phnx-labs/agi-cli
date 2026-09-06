@@ -80,6 +80,24 @@ describe('severity rubric', () => {
     expect(f?.remediation).toBe('remove or repoint the shadowing agents install(s)');
   });
 
+  it('a leaked daemon is a WARNING that prints HOME and start time, with kill <pid> remediation', () => {
+    const findings = buildLocalFindings(localInput({
+      leakedDaemons: [
+        { pid: 2416767, home: '/tmp/pin-e2e-2416513', startedAt: 'Tue Sep  1 02:14:00 2026', entry: '/home/user/.local/bin/agents' },
+      ],
+    }));
+    const f = findings.find((x) => x.kind === 'leaked-daemon');
+    expect(f?.severity).toBe('warning');
+    expect(f?.device).toBe('boxA');
+    expect(f?.message).toContain('2416767');
+    expect(f?.message).toContain('HOME=/tmp/pin-e2e-2416513');
+    expect(f?.message).toContain('Tue Sep  1 02:14:00 2026');
+    expect(f?.message).toContain('/home/user/.local/bin/agents');
+    expect(f?.remediation).toBe('kill 2416767');
+    // No leak → no row.
+    expect(buildLocalFindings(localInput({})).some((x) => x.kind === 'leaked-daemon')).toBe(false);
+  });
+
   it('a broken Windows OpenSSH enrollment is CRITICAL and names the effective file', () => {
     const findings = buildLocalFindings(localInput({
       windowsSshEnrollment: { status: {

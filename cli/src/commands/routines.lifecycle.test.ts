@@ -34,6 +34,8 @@ function envFor(home: string): NodeJS.ProcessEnv {
     AGENTS_DAEMON_TEST_HOME: home,
     AGENTS_DAEMON_DIR: path.join(home, '.agents', '.cache', 'helpers', 'daemon'),
     AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME: '1',
+    // W4: this suite deliberately runs daemon lifecycles in a sandbox HOME.
+    AGENTS_ALLOW_TEST_DAEMON: '1',
     AGENTS_SYNC_MACHINE_ID: 'routine-lifecycle',
   };
 }

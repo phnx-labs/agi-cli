@@ -1170,6 +1170,15 @@ Harness worker credentials are minted by `agents accounts add &lt;harness&gt; [n
       &#39;agents daemon start&#39; still starts it explicitly, same as
       &#39;systemctl start&#39; on a disabled unit.
 
+      under a redirected home (a test/e2e harness), &#39;agents daemon start&#39;
+      refuses to launch: a daemon started there keeps its own pid file under
+      the temp home and leaks, invisible to the real install (w4, phnx-3736).
+      &#39;daemon restart&#39; inherits the same guard — it stops first, so run it
+      with the same opt-in. a deliberate test launch sets
+      agents_allow_test_daemon=1 — and the harness owns stopping what it
+      started. &#39;agents doctor&#39; flags any leaked daemon that already exists,
+      with its home and start time.
+
       &#39;agents daemon services enable|disable|restart &lt;id&gt;&#39; applies live (no
       daemon restart) for supervisor-managed services that were registered at
       boot. browser-ipc is also registered while disabled, specifically so a
@@ -1226,6 +1235,15 @@ Harness worker credentials are minted by `agents accounts add &lt;harness&gt; [n
       the daemon (daemon.enabled: false in ~/.agents/devices/&lt;host&gt;/agents.yaml).
       &#39;agents daemon start&#39; still starts it explicitly, same as
       &#39;systemctl start&#39; on a disabled unit.
+
+      Under a redirected HOME (a test/e2e harness), &#39;agents daemon start&#39;
+      REFUSES to launch: a daemon started there keeps its own pid file under
+      the temp home and leaks, invisible to the real install (W4, PHNX-3736).
+      &#39;daemon restart&#39; inherits the same guard — it stops first, so run it
+      with the same opt-in. A deliberate test launch sets
+      AGENTS_ALLOW_TEST_DAEMON=1 — and the harness owns stopping what it
+      started. &#39;agents doctor&#39; flags any leaked daemon that already exists,
+      with its HOME and start time.
 
       &#39;agents daemon services enable|disable|restart &lt;id&gt;&#39; applies live (no
       daemon restart) for supervisor-managed services that were registered at

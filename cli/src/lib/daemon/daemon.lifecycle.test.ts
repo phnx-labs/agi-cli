@@ -134,8 +134,10 @@ describe('startDaemon (RUSH-2417: the start lock is released before the child-pi
 
   beforeEach(() => {
     tmpHome = fs.mkdtempSync(path.join(process.platform === 'win32' ? os.tmpdir() : '/tmp', 'agd-2417-'));
-    for (const k of ['HOME', 'PATH', 'AGENTS_DAEMON_DIR', 'AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME']) saved[k] = process.env[k];
+    for (const k of ['HOME', 'PATH', 'AGENTS_DAEMON_DIR', 'AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME', 'AGENTS_ALLOW_TEST_DAEMON']) saved[k] = process.env[k];
     process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME = '1';
+    // W4: these tests deliberately launch daemons under a sandbox HOME.
+    process.env.AGENTS_ALLOW_TEST_DAEMON = '1';
   });
 
   afterEach(() => {

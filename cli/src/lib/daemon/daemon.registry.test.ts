@@ -224,6 +224,65 @@ describe('ensureDaemonStarted (#415: always-on beyond routines)', () => {
   });
 });
 
+// W4 (PHNX-3736): RUSH-3021 gated ensureDaemonStarted's AUTO-start under a
+// redirected HOME but left the EXPLICIT startDaemon() open — the path the e2e
+// harness took when it launched the `HOME=/tmp/pin-e2e-<pid>` daemon that then
+// ran 4+ days on yosemite-s1, invisible to the real install's pid-file
+// takeover because it keeps its own pid file under the temp home. startDaemon
+// now refuses the launch unless the caller opted in with
+// AGENTS_ALLOW_TEST_DAEMON=1. The vitest suite itself runs under a redirected
+// HOME (tests/setup.ts), which is exactly the state the guard keys on.
+describe('redirected-HOME launch guard (W4, PHNX-3736)', () => {
+  const BAD_BIN = '/nonexistent/agents-cli-does-not-exist';
+  let saved: string | undefined;
+
+  beforeEach(() => { saved = process.env.AGENTS_ALLOW_TEST_DAEMON; });
+  afterEach(() => {
+    if (saved === undefined) delete process.env.AGENTS_ALLOW_TEST_DAEMON;
+    else process.env.AGENTS_ALLOW_TEST_DAEMON = saved;
+  });
+
+  it('startDaemon refuses under a redirected HOME without AGENTS_ALLOW_TEST_DAEMON', () => {
+    delete process.env.AGENTS_ALLOW_TEST_DAEMON;
+    removeDaemonPid(); // no already-running short-circuit — the guard is what's exercised
+    let caught: any = null;
+    try {
+      startDaemon();
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).not.toBeNull();
+    // Typed, so bootstrap prints the message without a stack.
+    expect(caught.name).toBe('RedirectedHomeDaemonError');
+    expect(caught.message).toMatch(/redirected HOME/);
+    expect(caught.message).toMatch(/AGENTS_ALLOW_TEST_DAEMON/);
+    // The refusal happened BEFORE any launch: no pid file, no failure streak.
+    expect(readDaemonPid()).toBeNull();
+  });
+
+  it('AGENTS_ALLOW_TEST_DAEMON=1 lets the launch through to the real outcome', () => {
+    process.env.AGENTS_ALLOW_TEST_DAEMON = '1';
+    removeDaemonPid();
+    // An unspawnable binary fails LATER, on the real cause — proof the guard
+    // passed the launch through instead of refusing it.
+    expect(() => startDaemon(BAD_BIN)).toThrow(/no PID/i);
+  });
+
+  it('an already-running daemon is still reported under a redirected HOME (stop stays possible)', async () => {
+    delete process.env.AGENTS_ALLOW_TEST_DAEMON;
+    const daemon = await spawnDaemonStandIn();
+    try {
+      writeDaemonPid(daemon.pid!);
+      // Reporting — and therefore `agents daemon stop` of a leaked daemon —
+      // must not be gated: the early-return sits above the guard.
+      expect(startDaemon().method).toBe('already-running');
+    } finally {
+      daemon.kill('SIGKILL');
+      removeDaemonPid();
+    }
+  });
+});
+
 // RUSH-2418: `daemon-health.ts`'s `consecutiveFailures` was write-only telemetry
 // — recorded, surfaced by `agents daemon status`, and consulted by nothing. So a
 // daemon that died on boot was relaunched by EVERY foreground command that
@@ -241,8 +300,10 @@ describe('daemon auto-start circuit breaker (RUSH-2418)', () => {
 
   beforeEach(() => {
     tmpHome = fs.mkdtempSync(path.join(process.platform === 'win32' ? os.tmpdir() : '/tmp', 'agd-2418-'));
-    for (const k of ['HOME', 'PATH', 'AGENTS_DAEMON_DIR', 'AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME']) saved[k] = process.env[k];
+    for (const k of ['HOME', 'PATH', 'AGENTS_DAEMON_DIR', 'AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME', 'AGENTS_ALLOW_TEST_DAEMON']) saved[k] = process.env[k];
     process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME = '1';
+    // W4: these tests deliberately launch daemons under a sandbox HOME.
+    process.env.AGENTS_ALLOW_TEST_DAEMON = '1';
 
     // A service-manager shim that always fails, so every start deterministically
     // falls through to the detached spawn — which then fails on the missing

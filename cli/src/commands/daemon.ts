@@ -34,7 +34,9 @@ import {
   findSurvivingStateDirDaemons,
   getDaemonLogPath,
   isDaemonAutostartCircuitOpen,
+  RedirectedHomeDaemonError,
 } from '../lib/daemon/daemon.js';
+import { listDaemonRunProcesses } from '../lib/daemon/leaked-daemons.js';
 import { getConfigValue, setConfigValue, isDaemonEnabled } from '../lib/device-config.js';
 import {
   readSubsystemHealth,
@@ -69,6 +71,26 @@ import {
 import { parseFunnelPort } from '../lib/funnel.js';
 
 // ─── Process scanning — which install owns the pid, and every duplicate ──────
+
+/**
+ * startDaemon for the explicit start/restart commands: the redirected-HOME
+ * refusal (W4, PHNX-3736) is user-actionable, not an engineering bug, so it
+ * prints without a stack and exits 1. Anything else (a genuinely unspawnable
+ * binary) still throws. Kept local to this command rather than in bootstrap's
+ * catch list — a bootstrap.ts edit selects the 54s non-interactive suite into
+ * the required impact gate, and this change's budget cannot carry it.
+ */
+function startDaemonClean(): { pid: number | null; method: string } {
+  try {
+    return startDaemon();
+  } catch (err) {
+    if (err instanceof RedirectedHomeDaemonError) {
+      console.error(chalk.red(err.message));
+      process.exit(1);
+    }
+    throw err;
+  }
+}
 
 interface DaemonProcess {
   pid: number;
@@ -239,19 +261,14 @@ function entryFromTokens(tokens: string[]): string | null {
 }
 
 /**
- * Every live `__daemon-run` process on this box, regardless of which install
- * launched it or which state dir it serves. POSIX-only (uses `ps`); a no-op on
- * Windows.
+ * Every live `__daemon-run` process on this box, enriched with display
+ * metadata (entry/version/entryMissing). The raw `ps` scan and its
+ * last-token `__daemon-run` invariant live in
+ * `lib/daemon/leaked-daemons.ts` (`listDaemonRunProcesses`) — shared with the
+ * doctor's leaked-daemon detection so the two can never disagree on what a
+ * daemon process is.
  *
- * `getDaemonLaunch` always spawns `<node> <entry> __daemon-run` with nothing
- * after it — the ONLY argv `__daemon-run` ever appears in for a real daemon.
- * A substring/regex test anywhere in the full command line is not enough: an
- * `agents run claude "<prompt>"` invocation whose prompt happens to quote the
- * literal text `__daemon-run` (this ticket's own brief does) matches that test
- * too, and was observed producing false "duplicate daemon" rows. Requiring it
- * to be the LAST whitespace-delimited token is the actual invariant.
- *
- * This raw box-wide scan is deliberately NOT the duplicate-detection scope
+ * This box-wide scan is deliberately NOT the duplicate-detection scope
  * (RUSH-2368): a `__daemon-run` under a different HOME serves a different
  * `getDaemonDir()` and is not a duplicate of THIS device's daemon, however
  * `ps` sees it — a leaked vitest fixture under its own `/tmp` HOME matched
@@ -260,30 +277,14 @@ function entryFromTokens(tokens: string[]): string | null {
  * `findSurvivingStateDirDaemons` has already confirmed as real duplicates.
  */
 function scanDaemonProcesses(): DaemonProcess[] {
-  if (process.platform === 'win32') return [];
-  let out: string;
-  try {
-    out = execFileSync('ps', ['-eo', 'pid=,uid=,args='], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
-  } catch {
-    return [];
-  }
   const found: DaemonProcess[] = [];
-  for (const line of out.split('\n')) {
-    const m = line.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/);
-    if (!m) continue;
-    const args = m[3].trim();
-    const tokens = args.split(/\s+/);
-    if (tokens.length === 0 || tokens[tokens.length - 1] !== '__daemon-run') continue;
-    const pid = parseInt(m[1], 10);
-    if (isNaN(pid)) continue;
-    const uidParsed = parseInt(m[2], 10);
-    const uid = isNaN(uidParsed) ? null : uidParsed;
-    const entry = entryFromTokens(tokens);
-    const version = entry ? resolveVersionNear(entry, pid) : null;
+  for (const p of listDaemonRunProcesses()) {
+    const entry = entryFromTokens(p.tokens);
+    const version = entry ? resolveVersionNear(entry, p.pid) : null;
     // Asks whether the code is on disk for the NEXT launch -- what a restart and
     // every other reader will see -- not what this pid currently has mapped.
     const entryMissing = entry ? entryAbsent(entry) : false;
-    found.push({ pid, entry, version, entryMissing, uid });
+    found.push({ pid: p.pid, entry, version, entryMissing, uid: p.uid });
   }
   return found;
 }
@@ -1032,6 +1033,15 @@ export function registerDaemonCommand(program: Command): void {
       'agents daemon start' still starts it explicitly, same as
       'systemctl start' on a disabled unit.
 
+      Under a redirected HOME (a test/e2e harness), 'agents daemon start'
+      REFUSES to launch: a daemon started there keeps its own pid file under
+      the temp home and leaks, invisible to the real install (W4, PHNX-3736).
+      'daemon restart' inherits the same guard — it stops first, so run it
+      with the same opt-in. A deliberate test launch sets
+      AGENTS_ALLOW_TEST_DAEMON=1 — and the harness owns stopping what it
+      started. 'agents doctor' flags any leaked daemon that already exists,
+      with its HOME and start time.
+
       'agents daemon services enable|disable|restart <id>' applies live (no
       daemon restart) for supervisor-managed services that were registered at
       boot. browser-ipc is also registered while disabled, specifically so a
@@ -1053,7 +1063,7 @@ export function registerDaemonCommand(program: Command): void {
   cmd.command('start')
     .description('Start the daemon. Bypasses daemon.enabled — this is the deliberate override.')
     .action(() => {
-      const result = startDaemon();
+      const result = startDaemonClean();
       if (result.method === 'already-running') {
         console.log(chalk.yellow(`Daemon already running (PID: ${result.pid})`));
       } else if (result.pid) {
@@ -1102,7 +1112,7 @@ export function registerDaemonCommand(program: Command): void {
         console.log(stop.ok ? chalk.gray('Daemon stopped') : chalk.red('Daemon stop incomplete'));
         for (const s of stop.surviving) console.log(chalk.red(`  surviving: ${s}`));
       }
-      const result = startDaemon();
+      const result = startDaemonClean();
       if (result.pid) console.log(chalk.green(`Daemon started (PID: ${result.pid}, ${result.method})`));
       else console.log(chalk.yellow('Daemon start dispatched but no PID surfaced. Check: agents daemon status'));
     });

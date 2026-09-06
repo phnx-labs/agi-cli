@@ -832,7 +832,8 @@ is `logout-unprovable`,
 `missing-resource`, `content-drift`, `never-synced`, `stale`, `repo-behind`,
 `repo-drift`, `version-skew`, `fleet-resource-gap`, `hook-runtime-visibility-unavailable`, `orphan`, `duplicate-hook`,
 `duplicate-hook-drift`, `host-cli-missing`, `host-cli-invalid`,
-`rc-secret-export`, `env-secret-export`, `auth-bundle-wrong-backend`, `exec-policy`, `stale-cli` and `binary-shadow`. (RUSH-2162 moved
+`rc-secret-export`, `env-secret-export`, `auth-bundle-wrong-backend`, `exec-policy`, `stale-cli` and `binary-shadow`,
+plus `leaked-daemon` (a `__daemon-run` no unit main PID or daemon.pid owns, W4/PHNX-3736). (RUSH-2162 moved
 `never-synced` and `duplicate-hook-drift` to warning — both are stale-sync states
 one `agents sync` resolves.)
 

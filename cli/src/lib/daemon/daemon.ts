@@ -84,6 +84,17 @@ const PLIST_NAME = 'com.phnx-labs.agents-daemon';
 const SYSTEMD_UNIT = 'agents-daemon.service';
 
 /**
+ * The service-manager identifiers of the REAL install's daemon — never
+ * namespaced. A caller under a redirected HOME (a test/e2e harness) uses these
+ * to recognize the box's production daemon as owned, where
+ * `daemonSystemdUnitName()`/`daemonServiceLabel()` would name only its own
+ * sandbox job (W4, PHNX-3736).
+ */
+export function productionDaemonServiceNames(): { systemdUnit: string; launchdLabel: string } {
+  return { systemdUnit: SYSTEMD_UNIT, launchdLabel: PLIST_NAME };
+}
+
+/**
  * RUSH-2639 (residual): launchd/systemd route `unload`/`load`/`list` by the
  * service identifier ALONE, never by the plist/unit file's path. Baking the
  * caller's HOME into the plist content (the earlier RUSH-2639 fix, above)
@@ -313,8 +324,8 @@ function getSystemdUnitPath(): string {
 }
 
 /** Read the stored daemon PID from disk. Returns null if not present or invalid. */
-export function readDaemonPid(): number | null {
-  const pidPath = getPidPath();
+export function readDaemonPid(daemonDir?: string): number | null {
+  const pidPath = daemonDir ? path.join(daemonDir, PID_FILE) : getPidPath();
   if (!fs.existsSync(pidPath)) return null;
   try {
     const pid = parseInt(fs.readFileSync(pidPath, 'utf-8').trim(), 10);
@@ -1667,19 +1678,30 @@ export { getAgentsBinPath };
  * the daemon hasn't yet written its pid file but launchd/systemd already report
  * it running — so a start never has to surface a null PID for a daemon that is
  * in fact up. Returns null when the service isn't running or the query fails.
+ *
+ * `names` defaults to THIS process's (possibly sandbox-namespaced) job; a
+ * caller under a redirected HOME passes `productionDaemonServiceNames()` to
+ * ask after the real install's unit instead. Read-only either way.
  */
-function readServiceManagerPid(platform: NodeJS.Platform = os.platform()): number | null {
-  const reg = serviceManagerRegistrationAllowed();
-  if (!reg.allowed) return null;
+export function readServiceManagerPid(
+  platform: NodeJS.Platform = os.platform(),
+  names?: { systemdUnit: string; launchdLabel: string },
+): number | null {
+  const resolved = names ?? { systemdUnit: daemonSystemdUnitName(), launchdLabel: daemonServiceLabel() };
+  // The registration gate exists because a sandboxed process must not REGISTER
+  // or tear down jobs in the real per-user service manager. Asking after an
+  // explicitly named job is read-only — in particular the production unit from
+  // a redirected-HOME caller (W4) — and mutates nothing, so it is let through.
+  if (names === undefined && !serviceManagerRegistrationAllowed().allowed) return null;
   try {
     if (platform === 'linux') {
-      const out = execFileSync('systemctl', ['--user', 'show', '-p', 'MainPID', '--value', daemonSystemdUnitName()],
+      const out = execFileSync('systemctl', ['--user', 'show', '-p', 'MainPID', '--value', resolved.systemdUnit],
         { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
       const pid = parseInt(out, 10);
       return !isNaN(pid) && pid > 0 ? pid : null;
     }
     if (platform === 'darwin') {
-      const out = execFileSync('launchctl', ['list', daemonServiceLabel()],
+      const out = execFileSync('launchctl', ['list', resolved.launchdLabel],
         { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
       const m = out.match(/"PID"\s*=\s*(\d+)/);
       if (m) {
@@ -1691,12 +1713,50 @@ function readServiceManagerPid(platform: NodeJS.Platform = os.platform()): numbe
   return null;
 }
 
+/**
+ * Thrown when a daemon LAUNCH is attempted under a redirected HOME without the
+ * explicit test opt-in (W4, PHNX-3736). `bootstrap.ts` prints the message
+ * without a stack — this is user-actionable, not an engineering bug.
+ */
+export class RedirectedHomeDaemonError extends Error {
+  override name = 'RedirectedHomeDaemonError';
+}
+
+/**
+ * W4 (PHNX-3736): never LAUNCH a daemon under a redirected (sandbox/test) HOME
+ * without an explicit opt-in. A daemon started there keeps its own pid file
+ * under the temp home, so the real install's pid-file takeover can never see
+ * it — the leaked `HOME=/tmp/pin-e2e-<pid>` daemon that ran 4+ days on
+ * yosemite-s1 was launched exactly this way by a headless e2e session that
+ * never cleaned up. RUSH-3021 closed this for `ensureDaemonStarted`'s
+ * AUTO-start path but left the explicit `startDaemon()` open, which is the
+ * path the e2e harness took.
+ *
+ * Placed after the `already-running` early-return: reporting a live daemon (so
+ * `daemon stop` can still kill a leaked one) must stay possible under any
+ * HOME. `AGENTS_ALLOW_TEST_DAEMON=1` is the deliberate test/e2e seam — a
+ * harness that sets it owns stopping what it starts.
+ */
+function assertDaemonLaunchHomeAllowed(): void {
+  const suffix = isolatedHomeSuffix();
+  if (!suffix) return;
+  if (process.env.AGENTS_ALLOW_TEST_DAEMON === '1') return;
+  throw new RedirectedHomeDaemonError(
+    `refusing to start the daemon under a redirected HOME (sandbox-${suffix}): ` +
+    `a daemon launched here keeps its own pid file under ${process.env.HOME}, invisible to the real ` +
+    `install's pid-file takeover, and outlives whatever launched it (PHNX-3736). ` +
+    `For a deliberate test/e2e launch set AGENTS_ALLOW_TEST_DAEMON=1 — and stop the daemon when done.`,
+  );
+}
+
 /** Start the daemon via launchd, systemd, or as a detached process. */
 export function startDaemon(agentsBin?: string): { pid: number | null; method: string } {
   if (isDaemonRunning()) {
     const pid = readDaemonPid();
     return { pid, method: 'already-running' };
   }
+
+  assertDaemonLaunchHomeAllowed();
 
   const releaseLock = acquireStartLock();
   if (!releaseLock) {
@@ -1782,8 +1842,9 @@ export function ensureDaemonStarted(): { pid: number | null; method: string } | 
   // recursive teardown rm (ENOTEMPTY). Placed after the already-running branch
   // — reporting a live daemon stays allowed, same as the circuit breaker.
   // AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME=1 is the test seam for suites
-  // that exercise daemon startup deliberately; `agents daemon start` remains
-  // the operator override.
+  // that exercise daemon startup deliberately. The explicit `agents daemon
+  // start` path is gated separately by startDaemon's own redirected-HOME
+  // refusal (AGENTS_ALLOW_TEST_DAEMON=1, W4/PHNX-3736).
   if (!serviceManagerRegistrationAllowed().allowed) return null;
   // RUSH-2418: the auto-start circuit breaker. A daemon that dies during
   // startup would otherwise be relaunched by EVERY foreground command that
