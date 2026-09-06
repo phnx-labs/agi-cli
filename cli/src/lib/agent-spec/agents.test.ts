@@ -975,6 +975,100 @@ describe('getAccountInfo — OpenCode provider credentials', () => {
     const info = await getAccountInfo('opencode', home);
     expect(info.signedIn).toBe(false);
   });
+
+  // An OAuth provider hands OpenCode a real access token. OpenAI's — the one
+  // `opencode auth login openai` stores — is a JWT carrying the same namespaced
+  // profile/auth claims Codex's own auth.json does, so the row can name WHO is
+  // signed in instead of only `id:<providers>`.
+  function jwt(claims: Record<string, unknown>): string {
+    const part = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url');
+    return `${part({ alg: 'RS256', typ: 'JWT' })}.${part(claims)}.signature`;
+  }
+
+  it('surfaces email and plan from an OAuth access token that carries the claims', async () => {
+    const home = makeTempDir();
+    writeOpenCodeAuth(home, {
+      openai: {
+        type: 'oauth',
+        access: jwt({
+          'https://api.openai.com/profile': { email: 'dev@example.com' },
+          'https://api.openai.com/auth': { chatgpt_plan_type: 'pro' },
+        }),
+        refresh: 'rt-secret-value',
+      },
+    });
+
+    const info = await getAccountInfo('opencode', home);
+    expect(info.signedIn).toBe(true);
+    expect(info.email).toBe('dev@example.com');
+    expect(info.plan).toBe('Pro');
+    // The providers join stays the identity key — OpenCode bills per provider.
+    expect(info.accountId).toBe('openai');
+    expect(info.accountKey).toBe('opencode:providers=openai');
+    expect(JSON.stringify(info)).not.toContain('rt-secret-value');
+  });
+
+  it('accepts a plain OIDC email claim and reports no plan when none is claimed', async () => {
+    const home = makeTempDir();
+    writeOpenCodeAuth(home, { someidp: { type: 'oauth', access: jwt({ email: 'x@y.dev' }) } });
+
+    const info = await getAccountInfo('opencode', home);
+    expect(info.email).toBe('x@y.dev');
+    expect(info.plan).toBeNull();
+  });
+
+  it('takes the email from the first provider in sorted order, not file order', async () => {
+    const home = makeTempDir();
+    writeOpenCodeAuth(home, {
+      zeta: { type: 'oauth', access: jwt({ email: 'later@example.com' }) },
+      alpha: { type: 'oauth', access: jwt({ email: 'first@example.com' }) },
+    });
+
+    const info = await getAccountInfo('opencode', home);
+    expect(info.accountId).toBe('alpha+zeta');
+    expect(info.email).toBe('first@example.com');
+  });
+
+  it('reports no email for an opaque (non-JWT) oauth token, still signed in', async () => {
+    const home = makeTempDir();
+    // Anthropic's OpenCode login stores an opaque `sk-ant-oat…`, not a JWT.
+    writeOpenCodeAuth(home, { anthropic: { type: 'oauth', access: 'sk-ant-oat01-opaque' } });
+
+    const info = await getAccountInfo('opencode', home);
+    expect(info.signedIn).toBe(true);
+    expect(info.email).toBeNull();
+    expect(info.plan).toBeNull();
+  });
+
+  it('ignores a non-email value in the email claim', async () => {
+    const home = makeTempDir();
+    writeOpenCodeAuth(home, { p: { type: 'oauth', access: jwt({ email: 'not-an-email' }) } });
+
+    const info = await getAccountInfo('opencode', home);
+    expect(info.signedIn).toBe(true);
+    expect(info.email).toBeNull();
+  });
+
+  it('dates lastActive from opencode.db, which the per-file session walk cannot see', async () => {
+    // Every OpenCode session lives in one sqlite file, so there is no directory
+    // of transcripts to walk — the db's own mtime is the activity signal.
+    const home = makeTempDir();
+    writeOpenCodeAuth(home, { anthropic: { type: 'api', key: 'sk-ant' } });
+    const db = path.join(home, '.local', 'share', 'opencode', 'opencode.db');
+    fs.writeFileSync(db, 'SQLite format 3\0');
+    const written = new Date('2026-08-01T12:00:00Z');
+    fs.utimesSync(db, written, written);
+
+    const info = await getAccountInfo('opencode', home);
+    expect(info.lastActive?.getTime()).toBe(written.getTime());
+  });
+
+  it('leaves lastActive null when no opencode.db exists anywhere', async () => {
+    const home = makeTempDir();
+    writeOpenCodeAuth(home, { anthropic: { type: 'api', key: 'sk-ant' } });
+    const info = await getAccountInfo('opencode', home);
+    expect(info.lastActive).toBeNull();
+  });
 });
 
 describe('getAccountInfo — claude credential floor (blanked .credentials.json)', () => {
