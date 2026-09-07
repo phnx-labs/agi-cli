@@ -2246,12 +2246,24 @@ export function listShimFileNames(): string[] {
 }
 
 /**
+ * Legacy command shims that are wrong even when their baked install is alive.
+ * `secrets`: the shim `exec`s `agents secrets`, which since PHNX-3989 is a
+ * passthrough to the STANDALONE `secrets` binary — so a `secrets` shim that
+ * re-enters `agents secrets` is a recursion, never a working command. It sits
+ * first on PATH and shadows the real `@phnx-labs/secrets-cli` bin, so it is
+ * pruned unconditionally (the liveness check below is what kept it alive across
+ * every in-place upgrade from 1.22.84).
+ */
+const LEGACY_SHIMS_ALWAYS_PRUNED: ReadonlySet<string> = new Set(['secrets']);
+
+/**
  * Prune a stale, orphaned shim: one that is NOT a managed agent shim and NOT a user
  * alias, whose baked `AGENTS_BIN` points at an install that no longer exists. These
  * are legacy `exec "$AGENTS_BIN" <cmd>` command shims (browser/secrets/sessions/…)
  * left behind by a removed install — the current source never generates them, and
  * they either die with `exit 127` or shadow the real package bin on PATH. Only
- * removed when the baked target is gone, so a working shim is never touched.
+ * removed when the baked target is gone, so a working shim is never touched —
+ * except the `LEGACY_SHIMS_ALWAYS_PRUNED` set, which cannot work at all.
  * Returns true if removed.
  */
 export function pruneOrphanedCommandShim(fileName: string): boolean {
@@ -2269,7 +2281,7 @@ export function pruneOrphanedCommandShim(fileName: string): boolean {
   if (content.includes('# Alias shim:')) return false; // a user `agents setup alias` shim — leave it
   const bin = readAgentsBinFromShim(shimPath);
   if (!bin) return false; // not an AGENTS_BIN-baked shim
-  if (fs.existsSync(bin)) return false; // its install is still alive — leave it
+  if (fs.existsSync(bin) && !LEGACY_SHIMS_ALWAYS_PRUNED.has(fileName)) return false; // its install is still alive — leave it
 
   try {
     fs.rmSync(shimPath);

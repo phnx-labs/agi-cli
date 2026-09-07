@@ -61,10 +61,12 @@ export const shimsCheck: HealCheck = {
       if (!ctx.dryRun && removeLegacyUserShim(agent)) fixed.push(`removed legacy ${cmd} shim`);
     }
 
-    // Prune orphaned legacy command shims (browser/secrets/sessions/… left by a
-    // removed install) whose baked AGENTS_BIN is dead — the current source never
+    // Prune orphaned legacy command shims (browser/sessions/… left by a removed
+    // install) whose baked AGENTS_BIN is dead — the current source never
     // regenerates them, and they either die with exit 127 or shadow the real
-    // package bin on PATH. Only removes shims whose target install is gone.
+    // package bin on PATH. Only removes shims whose target install is gone — plus
+    // the legacy `secrets` shim regardless: it re-enters `agents secrets`, which is
+    // a passthrough to the standalone binary since PHNX-3989, so it can only recurse.
     if (!ctx.dryRun) {
       for (const name of listShimFileNames()) {
         if (pruneOrphanedCommandShim(name)) fixed.push(`pruned orphaned ${name} shim`);

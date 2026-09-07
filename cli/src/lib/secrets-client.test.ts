@@ -52,7 +52,7 @@ import {
   _resetSecretsClientForTest,
   PROTOCOL_VERSION,
 } from './secrets-client.js';
-import { getUserAgentsDir } from './state.js';
+import { getShimsDir, getUserAgentsDir } from './state.js';
 import type { SecretsBundle } from './secrets-types.js';
 
 describe('resolveSecretsBin', () => {
@@ -83,6 +83,50 @@ describe('resolveSecretsBin', () => {
       expect((error as SecretsClientError).code).toBe('SECRETS_BIN_MISSING');
       expect((error as SecretsClientError).message).toContain('npm i -g @phnx-labs/secrets-cli');
     }
+  });
+
+  // The pre-PHNX-3989 shims dir carried a `secrets` command shim that `exec`s
+  // `agents secrets` — first on PATH, and alive across every in-place upgrade. A
+  // resolver that took it spawned `agents secrets` → shim → `agents secrets` → …
+  // without bound. The real standalone bin further down PATH must win, and with
+  // nothing but the shim the answer is MISSING, never the shim.
+  describe.skipIf(process.platform === 'win32')('never resolves to the legacy shim in agents-cli\'s own shims dir', () => {
+    let realDir: string;
+    let shimsDir: string;
+    beforeEach(() => {
+      shimsDir = getShimsDir();
+      fs.mkdirSync(shimsDir, { recursive: true });
+      const shim = path.join(shimsDir, 'secrets');
+      fs.writeFileSync(shim, `#!/bin/sh\nAGENTS_BIN='/opt/agents-cli/dist/index.js'\nexec "$AGENTS_BIN" secrets "$@"\n`);
+      fs.chmodSync(shim, 0o755);
+      realDir = fs.mkdtempSync(path.join(os.tmpdir(), 'secrets-real-bin-'));
+      const real = path.join(realDir, 'secrets');
+      fs.writeFileSync(real, '#!/bin/sh\necho standalone\n');
+      fs.chmodSync(real, 0o755);
+      delete process.env.SECRETS_BIN;
+    });
+    afterEach(() => {
+      fs.rmSync(path.join(shimsDir, 'secrets'), { force: true });
+      fs.rmSync(realDir, { recursive: true, force: true });
+    });
+
+    it('skips the shim and resolves the standalone further down PATH', () => {
+      process.env.PATH = [shimsDir, realDir].join(path.delimiter);
+      _resetSecretsClientForTest();
+      expect(resolveSecretsBin()).toBe(fs.realpathSync(path.join(realDir, 'secrets')));
+    });
+
+    it('reports SECRETS_BIN_MISSING when the shim is the only `secrets` on PATH', () => {
+      process.env.PATH = shimsDir;
+      _resetSecretsClientForTest();
+      try {
+        resolveSecretsBin();
+        throw new Error('expected resolveSecretsBin to throw');
+      } catch (error) {
+        expect(error).toBeInstanceOf(SecretsClientError);
+        expect((error as SecretsClientError).code).toBe('SECRETS_BIN_MISSING');
+      }
+    });
   });
 });
 

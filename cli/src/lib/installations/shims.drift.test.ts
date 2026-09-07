@@ -28,6 +28,10 @@ describe.skipIf(process.platform === 'win32')('shim AGENTS_BIN drift + orphan pr
     // Legacy command shim, dead target -> should prune.
     write('browser', `#!/bin/sh\nAGENTS_BIN='${deadBin}'\nexec "$AGENTS_BIN" browser "$@"\n`);
     // Legacy command shim, LIVE target -> should NOT prune.
+    write('sessions', `#!/bin/sh\nAGENTS_BIN='${liveBin}'\nexec "$AGENTS_BIN" sessions "$@"\n`);
+    // Legacy `secrets` shim, LIVE target -> pruned anyway: `agents secrets` is a
+    // passthrough to the standalone binary since PHNX-3989, so this shim can only
+    // recurse into itself, and it shadows the real `secrets` on PATH.
     write('secrets', `#!/bin/sh\nAGENTS_BIN='${liveBin}'\nexec "$AGENTS_BIN" secrets "$@"\n`);
     // A user alias shim, dead-ish -> protected, should NOT prune.
     write('myalias', `#!/bin/sh\n# Alias shim: myalias\nexec agents whatever "$@"\n`);
@@ -49,6 +53,7 @@ describe.skipIf(process.platform === 'win32')('shim AGENTS_BIN drift + orphan pr
       console.log(JSON.stringify({
         files: listShimFileNames().sort(),
         prunedBrowser: pruneOrphanedCommandShim('browser'),
+        prunedSessions: pruneOrphanedCommandShim('sessions'),
         prunedSecrets: pruneOrphanedCommandShim('secrets'),
         prunedAlias: pruneOrphanedCommandShim('myalias'),
         prunedClaude: pruneOrphanedCommandShim('claude'),
@@ -63,22 +68,24 @@ describe.skipIf(process.platform === 'win32')('shim AGENTS_BIN drift + orphan pr
     return JSON.parse(out);
   }
 
-  it('prunes only dead-target orphan command shims; spares live, alias, and agent shims', () => {
+  it('prunes dead-target orphan command shims and the always-recursive secrets shim; spares live, alias, and agent shims', () => {
     const r = run() as {
-      files: string[]; prunedBrowser: boolean; prunedSecrets: boolean;
+      files: string[]; prunedBrowser: boolean; prunedSessions: boolean; prunedSecrets: boolean;
       prunedAlias: boolean; prunedClaude: boolean; claudePointsLive: boolean;
     };
 
-    expect(r.files).toEqual(['browser', 'claude', 'myalias', 'secrets']);
+    expect(r.files).toEqual(['browser', 'claude', 'myalias', 'secrets', 'sessions']);
     expect(r.prunedBrowser).toBe(true);    // dead target -> removed
-    expect(r.prunedSecrets).toBe(false);   // live target -> spared
+    expect(r.prunedSessions).toBe(false);  // live target -> spared
+    expect(r.prunedSecrets).toBe(true);    // live target, but re-enters `agents secrets` -> removed (PHNX-3989)
     expect(r.prunedAlias).toBe(false);     // user alias -> spared
     expect(r.prunedClaude).toBe(false);    // agent command -> never pruned here
     expect(r.claudePointsLive).toBe(false); // agent shim baked at a different, removed install -> drift
 
-    // browser actually gone from disk; the spared ones remain.
+    // browser + secrets actually gone from disk; the spared ones remain.
     expect(fs.existsSync(path.join(shimsDir, 'browser'))).toBe(false);
-    expect(fs.existsSync(path.join(shimsDir, 'secrets'))).toBe(true);
+    expect(fs.existsSync(path.join(shimsDir, 'secrets'))).toBe(false);
+    expect(fs.existsSync(path.join(shimsDir, 'sessions'))).toBe(true);
     expect(fs.existsSync(path.join(shimsDir, 'myalias'))).toBe(true);
     expect(fs.existsSync(path.join(shimsDir, 'claude'))).toBe(true);
   });
