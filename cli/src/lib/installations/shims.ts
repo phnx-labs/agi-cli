@@ -1134,7 +1134,7 @@ export function removeShim(agent: AgentId): boolean {
 // v18 — Cursor aliases select the file credential store and swap HOME to the
 //       version home because current Cursor writes auth.json under ~/.cursor
 //       and ignores XDG_CONFIG_HOME for credential storage.
-export const VERSIONED_ALIAS_SCHEMA_VERSION = 19;
+export const VERSIONED_ALIAS_SCHEMA_VERSION = 20;
 
 /** Internal marker string used to embed the schema version in versioned alias scripts. */
 const VERSIONED_ALIAS_VERSION_MARKER = 'agents-versioned-alias-version:';
@@ -1254,55 +1254,59 @@ export function generateVersionedAliasScript(agent: AgentId, version: string): s
 # already sources this same adapter block, so sharing it keeps the two in sync.
 # plain (not exported) so it feeds shimConfigEnvBash below but never leaks into the
 # launched agent process — matching the main shim's convention.
-VERSION_DIR="$HOME/.agents/.history/versions/${agent}/${version}"
+VERSION_DIR="$AGENTS_REAL_HOME/.agents/.history/versions/${agent}/${version}"
 ${resolveHarnessAdapter(agent).shimConfigEnvBash?.({ configDirName }) ?? ''}`
     : agent === 'codex'
       ? codexHomeShimBash(
-          `$HOME/.agents/.history/versions/${agent}/${version}/home/${configDirName}`,
-          `$HOME/.agents/.codex-homes/${version}`,
+          `$AGENTS_REAL_HOME/.agents/.history/versions/${agent}/${version}/home/${configDirName}`,
+          `$AGENTS_REAL_HOME/.agents/.codex-homes/${version}`,
         )
       : agent === 'copilot'
         ? `
 # Copilot honors COPILOT_HOME to relocate ~/.copilot (settings, mcp-config.json,
 # session-state, logs). Point direct aliases at the versioned home so per-
 # version MCP and session state are isolated.
-export COPILOT_HOME="$HOME/.agents/.history/versions/${agent}/${version}/home/${configDirName}"
+export COPILOT_HOME="$AGENTS_REAL_HOME/.agents/.history/versions/${agent}/${version}/home/${configDirName}"
 `
         : agent === 'grok'
           ? `
 # Grok Build uses GROK_HOME to isolate its entire configuration tree (skills,
 # hooks, plugins, agents, memory, sessions, config.toml, MCP). Point direct
 # aliases at the versioned home for isolation parity with the main shim.
-export GROK_HOME="$HOME/.agents/.history/versions/${agent}/${version}/home/${configDirName}"
+export GROK_HOME="$AGENTS_REAL_HOME/.agents/.history/versions/${agent}/${version}/home/${configDirName}"
 `
           : agent === 'opencode'
             ? `
 # OpenCode reads plugins, agents, commands, and other config-directory
 # resources from OPENCODE_CONFIG_DIR. Point direct aliases at the versioned
 # global config tree where agents-cli syncs OpenCode resources.
-export OPENCODE_CONFIG_DIR="$HOME/.agents/.history/versions/${agent}/${version}/home/.config/opencode"
+export OPENCODE_CONFIG_DIR="$AGENTS_REAL_HOME/.agents/.history/versions/${agent}/${version}/home/.config/opencode"
 `
           : agent === 'kimi'
             ? `
 # Kimi Code CLI honors KIMI_CODE_HOME to relocate ~/.kimi-code (config.toml,
 # mcp.json, sessions, skills, hooks). Point direct aliases at the versioned home.
-export KIMI_CODE_HOME="$HOME/.agents/.history/versions/${agent}/${version}/home/${configDirName}"
+export KIMI_CODE_HOME="$AGENTS_REAL_HOME/.agents/.history/versions/${agent}/${version}/home/${configDirName}"
 `
             : agent === 'muse'
               ? `
 # Muse Code: no dedicated config env var. Pin XDG so config/sessions live under
 # the version home as real directories (not via the adopt symlink at
 # ~/.config/muse, which Muse rejects with SymlinkOrReparse).
-export XDG_CONFIG_HOME="$HOME/.agents/.history/versions/${agent}/${version}/home/.config"
-export XDG_DATA_HOME="$HOME/.agents/.history/versions/${agent}/${version}/home/.local/share"
+export XDG_CONFIG_HOME="$AGENTS_REAL_HOME/.agents/.history/versions/${agent}/${version}/home/.config"
+export XDG_DATA_HOME="$AGENTS_REAL_HOME/.agents/.history/versions/${agent}/${version}/home/.local/share"
 `
               : agent === 'cursor'
                 ? `
 # Cursor defaults to one machine-global OS-keychain login on macOS. Force its
 # file store and swap HOME, so ~/.cursor/auth.json belongs to this
 # version and direct aliases cannot fall through to the shared keychain login.
-export AGENTS_REAL_HOME="\${AGENTS_REAL_HOME:-$HOME}"
-export HOME="$HOME/.agents/.history/versions/${agent}/${version}/home"
+# A spawner that already chose HOME (an account slot, PHNX-3940 T5 — it left
+# the real home in AGENTS_REAL_HOME) keeps its choice: re-swapping here would
+# silently discard the slot.
+if [ "$HOME" = "$AGENTS_REAL_HOME" ]; then
+  export HOME="$AGENTS_REAL_HOME/.agents/.history/versions/${agent}/${version}/home"
+fi
 export AGENT_CLI_CREDENTIAL_STORE="file"
 `
                 : '';
@@ -1321,7 +1325,7 @@ export AGENT_CLI_CREDENTIAL_STORE="file"
   // alias's sibling dispatcher shim and re-execs forever.
   // This template is unix-only — on Windows the .cmd companion delegates to
   // "agents __shim" which resolves via getBinaryPath() instead.
-  const versionDir = `$HOME/.agents/.history/versions/${agent}/${version}`;
+  const versionDir = `$AGENTS_REAL_HOME/.agents/.history/versions/${agent}/${version}`;
   const binaryResolution =
     agent === 'grok'
       ? `# Grok ships its native binary in the versioned home's .grok/downloads (or,
@@ -1334,7 +1338,7 @@ if [ -d "$GROK_DOWNLOADS" ]; then
 fi
 # Fall back to the global grok home (binary installed without GROK_HOME set).
 if [ -z "$BINARY" ] || [ ! -x "$BINARY" ]; then
-  GROK_GLOBAL_DOWNLOADS="$HOME/.grok/downloads"
+  GROK_GLOBAL_DOWNLOADS="$AGENTS_REAL_HOME/.grok/downloads"
   if [ -d "$GROK_GLOBAL_DOWNLOADS" ]; then
     BINARY=$(_resolve_grok_binary "$GROK_GLOBAL_DOWNLOADS" "${version}")
   fi
@@ -1345,31 +1349,31 @@ fi
 if [ -z "$BINARY" ] || [ ! -x "$BINARY" ]; then
   BINARY=$(command -v grok 2>/dev/null || echo "")
   case "$BINARY" in
-    "$HOME/.agents/.cache/shims/"*) BINARY="" ;;
+    "$AGENTS_REAL_HOME/.agents/.cache/shims/"*) BINARY="" ;;
   esac
 fi`
       : agent === 'droid'
           ? `# Droid (Factory AI) installs a standalone native binary at ~/.local/bin/droid;
 # there is no npm package and nothing lands in node_modules/.bin. The PATH
 # fallback refuses anything under our shims dir to avoid an infinite re-exec.
-DROID_BINARY="$HOME/.local/bin/droid"
+DROID_BINARY="$AGENTS_REAL_HOME/.local/bin/droid"
 if [ -x "$DROID_BINARY" ]; then
   BINARY="$DROID_BINARY"
 else
   BINARY=$(command -v droid 2>/dev/null || echo "")
   case "$BINARY" in
-    "$HOME/.agents/.cache/shims/"*) BINARY="" ;;
+    "$AGENTS_REAL_HOME/.agents/.cache/shims/"*) BINARY="" ;;
   esac
 fi`
           : agent === 'muse'
             ? `# Muse Code installs a self-updating launcher at ~/.local/bin/muse.
-MUSE_BINARY="$HOME/.local/bin/muse"
+MUSE_BINARY="$AGENTS_REAL_HOME/.local/bin/muse"
 if [ -x "$MUSE_BINARY" ]; then
   BINARY="$MUSE_BINARY"
 else
   BINARY=$(command -v muse 2>/dev/null || echo "")
   case "$BINARY" in
-    "$HOME/.agents/.cache/shims/"*) BINARY="" ;;
+    "$AGENTS_REAL_HOME/.agents/.cache/shims/"*) BINARY="" ;;
   esac
 fi`
           : agent === 'warp'
@@ -1378,7 +1382,7 @@ fi`
 # PATH, refusing anything under our shims dir.
 BINARY=$(command -v warp 2>/dev/null || echo "")
 case "$BINARY" in
-  "$HOME/.agents/.cache/shims/"*) BINARY="" ;;
+  "$AGENTS_REAL_HOME/.agents/.cache/shims/"*) BINARY="" ;;
 esac`
           : `BINARY="${versionDir}/node_modules/.bin/${agentConfig.cliCommand}"`;
 
@@ -1387,22 +1391,32 @@ esac`
 # ${VERSIONED_ALIAS_VERSION_MARKER} ${VERSIONED_ALIAS_SCHEMA_VERSION}
 # Direct alias for ${agentConfig.name}@${version}
 
+# The real home. A spawner may have swapped HOME already — an account slot
+# launch (PHNX-3940 T5) sets HOME to the slot dir and leaves the real home in
+# AGENTS_REAL_HOME — so every agents-owned path below (the installation, the
+# version home, the shims dir) is anchored here, never on whatever HOME is now.
+# Anchoring on HOME made a slot launch of cursor#<name> answer "not installed"
+# and the launch lease fail with "No installation directory".
+export AGENTS_REAL_HOME="\${AGENTS_REAL_HOME:-$HOME}"
+
 ${binaryResolution}
 
 if [ -z "$BINARY" ] || [ ! -x "$BINARY" ]; then
   echo "agents: ${agent}@${version} not installed" >&2
   exit 1
 fi
-${managedEnv}
 
 # Register a launch lease for THIS pid before the exec below (PHNX-3940) — see
 # generateShimScript's identical call for what this closes and why it fails
-# closed rather than falling through on error. \$\$ survives exec.
-if ! ${agentsBin} __launch-lease "${agent}" "${version}" "\$\$"; then
+# closed rather than falling through on error. \$\$ survives exec. It runs
+# under the REAL home, before any harness HOME swap below: agents-cli's own
+# state root is $HOME/.agents, so a swapped HOME cannot find the installation.
+if ! HOME="$AGENTS_REAL_HOME" ${agentsBin} __launch-lease "${agent}" "${version}" "\$\$"; then
   echo "agents: could not safely coordinate this launch with a possibly in-progress update of ${agent}@${version}." >&2
   echo "  Check: agents update ${agent}@${version} --check    Retry once any update finishes." >&2
   exit 1
 fi
+${managedEnv}
 
 ${resolveHarnessAdapter(agent).shimExecTail?.(launchArgs) ?? `exec "$BINARY"${launchArgs} "$@"`}
 `;

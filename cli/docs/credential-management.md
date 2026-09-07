@@ -155,7 +155,10 @@ Durable worker credentials live in one reserved store per harness, named
 policy-`never` bundle** — the same shape as the legacy `auth` bundle — because the
 only transport to a worker is the ordinary bundle push (`pushBundleToHost`), which
 reads the store as a bundle and imports it remotely as one; the standalone accepts
-the `__<name>__` shape from secrets-cli 0.1.1. A user-created bundle whose name
+the `__<name>__` shape from secrets-cli 0.1.1. The push names the remote state root
+(`remoteSecretsHome: '~/.agents'`, filled in by the client wrapper — secrets-cli
+0.1.2), so the receiving `secrets` writes the same `~/.agents` root the worker's
+daemon reads instead of its own default `~/.secrets`. A user-created bundle whose name
 starts with `__` — or the reserved `auth` alias — is refused (`isReservedStoreName`).
 A key written by 1.22.84–1.22.89 as a bare file item (no bundle record) is adopted
 into its bundle by the next `auth-sync` tick (`adoptLegacyReservedStoreItems`);

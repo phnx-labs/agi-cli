@@ -89,6 +89,34 @@ describe('generateVersionedAliasScript', () => {
     expect(script).toContain('CLAUDE_CODE_OAUTH_TOKEN');
   });
 
+  it('anchors every agents-owned path on the real home and takes the launch lease before any HOME swap', () => {
+    // A slot launch (PHNX-3940 T5) hands the alias HOME=<slot dir> with the real
+    // home in AGENTS_REAL_HOME. Anchoring on $HOME made `agents run cursor#gmail`
+    // on a worker answer "cursor@main not installed", and — with cursor's own
+    // HOME swap ahead of the lease call — `agents __launch-lease` fail with
+    // "No installation directory for cursor@main" (yosemite-m0, 2026-09-07).
+    const script = generateVersionedAliasScript('cursor', 'main');
+    expect(script).toContain('export AGENTS_REAL_HOME="${AGENTS_REAL_HOME:-$HOME}"');
+    expect(script).toContain('BINARY="$AGENTS_REAL_HOME/.agents/.history/versions/cursor/main/node_modules/.bin/cursor-agent"');
+    expect(script).not.toMatch(/BINARY="\$HOME\//);
+    // The lease runs under the real home, and before cursor's HOME swap.
+    const lease = script.indexOf('HOME="$AGENTS_REAL_HOME" ');
+    expect(lease).toBeGreaterThan(0);
+    expect(script.slice(lease)).toMatch(/^HOME="\$AGENTS_REAL_HOME" '[^']+' __launch-lease "cursor" "main" "\$\$"/);
+    const swap = script.indexOf('export HOME="$AGENTS_REAL_HOME/.agents/.history/versions/cursor/main/home"');
+    expect(swap).toBeGreaterThan(lease);
+    // The swap yields to a spawner that already chose HOME (the slot).
+    expect(script).toContain('if [ "$HOME" = "$AGENTS_REAL_HOME" ]; then');
+    expect(script).toContain('export AGENT_CLI_CREDENTIAL_STORE="file"');
+  });
+
+  it('keeps the same real-home anchor and lease order for a claude@version alias', () => {
+    const script = generateVersionedAliasScript('claude', '2.1.196');
+    expect(script).toContain('BINARY="$AGENTS_REAL_HOME/.agents/.history/versions/claude/2.1.196/node_modules/.bin/claude"');
+    expect(script).toContain('VERSION_DIR="$AGENTS_REAL_HOME/.agents/.history/versions/claude/2.1.196"');
+    expect(script).toMatch(/HOME="\$AGENTS_REAL_HOME" '[^']+' __launch-lease "claude" "2.1.196"/);
+  });
+
   it('does not touch DISABLE_AUTOUPDATER for a codex@version alias (codex path unchanged)', () => {
     const script = generateVersionedAliasScript('codex', '0.20.0');
     expect(script).not.toContain('DISABLE_AUTOUPDATER');
@@ -182,7 +210,8 @@ describe('grok binary resolution order', () => {
   it('checks the versioned home before the global ~/.grok/downloads in the versioned alias', () => {
     const script = generateVersionedAliasScript('grok', '0.2.91');
     const versionedIdx = script.indexOf('/home/.grok/downloads');
-    const globalIdx = script.indexOf('$HOME/.grok/downloads');
+    // The global dir is under the REAL home (a slot launch swaps HOME).
+    const globalIdx = script.indexOf('$AGENTS_REAL_HOME/.grok/downloads');
     expect(versionedIdx, 'versioned home path must be present').toBeGreaterThanOrEqual(0);
     expect(globalIdx, 'global fallback path must be present').toBeGreaterThanOrEqual(0);
     expect(versionedIdx, 'versioned home must be checked before the global dir').toBeLessThan(globalIdx);

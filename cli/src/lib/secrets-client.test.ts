@@ -23,6 +23,8 @@ import * as path from 'node:path';
 import {
   resolveSecretsBin,
   buildServeEnv,
+  REMOTE_USER_AGENTS_DIR,
+  withRemoteStateRoot,
   bundleBackend,
   bundleBackendSync,
   bundleExists,
@@ -139,6 +141,16 @@ describe('resolveSecretsBin', () => {
         expect((error as SecretsClientError).code).toBe('SECRETS_BIN_MISSING');
       }
     });
+  });
+});
+
+describe('withRemoteStateRoot', () => {
+  it('names the remote user agents dir for a push unless the caller chose a root', () => {
+    // The receiving agents-cli reads pushed bundles from ~/.agents (MIG-1 on
+    // its end too); a push without this lands in the remote's default ~/.secrets.
+    expect(withRemoteStateRoot({ remoteBackend: 'file', operation: 'seam' }).remoteSecretsHome).toBe(REMOTE_USER_AGENTS_DIR);
+    expect(REMOTE_USER_AGENTS_DIR).toBe('~/.agents');
+    expect(withRemoteStateRoot({ remoteBackend: 'file', operation: 'seam', remoteSecretsHome: '/srv/agents' }).remoteSecretsHome).toBe('/srv/agents');
   });
 });
 

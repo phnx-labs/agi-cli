@@ -190,6 +190,14 @@ export interface PushBundleOptions {
   literalValues?: Record<string, string>;
   /** Per-SSH-operation deadline. Async daemon callers must set this explicitly. */
   timeoutMs?: number;
+  /**
+   * State root (`SECRETS_HOME`) the remote `secrets` runs under for the whole
+   * push (import, read-back verify, literal restoration); remote-relative, a
+   * leading `~/` resolves against the remote user's home. The client wrapper
+   * fills in the user agents dir (`REMOTE_USER_AGENTS_DIR`) so a push lands
+   * where the receiving agents-cli reads (MIG-1 on both ends).
+   */
+  remoteSecretsHome?: string;
 }
 
 export interface PushBundleResult {
