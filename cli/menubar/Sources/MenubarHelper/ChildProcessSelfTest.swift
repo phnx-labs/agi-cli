@@ -68,16 +68,38 @@ enum ChildProcessSelfTest {
     private static func testTimeoutKillsTheWholeProcessGroup() {
         // Parent spawns a grandchild that outlives it, then sleeps. Killing only
         // the parent pid leaves the grandchild; killing the group takes both.
-        let marker = "\(NSTemporaryDirectory())menubar-childtest-\(getpid())-\(Int(Date().timeIntervalSince1970))"
+        //
+        // The survivor check is scoped to THIS child's process group, never to a
+        // generic command string: a global `sleep 45` match counted any unrelated
+        // process on the box (a sibling agent's poll loop made it fail
+        // deterministically while group-kill worked). The child's pgid is not
+        // returned by `run`, so it is observed live from the process table while
+        // the child is still running, located by the unguessable marker the
+        // script carries in its argv.
+        let marker = "\(NSTemporaryDirectory())menubar-childtest-\(getpid())-\(UUID().uuidString)"
         let script = "/bin/sh -c 'sleep 45 && touch \(marker)' & sleep 45"
-        _ = ChildProcess.run(["/bin/sh", "-c", script], timeout: 1)
 
+        let finished = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .utility).async {
+            _ = ChildProcess.run(["/bin/sh", "-c", script], timeout: 3)
+            finished.signal()
+        }
+        var pgid: pid_t?
+        for _ in 0..<40 where pgid == nil {
+            pgid = processTable().first { $0.command.contains(marker) }?.pgid
+            if pgid == nil { usleep(50_000) }
+        }
+        finished.wait()
+
+        guard let group = pgid else {
+            check(false, "observed the child's process group while it ran"); return
+        }
         // Give the kill a beat to propagate, then assert nothing from that group
         // is still alive: the grandchild's own `sleep 45` must be gone.
         usleep(1_500_000)
-        let survivors = pgrepCount(matching: "sleep 45")
-        check(survivors == 0,
-              "timeout kills the whole process group (\(survivors) descendant sleep(s) survived)")
+        let survivors = processTable().filter { $0.pgid == group }
+        check(survivors.isEmpty,
+              "timeout kills the whole process group (pgid \(group): \(survivors.count) survivor(s)\(survivors.isEmpty ? "" : " — " + survivors.map(\.command).joined(separator: "; ")))")
         try? FileManager.default.removeItem(atPath: marker)
     }
 
@@ -334,20 +356,28 @@ enum ChildProcessSelfTest {
 
     // MARK: helpers
 
-    /// Count live processes whose command line contains `needle`, excluding this
-    /// process. Uses the real process table — the point is to observe survivors.
-    private static func pgrepCount(matching needle: String) -> Int {
+    private struct TableRow { let pid: pid_t; let pgid: pid_t; let command: String }
+
+    /// The live process table as (pid, pgid, command) rows, excluding the `ps`
+    /// itself. Real `ps`, no mock — the point is to observe real survivors, and
+    /// the pgid column is what lets a check stay scoped to one spawned subtree.
+    private static func processTable() -> [TableRow] {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/ps")
-        p.arguments = ["-Ao", "pid,command"]
+        p.arguments = ["-Ao", "pid=,pgid=,command="]
         let pipe = Pipe()
         p.standardOutput = pipe
         p.standardError = FileHandle.nullDevice
-        guard (try? p.run()) != nil else { return -1 }
+        guard (try? p.run()) != nil else { return [] }
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         p.waitUntilExit()
         let text = String(data: data, encoding: .utf8) ?? ""
-        return text.split(separator: "\n").filter { $0.contains(needle) }.count
+        return text.split(separator: "\n").compactMap { line in
+            let parts = line.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: true)
+            guard parts.count == 3, let pid = pid_t(parts[0]), let pgid = pid_t(parts[1]),
+                  pid != p.processIdentifier else { return nil }
+            return TableRow(pid: pid, pgid: pgid, command: String(parts[2]))
+        }
     }
 
     private static func check(_ condition: Bool, _ label: String) {
