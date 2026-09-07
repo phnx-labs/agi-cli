@@ -22,6 +22,7 @@ import {
   isTouchIdStormFixedVersion,
   manualUninstallCommand,
   MULTI_INSTALL_SCAN_TTL_MS,
+  NPM_PACKAGE_NAME,
   purgeRemovableAgentsCliInstalls,
   readInstalledVersion,
   readMultiInstallScanCache,
@@ -1180,5 +1181,42 @@ describe('ensureGlobalBinLinks (PHNX-2768)', () => {
     const packageRoot = path.join(prefix, 'lib', 'node_modules', '@phnx-labs', 'agents-cli');
     fs.mkdirSync(packageRoot, { recursive: true });
     await expect(ensureGlobalBinLinks(packageRoot, prefix)).rejects.toThrow(/could not read bin entries/);
+  });
+});
+
+describe('resolveRunningPackageRoot', () => {
+  const roots: string[] = [];
+  afterEach(() => {
+    for (const dir of roots.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  function makeInstall(): string {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-root-'));
+    roots.push(tmp);
+    const root = path.join(tmp, 'lib', 'node_modules', '@phnx-labs', 'agents-cli');
+    fs.mkdirSync(path.join(root, 'dist', 'lib', 'daemon'), { recursive: true });
+    fs.mkdirSync(path.join(root, 'dist', 'lib', 'self-heal', 'checks'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: NPM_PACKAGE_NAME, version: '1.0.0' }));
+    return root;
+  }
+
+  it('walks up from a module nested under dist/lib/… to the package root, not one level up', () => {
+    // The daemon's self-update tick called this from dist/lib/daemon and got
+    // `dist/lib` back, so deriveGlobalPrefix threw "not an npm-managed install"
+    // on every tick, fleet-wide — the running daemon never relaunched onto a
+    // release (2026-09-07).
+    const root = makeInstall();
+    expect(resolveRunningPackageRoot(path.join(root, 'dist', 'lib', 'daemon'))).toBe(root);
+    expect(resolveRunningPackageRoot(path.join(root, 'dist', 'lib', 'self-heal', 'checks'))).toBe(root);
+    expect(resolveRunningPackageRoot(path.join(root, 'dist'))).toBe(root);
+    expect(() => deriveGlobalPrefix(resolveRunningPackageRoot(path.join(root, 'dist', 'lib', 'daemon')))).not.toThrow();
+  });
+
+  it('fails loud when no package.json naming this package exists above the module', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-noroot-'));
+    roots.push(tmp);
+    const nested = path.join(tmp, 'dist', 'lib');
+    fs.mkdirSync(nested, { recursive: true });
+    expect(() => resolveRunningPackageRoot(nested)).toThrow(/no @phnx-labs\/agents-cli package.json above/);
   });
 });

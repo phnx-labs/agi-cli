@@ -125,7 +125,7 @@ const MIGRATED_SENTINEL_FILE = getMigratedSentinelPath();
 const MIGRATION_SENTINEL_VALUE = 'v21';
 
 describe('checkForUpdates — maybeWarnMultiInstall (index.ts:535-575): the PATH + known-install-root scan', () => {
-  bench('resolveRunningPackageRoot(__dirname) — real path math, no fs walk when not a bunfs virtual path (self-update.ts:177)', () => {
+  bench('resolveRunningPackageRoot(__dirname) — walks up from the module dir to the package.json naming this package (a few stat/read calls, bounded by nesting depth)', () => {
     resolveRunningPackageRoot(__dirname);
   });
 

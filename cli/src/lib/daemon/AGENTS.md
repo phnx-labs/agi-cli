@@ -65,8 +65,14 @@ record of `null` for it.
   `process.exit(0)`s so the OS supervisor — launchd `KeepAlive` / systemd
   `Restart=always` — relaunches the daemon onto the new code; fails CLOSED on
   any step — a failed install/verify leaves the running daemon untouched and
-  retries next tick, never exits into unverified code. No-ops on a dev build or
-  a shadowed install. Also reachable on demand via the `request-self-update`
+  retries next tick, never exits into unverified code. Before any of that, the
+  tick compares the on-disk `package.json` version (`getCliVersionFresh`) with
+  the version the process booted with; when another `agents` process has
+  already upgraded the install underneath the daemon, it exits for the relaunch
+  without downloading anything — the writer of that install byte-verified it.
+  No-ops on a dev build, and on a shadowed install unless the disk is already
+  newer (a relaunch installs nothing, so a shadow copy cannot make it unsafe);
+  the shadow no-op is logged once per process. Also reachable on demand via the `request-self-update`
   browser-IPC action, which a version-skewed client now sends instead of just
   printing `agents daemon restart` — `browser/ipc.ts`'s `reconcileDaemonVersion`.
   That trigger is DECOUPLED from the install (PHNX-3605): the handler kicks the

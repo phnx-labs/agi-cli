@@ -46,6 +46,14 @@ export class AuthSyncService extends BasePeriodicService {
       const slots = reconcileLocalWorkerSlots();
       if (slots.provisioned.length > 0) ctx.log('INFO', `auth-sync: provisioned worker slot(s) for ${slots.provisioned.join(', ')}`);
       for (const err of slots.errors) ctx.log('WARN', `auth-sync: worker slot ${err.accountId}: ${err.message}`);
+      // A row skipped for a key this box cannot read is the one silent outcome
+      // an operator needs to see: it is what "0 slots after the daemon restart"
+      // looked like on yosemite-m0 (2026-09-07), where the durable key was in
+      // the bundle but the `secrets` on the daemon's PATH could not decrypt it.
+      const waiting = slots.skipped.filter((s) => s.reason === 'durable key not synced yet');
+      if (waiting.length > 0) {
+        ctx.log('WARN', `auth-sync: ${waiting.length} registered account(s) have no readable durable key on this box yet; slot not provisioned (${waiting.map((s) => s.accountId).join(', ')})`);
+      }
     } catch (err) {
       ctx.log('WARN', `auth-sync: worker slot reconcile: ${(err as Error).message}`);
     }

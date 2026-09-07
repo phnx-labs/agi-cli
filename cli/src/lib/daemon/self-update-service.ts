@@ -36,7 +36,7 @@
 
 import { BasePeriodicService, type DaemonContext } from './service.js';
 import type { DaemonServiceId } from '../daemon-services.js';
-import { getCliVersion } from '../version.js';
+import { getCliVersion, getCliVersionFresh } from '../version.js';
 import { isDevVersionStamp } from '../startup/dev-build.js';
 import { detectAgentsBinaryShadows } from '../binary-shadow.js';
 import { compareVersions } from '../agent-spec/primitives.js';
@@ -103,7 +103,10 @@ interface NpmLatestMetadata {
  * branch exists in the exported logic itself.
  */
 export interface SelfUpdateDeps {
+  /** The version this process BOOTED with (memoized at startup). */
   currentVersion(): string;
+  /** The version of the install on disk right now — differs from `currentVersion` once another process upgraded it. */
+  installedVersion(): string;
   isDevBuild(): boolean;
   detectShadow(): boolean;
   packageRoot(): string;
@@ -208,6 +211,7 @@ export async function installAndVerifyDefault(
 export function defaultSelfUpdateDeps(): SelfUpdateDeps {
   return {
     currentVersion: () => getCliVersion(),
+    installedVersion: () => getCliVersionFresh(),
     isDevBuild: () => isDevVersionStamp(getCliVersion()),
     detectShadow: () => detectAgentsBinaryShadows().length > 0,
     packageRoot: () => resolveRunningPackageRoot(__dirname),
@@ -279,10 +283,29 @@ async function runSelfUpdateAttempt(
   signal: AbortSignal,
   deps: SelfUpdateDeps,
 ): Promise<SelfUpdateOutcome> {
-  const syncDecline = selfUpdateSyncDeclineReason(deps);
-  if (syncDecline) return { updated: false, reason: syncDecline };
+  if (deps.isDevBuild()) return { updated: false, reason: DEV_BUILD_DECLINE };
 
+  // Another agents process (an operator's `agents` command auto-updating, an
+  // `agents upgrade`, the installer) may already have replaced the install
+  // under this daemon. The code on disk is then newer than the code in memory
+  // and there is nothing to download or verify — that path byte-verified its
+  // install before it returned. Exit for the OS-supervisor relaunch. This runs
+  // BEFORE the shadow decline on purpose: a relaunch installs nothing, so a
+  // second copy of `agents` elsewhere on the box is irrelevant to it, and
+  // otherwise a shadowed worker never leaves the release it booted on.
   const current = deps.currentVersion();
+  const installed = deps.installedVersion();
+  if (installedIsNewerThanRunning(installed, current)) {
+    ctx.log(
+      'INFO',
+      `self-update: the install on disk is ${installed} but this daemon is still running ${current}; ` +
+        'exiting for OS-supervisor relaunch onto the installed code',
+    );
+    return { updated: true };
+  }
+
+  if (deps.detectShadow()) return { updated: false, reason: SHADOW_DECLINE };
+
   let metadata: NpmLatestMetadata;
   try {
     metadata = await deps.fetchLatestMetadata(signal);
@@ -399,10 +422,25 @@ export function triggerSelfUpdateInBackground(
  * reason, or `null` to proceed to the (backgrounded) install path.
  */
 export function selfUpdateSyncDeclineReason(deps: SelfUpdateDeps = defaultSelfUpdateDeps()): string | null {
-  if (deps.isDevBuild()) return 'dev build — self-update is a no-op';
-  if (deps.detectShadow()) return 'another agents binary shadows this install — self-update is a no-op';
+  if (deps.isDevBuild()) return DEV_BUILD_DECLINE;
+  // A stale install is never declined by a shadow: the relaunch installs nothing.
+  if (deps.detectShadow() && !installedIsNewerThanRunning(deps.installedVersion(), deps.currentVersion())) {
+    return SHADOW_DECLINE;
+  }
   return null;
 }
+
+export const DEV_BUILD_DECLINE = 'dev build — self-update is a no-op';
+export const SHADOW_DECLINE = 'another agents binary shadows this install — self-update is a no-op';
+
+/** True when the package on disk is a strictly newer release than the one this process booted with. */
+export function installedIsNewerThanRunning(installed: string, running: string): boolean {
+  if (installed === 'unknown' || running === 'unknown') return false;
+  return compareVersions(installed, running) > 0;
+}
+
+/** The shadow decline is logged once per daemon process — a silent permanent no-op is how eight workers sat on stale code unnoticed (2026-09-07). */
+let shadowDeclineLogged = false;
 
 export class SelfUpdateService extends BasePeriodicService {
   readonly id: DaemonServiceId = 'self-update';
@@ -420,6 +458,17 @@ export class SelfUpdateService extends BasePeriodicService {
 
   protected async onTick(ctx: DaemonContext, signal: AbortSignal): Promise<void> {
     const outcome = await attemptSelfUpdateAndExit(ctx, signal);
-    if (outcome.updated) scheduleSelfUpdateExit();
+    if (outcome.updated) {
+      scheduleSelfUpdateExit();
+      return;
+    }
+    if (outcome.reason === SHADOW_DECLINE && !shadowDeclineLogged) {
+      shadowDeclineLogged = true;
+      ctx.log(
+        'WARN',
+        `self-update: ${outcome.reason}; this daemon will only move to a new release after another agents ` +
+          'process upgrades the install (`agents doctor` lists the shadow copy)',
+      );
+    }
   }
 }
