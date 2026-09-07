@@ -803,12 +803,29 @@ export function remoteResolveEnv(
   return secretsRequest('remote.remoteResolveEnv', [target, bundle, opts ?? {}]);
 }
 
+/**
+ * The user agents dir as the RECEIVING agents-cli resolves it — `~/.agents` on
+ * every box, the same root {@link buildServeEnv} pins the local standalone to
+ * (MIG-1). A push must name it, because the remote `secrets` otherwise runs
+ * under its own default `~/.secrets`: the import succeeds, the file store there
+ * is keyed by a different machine-local passphrase, and the receiving daemon's
+ * `readReservedCredential` never finds the bundle (yosemite-m0, 2026-09-07:
+ * `pushed __cursor__` on the publisher, `no readable durable key` on the worker).
+ * Remote-relative on purpose — the local absolute dir means nothing over there.
+ */
+export const REMOTE_USER_AGENTS_DIR = '~/.agents';
+
+/** Fill in the remote state root unless the caller named one. Pure, for the seam test. */
+export function withRemoteStateRoot(opts: PushBundleOptions): PushBundleOptions {
+  return { ...opts, remoteSecretsHome: opts.remoteSecretsHome ?? REMOTE_USER_AGENTS_DIR };
+}
+
 export function pushBundleToHost(
   bundle: string,
   host: string,
   opts: PushBundleOptions,
 ): Promise<PushBundleResult> {
-  return secretsRequest('push.pushBundleToHost', [bundle, host, opts]);
+  return secretsRequest('push.pushBundleToHost', [bundle, host, withRemoteStateRoot(opts)]);
 }
 
 export function pushBundleToHostAsync(
@@ -816,7 +833,7 @@ export function pushBundleToHostAsync(
   host: string,
   opts: PushBundleOptions,
 ): Promise<PushBundleResult> {
-  return secretsRequest('push.pushBundleToHostAsync', [bundle, host, opts]);
+  return secretsRequest('push.pushBundleToHostAsync', [bundle, host, withRemoteStateRoot(opts)]);
 }
 
 // sync.* (transport pull, used by the `agents sync --secrets` umbrella stage)
