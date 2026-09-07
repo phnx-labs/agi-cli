@@ -124,7 +124,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private var routinesLoaded = false
 
     private var cachedRecentSessions: [RecentSession] = []
-    private var recentSessionsLoaded = false
 
     // The engine's active-session list (`sessions --active --local --json`) —
     // authoritative coverage (tmux/IDE/headless), but costs seconds, so it rides
@@ -195,6 +194,13 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         // Cheap poll: terminals + cloud + attention only. Badge stays glanceable
         // without paying the teams-dir scan cost on every interval.
         Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in self?.tick() }
+
+        // Attach the live-session feed + artifact index (PHNX-4003). These own the
+        // helper's single `feed watch --json` child and the rendered-page index;
+        // the dropdown RECENT section and the Sessions window both project them.
+        // Starting here is idempotent (both guard `started`).
+        FeedStream.shared.start()
+        ArtifactIndex.shared.start()
 
         if ProcessInfo.processInfo.environment["MENUBAR_DUMP"] == "1" {
             loadDumpCaches()
@@ -320,7 +326,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         cachedRoutines = snapshot.routines
         routinesLoaded = true
         cachedRecentSessions = snapshot.recentSessions
-        recentSessionsLoaded = true
         promptController.updateRecentSessions(snapshot.recentSessions)
         cachedActiveSessions = snapshot.activeSessions
         activeSessionsLoaded = true
@@ -425,12 +430,15 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         badgePending = pending
         badgeLoaded = loaded
         rebuild(menu, sessions: sessions, browserTasks: browserTasks,
-                recentSessions: cachedRecentSessions, routines: cachedRoutines,
+                routines: cachedRoutines,
                 doctor: cachedDoctorOverview, daemonPid: daemonPid, pending: pending, loaded: loaded,
                 devices: cachedDevices)
         refreshBadge()
         refreshSnapshot()
         refreshDoctorOverview()
+        // Warm the Notifications cache off-main (30s TTL); it renders from the
+        // cache, so the first open may read "Checking…" and the next shows them.
+        RecentSectionBuilder.shared.refreshNotificationsIfStale()
     }
 
     // The one rule: attention floats to the top triage strip (wait-time sorted,
@@ -438,7 +446,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     // groups by repo below; routines / tickets / recents stay dedicated,
     // glanceable sections; setup + watchdog noise collapses into one System row.
     private func rebuild(_ menu: NSMenu, sessions: [Session], browserTasks: [BrowserTask],
-                         recentSessions: [RecentSession], routines: [Routine],
+                         routines: [Routine],
                          doctor: DoctorOverview?, daemonPid: Int?, pending: [PendingDevice],
                          loaded: [LoadedDevice], devices: [Device]) {
         menu.removeAllItems()
@@ -454,9 +462,16 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         addHeader(menu, sessions: sessions, plusNeeds: loaded.count)
         menu.addItem(.separator())
 
-        // What needs me now — rendered only when there's something actionable.
-        if addNeedsAttention(menu, sessions: sessions, routines: routines,
-                             daemonPid: daemonPid, loaded: loaded) {
+        // The Sessions window entry + status-color legend (PHNX-4003): the row
+        // shows `n need you` in yellow when any fleet session is waiting, and
+        // opens the persistent window (Cmd-Shift-I).
+        RecentSectionBuilder.shared.addSessionsRow(menu)
+        RecentSectionBuilder.shared.addLegend(menu)
+        menu.addItem(.separator())
+
+        // What needs me now — non-session triage (high load, stopped scheduler,
+        // failing routines). Session attention lives in the Sessions row above.
+        if addNeedsAttention(menu, routines: routines, daemonPid: daemonPid, loaded: loaded) {
             menu.addItem(.separator())
         }
 
@@ -479,7 +494,16 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             menu.addItem(.separator())
         }
 
-        addRecent(menu, recentSessions: recentSessions)
+        // RECENT — live sessions across the fleet, grouped by project, newest
+        // first, two lines per row, from the shared row model (PHNX-4003). Replaces
+        // the historical recent-sessions list with the feed-driven view; a row
+        // click opens the Sessions window on that session.
+        RecentSectionBuilder.shared.addRecentByProject(menu)
+        menu.addItem(.separator())
+
+        // Today's feed banners (bounded 24h, cached 30s), unanswered first —
+        // opens the window on the session to Approve / Reply (PHNX-4003).
+        RecentSectionBuilder.shared.addNotifications(menu)
         menu.addItem(.separator())
 
         // Devices sit just above the System controls: newly-discovered nodes to
@@ -548,48 +572,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     // Returns true if anything was rendered (caller adds the trailing separator).
-    // Triage strip: blocked sessions grouped by (agent, repo). A group with 2+
-    // blocked sessions collapses to one row + submenu — walls of identical
-    // "Claude · muqsitnawaz — Claude is waiting for your input" rows were the
-    // single biggest source of noise. Groups of 1 render inline as before; the
-    // generic "awaiting input" filler drops when the Notification message is
-    // empty (the ⚠ glyph + section header already convey it). Failing routines
-    // follow.
-    private func addNeedsAttention(_ menu: NSMenu, sessions: [Session],
-                                   routines: [Routine], daemonPid: Int?,
+    // Triage strip for the NON-session attention the Sessions window does not
+    // cover: devices under high load, a stopped scheduler, failing routines.
+    // Blocked sessions no longer render here (PHNX-4003) — session attention is
+    // owned by the "Sessions" row + the Sessions window, which surface the
+    // reconciled feed attention with its real reply/approve controls.
+    private func addNeedsAttention(_ menu: NSMenu, routines: [Routine], daemonPid: Int?,
                                    loaded: [LoadedDevice]) -> Bool {
         var rows: [(String, NSColor, String, NSMenu?)] = []   // glyph, color, text, submenu
-
-        let blocked = sessions.filter { $0.status == .inputRequired }
-        let groups = Dictionary(grouping: blocked) { s in "\(s.agent)\u{0000}\(s.repo)" }
-        // Sort each group oldest-first, then order groups by their oldest wait.
-        let sortedGroups = groups.values.map { group -> [Session] in
-            group.sorted { ($0.attentionSinceMs ?? .greatestFiniteMagnitude) < ($1.attentionSinceMs ?? .greatestFiniteMagnitude) }
-        }.sorted { (a, b) in
-            (a.first?.attentionSinceMs ?? .greatestFiniteMagnitude) < (b.first?.attentionSinceMs ?? .greatestFiniteMagnitude)
-        }
-
-        for group in sortedGroups {
-            guard let first = group.first else { continue }
-            let agentLabel = LocalState.agentLabel(first.agent)
-            let repo = first.repo
-            if group.count == 1 {
-                // Inline: skip the generic filler when the hook wrote no message.
-                var text = "\(agentLabel) · \(repo)"
-                if !first.question.isEmpty {
-                    text += " — \(trim(first.question, 48))"
-                }
-                if let since = first.attentionSinceMs { text += "  ·  \(elapsedShort(since))" }
-                rows.append(("⚠", wait, text, blockedSubmenu(sessionId: first.sessionId, cwd: first.cwd)))
-            } else {
-                // Collapsed: N waiting · oldest elapsed. Submenu lists each session.
-                var text = "\(agentLabel) · \(repo) · \(group.count) waiting"
-                if let since = first.attentionSinceMs {
-                    text += "  ·  oldest \(elapsedShort(since))"
-                }
-                rows.append(("⚠", wait, text, groupedWaitersSubmenu(group)))
-            }
-        }
 
         // Devices under high load — this Mac (native getloadavg) first, then fresh
         // fleet peers. Warn at headroom() 'loaded' (>=75%); X red when critical.
@@ -668,23 +658,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         var line = "load \(Int(d.loadPercent.rounded()))%"
         if let mem = d.memPercent { line += " · mem \(Int(mem.rounded()))%" }
         sub.addItem(disabled(line))
-        return sub
-    }
-
-    // Submenu listing every blocked session in a grouped (agent, repo) waiter.
-    // Sorted oldest-first (most stalled at the top). Row = session title (or a
-    // "session" fallback when no title) with the elapsed wait as the trailing chip.
-    private func groupedWaitersSubmenu(_ group: [Session]) -> NSMenu {
-        let sub = NSMenu()
-        for s in group {
-            let label = s.title.isEmpty ? "session" : trim(s.title, 36)
-            var text = label
-            if !s.question.isEmpty { text += " — \(trim(s.question, 34))" }
-            if let since = s.attentionSinceMs { text += "  ·  \(elapsedShort(since))" }
-            let it = statusRow("⚠", wait, text)
-            it.submenu = blockedSubmenu(sessionId: s.sessionId, cwd: s.cwd)
-            sub.addItem(it)
-        }
         return sub
     }
 
@@ -1197,23 +1170,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
     }
 
-    private func addRecent(_ menu: NSMenu, recentSessions: [RecentSession]) {
-        let visible = Array(recentSessions.filter {
-            let id = LocalState.normalizeAgent($0.agent)
-            return LocalState.desiredAgents.contains { $0.id == id }
-        }.prefix(3))
-        addSectionTitle(menu, "RECENT", color: .secondaryLabelColor)
-        if visible.isEmpty {
-            menu.addItem(disabled(recentSessionsLoaded ? "  No recent sessions" : "  Recent sessions checking…"))
-            return
-        }
-        for session in visible {
-            let item = NSMenuItem(title: recentSessionTitle(session), action: nil, keyEquivalent: "")
-            item.submenu = recentSessionSubmenu(session)
-            menu.addItem(item)
-        }
-    }
-
     // Tickets filed via the quick-issue bar. Returns false (renders nothing) when
     // the ledger is empty. Each row opens the ticket in Linear on click.
     private func addRecentTickets(_ menu: NSMenu) -> Bool {
@@ -1417,62 +1373,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         sub.addItem(open)
         return sub
     }
-
-    private func recentSessionSubmenu(_ session: RecentSession) -> NSMenu {
-        let sub = NSMenu()
-        if let topic = session.topic, !topic.isEmpty {
-            sub.addItem(disabled(trim(topic, 60)))
-            sub.addItem(.separator())
-        }
-        if let version = session.version {
-            sub.addItem(disabled("Version: \(version)"))
-        }
-        if let branch = session.gitBranch {
-            sub.addItem(disabled("Branch: \(branch)"))
-        }
-        if session.version != nil || session.gitBranch != nil {
-            sub.addItem(.separator())
-        }
-        if let filePath = session.filePath {
-            let open = NSMenuItem(title: "Open transcript", action: #selector(onOpenPath(_:)), keyEquivalent: "")
-            open.target = self
-            open.representedObject = filePath
-            sub.addItem(open)
-        }
-        if let cwd = session.cwd {
-            let reveal = NSMenuItem(title: "Reveal project", action: #selector(onOpenPath(_:)), keyEquivalent: "")
-            reveal.target = self
-            reveal.representedObject = cwd
-            sub.addItem(reveal)
-        }
-        return sub
-    }
-
-    /// Submenu for a blocked row. "Focus session" comes FIRST and is the point:
-    /// a NEEDS-YOU row exists because an agent is waiting on the operator, so the
-    /// action that resolves it — land in that session — must be the first thing
-    /// under the cursor. Revealing the working dir does not unblock anything.
-    ///
-    /// `sessionId` is nil for a row the engine could not identify (a cloud task,
-    /// a stale sentinel); the item is simply omitted rather than shown disabled,
-    /// so the menu never offers an action that would do nothing.
-    private func blockedSubmenu(sessionId: String?, cwd: String?) -> NSMenu? {
-        let sub = NSMenu()
-        if let id = sessionId, !id.isEmpty {
-            let focus = NSMenuItem(title: "Focus session", action: #selector(onFocusSession(_:)), keyEquivalent: "")
-            focus.target = self
-            focus.representedObject = id
-            sub.addItem(focus)
-        }
-        if let dir = cwd, !dir.isEmpty {
-            let reveal = NSMenuItem(title: "Reveal working dir", action: #selector(onOpenPath(_:)), keyEquivalent: "")
-            reveal.target = self
-            reveal.representedObject = dir
-            sub.addItem(reveal)
-        }
-        return sub.items.isEmpty ? nil : sub
-    }
-
 
     private func routineSubmenu(_ r: Routine) -> NSMenu {
         let sub = NSMenu()
@@ -1707,18 +1607,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         open.target = self
         sub.addItem(open)
         return sub
-    }
-
-    private func recentSessionTitle(_ session: RecentSession) -> String {
-        let agent = LocalState.agentLabel(session.agent).padding(toLength: 9, withPad: " ", startingAt: 0)
-        let project = session.project ?? session.cwd.map { ($0 as NSString).lastPathComponent } ?? "session"
-        let label: String
-        if let topic = session.topic, !topic.isEmpty {
-            label = "“\(trim(topic, 22))”"
-        } else {
-            label = session.shortId ?? session.id.map { String($0.prefix(8)) } ?? "recent"
-        }
-        return "  \(agent) \(trim(project, 14)) · \(label) · \(shortWhen(session.timestamp))"
     }
 
     private func syncState(_ agent: String, doctor: DoctorOverview?) -> DoctorSync? {

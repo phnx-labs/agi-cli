@@ -12,8 +12,9 @@
 # checks the shipped bundle's signature. A whole class of helper bugs (the flock
 # fd-inheritance deadlock, the unbounded-child runaway) could regress unseen.
 #
-# NOT run here: MENUBAR_DUMP / MENUBAR_PROMPT_PREVIEW — those DO reach AppKit and
-# need a GUI session, so they would hang/fail on a headless runner.
+# NOT run here: MENUBAR_DUMP / MENUBAR_PROMPT_PREVIEW / MENUBAR_SESSIONS_PREVIEW —
+# those DO reach AppKit and need a GUI session, so they would hang/fail on a
+# headless runner.
 #
 # Usage:
 #   test-menubar.sh [BINARY]   # BINARY defaults to a fresh `swift build` debug binary
@@ -44,7 +45,7 @@ export MENUBAR_ARTIFACT_ROOT="$PWD/Tests/fixtures/artifacts-tree"
 export MENUBAR_OCR_FIXTURES="$PWD/Tests/fixtures"
 
 fail=0
-for mode in MENUBAR_GUARD_TEST MENUBAR_ISSUE_TEST MENUBAR_PROJECTS_TEST MENUBAR_SINGLE_TEST MENUBAR_CHILD_TEST MENUBAR_ACTIVE_TEST MENUBAR_ROUTINE_TEST MENUBAR_DOCTOR_TEST MENUBAR_DEVICE_TEST MENUBAR_FEED_TEST MENUBAR_ARTIFACT_TEST MENUBAR_OCR_TEST MENUBAR_NOTIFY_TEST MENUBAR_DISPATCH_TEST MENUBAR_PULSE_TEST; do
+for mode in MENUBAR_GUARD_TEST MENUBAR_ISSUE_TEST MENUBAR_PROJECTS_TEST MENUBAR_SINGLE_TEST MENUBAR_CHILD_TEST MENUBAR_ACTIVE_TEST MENUBAR_ROUTINE_TEST MENUBAR_DOCTOR_TEST MENUBAR_DEVICE_TEST MENUBAR_FEED_TEST MENUBAR_ARTIFACT_TEST MENUBAR_OCR_TEST MENUBAR_NOTIFY_TEST MENUBAR_DISPATCH_TEST MENUBAR_PULSE_TEST MENUBAR_ROWMODEL_TEST MENUBAR_REPLY_TEST; do
   echo "=== $mode ==="
   if ! env "$mode=1" "$BIN"; then
     echo "  $mode FAILED" >&2
