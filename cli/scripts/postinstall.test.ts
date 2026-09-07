@@ -200,7 +200,6 @@ function stageDaemonHealStubs(
 ): void {
   const lib = path.join(root, 'dist', 'lib');
   fs.mkdirSync(path.join(lib, 'platform'), { recursive: true });
-  fs.mkdirSync(path.join(lib, 'secrets'), { recursive: true });
   fs.writeFileSync(
     path.join(lib, 'platform', 'posixpath.js'),
     [
@@ -208,14 +207,6 @@ function stageDaemonHealStubs(
       'export function ensureLocalBinSymlink() { return { created: false }; }',
       'export function loginShellResolves() { return true; }',
       'export function dirOnLoginPath() { return true; }',
-      '',
-    ].join('\n'),
-  );
-  fs.writeFileSync(
-    path.join(lib, 'secrets', 'agent.js'),
-    [
-      'export function secretsAgentServiceInstalled() { return false; }',
-      'export function retireLegacySecretsAgentService() {}',
       '',
     ].join('\n'),
   );
