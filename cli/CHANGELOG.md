@@ -1,5 +1,75 @@
 # Changelog
 
+## 1.22.89
+
+- **Worker daemons now actually relaunch onto a new agents-cli release, so a fix
+  that ships reaches every worker without a hand `agents daemon restart`
+  (PHNX-3940 rollout).** Two defects kept every fleet daemon on the code it
+  booted with: `resolveRunningPackageRoot(__dirname)` resolved one level up from
+  the calling module, which from `dist/lib/daemon/self-update-service.js` is
+  `dist/lib`, so every self-update tick failed with `… is not an npm-managed
+  install` (eight Linux workers logged it for days and ran 1.22.79 code while the
+  disk sat at 1.22.88); and the tick only exited after an install it performed
+  itself, so an install written by an operator's `agents` command never relaunched
+  the daemon, and on a box with a second `agents` on PATH the tick declined
+  silently. The resolver now walks up to the `package.json` naming this package;
+  the tick compares the on-disk version with the version it booted with and, when
+  the disk is newer and the install has settled (`package.json` at rest for a
+  minute and every `bin` entry present, because bun's write is not atomic), exits
+  for the OS-supervisor relaunch without downloading anything. The shadow decline
+  is logged once per daemon process, and `auth-sync` logs accounts skipped
+  because their durable key is not readable on the box. Source:
+  `cli/src/lib/self-update.ts`, `cli/src/lib/daemon/self-update-service.ts`,
+  `cli/src/lib/daemon/auth-sync-service.ts`.
+
+- **AGI Menu palette: real projects, Linear from the binding, pin, live screenshots, image paste (PHNX-4001).**
+  The `Cmd-Shift-O` palette now picks a **project**, not a directory: it lists every
+  `agents projects` definition by name (with a type-ahead filter and the root as a
+  tooltip) instead of the last eight session working directories, so a project you
+  have not worked in today is still one keystroke away, and two definitions that
+  share a checkout — `prix` and `rush` both live in the same monorepo — stay two
+  entries. Dispatch passes `--project <name>`; recent session cwds now only offer a
+  worktree or subdirectory *inside* the chosen project. The ticket list is scoped by
+  the project's own Linear **binding** rather than by matching folder names against
+  Linear project names, which is why picking `agi` now shows the AGI board instead of
+  "no Linear project matches agents-cli"; a project with no binding says so and prints
+  `agents projects link <name> --linear`. The palette can be **pinned** (header button,
+  or press `Cmd-Shift-O` while it is already focused) so it survives another app
+  taking focus. The screenshot strip is **live** — a shot taken while the palette is
+  open appears within about a second, with no re-summon — and images can be pasted
+  with `Cmd-V` or dropped onto the panel; `Backspace` on a focused thumbnail removes
+  it. Attachments now travel to the agent as `<host>:<abs-path>` references (the same
+  form `Cmd-Shift-V` types), so a dispatch to another device can fetch them. The
+  ticket list starts folded and `Cmd-T` toggles it, remembered. On a machine with no
+  projects defined the palette falls back to recent session working directories, and
+  with neither a project nor a recent directory it now refuses to dispatch instead of
+  launching an agent with no working directory (which resolved to `/`).
+  Source: `cli/menubar/Sources/MenubarHelper/PromptPanel.swift`,
+  `cli/menubar/Sources/MenubarHelper/ScreenshotWatcher.swift`,
+  `cli/menubar/Sources/MenubarHelper/LinearTickets.swift`.
+
+- **The CLI now posts one actionable desktop banner per new attention item, so a
+  session asking a question, a permission prompt, or a plan review is answerable
+  straight from the notification (PHNX-4004).** A new supervised `attention-notify`
+  daemon service (tick 5 s, reader-independent) reconciles this host's live
+  sessions each tick and posts a banner carrying the category, the attention key,
+  the session id, and the answerable choices — Approve / Approve for session / Deny
+  for a permission, the options plus a typed reply for a question, Approve / Send
+  back for a plan review, Open terminal for a stall — which the macOS helper routes
+  back through `agents feed answer <key> --choice <id>`. A `deny`/`send-back`
+  choice delivers a real Escape keystroke (no trailing Enter) rather than the
+  letters "esc", so cancelling a permission or plan prompt never confirms it.
+  `agents run --notify` finish banners now carry `category: done|failure`; the
+  finish-notification shape also carries the session id and open-report / open-pr
+  choices when the caller supplies a session id, report path, or PR url.
+  Idempotency is a filesystem ledger under `~/.agents/.history/feed/notified/`,
+  pruned at 14 days, so a daemon restart never re-posts a banner already sent. The
+  `--notify` argv gains `--category`, `--key`, `--session`, and repeated
+  `--choice <id>=<label>` (see `docs/menubar.md` → Actionable notifications).
+  Source: `src/lib/menubar/notify-desktop.ts`,
+  `src/lib/daemon/attention-notify-service.ts`, `src/lib/feed/attention.ts`,
+  `src/lib/answer-router.ts`, `src/lib/run-notify.ts`.
+
 ## 1.22.88
 
 - **`agents run` no longer fails with `secrets request failed: spawnSync sh
