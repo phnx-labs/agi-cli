@@ -1614,7 +1614,7 @@ Extras clone into `~/.agents-system/.repos/<alias>/` and ship the same layout as
 
 ## Security & Privacy
 
-**The CLI binary has no built-in telemetry or phone-home path.** Routine commands run locally; explicit features such as cloud dispatch and iCloud Keychain sync send only the data needed for the action you invoke. Here's exactly what `agi-cli` stores locally and why.
+**The CLI binary has no built-in telemetry or phone-home path.** Routine commands run locally; explicit features such as cloud dispatch and secrets push/pull send only the data needed for the action you invoke. Here's exactly what `agi-cli` stores locally and why.
 
 ### Event log
 
