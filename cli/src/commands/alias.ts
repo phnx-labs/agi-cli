@@ -25,9 +25,13 @@ function aliasesFile(): string {
   return path.join(getUserAgentsDir(), 'aliases.json');
 }
 
-/** Names that would clobber an agent CLI shim or the `agents` binary itself. */
+/**
+ * Names that would clobber an agent CLI shim, the `agents` binary itself, or the
+ * standalone `secrets` CLI (PHNX-3989): the shims dir sits first on PATH, so an
+ * alias named `secrets` would shadow `@phnx-labs/secrets-cli` for every caller.
+ */
 function reservedNames(): Set<string> {
-  const reserved = new Set<string>(['agents']);
+  const reserved = new Set<string>(['agents', 'secrets']);
   for (const id of ALL_AGENT_IDS) reserved.add(AGENTS[id].cliCommand);
   return reserved;
 }
@@ -107,7 +111,7 @@ export function registerAliasCommand(setupCmd: Command): void {
         process.exit(1);
       }
       if (reservedNames().has(name)) {
-        console.error(chalk.red(`"${name}" is reserved (collides with an agent CLI or the agents binary).`));
+        console.error(chalk.red(`"${name}" is reserved (collides with an agent CLI, the agents binary, or the standalone secrets CLI).`));
         process.exit(1);
       }
 

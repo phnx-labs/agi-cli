@@ -146,6 +146,26 @@ describe('postinstall alias shims', () => {
     expect(fs.existsSync(foreign)).toBe(true);
     expect(readShim(home, 'sessions')).toContain('exec "$AGENTS_BIN" sessions "$@"');
   });
+
+  it("leaves a user's own `# Alias shim:` under a retired name alone", () => {
+    // `agents setup alias` shims carry the marker and end in the same
+    // `<name> "$@"` tail; a pre-existing user alias is the user's, not ours.
+    const home = makeTempHome();
+    const root = stagePackageTree();
+    const shims = path.join(home, '.agents', '.cache', 'shims');
+    fs.mkdirSync(shims, { recursive: true });
+    const userAlias = path.join(shims, 'secrets');
+    fs.writeFileSync(userAlias, `#!/bin/sh\n# Alias shim: secrets -> agents secrets\nexec agents secrets "$@"\n`, { mode: 0o755 });
+
+    const result = runPostinstall(root, home, {
+      npm_config_global: undefined,
+      AGENTS_INIT_SHELL: undefined,
+      AGENTS_POSTINSTALL_SHIMS_ONLY: '1',
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(fs.readFileSync(userAlias, 'utf-8')).toContain('# Alias shim: secrets');
+  });
 });
 
 describe('postinstall signed-binary resolution (#315)', () => {
