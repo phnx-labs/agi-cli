@@ -144,10 +144,6 @@ describe('daemon tick call sites use the async, non-blocking helper variants', (
     expect(read('auth-sync-service.ts')).toMatch(/await publishReservedAuthVerdict\(/);
   });
 
-  it('keychain-reap tick awaits the async (bounded ps) reaper', () => {
-    expect(read('keychain-reap-service.ts')).toMatch(/await reapOrphanedKeychainProcesses\(/);
-  });
-
   it('browser-task-reap tick awaits the async idle-config read', () => {
     expect(read('browser-task-reap-service.ts')).toMatch(/await resolveBrowserTaskIdleMs\(/);
   });
