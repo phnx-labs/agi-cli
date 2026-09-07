@@ -13,16 +13,17 @@
  * stored and optionally synced. Interactive mint is Claude-only; every other
  * harness fails loud with the command that actually provisions it.
  */
-import type { AgentId } from './types.js';
+import type { AgentId, Meta } from './types.js';
 import { resolveAgentName } from './agents.js';
 import {
   AUTH_BUNDLE,
   claudeAccountTokenKey,
   isValidClaudeSetupToken,
   readClaudeAccountEmail,
+  readReservedCredential,
   invalidateClaudeSetupTokenCache,
 } from './claude-account-token.js';
-import { addAccount, findAccount, readAccountRegistry, setAccountSecret, type CredentialAccount } from './account-registry.js';
+import { addAccount, findAccount, listNativeAccounts, readAccountRegistry, setAccountSecret, type CredentialAccount } from './account-registry.js';
 import {
   bundleBackendSync,
   bundleExists,
@@ -32,7 +33,6 @@ import {
   readBundleSync,
   rotateBundleSecretSync,
   secretsKeychainItem,
-  storeSetSync,
   writeBundleWithItemsSync,
 } from './secrets-client.js';
 import type { SecretsBundle } from './secrets-types.js';
@@ -335,13 +335,81 @@ export function seedReservedStoreKey(
   const name = reservedStoreName(harness);
   const cleaned = value.trim();
   if (!cleaned) throw new Error(`Empty ${kind} for reserved store '${name}' key ${key}.`);
-  // A `__<harness>__` reserved store is written and read as raw FILE-backed items,
-  // never as a standalone bundle: the standalone's bundle-name validation rejects
-  // the `__`-wrapped reserved name, so the worker credential rides the raw item
-  // directly, symmetric with how `readReservedCredential` reads it. A first write
-  // and a rotation are the same operation — `store.set` overwrites the item value.
-  storeSetSync('file', secretsKeychainItem(name, key), cleaned);
+  // A `__<harness>__` reserved store is a real FILE-backed, policy-`never` bundle
+  // — the same shape as the legacy `auth` bundle — because the only transport to
+  // a worker is the ordinary bundle push (`syncReservedStores` →
+  // `pushBundleToHost`), which reads the store as a bundle and imports it
+  // remotely as one. It used to be written as a bare `store.set` item with no
+  // bundle record (the standalone rejected the `__`-wrapped name at the time), so
+  // the push could never read it and no worker received a Cursor/Codex/Grok key.
+  // The item name is unchanged (`agents-cli.secrets.__<harness>__.<KEY>`), so
+  // `readReservedCredential` and every worker that already holds the raw item
+  // keep resolving it. Requires -labs/secrets-cli >= 0.1.1 (reserved-shape
+  // bundle names).
+  const item = secretsKeychainItem(name, key);
+  if (bundleExistsSync(name)) {
+    const backend = bundleBackendSync(name);
+    if (backend !== 'file') {
+      throw new Error(
+        `Reserved store '${name}' exists with backend '${backend}', but worker provisioning only reads a FILE-backed store. Recreate it with: agents secrets delete ${name} --yes`,
+      );
+    }
+    const bundle = readBundleSync(name);
+    if (key in bundle.vars) {
+      rotateBundleSecretSync(bundle, key, { newValue: cleaned, meta: { type: 'token' } });
+      return { bundle: name, key };
+    }
+    bundle.vars[key] = keychainRef(key);
+    if (!bundle.meta) bundle.meta = {};
+    bundle.meta[key] = { type: 'token' };
+    writeBundleWithItemsSync(bundle, new Map([[item, cleaned]]));
+    return { bundle: name, key };
+  }
+  const bundle: SecretsBundle = {
+    name,
+    backend: 'file',
+    policy: 'never',
+    description: `Reserved ${harness} worker credentials (${kind}), one key per account; pushed to worker devices by the daemon. Never a native OAuth session.`,
+    vars: { [key]: keychainRef(key) },
+    meta: { [key]: { type: 'token' } },
+  };
+  writeBundleWithItemsSync(bundle, new Map([[item, cleaned]]));
   return { bundle: name, key };
+}
+
+export interface AdoptLegacyReservedItemsResult {
+  adopted: Array<{ bundle: string; key: string }>;
+  errors: Array<{ bundle: string; key: string; message: string }>;
+}
+
+/**
+ * Adopt reserved-store keys written by 1.22.84–1.22.89 as bare file items (no
+ * bundle record) into the file-backed bundle the daemon push reads. Every
+ * `accounts add codex|grok|cursor` from those releases left its worker key in
+ * that shape on the laptop, unpushable; the item name is the same in both
+ * shapes, so adoption re-seeds the bundle from the raw value in place and
+ * nothing already on a worker changes. Idempotent: a key the bundle already
+ * carries is skipped. Local data repair only — it never talks to a peer.
+ */
+export function adoptLegacyReservedStoreItems(
+  meta: Pick<Meta, 'accounts' | 'deviceAccounts'>,
+): AdoptLegacyReservedItemsResult {
+  const result: AdoptLegacyReservedItemsResult = { adopted: [], errors: [] };
+  for (const account of listNativeAccounts(meta)) {
+    const cred = account.workerCredential;
+    if (!cred || !cred.bundle.startsWith('__')) continue;
+    if (cred.kind !== 'setup-token' && cred.kind !== 'api-key') continue;
+    try {
+      if (bundleExistsSync(cred.bundle) && cred.key in readBundleSync(cred.bundle).vars) continue;
+      const value = readReservedCredential(cred.bundle, cred.key);
+      if (value === null) continue;
+      seedReservedStoreKey(account.agent, cred.kind, cred.key, value);
+      result.adopted.push({ bundle: cred.bundle, key: cred.key });
+    } catch (err) {
+      result.errors.push({ bundle: cred.bundle, key: cred.key, message: (err as Error).message });
+    }
+  }
+  return result;
 }
 
 /**

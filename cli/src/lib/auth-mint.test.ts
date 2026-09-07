@@ -22,6 +22,7 @@ import {
   seedNamedAccount,
   seedReservedAuthToken,
   seedReservedStoreKey,
+  adoptLegacyReservedStoreItems,
   stripAnsi,
   unmintableMessage,
   workerCredentialEnv,
@@ -39,7 +40,7 @@ import {
   resolveClaudeSetupToken,
 } from './claude-account-token.js';
 import { findAccount } from './account-registry.js';
-import { _resetSecretsClientForTest, bundleBackendSync, bundleExistsSync, readAndResolveBundleEnvSync } from './secrets-client.js';
+import { _resetSecretsClientForTest, bundleBackendSync, bundleExistsSync, readAndResolveBundleEnvSync, secretsKeychainItem, storeSetSync } from './secrets-client.js';
 import { standaloneKeychainIsFileBacked, useFreshSecretsHome } from '../../tests/secrets-standalone.js';
 import type { PtyDriver } from './fleet/remote-login.js';
 
@@ -291,27 +292,62 @@ describe('seedReservedAuthToken — the reserved file-backed auth bundle', () =>
     expect(hasMintedSetupToken().ready).toBe(true);
   });
 
-  it('seedReservedStoreKey writes __<harness>__ raw items keyed by account id, rotates in place, and refuses rotating kinds', () => {
+  it('seedReservedStoreKey writes __<harness>__ as a file-backed bundle the push can read, rotates in place, and refuses rotating kinds', () => {
     const accountId = '12f8a2df-d37b-4205-9658-498c2070736a';
     const key = workerCredentialStoreKey('claude', accountId);
     const first = seedReservedStoreKey('claude', 'setup-token', key, TOKEN);
     expect(first).toEqual({ bundle: '__claude__', key });
-    // Reserved `__<harness>__` stores are raw file items, read back the same way
-    // the worker slot reads them (readReservedCredential), never as a bundle.
+    // The worker slot reads the raw item (readReservedCredential) …
     expect(readReservedCredential('__claude__', key)).toBe(TOKEN);
+    // … and the daemon push reads the store AS A BUNDLE (pushBundleToHost →
+    // readAndResolveBundleEnv). A bare raw item with no bundle record made every
+    // reserved-store push fail with "Invalid bundle name" / OPERATION_FAILED and
+    // left every worker without a Cursor/Codex/Grok key — so this is the read
+    // that must succeed, on a FILE-backed, policy-never bundle.
+    expect(bundleExistsSync('__claude__')).toBe(true);
+    expect(bundleBackendSync('__claude__')).toBe('file');
+    const resolved = readAndResolveBundleEnvSync('__claude__', { caller: 'test', agentOnly: true, keyMode: 'storage' });
+    expect(resolved.env[key]).toBe(TOKEN);
+    expect(resolved.bundle.policy).toBe('never');
 
     // Rotation: same key, new value (re-mint after expiry).
     seedReservedStoreKey('claude', 'setup-token', key, `${TOKEN}rotated`);
     expect(readReservedCredential('__claude__', key)).toBe(`${TOKEN}rotated`);
+    expect(readAndResolveBundleEnvSync('__claude__', { caller: 'test', agentOnly: true, keyMode: 'storage' }).env[key]).toBe(`${TOKEN}rotated`);
 
     // A second harness gets its own store and value.
     const grokKey = workerCredentialStoreKey('grok', accountId);
     seedReservedStoreKey('grok', 'api-key', grokKey, 'xai-test');
     expect(readReservedCredential('__grok__', grokKey)).toBe('xai-test');
+    expect(bundleBackendSync('__grok__')).toBe('file');
+    expect(readAndResolveBundleEnvSync('__grok__', { caller: 'test', agentOnly: true, keyMode: 'storage' }).env[grokKey]).toBe('xai-test');
 
     // The write boundary refuses a rotating OAuth/session credential (RUSH-1958).
     expect(() => seedReservedStoreKey('codex', 'oauth-session' as never, 'OPENAI_API_KEY_x', 'v'))
       .toThrow(/rotating session/);
+  });
+
+  it('adoptLegacyReservedStoreItems folds a pre-bundle raw reserved item into its file-backed bundle, once', () => {
+    // The shape 1.22.84–1.22.89 left behind: the value sits at the item name the
+    // bundle would use, but no bundle record exists, so the push cannot read it.
+    const accountId = '3dbc408e-a885-4571-8137-2c7ddc84a2ad';
+    const key = workerCredentialStoreKey('cursor', accountId);
+    storeSetSync('file', secretsKeychainItem('__cursor__', key), 'crsr_legacy_value');
+    expect(readReservedCredential('__cursor__', key)).toBe('crsr_legacy_value');
+    expect(bundleExistsSync('__cursor__')).toBe(false);
+
+    const meta = { accounts: { native: { [accountId]: { id: accountId, name: 'gmail', agent: 'cursor' as const, identityKey: 'cursor:user=u', scope: 'version' as const, identityLabel: 'g.io', workerCredential: { bundle: '__cursor__', key, kind: 'api-key' as const, mintedAt: 'm1' } } } } };
+    const first = adoptLegacyReservedStoreItems(meta);
+    expect(first).toEqual({ adopted: [{ bundle: '__cursor__', key }], errors: [] });
+    expect(bundleBackendSync('__cursor__')).toBe('file');
+    const resolved = readAndResolveBundleEnvSync('__cursor__', { caller: 'test', agentOnly: true, keyMode: 'storage' });
+    expect(resolved.env[key]).toBe('crsr_legacy_value');
+    expect(resolved.bundle.policy).toBe('never');
+    // The raw reader keeps working on the adopted item (same name).
+    expect(readReservedCredential('__cursor__', key)).toBe('crsr_legacy_value');
+
+    // Idempotent: the bundle now carries the key, so a second pass adopts nothing.
+    expect(adoptLegacyReservedStoreItems(meta)).toEqual({ adopted: [], errors: [] });
   });
 
   it('reports not-ready instead of crashing when the standalone secrets CLI is unreachable (PHNX-3385)', () => {

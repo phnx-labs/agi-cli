@@ -516,6 +516,8 @@ export function peerPresentKeys(
 
 export interface ReservedStoreSyncResult {
   publisher: string | null;
+  /** Legacy raw reserved items adopted into their bundle on this box before planning (local repair). */
+  adopted: Array<{ bundle: string; key: string }>;
   pushed: Array<{ device: string; bundle: string; keys: string[] }>;
   skipped: Array<{ device: string; reason: string }>;
   errors: Array<{ device: string; message: string }>;
@@ -533,6 +535,8 @@ export interface ReservedStoreSyncDeps {
   localReady?: boolean;
   /** Does THIS publisher hold (bundle, key) to push? Defaults to a local bundle read. */
   hasLocalKey?: (bundle: string, key: string) => boolean;
+  /** Adopt pre-bundle raw reserved items locally before planning; defaults to `adoptLegacyReservedStoreItems`. */
+  adoptLegacy?: (meta: Pick<Meta, 'accounts' | 'deviceAccounts'>) => Promise<{ adopted: Array<{ bundle: string; key: string }>; errors: Array<{ bundle: string; key: string; message: string }> }>;
   push?: (bundle: string, host: string) => Promise<PushBundleResult>;
   sshTarget?: (device: DeviceProfile) => string;
 }
@@ -550,11 +554,23 @@ function defaultHasLocalKey(bundle: string, key: string): boolean {
  * there is no second scheduler. The daemon runs this each tick.
  */
 export async function syncReservedStores(deps: ReservedStoreSyncDeps = {}): Promise<ReservedStoreSyncResult> {
-  const result: ReservedStoreSyncResult = { publisher: null, pushed: [], skipped: [], errors: [] };
+  const result: ReservedStoreSyncResult = { publisher: null, adopted: [], pushed: [], skipped: [], errors: [] };
   const localName = deps.localName ?? machineId();
   const localNorm = normalizeHost(localName);
   const root = deps.userAgentsDir ?? getUserAgentsDir();
   const meta = (deps.readMetaFn ?? readMeta)();
+
+  // Local repair first: a reserved key written by 1.22.84–1.22.89 is a bare
+  // file item with no bundle record, which the push below cannot read. Adopt
+  // it into its bundle here so the plan sees it; nothing leaves the box.
+  const adopt = deps.adoptLegacy ?? (async (m) => (await import('./auth-mint.js')).adoptLegacyReservedStoreItems(m));
+  try {
+    const adoption = await adopt(meta);
+    result.adopted.push(...adoption.adopted);
+    for (const err of adoption.errors) result.errors.push({ device: localName, message: `adopt ${err.bundle} ${err.key}: ${err.message}` });
+  } catch (err) {
+    result.errors.push({ device: localName, message: `adopt legacy reserved items: ${(err as Error).message}` });
+  }
 
   const hasLocalKey = deps.hasLocalKey ?? defaultHasLocalKey;
   const targets = reservedSyncTargets(meta).filter((t) => hasLocalKey(t.bundle, t.key));
