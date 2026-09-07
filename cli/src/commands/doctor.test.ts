@@ -782,13 +782,17 @@ function resolveBun(): string {
 }
 
 describe('doctor when the standalone `secrets` CLI is missing (PHNX-3989)', () => {
-  // doctor routes rc-file / master-passphrase scans through the sync secrets
-  // client (doctor.ts:571,1674), which throws SecretsClientError('SECRETS_BIN_MISSING')
-  // with no standalone installed. bootstrap.ts's top-level catch must clean-print
-  // it (one line, exit 1) rather than dumping a Node stacktrace. Spawned with an
-  // EMPTY PATH and a blank SECRETS_BIN so nothing resolves `secrets`, exactly the
-  // reproduction the review reported.
-  it('exits 1 with install guidance and no stacktrace', () => {
+  // doctor is the umbrella diagnostic (AGENTS.md §Diagnostic command taxonomy) —
+  // it must never crash outright because ONE subsystem is unavailable, the same
+  // way an uninstalled cursor/opencode/antigravity login degrades to a finding
+  // rather than aborting the whole report. Its rc-file / master-passphrase scans
+  // route through the sync secrets client (doctor.ts), which throws
+  // SecretsClientError('SECRETS_BIN_MISSING') with no standalone installed;
+  // doctor.ts's scanUserRcFiles()/masterPassphraseInEnv() wrappers swallow that
+  // transport error and degrade to "nothing to report" from those two checks so
+  // the rest of the fleet report still prints. Spawned with an EMPTY PATH and a
+  // blank SECRETS_BIN so nothing resolves `secrets`.
+  it('degrades gracefully — full report, exit 0, no stacktrace', () => {
     seedHome(['2.0.0'], '2.0.0');
     const r = spawnSync(resolveBun(), [INDEX, 'doctor', '--cwd', projectDir], {
       encoding: 'utf-8',
@@ -808,11 +812,10 @@ describe('doctor when the standalone `secrets` CLI is missing (PHNX-3989)', () =
         AGENTS_PERF_DIR: path.join(testHome, 'perf'),
       },
     });
-    expect(r.status).toBe(1);
-    expect(r.stderr).toContain('npm i -g @phnx-labs/secrets-cli');
-    // The one thing this guards: the typed error is clean-printed, not thrown.
-    expect(r.stderr).not.toContain('SecretsClientError');
-    expect(r.stderr).not.toMatch(/\n\s+at /);
-    expect(r.stderr).not.toContain('secrets-client.ts');
+    expect(r.status).toBe(0);
+    // The one thing this guards: the typed transport error never surfaces raw.
+    expect(r.stdout + r.stderr).not.toContain('SecretsClientError');
+    expect(r.stdout + r.stderr).not.toMatch(/\n\s+at /);
+    expect(r.stdout + r.stderr).not.toContain('secrets-client.ts');
   });
 });

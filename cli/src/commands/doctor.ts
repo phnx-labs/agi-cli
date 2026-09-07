@@ -80,7 +80,11 @@ import { listCliStatus, listCliStatusAsync } from '../lib/cli-resources.js';
 import { setHelpSections } from '../lib/help.js';
 import { getEffectiveExecutionPolicy } from '../lib/platform/winpath.js';
 import { auditWindowsSshEnrollment, diagnoseWindowsSshFailure } from '../lib/devices/windows-ssh-enrollment.js';
-import { scanUserRcFilesSync as scanUserRcFiles, masterPassphraseInEnvSync as masterPassphraseInEnv } from '../lib/secrets-client.js';
+import {
+  scanUserRcFilesSync,
+  masterPassphraseInEnvSync,
+  isSecretsTransportError,
+} from '../lib/secrets-client.js';
 import { terminalWidth, truncateToWidth, stringWidth, padToWidth } from '../lib/session/width.js';
 import { readRepoBehindMarkers, type FetchStatusMarker } from '../lib/auto-pull.js';
 import { detectAgentsBinaryShadows } from '../lib/binary-shadow.js';
@@ -108,6 +112,30 @@ interface DoctorOptions {
 }
 
 // ─── overview mode (no target) ────────────────────────────────────────────────
+
+// doctor is the umbrella diagnostic and must never crash on one subsystem
+// (§Diagnostic command taxonomy). The standalone secrets CLI being absent from
+// PATH is a routine, expected state on a box that hasn't installed it — not a
+// reason to abort the whole report — so these two checks degrade to "nothing to
+// report" on a transport error and let every other finding still print. A data
+// error the standalone actually answered with must still surface.
+function scanUserRcFiles(): ReturnType<typeof scanUserRcFilesSync> {
+  try {
+    return scanUserRcFilesSync();
+  } catch (error) {
+    if (isSecretsTransportError(error)) return [];
+    throw error;
+  }
+}
+
+function masterPassphraseInEnv(): boolean {
+  try {
+    return masterPassphraseInEnvSync();
+  } catch (error) {
+    if (isSecretsTransportError(error)) return false;
+    throw error;
+  }
+}
 
 function collapseWhitespace(s: string): string {
   return s.replace(/\s+/g, ' ').trim();
