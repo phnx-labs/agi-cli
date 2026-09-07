@@ -11,6 +11,12 @@ import Vision
 // processed twice — and the recognized text is stored in SQLite so the search field
 // and the grouped grid read it without re-running Vision.
 //
+// A row lives exactly as long as its file: every scan (the FSEvents callback fires
+// one on any change in the source dirs, deletions included) prunes rows whose path
+// is gone — repointing to a surviving duplicate first — and the palette's reads
+// drop a row whose file vanished inside the watcher's coalescing window, so a
+// deleted capture never resurfaces as a blank, unreadable thumbnail.
+//
 // Nothing leaves the machine: Vision runs on-device, the DB is a local file, and no
 // network call is made. This is NOT a fleet-affecting scheduler (spec SING-2): like
 // ScreenshotWatcher it reacts to a LOCAL file change and writes a LOCAL cache; it
@@ -170,6 +176,7 @@ final class ScreenshotIndex {
     // MARK: Scan + OCR (all on writeQueue)
 
     private func performScan() {
+        pruneDeletedRows()
         let cutoff = Date().addingTimeInterval(-Self.indexWindow)
         for url in Self.imageURLs(inDirs: sourceDirs(), since: cutoff) {
             // Drain per file: decoding + OCR'ing a batch autoreleases large image
@@ -203,6 +210,39 @@ final class ScreenshotIndex {
                 pathToHash[path] = hash
             }
         }
+    }
+
+    /// Drop every known path whose file no longer exists. A row whose stored path
+    /// died but whose bytes survive under another known name (the original of a
+    /// deleted duplicate, or vice versa) is re-pointed there instead of deleted, so
+    /// a cleanup of copies never loses the OCR of a capture that is still on disk.
+    private func pruneDeletedRows() {
+        let fm = FileManager.default
+        let dead = pathToHash.filter { !fm.fileExists(atPath: $0.key) }
+        guard !dead.isEmpty else { return }
+        for path in dead.keys { pathToHash.removeValue(forKey: path) }
+
+        var survivorByHash: [String: String] = [:]
+        for (path, hash) in pathToHash where survivorByHash[hash] == nil { survivorByHash[hash] = path }
+
+        for hash in Set(dead.values) {
+            if let survivor = survivorByHash[hash] {
+                repointPath(hash: hash, to: survivor)
+            } else {
+                deleteRow(hash: hash)
+                knownHashes.remove(hash)
+            }
+        }
+    }
+
+    private func deleteRow(hash: String) {
+        guard let writeDB else { return }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(writeDB, "DELETE FROM screenshots WHERE hash = ?;", -1, &stmt, nil) == SQLITE_OK
+        else { return }
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, hash)
+        _ = sqlite3_step(stmt)
     }
 
     private func insert(hash: String, path: String, takenAt: Date,
@@ -261,6 +301,10 @@ final class ScreenshotIndex {
         return queryRows(where: clause, params: params, limit: limit)
     }
 
+    /// Rows are filtered to files that still exist: a capture deleted inside the
+    /// watcher's coalescing window (or while the helper was not running) has not
+    /// been pruned yet, and handing its path to the grid or the agent would attach
+    /// a file nobody can read. The stat runs on `readQueue`, never on main.
     private func queryRows(where clause: String?, params: [String], limit: Int) -> [ScreenshotRow] {
         guard let readDB else { return [] }
         var sql = "SELECT hash, path, taken_at, width, height, ocr_text, first_line FROM screenshots"
@@ -273,9 +317,12 @@ final class ScreenshotIndex {
         for p in params { bindText(stmt, idx, p); idx += 1 }
         sqlite3_bind_int(stmt, idx, Int32(limit))
         var out: [ScreenshotRow] = []
+        let fm = FileManager.default
         while sqlite3_step(stmt) == SQLITE_ROW {
+            let path = colText(stmt, 1)
+            guard fm.fileExists(atPath: path) else { continue }
             out.append(ScreenshotRow(
-                hash: colText(stmt, 0), path: colText(stmt, 1),
+                hash: colText(stmt, 0), path: path,
                 takenAt: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 2)),
                 width: Int(sqlite3_column_int(stmt, 3)), height: Int(sqlite3_column_int(stmt, 4)),
                 ocrText: colText(stmt, 5), firstLine: colText(stmt, 6)))
@@ -425,12 +472,14 @@ final class ScreenshotIndex {
     }
 
     /// Seed `count` synthetic rows directly (no OCR), for the search-latency bench.
-    func seedSyntheticRowsForBench(_ count: Int) {
+    /// Every row points at `path`, which must exist: the read path drops rows whose
+    /// file is gone, so a fake path would bench an empty result.
+    func seedSyntheticRowsForBench(_ count: Int, path: String) {
         writeQueue.sync {
             if writeDB == nil { openConnections(); loadKnownFromDB() }
             let base = Date().timeIntervalSince1970
             for i in 0..<count {
-                insert(hash: "bench-\(i)", path: "/tmp/bench-\(i).png",
+                insert(hash: "bench-\(i)", path: path,
                        takenAt: Date(timeIntervalSince1970: base - Double(i)),
                        width: 100, height: 100,
                        ocrText: "row \(i) needs you now deploy the release ship it today item \(i)",

@@ -59,14 +59,20 @@ enum Bench {
         // Screenshot OCR search latency on a 1,000-row fixture DB (PHNX-4006). The
         // palette's search field filters on every keystroke, so this is the read
         // that must stay well under a frame.
-        let benchDB = NSTemporaryDirectory() + "menubar-ocr-bench-\(UUID().uuidString).db"
+        // The rows point at one real placeholder file: the read path stats every
+        // row (a deleted capture is dropped), so the bench must pay that cost too.
+        let benchDir = NSTemporaryDirectory() + "menubar-ocr-bench-\(UUID().uuidString)"
+        try? FileManager.default.createDirectory(atPath: benchDir, withIntermediateDirectories: true)
+        let benchDB = "\(benchDir)/screenshots.db"
+        let benchShot = "\(benchDir)/placeholder.png"
+        FileManager.default.createFile(atPath: benchShot, contents: Data())
         let ocr = ScreenshotIndex.makeForTest(dbPath: benchDB, sourceDirs: [])
-        ocr.seedSyntheticRowsForBench(1000)
+        ocr.seedSyntheticRowsForBench(1000, path: benchShot)
         let sIters = max(20, iters / 3)
         measure("ScreenshotIndex.search(\"needs you\")  [1,000-row db, \(sIters)x]", sIters) {
             _ = ocr.searchSyncForTest("needs you")
         }
-        try? FileManager.default.removeItem(atPath: benchDB)
+        try? FileManager.default.removeItem(atPath: benchDir)
 
         // Real cold-index measurement over THIS machine's screenshot folders,
         // gated so an ordinary bench run doesn't OCR the user's real captures.
