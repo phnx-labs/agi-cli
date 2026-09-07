@@ -125,10 +125,16 @@ waits for `agents projects list`, attachment-directory scans, or image decode.
   locations and the inherited `PATH`. A missing or non-executable CLI stops
   immediately with the install path instead of reporting a generic create
   failure after the agent has run.
-- **Run** fans out to every selected agent with `agents run <agent> --mode auto
-  --balanced --notify --name <slug-of-your-note>`, so the resulting sessions
-  appear in normal `agents sessions` and menu-bar surfaces instead of as opaque
-  background work.
+- **Auto / Edit** fan out to every selected agent with `agents run <agent> --mode
+  auto|edit --balanced --notify --name <slug-of-your-note>` — plus `--terminal`
+  when the surface is Interactive, `--device <name>` when the run is placed on a
+  fleet box, and `--session-id <uuid>` for a Claude dispatch — so the resulting
+  sessions appear in normal `agents sessions` and menu-bar surfaces instead of as
+  opaque background work. The argv is assembled by the pure `AgentsCLI.dispatchArgs`
+  builder, pinned per combination by the `MENUBAR_DISPATCH_TEST` self-test.
+- **Plan** keeps the ticket-agent flow above; the other two are headless-or-
+  interactive runs. The three are the **Mode** dimension of the dispatch form
+  (below).
 
 ### Picking where it runs
 
@@ -166,6 +172,72 @@ land at `/` — broader than the `$HOME` this picker has always refused to offer
 This replaced a dropdown of the last eight session cwds (PHNX-4001), which could
 not name a project you had not worked in recently, listed worktrees as if they
 were projects, and carried no Linear binding to scope tickets by.
+
+### The dispatch form (PHNX-4005)
+
+Below the text field sits the **dispatch form** (`DispatchForm.swift`), which
+carries the dimensions of a dispatch beyond the note and the project:
+
+- **Agent** — the palette's existing chips (`LocalState.quickDispatchRoster()`),
+  single-select by default; a caption shows each harness's version and sign-in from
+  `agents view --json`, decoded best-effort (`AgentCaption`).
+- **Run on** — This Mac (the default), `Auto` (the CLI's own least-loaded
+  placement, offered as `--device auto`), or any fleet device. Sourced from the
+  menu-bar snapshot's `devices`; anything but This Mac rides `--device <name>`.
+- **Project** — the palette's project popup (reused, not duplicated).
+- **Mode** — Plan / Auto / Edit → `--mode` (Plan keeps the ticket-agent flow).
+- **Surface** — Interactive (`--terminal`) / Headless.
+- **Watchdog** — Off / Keep moving / Hands-off. This is **not** a flag on
+  `agents run` (there is none); it maps to the separate per-session command
+  `agents watchdog policy <id> off|keep|handsoff` (watchdog.ts), applied on the
+  dispatch's minted session id. `keep` is the daemon default and emits no command;
+  `off` / `handsoff` deviate from it.
+
+The form starts **collapsed** to a single summary line —
+`Claude 2.1.263 · this-mac · agi · Auto · Interactive · Keep moving` — with a
+`▸ details` disclosure that expands it to the control rows. **Cmd-Return**
+dispatches from either state; **Cmd-P** switches this one dispatch to Plan without
+persisting it.
+
+Every dimension is **remembered per project** under
+`menubar.quickDispatch.defaults.<project>` (`DispatchDefaults`), so switching
+projects restores the agent/mode/run-on you last used there and, when the defaults
+are right, one keystroke dispatches — you never re-select an agent. The argv is
+assembled by the pure `AgentsCLI.dispatchArgs` builder and pinned per
+mode/surface/watchdog/run-on combination by the `MENUBAR_DISPATCH_TEST` self-test.
+
+### Session-id minting
+
+A **Claude** dispatch mints a lowercase UUID and passes it as `--session-id <uuid>`
+(`AgentsCLI.mintedSessionId`; the CLI forces this id onto the Claude conversation,
+exec.ts). That lets the palette do two things before the feed reports the row:
+register a **launching placeholder** keyed by the id, and set a non-default
+watchdog policy on it. The placeholder is resolved when a matching feed row
+appears (`PendingLaunches.resolvedKeys`, matched on session id, or on `--name` for
+the harnesses that coin their own id and surface it through the
+`@@AGENTS_SESSION_ID <id>@@` stdout marker) and **expires after 60 s** with "did
+not start" plus the stderr tail if no row ever arrives. Watchdog-at-dispatch is
+Claude-only, because `--session-id` is Claude-only (exec.ts); other harnesses
+coin their id asynchronously and keep the daemon default (`keep`).
+
+### Project pulse
+
+Under the project row, the **pulse strip** (`ProjectPulse.swift`) shows roughly
+where the bound project stands and what makes sense next, in three lines:
+
+1. **Milestone** progress from `agents projects status <name> --json` (decoded into
+   `ProjectPulse`, cached 5 minutes, bounded through `ChildProcess`).
+2. **Counts** — open + in-progress tickets and open PRs from that status read, plus
+   live running / need-you / idle counts folded from `FeedStream.rows` filtered to
+   the project (`ProjectLiveRollup`), and up to three **NOW** chips (status dot,
+   title, PR) — not-progressing first, so idle-but-unfinished work is never buried.
+   Click a chip to jump to that session (`agents focus`).
+3. **NEXT UP** — the top of `LinearTickets.rank` for the bound project; click (or
+   Cmd-N) attaches it as a dispatch.
+
+The strip is a **projection**: it composes the bounded status read with the feed
+rows and Linear cache the palette already holds — it owns no timer of its own. The
+decode + live rollup are pinned by the `MENUBAR_PULSE_TEST` self-test.
 
 ### Pin
 

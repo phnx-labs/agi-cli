@@ -138,6 +138,22 @@ if ProcessInfo.processInfo.environment["MENUBAR_NOTIFY_TEST"] == "1" {
     NotifierSelfTest.run()
 }
 
+// Dispatch-form self-test (PHNX-4005, Track E): pin the `agents run` argv for
+// each mode/surface/watchdog/run-on combo, the session-id minting, the watchdog
+// policy command, the per-project remembered defaults + summary line, and the
+// pending-launch resolve/expire logic. Pure — a build gate. See DispatchSelfTest.swift.
+if ProcessInfo.processInfo.environment["MENUBAR_DISPATCH_TEST"] == "1" {
+    DispatchSelfTest.run()
+}
+
+// Project-pulse self-test (PHNX-4005, Track E): decode a fixture `projects status
+// --json` payload into the pulse model and fold a fixture row set into the live
+// rollup (counts + not-progressing-first NOW ordering). Pure — a build gate.
+// See PulseSelfTest.swift.
+if ProcessInfo.processInfo.environment["MENUBAR_PULSE_TEST"] == "1" {
+    PulseSelfTest.run()
+}
+
 // Feed live smoke (PHNX-4002): run FeedStream against THIS machine for ~60s and
 // print row/attention/device counts + health, then exit cleanly. Spawns the real
 // `agents feed watch` child, so it is NOT part of the build gate — like
