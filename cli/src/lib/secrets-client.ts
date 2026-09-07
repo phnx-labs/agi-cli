@@ -17,12 +17,17 @@
  *   - async: `spawn` with stdio ['ignore','ignore','inherit','pipe','pipe'];
  *     write+end child.stdio[3], read child.stdio[4] to EOF.
  *   - sync: `spawnSync` only wires stdio 0-2 portably (Bun drops numbered fds
- *     3+), so the fd 3/4 wiring is done in a POSIX shell: the request rides a
- *     named FIFO fed by a backgrounded `cat` (fd 3), and fd 4 is redirected onto
- *     the child's stdout (`4>&1`), which `spawnSync` captures natively on every
- *     runtime. Bounded to `SYNC_SERVE_TIMEOUT_MS` so a broken standalone fails
- *     fast, never for the server's 60s deadline. POSIX only; Windows has no
- *     `mkfifo` and fails loud pointing at the async path.
+ *     3+), so the fd 3/4 wiring is done in a POSIX shell: the request rides
+ *     `spawnSync`'s STDIN — a real pipe/socketpair on every runtime — which the
+ *     shell dups onto fd 3 (`3<&0`), and fd 4 is redirected onto the child's
+ *     stdout (`4>&1`), which `spawnSync` captures natively. Both fds are then the
+ *     SAME anonymous pipe/socketpair the async path hands the standalone, which
+ *     is load-bearing: the standalone wraps fd 3 in a `net.Socket`, and a Socket
+ *     over a NAMED FIFO reads the request but never fires EOF on macOS, so the
+ *     older FIFO wiring hung the read loop for the full timeout. Bounded to
+ *     `SYNC_SERVE_TIMEOUT_MS` so a broken standalone fails fast, never for the
+ *     server's 60s deadline. POSIX only; Windows fails loud pointing at the
+ *     async path.
  *
  * State root (MIG-1): the standalone selects its state root from `SECRETS_HOME`.
  * agents-cli points it at the user agents dir (`~/.agents`) by default so the
@@ -42,9 +47,6 @@
  * `@phnx-labs/secrets-cli` package is the only implementation.
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import type { Readable, Writable } from 'node:stream';
 import { findInPath } from './agent-spec/agents.js';
 import { getUserAgentsDir } from './state.js';
@@ -435,69 +437,60 @@ function serveOnceSync(op: string, args: unknown[], context?: SecretsContext): u
   if (process.platform === 'win32') {
     throw new SecretsClientError(
       'SYNC_UNSUPPORTED',
-      'The synchronous secrets path needs a POSIX shell and FIFO; use secretsRequest (async) on Windows.',
+      'The synchronous secrets path needs a POSIX shell; use secretsRequest (async) on Windows.',
     );
   }
   const { command, prefix } = invocation(resolveSecretsBin());
   const request = Buffer.from(JSON.stringify(buildRequest(op, args, context)));
   // The standalone's private protocol reads the request from fd 3 and writes the
-  // response to fd 4, and it REFUSES a plain file or tty for either (it fails with
-  // `PRIVATE_PIPE_REQUIRED` so no secret is ever staged to disk). But `spawnSync`
-  // only wires stdio 0-2 portably — the Bun runtime (this repo runs its whole CLI
-  // suite as `bun src/index.ts`, so the 71 CLI-integration tests spawn agents-cli
-  // under Bun) silently DROPS numbered fds 3+, so the old direct-fd wiring left the
-  // child blocked on an empty fd 3 for the full timeout. Do the numbered-fd wiring
-  // in a POSIX shell against PIPES instead: the request rides a FIFO fed by a
-  // backgrounded `cat` (fd 3), and fd 4 is dup'd from the captured stdout pipe
-  // (`4>&1`), which `spawnSync` captures natively as an anonymous pipe on every
-  // runtime. The child's own fd 1 is then redirected to /dev/null (`1>/dev/null`,
-  // applied AFTER `4>&1` so fd 4 keeps the pipe): the response channel (fd 4) is
-  // structurally the ONLY writer to the captured stream, so even a stray write to
-  // the standalone's own stdout can never corrupt the fd-4 bytes. Both fd 3/4 are
-  // S_ISFIFO, satisfying the standalone; the response never touches disk.
-  // Identical on Node and Bun.
-  const dir = mkdtempSync(join(tmpdir(), 'agents-secrets-'));
-  const reqFile = join(dir, 'req');
-  const reqFifo = join(dir, 'reqfifo');
-  try {
-    writeFileSync(reqFile, request);
-    const mk = spawnSync('mkfifo', [reqFifo]);
-    if (mk.status !== 0) {
-      throw new SecretsClientError('SYNC_UNSUPPORTED', 'mkfifo is unavailable for the synchronous secrets path');
-    }
-    const serve = [command, ...prefix, '__serve'].map(shQuote).join(' ');
-    // `exec` so the wrapper `sh` BECOMES the standalone (same PID). Two things ride
-    // on that: `spawnSync` waits on the real process, so on return the store is
-    // fully flushed and its proper-lockfile lock dir released (the sync path never
-    // had the async path's resolve-before-exit race — spawnSync is a hard barrier);
-    // and `spawnSync`'s timeout SIGTERM lands on the standalone itself rather than
-    // orphaning a wedged child behind a dead wrapper. The backgrounded `cat` only
-    // feeds the tiny request into the FIFO and exits the instant the reader (fd 3)
-    // opens — long before the standalone finishes — so it is reaped by its own exit
-    // and never outlives the call. fd wiring is order-sensitive: `4>&1` dups the
-    // response channel from the captured stdout pipe, THEN `1>/dev/null` sends the
-    // child's own stdout to the bit bucket, so fd 4 stays the sole writer to the
-    // captured stream.
-    const script = `cat ${shQuote(reqFile)} > ${shQuote(reqFifo)} & exec ${serve} 3<${shQuote(reqFifo)} 4>&1 1>/dev/null`;
-    const result = spawnSync('sh', ['-c', script], {
-      stdio: ['ignore', 'pipe', 'inherit'],
-      env: buildServeEnv(),
-      timeout: SYNC_SERVE_TIMEOUT_MS,
-      maxBuffer: MAX_PROTOCOL_BYTES + 4096,
-    });
-    if (result.error) {
-      const err = result.error as NodeJS.ErrnoException;
-      const code = err.code === 'ETIMEDOUT' ? 'TIMEOUT' : 'SPAWN_FAILED';
-      throw new SecretsClientError(code, `secrets request failed: ${err.message}`);
-    }
-    const raw = (result.stdout as Buffer | undefined) ?? Buffer.alloc(0);
-    if (raw.length > MAX_PROTOCOL_BYTES) {
-      throw new SecretsClientError('RESPONSE_TOO_LARGE', 'secrets response exceeds the protocol limit');
-    }
-    return parseResponse(raw);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
+  // response to fd 4, wrapping BOTH in a `net.Socket` (secrets-cli
+  // `runProtocolServer`). It also REFUSES a plain file or tty for either — fd 3/4
+  // MUST be a pipe or socket (`PRIVATE_PIPE_REQUIRED`) — so no secret is ever
+  // staged to disk. But `spawnSync` only wires stdio 0-2 portably — the Bun
+  // runtime (this repo runs its whole CLI suite as `bun src/index.ts`, so the CLI-
+  // integration tests spawn agents-cli under Bun) silently DROPS numbered fds 3+,
+  // so the numbered-fd wiring is done in a POSIX shell.
+  //
+  // The request rides `spawnSync`'s STDIN, which every runtime backs with a real
+  // pipe/socketpair, and the shell dups it onto fd 3 (`3<&0`); fd 4 is dup'd from
+  // the captured stdout pipe (`4>&1`), then the child's own fd 1 is sent to
+  // /dev/null (`1>/dev/null`, AFTER `4>&1` so fd 4 keeps the pipe) — so the
+  // response channel (fd 4) is structurally the ONLY writer to the captured
+  // stream and a stray write to the standalone's own stdout can never corrupt the
+  // fd-4 bytes. Crucially, fd 3 and fd 4 are now the SAME anonymous
+  // pipe/socketpair the async path hands the standalone via `spawn` numbered
+  // stdio, rather than a named FIFO: a `net.Socket` wrapped around a named FIFO
+  // reads the request but never fires EOF on macOS, so the standalone's
+  // `for await (const chunk of input)` on fd 3 would hang for the full timeout
+  // (the bug the old FIFO wiring hit — spawnSync's stdout IS a socketpair, so fd 4
+  // was fine, but the FIFO on fd 3 never EOF'd). `exec` so the wrapper `sh`
+  // BECOMES the standalone (same PID): `spawnSync` waits on the real process, so
+  // on return the store is fully flushed and its lock dir released, and a timeout
+  // SIGTERM lands on the standalone itself rather than orphaning a wedged child.
+  // The response never touches disk. The shell wiring is parent-runtime-agnostic
+  // — `spawnSync`'s stdio is a socketpair under both Node and Bun — so fd 3 EOFs
+  // whenever the standalone itself runs under Node. (A standalone that `invocation`
+  // launches under BUN still hits its own PHNX-3989 EOF hang regardless of the
+  // wiring; that stays bounded by SYNC_SERVE_TIMEOUT_MS below, as before.)
+  const serve = [command, ...prefix, '__serve'].map(shQuote).join(' ');
+  const script = `exec ${serve} 3<&0 4>&1 1>/dev/null`;
+  const result = spawnSync('sh', ['-c', script], {
+    input: request,
+    stdio: ['pipe', 'pipe', 'inherit'],
+    env: buildServeEnv(),
+    timeout: SYNC_SERVE_TIMEOUT_MS,
+    maxBuffer: MAX_PROTOCOL_BYTES + 4096,
+  });
+  if (result.error) {
+    const err = result.error as NodeJS.ErrnoException;
+    const code = err.code === 'ETIMEDOUT' ? 'TIMEOUT' : 'SPAWN_FAILED';
+    throw new SecretsClientError(code, `secrets request failed: ${err.message}`);
   }
+  const raw = (result.stdout as Buffer | undefined) ?? Buffer.alloc(0);
+  if (raw.length > MAX_PROTOCOL_BYTES) {
+    throw new SecretsClientError('RESPONSE_TOO_LARGE', 'secrets response exceeds the protocol limit');
+  }
+  return parseResponse(raw);
 }
 
 // --- handshake (once per process) ------------------------------------------

@@ -338,7 +338,20 @@ describe.skipIf(!REAL_BIN)('secrets protocol client against the real standalone'
 
   it('reports bundleExists=false on a fresh home', async () => {
     expect(await bundleExists('absent-bundle')).toBe(false);
-    expect(bundleExistsSync('absent-bundle')).toBe(false); // sync FIFO transport
+    expect(bundleExistsSync('absent-bundle')).toBe(false); // sync fd-3-over-stdin transport
+  });
+
+  it('the synchronous handshake round-trips well under the ~3s bound (no fd-3 EOF hang)', () => {
+    // Regression for the macOS sync-path hang: the standalone wraps fd 3 in a
+    // `net.Socket`, and a Socket over a NAMED FIFO reads the request but never
+    // fires EOF on macOS — so the old FIFO wiring left `for await (chunk of
+    // input)` blocked until the 3s SYNC_SERVE_TIMEOUT_MS fired (`ETIMEDOUT`).
+    // Feeding fd 3 the stdin pipe/socketpair (the async path's fd type) EOFs, so a
+    // real handshake now completes in tens of ms against the real standalone.
+    const t0 = Date.now();
+    const result = secretsRequestSync<{ protocol: number }>('handshake', []);
+    expect(result.protocol).toBe(PROTOCOL_VERSION);
+    expect(Date.now() - t0).toBeLessThan(2_000); // real op is tens of ms; never the 3s timeout
   });
 
   it('round-trips writeBundleWithItems -> readAndResolveBundleEnv on a file bundle', async () => {
@@ -351,15 +364,15 @@ describe.skipIf(!REAL_BIN)('secrets protocol client against the real standalone'
     expect(resolved.bundle.backend).toBe('file');
     expect(resolved.env).toEqual({ MY_KEY: value });
 
-    // The same read on the synchronous FIFO path returns the same env.
+    // The same read on the synchronous path returns the same env.
     const sync = readAndResolveBundleEnvSync('round-trip');
     expect(sync.env).toEqual({ MY_KEY: value });
   });
 
-  it('an arbitrarily large synchronous request completes — the request rides a FIFO, not a bounded pipe write', () => {
-    // The request now streams through a FIFO fed by a backgrounded `cat` rather
-    // than being pre-filled into a pipe buffer, so there is no size at which the
-    // sync path must be refused or deadlocks. A name well past any former
+  it('an arbitrarily large synchronous request completes — spawnSync services stdin and fd 4 concurrently, no deadlock', () => {
+    // The request rides spawnSync's stdin (dup'd onto fd 3), and the standalone
+    // drains fd 3 to EOF while spawnSync is still writing it, so there is no size
+    // at which the sync path deadlocks on a full pipe buffer. A name well past any
     // pipe-buffer bound (~64 KiB on Linux) still round-trips: the server answers
     // even when it rejects the oversized name, and nothing hangs.
     const bigName = 'x'.repeat(200_000);
