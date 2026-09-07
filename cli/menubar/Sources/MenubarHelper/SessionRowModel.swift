@@ -142,6 +142,9 @@ enum SessionRowModel {
             return .idle
         case "running":
             return .working
+        case PendingLaunches.launchingPhase:
+            // A dispatch placeholder (PHNX-4005) is in progress, not yet working.
+            return .working
         default:
             break
         }
@@ -188,6 +191,7 @@ enum SessionRowModel {
         // phase reads as "working" (the green label), matching the brief.
         switch row.phase {
         case "running": return "working"
+        case PendingLaunches.launchingPhase: return "launching"
         case "waiting": return "waiting"
         case "idle":    return "idle"
         case "failed":  return "failed"

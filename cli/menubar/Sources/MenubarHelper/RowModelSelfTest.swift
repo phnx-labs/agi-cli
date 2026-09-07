@@ -25,6 +25,14 @@ enum RowModelSelfTest {
 
         // MARK: status color — every branch.
 
+        // A dispatch placeholder row (PHNX-4005) is in progress and reads as
+        // "launching", never as a working session.
+        let launching = row(#"{"phase":"launching","status":"launching","machine":"zion","startedAtMs":\#(ms(0.5))}"#)
+        check("phase launching → working (green)",
+              SessionRowModel.statusColor(launching, attention: nil) == .working)
+        check("phase launching → phase text leads with launching",
+              SessionRowModel.phaseText(launching, attention: nil, status: .working, now: now).hasPrefix("launching"))
+
         let working = row(#"{"phase":"running","machine":"s0","startedAtMs":\#(ms(18 * 60))}"#)
         check("phase running → working (green)",
               SessionRowModel.statusColor(working, attention: nil) == .working)
