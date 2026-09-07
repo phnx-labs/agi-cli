@@ -218,7 +218,7 @@ the open Linear tickets of the project you picked, so you can pick one up instea
 of filing a duplicate. The section starts **folded**; `Cmd-T` toggles it and the
 choice is remembered (`menubar.quickDispatch.ticketsExpanded`).
 
-Controls sit on **one compact row** of popups (same language as the repo picker —
+Controls sit on **one compact row** of popups (same language as the project row —
 not a chip grid or two-column block):
 
 ```

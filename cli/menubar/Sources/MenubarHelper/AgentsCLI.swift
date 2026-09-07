@@ -353,23 +353,6 @@ enum AgentsCLI {
         }
     }
 
-    // The repo name behind a working directory — the identity the panel maps to a
-    // Linear project. A worktree under `<repo>/.agents/worktrees/<slug>` must
-    // resolve to `<repo>`, not to the slug, so ask git for the COMMON dir (shared
-    // by every worktree) rather than trusting the path's last component. A
-    // directory that is not a git repo has no repo name but is still a real place
-    // to run in, so it identifies as itself.
-    static func repoName(forDir dir: String) -> String {
-        let common = capture(["/usr/bin/git", "-C", dir, "rev-parse",
-                              "--path-format=absolute", "--git-common-dir"])
-            .flatMap { String(data: $0, encoding: .utf8) }?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        if let common, !common.isEmpty {
-            return ((common as NSString).deletingLastPathComponent as NSString).lastPathComponent
-        }
-        return (dir as NSString).lastPathComponent
-    }
-
     // The brief for working a ticket that already exists. Plan asks for a plan
     // posted back on the ticket; Run asks for the change, shipped. Both run in
     // `auto` mode — even the plan has to read the repo and comment on the ticket,
