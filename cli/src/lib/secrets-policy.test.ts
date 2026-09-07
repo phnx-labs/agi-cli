@@ -422,9 +422,39 @@ describe('electPublisher', () => {
       selfRole: () => 'personal',
       readMetaFn: () => ({ accounts: { native: { a1: { id: 'a1', name: 'work', agent: 'claude', identityKey: 'claude:account=a:org=o', scope: 'version', identityLabel: 'w@x.io', workerCredential: { bundle: '__claude__', key: 'K1', kind: 'setup-token', mintedAt: 'm1' } } } } }),
       hasLocalKey: () => true,
+      adoptLegacy: async () => ({ adopted: [], errors: [] }),
       push: async () => ({ ok: true, message: 'pushed' }),
     });
     expect(reserved.publisher).toBe('zion');
     expect(reserved.pushed).toEqual([{ device: 'mac-mini', bundle: '__claude__', keys: ['K1'] }]);
+  });
+
+  it('syncReservedStores adopts legacy raw reserved items locally before planning and surfaces adoption errors', async () => {
+    // 1.22.84–1.22.89 wrote `__<harness>__` keys as bare file items with no
+    // bundle record, which the bundle push cannot read. The tick repairs that
+    // on the publisher first, so a key added under the old code propagates
+    // the moment the new release runs — and an adoption failure is reported
+    // against the local box instead of being swallowed.
+    const root = tempStore();
+    const meta = { accounts: { native: { a1: { id: 'a1', name: 'gmail', agent: 'cursor', identityKey: 'cursor:user=u', scope: 'version', identityLabel: 'g.io', workerCredential: { bundle: '__cursor__', key: 'CURSOR_API_KEY_a1', kind: 'api-key', mintedAt: 'm1' } } } } } as const;
+    const seen: unknown[] = [];
+    const reserved = await syncReservedStores({
+      userAgentsDir: root,
+      cacheDir: tempStore(),
+      localName: 'zion',
+      localReady: true,
+      listDevices: () => [profile('mac-mini')],
+      isPinned: () => true,
+      peerRole: () => 'worker',
+      selfRole: () => 'personal',
+      readMetaFn: () => meta,
+      hasLocalKey: () => true,
+      adoptLegacy: async (m) => { seen.push(m); return { adopted: [{ bundle: '__cursor__', key: 'CURSOR_API_KEY_a1' }], errors: [{ bundle: '__grok__', key: 'XAI_API_KEY_a2', message: 'boom' }] }; },
+      push: async () => ({ ok: true, message: 'pushed' }),
+    });
+    expect(seen).toEqual([meta]);
+    expect(reserved.adopted).toEqual([{ bundle: '__cursor__', key: 'CURSOR_API_KEY_a1' }]);
+    expect(reserved.errors).toContainEqual({ device: 'zion', message: 'adopt __grok__ XAI_API_KEY_a2: boom' });
+    expect(reserved.pushed).toEqual([{ device: 'mac-mini', bundle: '__cursor__', keys: ['CURSOR_API_KEY_a1'] }]);
   });
 });

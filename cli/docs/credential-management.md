@@ -151,8 +151,15 @@ leaves the device that minted it.
 
 Durable worker credentials live in one reserved store per harness, named
 `__<harness>__` from a hard-coded table (`RESERVED_STORES`, derived from
-`AGENT_IDS`; `lib/reserved-stores.ts`). A user-created bundle whose name
+`AGENT_IDS`; `lib/reserved-stores.ts`). Each store is a real **file-backed,
+policy-`never` bundle** — the same shape as the legacy `auth` bundle — because the
+only transport to a worker is the ordinary bundle push (`pushBundleToHost`), which
+reads the store as a bundle and imports it remotely as one; the standalone accepts
+the `__<name>__` shape from secrets-cli 0.1.1. A user-created bundle whose name
 starts with `__` — or the reserved `auth` alias — is refused (`isReservedStoreName`).
+A key written by 1.22.84–1.22.89 as a bare file item (no bundle record) is adopted
+into its bundle by the next `auth-sync` tick (`adoptLegacyReservedStoreItems`);
+the item name is unchanged, so workers that already hold it are unaffected.
 The store accepts only a **setup-token** or an **API key** at write time; a
 rotating OAuth/session file is rejected with a harness-specific reason (the
 RUSH-1958 class: a refresh-bearing session reused on two devices logs the owner

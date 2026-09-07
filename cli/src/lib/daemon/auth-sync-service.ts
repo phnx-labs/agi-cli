@@ -82,6 +82,7 @@ export class AuthSyncService extends BasePeriodicService {
     // the only transport — provisioning (above) writes only locally (invariant 1).
     try {
       const stores = await syncReservedStores();
+      if (stores.adopted.length > 0) ctx.log('INFO', `auth-sync: adopted ${stores.adopted.length} legacy reserved item(s) into their bundle: ${stores.adopted.map((a) => `${a.bundle} ${a.key}`).join(', ')}`);
       for (const p of stores.pushed) ctx.log('INFO', `auth-sync: pushed ${p.bundle} (${p.keys.length} key(s)) to ${p.device}`);
       for (const err of stores.errors) ctx.log('WARN', `auth-sync: reserved-store ${err.device}: ${err.message}`);
     } catch (err) {

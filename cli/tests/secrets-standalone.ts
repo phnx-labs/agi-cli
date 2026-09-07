@@ -30,7 +30,7 @@ import { _resetSecretsClientForTest, keychainUsesFileFallback } from '../src/lib
 import { invalidateClaudeSetupTokenCache } from '../src/lib/claude-account-token.js';
 
 /** The published standalone the suite is pinned to; bump with the protocol. */
-export const STANDALONE_SECRETS_VERSION = '0.1.0';
+export const STANDALONE_SECRETS_VERSION = '0.1.1';
 const LOCK_STALE_MS = 10 * 60 * 1000;
 const LOCK_WAIT_MS = 5 * 60 * 1000;
 
