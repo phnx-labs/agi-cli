@@ -46,7 +46,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Readable, Writable } from 'node:stream';
-import { findExecutable } from './platform/exec.js';
+import { findInPath } from './agent-spec/agents.js';
 import { getUserAgentsDir } from './state.js';
 import type {
   SecretsBundle,
@@ -243,13 +243,21 @@ let cachedBin: string | undefined;
 
 /**
  * Resolve the standalone `secrets` executable: `$SECRETS_BIN` if set, else the
- * `secrets` command on PATH. Cached for the process. A miss throws with install
- * guidance — there is NO fallback to the embedded engine (DIST-1).
+ * `secrets` command on PATH — resolved with `findInPath`, which skips agents-cli's
+ * own shims dir. That skip is load-bearing, not tidiness: before PHNX-3989 the
+ * shims dir carried a `secrets` command shim that `exec`s `agents secrets`, it
+ * sits FIRST on PATH, and it survives an in-place upgrade (its baked entrypoint
+ * still exists). A plain `which secrets` returned that shim, so `agents secrets`
+ * → shim → `agents secrets` → … spawned an unbounded process chain on every box
+ * upgraded from 1.22.84 (the whole fleet, via R5 auto-update). A `secrets` inside
+ * our shims dir can never be the standalone, so it is not a candidate at all.
+ * Cached for the process. A miss throws with install guidance — there is NO
+ * fallback to the embedded engine (DIST-1).
  */
 export function resolveSecretsBin(): string {
   if (cachedBin) return cachedBin;
   const explicit = process.env.SECRETS_BIN?.trim();
-  const resolved = explicit && explicit.length > 0 ? explicit : findExecutable('secrets');
+  const resolved = explicit && explicit.length > 0 ? explicit : findInPath('secrets');
   if (!resolved) {
     throw new SecretsClientError(
       'SECRETS_BIN_MISSING',

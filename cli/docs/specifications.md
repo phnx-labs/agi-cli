@@ -1754,6 +1754,12 @@ process client (`cli/src/lib/secrets-client.ts`, documented in
   guidance (`resolveSecretsBin`, `secrets-client.ts`) — there is no fallback to
   an in-repo implementation, because none exists. Verified by a real `npm
   pack` + `tar tzf` of the produced tarball (`scripts/packed-tarball.test.ts`).
+  The PATH lookup MUST NOT resolve to a `secrets` inside agents-cli's own shims
+  dir (`findInPath` skips it): the pre-extraction command shim there `exec`s
+  `agents secrets`, so taking it re-enters the passthrough without bound.
+  Verified in `secrets-client.test.ts` (shim first on PATH, standalone after);
+  the self-heal shim pass removes that legacy shim outright
+  (`pruneOrphanedCommandShim`, `shims.drift.test.ts`).
 - **RPC-1 (MUST).** The client MUST speak the standalone's private
   request/response protocol over inherited pipes (fd 3 in, fd 4 out),
   separate from the child's stdout, and MUST verify the protocol version via a
