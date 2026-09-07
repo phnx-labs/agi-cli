@@ -21,7 +21,7 @@ import {
 } from './secrets-policy.js';
 import { claudeAccountTokenKey, readClaudeAccountEmail } from './claude-account-token.js';
 import { readSlots, slotDir } from './accounts/slots.js';
-import { keychainRef, secretsKeychainItem, writeBundleWithItemsSync } from './secrets-client.js';
+import { bundleExistsSync, keychainRef, secretsKeychainItem, storeSetSync, writeBundleWithItemsSync } from './secrets-client.js';
 import type { SecretsBundle } from './secrets-types.js';
 import { readMeta } from './state.js';
 import { useFreshSecretsHome } from '../../tests/secrets-standalone.js';
@@ -456,5 +456,33 @@ describe('electPublisher', () => {
     expect(reserved.adopted).toEqual([{ bundle: '__cursor__', key: 'CURSOR_API_KEY_a1' }]);
     expect(reserved.errors).toContainEqual({ device: 'zion', message: 'adopt __grok__ XAI_API_KEY_a2: boom' });
     expect(reserved.pushed).toEqual([{ device: 'mac-mini', bundle: '__cursor__', keys: ['CURSOR_API_KEY_a1'] }]);
+  });
+});
+
+// The default `adoptLegacy` path of syncReservedStores — the dynamic import of
+// auth-mint and the real adoption against the standalone — with no stub. This
+// is the box a 1.22.84–1.22.89 `accounts add cursor` left behind: the worker key
+// sits at its item name with no bundle record. No peers, so nothing is pushed.
+describe('syncReservedStores adopts a legacy raw reserved item through the real standalone', () => {
+  useFreshSecretsHome();
+
+  it('folds the raw item into a bundle before planning, with no adoptLegacy override', async () => {
+    const accountId = '3dbc408e-a885-4571-8137-2c7ddc84a2ad';
+    const key = `CURSOR_API_KEY_${accountId.replace(/-/g, '')}`;
+    storeSetSync('file', secretsKeychainItem('__cursor__', key), 'crsr_legacy');
+    expect(bundleExistsSync('__cursor__')).toBe(false);
+
+    const result = await syncReservedStores({
+      userAgentsDir: tempStore(),
+      cacheDir: tempStore(),
+      localName: 'zion',
+      localReady: true,
+      listDevices: () => [],
+      selfRole: () => 'personal',
+      readMetaFn: () => ({ accounts: { native: { [accountId]: { id: accountId, name: 'gmail', agent: 'cursor', identityKey: 'cursor:user=u', scope: 'version', identityLabel: 'g@x.io', workerCredential: { bundle: '__cursor__', key, kind: 'api-key', mintedAt: 'm1' } } } } }),
+    });
+    expect(result.adopted).toEqual([{ bundle: '__cursor__', key }]);
+    expect(result.errors).toEqual([]);
+    expect(bundleExistsSync('__cursor__')).toBe(true);
   });
 });

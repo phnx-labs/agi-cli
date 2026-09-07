@@ -26,6 +26,7 @@ import {
 import { addAccount, findAccount, listNativeAccounts, readAccountRegistry, setAccountSecret, type CredentialAccount } from './account-registry.js';
 import {
   bundleBackendSync,
+  isSecretsClientError,
   bundleExists,
   bundleExistsSync,
   keychainRef,
@@ -347,34 +348,46 @@ export function seedReservedStoreKey(
   // keep resolving it. Requires -labs/secrets-cli >= 0.1.1 (reserved-shape
   // bundle names).
   const item = secretsKeychainItem(name, key);
-  if (bundleExistsSync(name)) {
-    const backend = bundleBackendSync(name);
-    if (backend !== 'file') {
-      throw new Error(
-        `Reserved store '${name}' exists with backend '${backend}', but worker provisioning only reads a FILE-backed store. Recreate it with: agents secrets delete ${name} --yes`,
-      );
-    }
-    const bundle = readBundleSync(name);
-    if (key in bundle.vars) {
-      rotateBundleSecretSync(bundle, key, { newValue: cleaned, meta: { type: 'token' } });
+  try {
+    if (bundleExistsSync(name)) {
+      const backend = bundleBackendSync(name);
+      if (backend !== 'file') {
+        throw new Error(
+          `Reserved store '${name}' exists with backend '${backend}', but worker provisioning only reads a FILE-backed store. Recreate it with: agents secrets delete ${name} --yes`,
+        );
+      }
+      const bundle = readBundleSync(name);
+      if (key in bundle.vars) {
+        rotateBundleSecretSync(bundle, key, { newValue: cleaned, meta: { type: 'token' } });
+        return { bundle: name, key };
+      }
+      bundle.vars[key] = keychainRef(key);
+      if (!bundle.meta) bundle.meta = {};
+      bundle.meta[key] = { type: 'token' };
+      writeBundleWithItemsSync(bundle, new Map([[item, cleaned]]));
       return { bundle: name, key };
     }
-    bundle.vars[key] = keychainRef(key);
-    if (!bundle.meta) bundle.meta = {};
-    bundle.meta[key] = { type: 'token' };
+    const bundle: SecretsBundle = {
+      name,
+      backend: 'file',
+      policy: 'never',
+      description: `Reserved ${harness} worker credentials (${kind}), one key per account; pushed to worker devices by the daemon. Never a native OAuth session.`,
+      vars: { [key]: keychainRef(key) },
+      meta: { [key]: { type: 'token' } },
+    };
     writeBundleWithItemsSync(bundle, new Map([[item, cleaned]]));
     return { bundle: name, key };
+  } catch (err) {
+    // A standalone older than 0.1.1 rejects the `__<harness>__` bundle name and
+    // the client only sees a sanitized code. Name the real requirement instead
+    // of leaving `accounts add` to fail with `OPERATION_FAILED`.
+    if (isSecretsClientError(err) && err.code !== 'LOCKED' && err.code !== 'ACCESS_DENIED') {
+      throw new Error(
+        `Could not write the reserved store '${name}' as a bundle (${err.code}). agents-cli needs @phnx-labs/secrets-cli 0.1.1 or newer, which accepts the __<harness>__ bundle name: npm i -g @phnx-labs/secrets-cli@latest`,
+      );
+    }
+    throw err;
   }
-  const bundle: SecretsBundle = {
-    name,
-    backend: 'file',
-    policy: 'never',
-    description: `Reserved ${harness} worker credentials (${kind}), one key per account; pushed to worker devices by the daemon. Never a native OAuth session.`,
-    vars: { [key]: keychainRef(key) },
-    meta: { [key]: { type: 'token' } },
-  };
-  writeBundleWithItemsSync(bundle, new Map([[item, cleaned]]));
-  return { bundle: name, key };
 }
 
 export interface AdoptLegacyReservedItemsResult {
