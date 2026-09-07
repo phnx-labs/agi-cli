@@ -726,9 +726,12 @@ same way `MENUBAR_PROMPT_PREVIEW=1` opens the palette.
   topic, project, ticket, and device. A device strip above the split shows each
   reporting device with a `stale Nm` marker when its heartbeat ages out; offline
   devices collapse to a count. The status bar reads stream health, last-event age,
-  devices reporting/stale, helper RSS, and row count. The only timer is a 1 s
-  relative-time refresh that re-renders **only the visible cells**; every other
-  redraw is a `FeedStream` diff.
+  devices reporting/stale, helper RSS, and row count. The list is a view-based
+  `NSTableView` with real cell reuse: `GroupCellView` / `SessionCellView` own
+  their labels for life, are dequeued with `makeView(withIdentifier:owner:)`, and
+  are updated in place. The only timer is a 1 s relative-time refresh that
+  updates the **text of the visible cells in place** (no reload, no view
+  rebuild); every other redraw is a `FeedStream` diff.
 - **Card** (`SessionCard.swift`) — header (dot + title, harness+version, project,
   host), phase pill + PR chip + subagents glyph, the REQUEST excerpt, the attention
   block when present (question text with numbered option buttons; permission
@@ -760,6 +763,25 @@ remains). Each runs through a bounded `ChildProcess.runResult` (deadline,
 group-killed, reaped) and the ok/stderr result renders inline in the card, never as
 a toast. `MENUBAR_REPLY_TEST=1` pins the argv for each capability (a `build.sh`
 gate).
+
+With **no open block**, the card does not assume a terminal: `Reply.fallbackTarget`
+mirrors the CLI's own rail ladder (`replyCapabilityForSession`,
+`cli/src/lib/feed/attention.ts`) from the row's `context` and `host` — `host: tmux`
+→ tmux inject; `context: teams` → `teams message <teamName> <agentId>`;
+`context: cloud` → `cloud message <cloudTaskId>`; `context: terminal` with a
+detected host surface (iterm/ghostty/code/…) → inject; everything else (headless,
+history, a bare shell with no recognized ancestor, a closed session) → `none` with
+the reason in the disabled field's placeholder. A peer-owned terminal row injects
+with `--device <sourceDevice>`, since a bare id resolves only local panes. The
+orchestrator's `spawnedTeam` is not a team rail — it marks the session that
+*created* a team, which is an ordinary terminal row.
+
+The Sessions window also feeds the notifications layer (PHNX-4004):
+`Notifier.isSessionSelectedInSessionsWindow` is wired at launch to
+`SessionsWindowController.isShowingSession`, so a banner for the session whose row
+is selected in a visible window is not presented (the item still lands in the
+list). The window publishes the selected session id under a lock, since the
+notification delegate asks off the main queue.
 
 ## Lifecycle
 

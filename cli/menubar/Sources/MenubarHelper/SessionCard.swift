@@ -65,6 +65,12 @@ final class SessionCard: NSView {
     var onOpenTerminal: ((String) -> Void)?
     /// Open a rendered artifact in the default browser.
     var onOpenArtifact: ((String) -> Void)?
+    /// This machine's registry name (from the window's device snapshot), so a
+    /// peer-owned terminal row injects with `--device`. Nil until the snapshot
+    /// arrives; the fallback then routes every row explicitly.
+    var localDevice: String? {
+        didSet { if oldValue != localDevice, entry != nil { rebuild() } }
+    }
 
     private let scroll = NSScrollView()
     private let stack = NSStackView()
@@ -286,13 +292,9 @@ final class SessionCard: NSView {
                                disabledReason: attn.replyCapability == "none"
                                    ? "the CLI reports no reply rail for this session" : nil)
         }
-        // No open block: a live local session can still be nudged via inject.
-        let live = row.status == "running" || row.status == "idle"
-            || row.activity == "working" || row.activity == "waiting_input"
-        return ReplyTarget(sessionId: row.sessionId,
-                           capability: live && row.sessionId != nil ? .terminal : .none,
-                           team: row.spawnedTeam,
-                           disabledReason: live ? nil : "the session is not live")
+        // No open block: route on the row's own context/host exactly as the CLI
+        // would report its reply rail (Reply.fallbackTarget).
+        return Reply.fallbackTarget(for: row, localDevice: localDevice)
     }
 
     @objc private func onReplyReturn() { onSend() }

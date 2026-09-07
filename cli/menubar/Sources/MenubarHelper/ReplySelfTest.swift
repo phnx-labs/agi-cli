@@ -76,7 +76,92 @@ enum ReplySelfTest {
         let noMate = ReplyTarget(sessionId: "s5", capability: .team, team: "squad", mate: nil)
         check("team with no mate cannot reply", Reply.canReply(noMate) == false)
 
+        // A peer-owned terminal row injects on its device.
+        check("inject argv names a peer device",
+              Reply.injectArgs(sessionId: "abcd1234", text: "go", device: "yosemite-s0")
+                == ["sessions", "inject", "abcd1234", "go", "--device", "yosemite-s0"])
+        let peer = ReplyTarget(sessionId: "term-9", capability: .terminal, device: "yosemite-s0")
+        check("terminal rail on a peer routes with --device",
+              Reply.textArgs(peer, text: "go") == ["sessions", "inject", "term-9", "go", "--device", "yosemite-s0"])
+
+        // MARK: no-block fallback — the card's routing from the row itself.
+        // Mirrors replyCapabilityForSession (cli/src/lib/feed/attention.ts).
+
+        // (1) A teammate row (context: teams) messages its team + member —
+        // never an inject, even though it is live.
+        let mate = row(#"{"sessionId":"s-mate","context":"teams","teamName":"squad","agentId":"ag-ocr","label":"ocr","status":"running","host":"code","sourceDevice":"zion"}"#)
+        let mateTarget = Reply.fallbackTarget(for: mate, localDevice: "zion")
+        check("teams row routes to the team rail", mateTarget.capability == .team)
+        check("teams row messages <teamName> <agentId>",
+              Reply.textArgs(mateTarget, text: "sync up") == ["teams", "message", "squad", "ag-ocr", "sync up"])
+        let mateNoTeam = row(#"{"sessionId":"s-m2","context":"teams","status":"running"}"#)
+        check("teams row with no team name is disabled with a reason",
+              Reply.fallbackTarget(for: mateNoTeam, localDevice: "zion").capability == .none
+                && Reply.fallbackTarget(for: mateNoTeam, localDevice: "zion").disabledReason?.isEmpty == false)
+
+        // spawnedTeam marks the ORCHESTRATOR — an ordinary terminal row, injectable.
+        let lead = row(#"{"sessionId":"s-lead","context":"terminal","host":"ghostty","spawnedTeam":"squad","status":"running","sourceDevice":"zion"}"#)
+        let leadTarget = Reply.fallbackTarget(for: lead, localDevice: "zion")
+        check("orchestrator with spawnedTeam stays on the terminal rail", leadTarget.capability == .terminal)
+        check("orchestrator injects locally with no --device",
+              Reply.textArgs(leadTarget, text: "Continue.") == ["sessions", "inject", "s-lead", "Continue."])
+
+        // (2) A live terminal row keeps the terminal rail only with a detected
+        // host surface; tmux is its own rail; a peer's row carries --device.
+        let iterm = row(#"{"sessionId":"s-it","context":"terminal","host":"iterm","status":"idle","sourceDevice":"zion"}"#)
+        check("live iterm row injects", Reply.fallbackTarget(for: iterm, localDevice: "zion").capability == .terminal)
+        let tmuxRow = row(#"{"sessionId":"s-tm","context":"headless","host":"tmux","status":"running","sourceDevice":"yosemite-s0"}"#)
+        let tmuxTarget = Reply.fallbackTarget(for: tmuxRow, localDevice: "zion")
+        check("tmux host is the tmux rail whatever the context", tmuxTarget.capability == .tmux)
+        check("peer tmux row injects with --device",
+              Reply.textArgs(tmuxTarget, text: "go") == ["sessions", "inject", "s-tm", "go", "--device", "yosemite-s0"])
+        let bareShell = row(#"{"sessionId":"s-sh","context":"terminal","status":"running","sourceDevice":"zion"}"#)
+        let bareTarget = Reply.fallbackTarget(for: bareShell, localDevice: "zion")
+        check("terminal row with no host surface is disabled",
+              bareTarget.capability == .none && bareTarget.disabledReason?.contains("no terminal surface") == true)
+        let closed = row(#"{"sessionId":"s-cl","context":"terminal","host":"iterm","status":"closed","sourceDevice":"zion"}"#)
+        let closedTarget = Reply.fallbackTarget(for: closed, localDevice: "zion")
+        check("closed terminal row is disabled as not live",
+              closedTarget.capability == .none && closedTarget.disabledReason == "the session is not live")
+        let unknownLocal = Reply.fallbackTarget(for: iterm, localDevice: nil)
+        check("unknown local device routes explicitly", unknownLocal.device == "zion")
+
+        // Cloud rows carry no session id; the task id is the message target.
+        let cloudRow = row(#"{"context":"cloud","cloudTaskId":"ct-42","kind":"codex","status":"running"}"#)
+        let cloudTarget = Reply.fallbackTarget(for: cloudRow, localDevice: "zion")
+        check("cloud row routes to the cloud rail", cloudTarget.capability == .cloud)
+        check("cloud row messages its task id",
+              Reply.textArgs(cloudTarget, text: "resume") == ["cloud", "message", "ct-42", "resume"])
+
+        // (3) Everything else is .none with a clear reason.
+        let headless = row(#"{"sessionId":"s-hl","context":"headless","host":"code","status":"running"}"#)
+        let headlessTarget = Reply.fallbackTarget(for: headless, localDevice: "zion")
+        check("headless row is disabled", headlessTarget.capability == .none)
+        check("headless row says why", headlessTarget.disabledReason?.contains("headless") == true)
+        let recent = row(#"{"sessionId":"s-rc","context":"recent","status":"done"}"#)
+        check("history row is disabled with a reason",
+              Reply.fallbackTarget(for: recent, localDevice: "zion").disabledReason?.contains("history") == true)
+        let noContext = row(#"{"sessionId":"s-nc","status":"running","host":"iterm"}"#)
+        let noContextTarget = Reply.fallbackTarget(for: noContext, localDevice: "zion")
+        check("row with no context is disabled, never assumed terminal",
+              noContextTarget.capability == .none && noContextTarget.disabledReason?.contains("no context") == true)
+        check("every disabled fallback cannot reply",
+              [mateNoTeam, bareShell, closed, headless, recent, noContext]
+                .allSatisfy { !Reply.canReply(Reply.fallbackTarget(for: $0, localDevice: "zion")) })
+
         print(pass ? "ALL PASS" : "SOME FAILED")
         exit(pass ? 0 : 1)
+    }
+
+    /// Rows are built by DECODING JSON, so the fallback is exercised on the same
+    /// decode path a stream line takes (and the new context/team/cloud fields
+    /// are proven to decode).
+    private static func row(_ json: String) -> SessionRow {
+        guard let data = json.data(using: .utf8),
+              let r = try? JSONDecoder().decode(SessionRow.self, from: data) else {
+            print("FAIL — could not decode test row: \(json)")
+            exit(1)
+        }
+        return r
     }
 }

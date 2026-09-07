@@ -53,6 +53,17 @@ struct SessionRow: Decodable, Equatable {
     let machine: String?
     /// Host process (claude/codex/…) — the harness family.
     let kind: String?
+    /// Where the session runs (`ActiveContext` + the stream's `recent`):
+    /// terminal | teams | cloud | headless | recent. The CLI's reply-rail verdict
+    /// (`replyCapabilityForSession`, cli/src/lib/feed/attention.ts) keys on this
+    /// plus `host`, and the card's no-block fallback mirrors that exact ladder.
+    let context: String?
+    /// Team a teammate row belongs to (`context == "teams"`), with its member id.
+    let teamName: String?
+    let agentId: String?
+    /// Cloud task id for a `context == "cloud"` row — such rows carry no
+    /// `sessionId`, so this is the `agents cloud message` target.
+    let cloudTaskId: String?
     /// Custom profile name when launched via `agents run <profile>`.
     let harness: String?
     /// Coarse lifecycle bucket: running | waiting | failed | done | idle.
