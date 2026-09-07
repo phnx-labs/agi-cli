@@ -72,7 +72,9 @@ function removeRetiredAliasShims() {
       }
       // Only ever remove OUR alias — the POSIX shim ends in `<name> "$@"`, the
       // Windows companion in `<name> %*` — never an unrelated file someone placed
-      // under that name.
+      // under that name, and never a user's own `agents setup alias` shim, which
+      // is marked `# Alias shim:` (the same guard pruneOrphanedCommandShim keeps).
+      if (content.includes('# Alias shim:')) continue;
       if (!content.includes(`${name} "$@"`) && !content.includes(`${name} %*`)) continue;
       fs.rmSync(file, { force: true });
     }

@@ -125,6 +125,14 @@ describe('the nested `agents setup alias` surface', () => {
     expect(r.status).not.toBe(0);
     expect(r.stderr).toMatch(/reserved/);
   });
+
+  it('refuses `secrets`, the standalone CLI name the shims dir would shadow (PHNX-3989)', () => {
+    const home = guardedHome();
+    const r = run(['setup', 'alias', 'add', 'secrets'], home);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/reserved/);
+    expect(fs.existsSync(path.join(home, '.agents', '.cache', 'shims', 'secrets'))).toBe(false);
+  });
 });
 
 describe('the retired top-level `agents alias`', () => {
