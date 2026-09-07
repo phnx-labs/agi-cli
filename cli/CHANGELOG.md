@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.22.87
+
+- **Workers now materialize a slot for every registered Claude account, not only
+  the ones added through the v2 `accounts add` flow (PHNX-3940).** The daemon's
+  slot reconciliation skipped any account row without a `workerCredential` field —
+  every account registered before the v2 model — on the assumption that a legacy
+  row "resolves its token at spawn". That holds for `agents run claude#<name>` but
+  not for the interactive picker, so on a worker whose `auth` bundle already held
+  all eight setup-tokens `agents run claude --interactive --device auto` listed the
+  installed version labels, showed most of them `logged out`, and launching one put
+  a Claude login screen on a headless box. `reconcileLocalWorkerSlots` now resolves
+  each row through the same `reservedSyncTargets` the push plan uses (a v2 row's
+  reserved `__claude__` key, a legacy row's email-keyed `auth` token), so every
+  account whose token is on the box gets a `durable` slot with a 0600
+  `.oauth_token` and the seeded identity the adapter injects from. Two related
+  fixes ride along: the credential publisher is now a ready **headed** device
+  (`electPublisher`, headed-first then by name) instead of the alphabetically first
+  ready box, which had made a worker the fleet's source of truth; and slot
+  reconciliation runs first in the `auth-sync` tick, so a failed shared-state git
+  exchange no longer postpones local provisioning. Source:
+  `cli/src/lib/secrets/reserved-sync.ts`, `cli/src/lib/daemon/auth-sync-service.ts`.
+
+- **`agents secrets` no longer recurses into the legacy `secrets` shim after an
+  in-place upgrade (PHNX-3989).** Boxes that ran agents-cli before the standalone
+  `secrets` engine still carry `~/.agents/.cache/shims/secrets`, a command shim that
+  `exec`s `agents secrets`. It sits first on PATH and survives an upgrade because its
+  baked entrypoint still exists, and 1.22.85 resolved the standalone with a plain
+  `which secrets` — so on every such box `agents secrets …` (and the daemon's
+  reserved-store sync, which uses the same resolver) re-entered itself through the
+  shim without bound. The resolver now skips agents-cli's own shims dir when looking
+  for the standalone (`SECRETS_BIN` still wins; a miss still fails loud with the
+  install command), and the self-heal shim pass removes that legacy `secrets` shim
+  even though its target install is alive, since it can only recurse. The package's
+  postinstall — which used to write that very shim on every install, so an upgrade
+  kept bringing it back — no longer writes a `secrets` alias at all and removes one
+  a previous install left behind; the bare-command aliases are now `sessions`,
+  `browser`, `pty`, and `teams`. Install the standalone with
+  `npm i -g @phnx-labs/secrets-cli` if `agents secrets` reports it missing.
+
 ## 1.22.85
 
 - **`agents run codex` marks an exhausted account so rotation stops re-picking it
