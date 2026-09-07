@@ -14,7 +14,7 @@ import { showUrl } from '../lib/open-url.js';
 import { crabboxList, crabboxStop, reapSafeOrphans, reapOrphans, setLeaseSecretsBundle, type CrabboxBox } from '../lib/crabbox/cli.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { bundleExists, keychainRef, readBundle, secretsKeychainItem, writeBundleWithItems } from '../lib/secrets-client.js';
-import type { SecretsBundle } from '../lib/secrets/bundles.js';
+import type { SecretsBundle } from '../lib/secrets-types.js';
 
 function fmtIdle(box: CrabboxBox): string {
   if (box.lastTouchedAt === null) return 'idle ?';

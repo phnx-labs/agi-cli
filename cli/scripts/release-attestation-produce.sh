@@ -15,14 +15,15 @@
 #   1. Runs the full suite (bun run test). Fail closed -- no attestation is
 #      written for a red suite.
 #   2. On a macOS box with `agents` + the apple.com secrets bundle, signs and
-#      notarizes the CLI binary and the two helper .apps headlessly (the same
+#      notarizes the CLI binary and the menubar helper .app headlessly (the same
 #      steps release.sh's privileged phase ran before RUSH-2666 relocated
 #      build/sign to attestation time). Off that box the step is simply skipped,
 #      and since RUSH-3100 that costs nothing: the tarball carries no helper
 #      bundle, so there is nothing for `npm pack` to gate on and no unsigned
-#      bundle can ship from anywhere. The old prepack gates
-#      (verify-keychain-helper.sh, verify-menubar-helper.sh) are retained for
-#      cutting a HELPER release, not for packing the CLI. (The CLI binary left
+#      bundle can ship from anywhere. The old prepack gate (verify-menubar-helper.sh)
+#      is retained for cutting a HELPER release, not for packing the CLI. The
+#      keychain helper moved with the standalone `secrets` engine (PHNX-3989) —
+#      it is no longer built, signed, or verified anywhere in this repo. (The CLI binary left
 #      the tarball in RUSH-3026; the sign step below still builds it on a Mac for
 #      the per-release GitHub-asset path.)
 #   3. Packs the tarball (`npm pack`) and binds its sha256 into the record.
@@ -328,8 +329,6 @@ if [[ "$WITH_HELPERS" == true && "$(uname)" == "Darwin" ]] && command -v agents 
     cp -R menubar/dist/MenubarHelper.app bin/MenubarHelper.app
     codesign --verify --deep --strict "bin/MenubarHelper.app"
     xcrun stapler validate "bin/MenubarHelper.app"
-    scripts/build-keychain-helper.sh
-    shasum -a 256 "bin/Agents CLI.app/Contents/MacOS/Agents CLI" > "scripts/Agents CLI.app.sha256"
   ' || die "signed helper build failed"
 else
   # Nothing to do off a signing box: the tarball carries no helper bundle
@@ -409,8 +408,8 @@ green "Tarball at $DEST_DIR/$TGZ_NAME"
 # carried forward across producer runs: a helper whose input digest still
 # matches the recorded one keeps its already-attested record untouched; one
 # that drifted is only re-recorded when a freshly built+signed asset for it
-# is actually on disk in this worktree. This producer builds/signs keychain
-# and menubar itself (the Darwin block above); computer-mac is signed by the
+# is actually on disk in this worktree. This producer builds/signs menubar
+# itself (the Darwin block above); computer-mac is signed by the
 # separate native/computer-mac release path
 # (scripts/publish-computer-helper-mac.sh) and is never rebuilt here, so a
 # drifted computer-mac digest with no prior record to carry forward fails
@@ -549,7 +548,7 @@ if [[ "$WITH_HELPERS" == true && -x scripts/release-manifest.sh ]]; then
     green "Recorded computer-mac from published $tag (input ${want_digest#sha256:}, asset ${got_sha:0:12})"
   }
 
-  for helper in computer-mac keychain menubar; do
+  for helper in computer-mac menubar; do
     helper_digest="$(scripts/release-manifest.sh input-digest --repo-root "$WT" --helper "$helper")" \
       || die "could not compute input digest for helper $helper"
     recorded_digest="$(jq -r --arg n "$helper" '.helpers[$n].inputDigest // empty' "$MANIFEST_FILE")"
@@ -559,7 +558,6 @@ if [[ "$WITH_HELPERS" == true && -x scripts/release-manifest.sh ]]; then
     fi
 
     case "$helper" in
-      keychain) asset="bin/Agents CLI.app/Contents/MacOS/Agents CLI" ;;
       menubar)  asset="bin/MenubarHelper.app/Contents/MacOS/AGI Menu" ;;
       computer-mac)
         # Never rebuilt here -- record it from its published, source-verified release

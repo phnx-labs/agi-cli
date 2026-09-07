@@ -1,10 +1,11 @@
 /**
  * Atomic, serialized install of a macOS `.app` bundle to a stable user path.
  *
- * Shared by the two helpers agents-cli installs on darwin — the secrets keychain
- * helper (`lib/secrets/install-helper.ts`) and the menu-bar helper
- * (`lib/menubar/install-menubar.ts`) — both of which are (re)installed on the hot
- * path of ordinary `agents` invocations. Both previously did a non-atomic
+ * Used by the menu-bar helper (`lib/menubar/install-menubar.ts`), which is
+ * (re)installed on the hot path of ordinary `agents` invocations. (A second
+ * helper this module used to also serve, the secrets keychain broker, moved
+ * out of this repo entirely with the standalone `secrets` engine —
+ * PHNX-3989 — and installs itself now.) It previously did a non-atomic
  * `rm -rf dest` + `cp -R src dest` straight onto the live bundle. That copy takes
  * long enough that a concurrent reader (Gatekeeper, or an exec of the bundle) sees
  * a half-written `.app` — a truncated Mach-O / mismatched `_CodeSignature` hash —

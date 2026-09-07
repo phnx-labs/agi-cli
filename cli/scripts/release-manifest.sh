@@ -45,7 +45,7 @@ usage() {
   exit 2
 }
 
-KNOWN_HELPERS="computer-mac keychain menubar"
+KNOWN_HELPERS="computer-mac menubar"
 
 CMD="${1:-}"
 [[ -n "$CMD" ]] || usage
@@ -109,12 +109,6 @@ helper_paths() {
         "$root/native/computer-mac/Sources" \
         "$root/native/computer-mac/scripts/build.sh" \
         "$root/native/computer-mac/Package.swift"
-      ;;
-    keychain)
-      printf '%s\n' \
-        "$root/cli/scripts/build-keychain-helper.sh" \
-        "$root/cli/scripts/keychain-entitlements.plist" \
-        "$root/cli/scripts/verify-keychain-helper.sh"
       ;;
     menubar)
       printf '%s\n' \
@@ -285,7 +279,6 @@ copy_asset() {
   src="$(jq -r '.assetPath // empty' <<<"$rec")"
   name="$(jq -r --arg n "$HELPER" '
       if $n == "computer-mac" then "ComputerHelper.app.zip"
-      elif $n == "keychain" then "Agents CLI.app"
       elif $n == "menubar" then "MenubarHelper.app"
       else $n end' <<<"$rec")"
   if [[ -z "$src" || ! -f "$src" ]]; then

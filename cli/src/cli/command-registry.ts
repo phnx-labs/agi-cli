@@ -68,10 +68,10 @@ export const loadRestore: ModuleLoader = async () => (await import('../commands/
 export const loadDoctor: ModuleLoader = async () => (await import('../commands/doctor.js')).registerDoctorCommand;
 export const loadRoute: ModuleLoader = async () => (await import('../commands/route.js')).registerRouteCommands;
 export const loadHarness: ModuleLoader = async () => (await import('../commands/harness.js')).registerHarnessCommands;
-// PHNX-3989: `agents secrets` is now a thin passthrough to the standalone
-// `secrets` CLI (secrets-passthrough.ts). The legacy in-repo engine's own
-// registrar (`commands/secrets.js`) stays in the tree, unregistered, until the
-// full consumer-conversion wave lands (tasks.md item 7).
+// PHNX-3989: `agents secrets` is a thin passthrough to the standalone
+// `secrets` CLI (secrets-passthrough.ts). The legacy in-repo engine and its
+// own command registrar are gone (Track D, tasks.md item 7) — the standalone
+// `@phnx-labs/secrets-cli` package is the only implementation.
 export const loadSecrets: ModuleLoader = async () => (await import('../commands/secrets-passthrough.js')).registerSecretsCommands;
 export const loadMenubar: ModuleLoader = async () => (await import('../commands/menubar.js')).registerMenubarCommands;
 export const loadSync: ModuleLoader = async () => (await import('../commands/sync.js')).registerSyncCommand;

@@ -3,22 +3,17 @@
  *
  * These live in their own LEAF module — importing only `node:crypto` and
  * `node:fs` — on purpose. They used to sit in `computer/ssh-tunnel.ts`, whose
- * own import graph reaches `browser/drivers/ssh.ts` -> `browser/chrome.ts` ->
- * `secrets/*`. `helper-download.ts` needs nothing from that graph but these two
- * pure functions, and importing them from there closed a module-initialization
- * cycle:
- *
- *   helper-download.ts
- *     -> computer/ssh-tunnel.ts        (evaluated BEFORE `EXPECTED_TEAM_ID`)
- *       -> browser/drivers/ssh.ts -> browser/chrome.ts
- *         -> secrets/bundles.ts -> secrets/index.ts -> secrets/install-helper.ts
- *           -> secrets/download-keychain.ts
- *             -> helper-download.ts    (still evaluating; const not yet bound)
- *
- * which threw `ReferenceError: Cannot access 'EXPECTED_TEAM_ID' before
- * initialization` at `secrets/download-keychain.ts:45` for any entry point that
- * reached `helper-download.ts` first (RUSH-3113). Keep this module a leaf: adding
- * a local import here can reintroduce that cycle.
+ * own import graph reached `browser/drivers/ssh.ts` -> `browser/chrome.ts` ->
+ * the in-repo secrets engine's own keychain-helper downloader, which imported
+ * back into `helper-download.ts` while it was still evaluating — before
+ * `EXPECTED_TEAM_ID` was bound, throwing `ReferenceError: Cannot access
+ * 'EXPECTED_TEAM_ID' before initialization` for any entry point that reached
+ * `helper-download.ts` first (RUSH-3113). The secrets engine that closed that
+ * cycle is gone now (PHNX-3989 — the standalone `secrets` CLI downloads its own
+ * helper), but the discipline that fixed it still holds: keep this module a
+ * leaf, since `helper-download.ts` needs nothing beyond these two pure
+ * functions and adding a local import here can reintroduce a cycle with
+ * whatever imports it next.
  */
 
 import { createHash } from 'node:crypto';

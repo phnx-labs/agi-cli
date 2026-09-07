@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { ALL_AGENT_IDS } from '../agents.js';
-import { AUTH_BUNDLE_NAME, validateBundleName } from './bundles.js';
+import { ALL_AGENT_IDS } from './agents.js';
 import {
   AUTH_BUNDLE_BACKEND,
+  AUTH_BUNDLE_NAME,
   AUTH_STORE_ALIAS,
   RESERVED_STORES,
   ReservedBundleWrongBackendError,
@@ -12,7 +12,7 @@ import {
   isReservedStoreName,
   reservedStoreName,
 } from './reserved-stores.js';
-import { SecretsClientError } from '../secrets-client.js';
+import { SecretsClientError } from './secrets-client.js';
 
 describe('RESERVED_STORES', () => {
   it('names one __<harness>__ store for every ALL_AGENT_IDS entry', () => {
@@ -49,20 +49,6 @@ describe('assertStorableCredentialKind', () => {
     expect(() => assertStorableCredentialKind('bearer-token')).toThrow(
       /reserved stores accept only a setup-token or an API key/,
     );
-  });
-});
-
-describe('validateBundleName rejects user names starting with __', () => {
-  it('refuses __claude__ and unknown __foo__ on the user path', () => {
-    expect(() => validateBundleName('__claude__')).toThrow(/reserved/);
-    expect(() => validateBundleName('__foo__')).toThrow(/reserved/);
-    expect(() => validateBundleName('prod')).not.toThrow();
-    expect(() => validateBundleName('auth')).not.toThrow();
-  });
-
-  it('allows a known reserved store only when the CLI opts in', () => {
-    expect(() => validateBundleName('__claude__', { allowReservedStore: true })).not.toThrow();
-    expect(() => validateBundleName('__foo__', { allowReservedStore: true })).toThrow(/reserved/);
   });
 });
 

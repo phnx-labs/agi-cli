@@ -107,13 +107,13 @@ async function publishUserRepoAccountState(provisionAuth: boolean): Promise<void
   if (usage.error) console.error(chalk.yellow(`Usage snapshot: ${usage.error}`));
 
   if (provisionAuth) {
-    const { syncReservedAuthBundle } = await import('../lib/secrets/reserved-sync.js');
+    const { syncReservedAuthBundle } = await import('../lib/secrets-policy.js');
     const auth = await syncReservedAuthBundle();
     if (auth.pushed.length > 0) console.log(chalk.gray(`Auth bundle: pushed to ${auth.pushed.join(', ')}`));
     for (const err of auth.errors) console.error(chalk.yellow(`Auth bundle: ${err.device}: ${err.message}`));
     return;
   }
-  const { publishReservedAuthVerdict } = await import('../lib/secrets/reserved-sync.js');
+  const { publishReservedAuthVerdict } = await import('../lib/secrets-policy.js');
   const auth = await publishReservedAuthVerdict();
   if (auth.error) console.error(chalk.yellow(`Auth verdict: ${auth.device}: ${auth.error}`));
 }
@@ -125,7 +125,7 @@ async function consumeUserRepoAccountState(): Promise<void> {
   if (usage.merged > 0) console.log(chalk.gray(`Usage snapshot: merged ${usage.merged} row(s) from ${usage.sources.join(', ')}`));
   for (const err of usage.errors) console.error(chalk.yellow(`Usage snapshot: ${err.device}: ${err.message}`));
 
-  const { syncReservedAuthBundle } = await import('../lib/secrets/reserved-sync.js');
+  const { syncReservedAuthBundle } = await import('../lib/secrets-policy.js');
   const auth = await syncReservedAuthBundle();
   if (auth.pushed.length > 0) console.log(chalk.gray(`Auth bundle: pushed to ${auth.pushed.join(', ')}`));
   for (const err of auth.errors) console.error(chalk.yellow(`Auth bundle: ${err.device}: ${err.message}`));

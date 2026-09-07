@@ -189,12 +189,11 @@ describe('download sha256 gate (real hash + parse used in downloadHelperApp)', (
 
 // RUSH-3113 regression. `helper-download.ts` must be importable as the FIRST
 // local module in a fresh process. It used to reach `computer/ssh-tunnel.ts`
-// for two sha256 helpers, and that graph runs
-// browser/drivers/ssh -> browser/chrome -> secrets/* -> secrets/download-keychain,
-// which imports back into this module while it is still evaluating — before
-// `EXPECTED_TEAM_ID` (line 30) is bound. Every entry point that reached
-// helper-download first died with
-// `ReferenceError: Cannot access 'EXPECTED_TEAM_ID' before initialization`,
+// for two sha256 helpers, and that graph ran through the (now-removed, PHNX-3989)
+// in-repo secrets engine's own keychain-helper downloader, which imported back
+// into this module while it was still evaluating — before `EXPECTED_TEAM_ID`
+// (line 30) is bound. Every entry point that reached helper-download first died
+// with `ReferenceError: Cannot access 'EXPECTED_TEAM_ID' before initialization`,
 // taking drift-sync and self-heal's real-subprocess tests down with it.
 //
 // A SUBPROCESS is the only faithful reproduction: inside vitest the module

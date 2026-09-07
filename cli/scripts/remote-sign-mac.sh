@@ -9,18 +9,16 @@
 # remains for the narrow case of building + pulling back JUST the signed macOS
 # artifacts from another Mac, without publishing.
 #
-# The published tarball bundles two signed macOS .app helpers that Linux cannot
-# produce:
-#   - bin/Agents CLI.app   — the keychain helper (swiftc universal → codesign
-#                            with entitlements + embedded provisioning profile →
-#                            notarize → staple). See build-keychain-helper.sh.
-#   - bin/MenubarHelper.app — the menu-bar status item (swift build → codesign →
-#                            notarize → staple). See menubar/scripts/build.sh.
+# The published tarball bundles one signed macOS .app helper that Linux cannot
+# produce: bin/MenubarHelper.app — the menu-bar status item (swift build →
+# codesign → notarize → staple). See menubar/scripts/build.sh. (A second
+# helper, the keychain broker, used to build here too; it moved out of this
+# repo entirely with the standalone `secrets` engine, PHNX-3989.)
 #
 # This script rsyncs the exact build INPUTS from THIS worktree to the home base,
-# runs the two Mac build scripts there under its headless signing creds, then
-# pulls the signed bundles back into THIS worktree's cli/bin/ so
-# `bun run build` (presence-gated) can package them.
+# runs the Mac build script there under its headless signing creds, then
+# pulls the signed bundle back into THIS worktree's cli/bin/ so
+# `bun run build` (presence-gated) can package it.
 #
 # NO ENV VARS: the sign host defaults to mac-mini (matching release.sh) and is
 # overridable only with `--device <name>` (alias `--host`) -- a flag, never
@@ -28,10 +26,9 @@
 # discovery, no auto-failover.
 #
 # The home base must have: a Developer ID identity in rush-signing.keychain-db,
-# the kcpass + secrets.pass files under ~/Library/Application Support/rush/, the
-# `apple.com` secrets bundle (APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD /
-# APPLE_TEAM_ID), and — for the keychain helper only — bin/embedded.provisionprofile
-# (rsynced from here if present locally, otherwise the host's own copy is used).
+# the kcpass + secrets.pass files under ~/Library/Application Support/rush/, and
+# the `apple.com` secrets bundle (APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD /
+# APPLE_TEAM_ID).
 #
 # Usage: scripts/remote-sign-mac.sh [--device <name>]
 set -euo pipefail
@@ -77,10 +74,10 @@ log "remote cli:  $HOME_BASE:$HOST_CLI"
 
 # ----- 1. Ship the build inputs from this worktree to the sign host -----
 # We stage into the sign host's cli subtree so the Mac build scripts see the
-# layout they expect (scripts/.., src/lib/secrets/.., menubar/..). This is a build
+# layout they expect (scripts/.., src/.., menubar/..). This is a build
 # workspace, not a git checkout — the sign host's own branch/version is irrelevant.
 log "staging build inputs on $HOME_BASE ..."
-ssh "$HOME_BASE" "mkdir -p '$HOST_CLI/src/lib/secrets' '$HOST_CLI/scripts' '$HOST_CLI/bin' '$HOST_CLI/menubar'"
+ssh "$HOME_BASE" "mkdir -p '$HOST_CLI/scripts' '$HOST_CLI/bin' '$HOST_CLI/menubar'"
 
 # Full src tree + package manifest: the standalone CLI binary is compiled from
 # src/ with `bun build --compile` (scripts/build-bin.sh), which resolves its
@@ -88,9 +85,7 @@ ssh "$HOME_BASE" "mkdir -p '$HOST_CLI/src/lib/secrets' '$HOST_CLI/scripts' '$HOS
 rsync -az --delete --exclude '__tests__/' --exclude '*.test.ts' \
           "$LOCAL_CLI/src/" "$HOME_BASE:$HOST_CLI/src/"
 rsync -az "$LOCAL_CLI/package.json" "$LOCAL_CLI/bun.lock" "$HOME_BASE:$HOST_CLI/"
-rsync -az "$LOCAL_CLI/scripts/keychain-entitlements.plist" \
-          "$LOCAL_CLI/scripts/build-keychain-helper.sh" \
-          "$LOCAL_CLI/scripts/build-bin.sh" \
+rsync -az "$LOCAL_CLI/scripts/build-bin.sh" \
           "$LOCAL_CLI/scripts/sign-cli-binary.sh" \
           "$LOCAL_CLI/scripts/bun-jit-entitlements.plist" \
           "$LOCAL_CLI/scripts/headless-sign-context.sh" \
@@ -98,23 +93,12 @@ rsync -az "$LOCAL_CLI/scripts/keychain-entitlements.plist" \
 # Menu-bar Swift package — exclude build outputs so we don't ship stale artifacts.
 rsync -az --delete --exclude '.build/' --exclude 'dist/' \
           "$LOCAL_CLI/menubar/" "$HOME_BASE:$HOST_CLI/menubar/"
-
-if [[ -f "$LOCAL_CLI/bin/embedded.provisionprofile" ]]; then
-  rsync -az "$LOCAL_CLI/bin/embedded.provisionprofile" "$HOME_BASE:$HOST_CLI/bin/"
-  log "shipped local bin/embedded.provisionprofile"
-else
-  log "no local provisioning profile — relying on the sign host's own copy"
-fi
 ok "inputs staged"
 
-# ----- 2. Build + sign (+ notarize the keychain helper) on the sign host -----
+# ----- 2. Build + sign on the sign host -----
 # Runs under a login shell so `agents` is on PATH, unlocks the signing keychain
 # headless, and injects the Apple notarization creds via the `apple.com` bundle.
-# The menu-bar helper is built FIRST: it needs no external prerequisites, so a
-# misconfigured sign host still yields the (reliably signable) menu-bar bundle
-# before failing loudly on the keychain helper, which additionally requires the
-# provisioning profile + a notarization round-trip.
-log "building + signing on $HOME_BASE (menu-bar helper, then keychain helper + notarize) ..."
+log "building + signing on $HOME_BASE (menu-bar helper, then the standalone CLI binary) ..."
 
 # Generate the remote build script LOCALLY and ship it as a file, then run it on
 # the host. A file dodges the multi-layer quoting hell of embedding a multi-line
@@ -142,11 +126,6 @@ agents secrets exec apple.com -- bash -c '
   rm -rf bin/MenubarHelper.app
   cp -R menubar/dist/MenubarHelper.app bin/MenubarHelper.app
   codesign --verify --deep --strict "bin/MenubarHelper.app"
-  echo "== keychain helper: swiftc + codesign + notarize =="
-  scripts/build-keychain-helper.sh
-  echo "== pin sha256 of the notarized keychain binary =="
-  shasum -a 256 "bin/Agents CLI.app/Contents/MacOS/Agents CLI" > "scripts/Agents CLI.app.sha256"
-  cat "scripts/Agents CLI.app.sha256"
   echo "== standalone agents binary: bun build + codesign + notarize =="
   bun install --frozen-lockfile
   scripts/sign-cli-binary.sh
@@ -161,15 +140,13 @@ ssh "$HOME_BASE" "bash -lc 'bash \"$HOST_CLI/.remote-sign-build.sh\"'" \
   || die "remote build/sign failed on $HOME_BASE (see output above)"
 ok "remote build + sign complete"
 
-# ----- 3. Pull the signed bundles + refreshed sha pin back into this worktree -----
-log "pulling signed bundles back into $LOCAL_CLI/bin/ ..."
+# ----- 3. Pull the signed bundle + refreshed sha pin back into this worktree -----
+log "pulling signed bundle back into $LOCAL_CLI/bin/ ..."
 mkdir -p "$LOCAL_CLI/bin"
-rsync -az --delete "$HOME_BASE:$HOST_CLI/bin/Agents CLI.app"   "$LOCAL_CLI/bin/"
 rsync -az --delete "$HOME_BASE:$HOST_CLI/bin/MenubarHelper.app" "$LOCAL_CLI/bin/"
-rsync -az "$HOME_BASE:$HOST_CLI/scripts/Agents CLI.app.sha256" "$LOCAL_CLI/scripts/Agents CLI.app.sha256"
 rsync -az "$HOME_BASE:$HOST_CLI/bin/agents-macos" "$LOCAL_CLI/bin/agents-macos"
 rsync -az "$HOME_BASE:$HOST_CLI/scripts/agents-cli-bin.sha256" "$LOCAL_CLI/scripts/agents-cli-bin.sha256"
-ok "bundles pulled back"
+ok "bundle pulled back"
 
 # ----- 4. Local sanity: recompute the sha over the pulled Mach-O and assert match -----
 if command -v shasum >/dev/null 2>&1; then
@@ -177,11 +154,6 @@ if command -v shasum >/dev/null 2>&1; then
 else
   SHA_TOOL=(sha256sum)
 fi
-expected="$(cut -d ' ' -f 1 "$LOCAL_CLI/scripts/Agents CLI.app.sha256")"
-actual="$("${SHA_TOOL[@]}" "$LOCAL_CLI/bin/Agents CLI.app/Contents/MacOS/Agents CLI" | cut -d ' ' -f 1)"
-[[ "$actual" == "$expected" ]] \
-  || die "keychain helper sha mismatch after pull-back: expected $expected, got $actual"
-ok "keychain helper sha verified: $actual"
 
 [[ -d "$LOCAL_CLI/bin/MenubarHelper.app" ]] || die "menu-bar helper bundle missing after pull-back"
 ok "menu-bar helper bundle present: bin/MenubarHelper.app"

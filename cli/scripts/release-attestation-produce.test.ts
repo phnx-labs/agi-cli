@@ -215,7 +215,6 @@ describe('release-attestation-produce.sh', () => {
     // Already-signed apps present in the CALLER checkout — the exact condition
     // that used to trigger seeding.
     for (const [app, binName] of [
-      ['Agents CLI.app', 'Agents CLI'],
       ['MenubarHelper.app', 'AGI Menu'],
     ] as const) {
       const dir = path.join(fx.caller, 'cli/bin', app, 'Contents/MacOS');
@@ -231,7 +230,7 @@ describe('release-attestation-produce.sh', () => {
     expect(out).not.toContain('seeded bin/');
     const kept = out.match(/kept worktree for inspection: (\S+)/);
     expect(kept, out).toBeTruthy();
-    for (const app of ['Agents CLI.app', 'MenubarHelper.app']) {
+    for (const app of ['MenubarHelper.app']) {
       expect(
         fs.existsSync(path.join(kept![1], 'cli/bin', app)),
         `${app} must not be copied into the producer worktree`,
@@ -507,12 +506,12 @@ describe('release-attestation-produce.sh', () => {
 });
 
 // Extends the base fixture with a real (copied, not faked) release-manifest.sh
-// plus minimal source trees for all three known helpers -- computer-mac at repo
-// root, keychain + menubar under cli -- so the producer's helper-manifest
-// step (RUSH-2766) has real inputs to hash. keychain/menubar's "signed" assets
-// are plain placeholder files standing in for what the Darwin-only sign block
-// would have built; the manifest step only checks the files exist and hashes
-// them, so this is enough to exercise it on Linux CI without a real signing box.
+// plus minimal source trees for both known helpers -- computer-mac at repo
+// root, menubar under cli -- so the producer's helper-manifest
+// step (RUSH-2766) has real inputs to hash. menubar's "signed" asset
+// is a plain placeholder file standing in for what the Darwin-only sign block
+// would have built; the manifest step only checks the file exists and hashes
+// it, so this is enough to exercise it on Linux CI without a real signing box.
 /**
  * A prior release's `release-manifest.json`, built with the shipped generator
  * so the seed fixture matches what a real GitHub release carries.
@@ -553,7 +552,7 @@ function priorReleaseManifest(root: string, computerMacDigest: string): string {
 }
 
 function buildManifestFixture(root: string): ReturnType<typeof buildFixture> & {
-  manifestDigests: Record<'computer-mac' | 'keychain' | 'menubar', string>;
+  manifestDigests: Record<'computer-mac' | 'menubar', string>;
 } {
   const fx = buildFixture(root);
   const { caller } = fx;
@@ -571,16 +570,13 @@ function buildManifestFixture(root: string): ReturnType<typeof buildFixture> & {
   fs.writeFileSync(
     path.join(caller, 'cli/src/lib/helper-versions.ts'),
     [
-      "const FLOORS = { 'computer-mac': '1.0.0', keychain: '1.0.0', menubar: '1.0.0', 'computer-win': '1.0.0' };",
+      "const FLOORS = { 'computer-mac': '1.0.0', menubar: '1.0.0', 'computer-win': '1.0.0' };",
       'export function helperFloor(h) { return FLOORS[h]; }',
       "export function helperTag(h, v) { return `${h}/v${v}`; }",
       '',
     ].join('\n'),
   );
 
-  fs.writeFileSync(path.join(caller, 'cli/scripts/build-keychain-helper.sh'), '#!/usr/bin/env bash\n');
-  fs.writeFileSync(path.join(caller, 'cli/scripts/keychain-entitlements.plist'), '<plist/>\n');
-  fs.writeFileSync(path.join(caller, 'cli/scripts/verify-keychain-helper.sh'), '#!/usr/bin/env bash\n');
   fs.copyFileSync(MANIFEST_SCRIPT, path.join(caller, 'cli/scripts/release-manifest.sh'));
   fs.chmodSync(path.join(caller, 'cli/scripts/release-manifest.sh'), 0o755);
 
@@ -590,8 +586,6 @@ function buildManifestFixture(root: string): ReturnType<typeof buildFixture> & {
   fs.writeFileSync(path.join(caller, 'cli/menubar/scripts/build.sh'), '#!/usr/bin/env bash\n');
   fs.writeFileSync(path.join(caller, 'cli/menubar/Package.swift'), '// swift package\n');
 
-  fs.mkdirSync(path.join(caller, 'cli/bin/Agents CLI.app/Contents/MacOS'), { recursive: true });
-  fs.writeFileSync(path.join(caller, "cli/bin/Agents CLI.app/Contents/MacOS/Agents CLI"), 'fake-keychain-binary\n');
   fs.mkdirSync(path.join(caller, 'cli/bin/MenubarHelper.app/Contents/MacOS'), { recursive: true });
   fs.writeFileSync(path.join(caller, 'cli/bin/MenubarHelper.app/Contents/MacOS/AGI Menu'), 'fake-menubar-binary\n');
 
@@ -613,7 +607,6 @@ function buildManifestFixture(root: string): ReturnType<typeof buildFixture> & {
     headCommit,
     manifestDigests: {
       'computer-mac': digestFor('computer-mac'),
-      keychain: digestFor('keychain'),
       menubar: digestFor('menubar'),
     },
   };
@@ -660,9 +653,9 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
     const root = tmp('attest-produce-manifest-');
     const fx = buildManifestFixture(root);
     // Pre-seed only computer-mac, matching its current digest -- it must be
-    // carried forward untouched (this producer never rebuilds it). keychain
-    // and menubar have no prior record, so they must be freshly recorded from
-    // the "signed" assets committed into the fixture.
+    // carried forward untouched (this producer never rebuilds it). menubar
+    // has no prior record, so it must be freshly recorded from
+    // the "signed" asset committed into the fixture.
     seedManifest(fx.store, { 'computer-mac': { inputDigest: fx.manifestDigests['computer-mac'] } });
 
     const result = runProduceWithHelpers(fx);
@@ -677,12 +670,12 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
     expect(manifest.helpers['computer-mac'].helperVersion).toBe('prev-1.0.0');
     expect(manifest.helpers['computer-mac'].inputDigest).toBe(fx.manifestDigests['computer-mac']);
 
-    // keychain / menubar: freshly recorded against the committed placeholder
-    // "signed" binaries, keyed by the SAME digest a second, independent
+    // menubar: freshly recorded against the committed placeholder
+    // "signed" binary, keyed by the SAME digest a second, independent
     // checkout computes (proving the RUSH-2766 relative-path fix: the
     // producer hashed inside a throwaway $WT, the test hashed the caller
     // clone -- different absolute paths, same relative tree).
-    for (const helper of ['keychain', 'menubar'] as const) {
+    for (const helper of ['menubar'] as const) {
       expect(manifest.helpers[helper].inputDigest).toBe(fx.manifestDigests[helper]);
       expect(manifest.helpers[helper].assetDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
       expect(manifest.helpers[helper].helperVersion).toBe('9.9.9');
@@ -742,9 +735,9 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
     // The seeded computer-mac record carried forward, so the unchanged helper
     // needed no rebuild — the whole point.
     expect(manifest.helpers['computer-mac'].inputDigest).toBe(fx.manifestDigests['computer-mac']);
-    // …and the seed did not disable the check: the other helpers were still
+    // …and the seed did not disable the check: the other helper was still
     // recorded fresh against this tree.
-    for (const helper of ['keychain', 'menubar'] as const) {
+    for (const helper of ['menubar'] as const) {
       expect(manifest.helpers[helper].inputDigest).toBe(fx.manifestDigests[helper]);
     }
   });
@@ -987,8 +980,6 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
       '#!/usr/bin/env bash\nmkdir -p menubar/dist/MenubarHelper.app bin\n',
     );
     fs.chmodSync(path.join(fx.caller, 'cli/menubar/scripts/build.sh'), 0o755);
-    fs.writeFileSync(path.join(fx.caller, 'cli/scripts/build-keychain-helper.sh'), '#!/usr/bin/env bash\n');
-    fs.chmodSync(path.join(fx.caller, 'cli/scripts/build-keychain-helper.sh'), 0o755);
     // codesign/stapler/shasum run against the .app the stubbed build would emit.
     for (const b of ['codesign', 'xcrun', 'shasum']) {
       fs.writeFileSync(path.join(fx.fakebin, b), '#!/usr/bin/env bash\nexit 0\n');

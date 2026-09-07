@@ -16,7 +16,7 @@ import {
   writeClaudeWorkerOauthToken,
 } from './claude-account-token.js';
 import { seedReservedAuthToken } from './auth-mint.js';
-import { isReservedBundleBackendError } from './secrets/reserved-stores.js';
+import { isReservedBundleBackendError } from './secrets-policy.js';
 import {
   SecretsClientError,
   bundleExistsSync,
@@ -27,7 +27,7 @@ import {
   storeSet,
   writeBundleWithItemsSync,
 } from './secrets-client.js';
-import type { SecretsBundle } from './secrets/bundles.js';
+import type { SecretsBundle } from './secrets-types.js';
 import { useFreshSecretsHome } from '../../tests/secrets-standalone.js';
 import { readSlots, slotDir } from './accounts/slots.js';
 import { readMeta } from './state.js';

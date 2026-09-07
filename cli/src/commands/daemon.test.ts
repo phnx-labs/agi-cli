@@ -172,46 +172,6 @@ describeDaemon('agents daemon — command surface, status, enable/disable', () =
     },
     20_000,
   );
-  it(
-    'a subsystem whose last-ok record is stale but is unreachable RIGHT NOW never renders "healthy" (RUSH-2368)',
-    () => {
-      const home = makeHome();
-      try {
-        // Simulate a daemon that hosted the secrets broker earlier in its life
-        // (recordSubsystemOk at startup) and has since gone unreachable — the
-        // exact shape of the real bug: `health.json` still says "last ok" with
-        // zero consecutive failures, while nothing is listening on the socket
-        // right now. Written directly in the persisted format `daemon-health.ts`
-        // itself writes, read back through the real `readSubsystemHealth` path.
-        const daemonDir = path.join(home, '.agents', '.cache', 'helpers', 'daemon');
-        fs.mkdirSync(daemonDir, { recursive: true });
-        fs.writeFileSync(
-          path.join(daemonDir, 'health.json'),
-          JSON.stringify({
-            'secrets-broker': {
-              subsystem: 'secrets-broker',
-              lastError: null,
-              lastErrorAt: null,
-              consecutiveFailures: 0,
-              lastOkAt: new Date(Date.now() - 60_000).toISOString(),
-            },
-          }),
-          'utf-8',
-        );
-
-        const res = run(home, ['services']);
-        expect(res.status).toBe(0);
-        // The old bug: a line reading "healthy  secrets broker  (unreachable)".
-        // No daemon is listening on this socket, so the live probe MUST win —
-        // the record's stale zero-failure streak must never render "healthy".
-        expect(res.stdout).not.toMatch(/healthy\s+secrets broker/);
-        expect(res.stdout).toContain('(unreachable)');
-      } finally {
-        fs.rmSync(home, { recursive: true, force: true });
-      }
-    },
-  );
-
   /**
    * RUSH-2493: a daemon whose entry file has been deleted answers every probe
    * and reads healthy, but cannot restart and runs whatever was loaded before

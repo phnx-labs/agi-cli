@@ -2,7 +2,6 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import type { KeychainBackend } from '../secrets/index.js';
 
 type ConfigMod = typeof import('./config.js');
 type PublishMod = typeof import('./publish.js');
@@ -11,11 +10,9 @@ let cfg: ConfigMod;
 let publish: PublishMod;
 let tmpHome: string;
 let tmpDir: string;
-const keychain = new Map<string, string>();
 let originalHome: string | undefined;
 let originalNoAgent: string | undefined;
 let originalShareWriteToken: string | undefined;
-let restoreKeychain: KeychainBackend | null;
 
 beforeAll(async () => {
   vi.resetModules();
@@ -29,29 +26,13 @@ beforeAll(async () => {
   // readWriteToken() prefers SHARE_WRITE_TOKEN over the keychain-backed bundle
   // (config.ts:126-127) so a fleet/cloud agent can inject the token ephemerally.
   // These tests assert the publish upload carries `Bearer write-token-1`, i.e.
-  // publish BEHAVIOR, not token storage — so seed the token on that env rail.
-  // storeWriteToken now round-trips through the standalone `secrets` process
-  // client (PHNX-3989), which this suite has no binary for; the bundle-store
+  // publish BEHAVIOR, not token storage — so seed the token on that env rail and
+  // never touch the (now standalone-backed) bundle path at all. The bundle-store
   // round-trip is covered against a real standalone in config.test.ts. First
   // clear the box's own real token so an un-isolated run can't leak it (RUSH-2749).
   originalShareWriteToken = process.env[cfg.SHARE_TOKEN_ENV_KEY];
   delete process.env[cfg.SHARE_TOKEN_ENV_KEY];
 
-  // The token is read from an in-memory keychain backend installed below.
-  const secrets = await import('../secrets/index.js');
-  const bundles = await import('../secrets/bundles.js');
-  bundles.setKeychainAgentOnlyBypassForTest(true);
-  restoreKeychain = secrets.setKeychainBackendForTest({
-    has: (item) => keychain.has(item),
-    get: (item) => {
-      const value = keychain.get(item);
-      if (value === undefined) throw new Error(`missing ${item}`);
-      return value;
-    },
-    set: (item, value) => { keychain.set(item, value); },
-    delete: (item) => keychain.delete(item),
-    list: (prefix) => Array.from(keychain.keys()).filter((key) => key.startsWith(prefix)),
-  });
   publish = await import('./publish.js');
   cfg.writeShareConfig({
     baseUrl: 'https://share.example.com',
@@ -63,10 +44,6 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  const secrets = await import('../secrets/index.js');
-  const bundles = await import('../secrets/bundles.js');
-  bundles.setKeychainAgentOnlyBypassForTest(false);
-  secrets.setKeychainBackendForTest(restoreKeychain);
   if (originalHome === undefined) delete process.env.HOME;
   else process.env.HOME = originalHome;
   if (originalNoAgent === undefined) delete process.env.AGENTS_SECRETS_NO_AGENT;

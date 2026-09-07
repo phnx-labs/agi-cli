@@ -28,7 +28,7 @@
  */
 
 /** The helpers that have their own release train. */
-export type HelperName = 'menubar' | 'keychain' | 'computer-mac' | 'computer-win';
+export type HelperName = 'menubar' | 'computer-mac' | 'computer-win';
 
 /** One helper's release identity. */
 export interface HelperRelease {
@@ -44,13 +44,14 @@ export interface HelperRelease {
 /**
  * Floors, by helper.
  *
- * `menubar` and `keychain` start at 1.0.0 — the first builds published under
- * their own tags rather than the CLI's. They are not "version 1 of the helper";
- * they are version 1 of its independent release train.
+ * `menubar` starts at 1.0.0 — the first build published under its own tag
+ * rather than the CLI's. It is not "version 1 of the helper"; it is version 1
+ * of its independent release train. The keychain helper moved with the
+ * standalone `secrets` engine (PHNX-3989) — it downloads and verifies its own
+ * helper release now, off this table entirely.
  */
 export const HELPER_RELEASES: Readonly<Record<HelperName, HelperRelease>> = {
   menubar: { tagPrefix: 'menubar', floor: '1.0.0' },
-  keychain: { tagPrefix: 'keychain', floor: '1.0.0' },
   'computer-mac': { tagPrefix: 'computer-mac', floor: '1.0.0' },
   // The Windows helper is a bare .exe, not an .app bundle, so it does not share
   // helper-download.ts's zip/codesign/notarize machinery -- but it has the same

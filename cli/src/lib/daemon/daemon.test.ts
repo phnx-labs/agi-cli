@@ -5,9 +5,10 @@
  * plist / systemd unit) NEVER embeds a Claude OAuth token — even when one is
  * configured in the `claude` secrets bundle. The daemon holds no Claude
  * credential of its own; routine runs authenticate through the per-account
- * CLAUDE_CONFIG_DIR login on the device. The Keychain is swapped for an
- * in-memory backend via setKeychainBackendForTest so a token can be configured
- * and the generators proven to omit it.
+ * CLAUDE_CONFIG_DIR login on the device. The bundle is seeded through the real
+ * standalone `secrets` engine (PHNX-3989) in a fresh, isolated store
+ * (`installKeychainHermeticity`) so a token can be configured and the
+ * generators proven to omit it.
  *
  * RUSH-2819: this is the residual slice of the original daemon.test.ts (2201
  * lines / 88 tests / ~112s in CI) — the manifest/plist/systemd/launch-shape
@@ -35,8 +36,8 @@ import {
   daemonServiceLabel,
   daemonSystemdUnitName,
 } from './daemon.js';
-import { secretsKeychainItem, setKeychainToken } from '../secrets/index.js';
-import { writeBundle } from '../secrets/bundles.js';
+import { secretsKeychainItem, writeBundleWithItemsSync } from '../secrets-client.js';
+import type { SecretsBundle } from '../secrets-types.js';
 import { DIST_ENTRY, installKeychainHermeticity } from './daemon.test-fixture.js';
 
 const systemdQuote = (value: string): string =>
@@ -44,8 +45,8 @@ const systemdQuote = (value: string): string =>
 
 /** Seed the `claude` bundle with a keychain-backed CLAUDE_CODE_OAUTH_TOKEN. */
 function seedKeychainBacked(value: string): void {
-  writeBundle({ name: 'claude', vars: { CLAUDE_CODE_OAUTH_TOKEN: 'keychain:CLAUDE_CODE_OAUTH_TOKEN' } });
-  setKeychainToken(secretsKeychainItem('claude', 'CLAUDE_CODE_OAUTH_TOKEN'), value);
+  const bundle: SecretsBundle = { name: 'claude', vars: { CLAUDE_CODE_OAUTH_TOKEN: 'keychain:CLAUDE_CODE_OAUTH_TOKEN' } };
+  writeBundleWithItemsSync(bundle, new Map([[secretsKeychainItem('claude', 'CLAUDE_CODE_OAUTH_TOKEN'), value]]));
 }
 
 installKeychainHermeticity();

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sanitizeProcessEnv } from '../../src/lib/secrets/bundles.js';
+import { sanitizeProcessEnv } from '../../src/lib/secrets-client.js';
 
 describe('sanitizeProcessEnv', () => {
   it('strips loader and interpreter env vars from a process.env-shaped input', () => {

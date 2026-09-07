@@ -180,8 +180,11 @@ export type EventType =
   | 'browser.screenshot'
   // Computer (native desktop automation via the computer-helper daemon)
   | 'computer.action'
-  // Secrets (no values logged) — the value-free lifecycle vocabulary funnelled
-  // through emitSecretAudit (lib/secrets/audit.ts).
+  // Secrets (no values logged) — the value-free lifecycle vocabulary the
+  // in-repo secrets engine used to funnel through its own emitSecretAudit
+  // chokepoint. That engine (and its audit emission) moved out of this repo
+  // entirely with the standalone `secrets` engine (PHNX-3989); this vocabulary
+  // stays as the stable event-name union other callers may still use.
   | 'secrets.get'
   | 'secrets.unlocked'
   | 'secrets.create'

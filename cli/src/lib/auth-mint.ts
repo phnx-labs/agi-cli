@@ -35,12 +35,12 @@ import {
   storeSetSync,
   writeBundleWithItemsSync,
 } from './secrets-client.js';
-import type { SecretsBundle } from './secrets/bundles.js';
+import type { SecretsBundle } from './secrets-types.js';
 import {
   assertStorableCredentialKind,
   reservedStoreName,
   type StorableCredentialKind,
-} from './secrets/reserved-stores.js';
+} from './secrets-policy.js';
 import { getBinaryPath, getGlobalDefault, getVersionHomePath, listInstalledVersions } from './installations/versions.js';
 import { shellQuote } from './ssh-exec.js';
 import {

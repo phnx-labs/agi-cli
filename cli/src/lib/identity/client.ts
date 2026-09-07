@@ -10,9 +10,9 @@
  * here and nothing else.
  *
  * The shape mirrors the seams this repo already proved elsewhere —
- * `SyncBackend` (`lib/secrets/sync-backend.ts`) and `CloudProvider`
- * (`lib/cloud/types.ts`) — so a second identity backend, if one is ever
- * needed, is a swap here rather than a sweep across commands.
+ * the bounded secrets process client (`lib/secrets-client.ts`) and
+ * `CloudProvider` (`lib/cloud/types.ts`) — so a second identity backend, if
+ * one is ever needed, is a swap here rather than a sweep across commands.
  */
 
 import * as fs from 'fs';

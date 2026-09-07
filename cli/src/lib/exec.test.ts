@@ -9,7 +9,7 @@ import { isTmuxInstalled } from './tmux/binary.js';
 import { mailboxDir } from './mailbox.js';
 import { getVersionHomePath } from './installations/versions.js';
 import { keychainRef, secretsKeychainItem, writeBundleWithItemsSync } from './secrets-client.js';
-import type { SecretsBundle } from './secrets/bundles.js';
+import type { SecretsBundle } from './secrets-types.js';
 import { useFreshSecretsHome } from '../../tests/secrets-standalone.js';
 import { claudeAccountTokenKey } from './claude-account-token.js';
 

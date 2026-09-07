@@ -35,12 +35,11 @@
  * set. Computing that policy stays in agents-cli (the caller supplies `context`);
  * this client only forwards it.
  *
- * The typed shapes are imported `type`-only from the in-repo engine so this
- * client's wrappers are exactly the shapes today's consumers pass and receive,
- * making the consumer-conversion wave (tasks.md item 6) a drop-in. `import type`
- * is fully erased at compile time, so it adds no runtime edge and nothing to the
- * npm tarball — DIST-1 holds. When the engine is deleted, repoint these type
- * imports at the published `@phnx-labs/secrets-cli` SDK types.
+ * The typed shapes are imported `type`-only from `./secrets-types.js`, a pure
+ * re-declaration of the standalone's wire types (no runtime code, nothing in
+ * the npm tarball beyond the erased type import) — this repo's own in-process
+ * engine (`cli/src/lib/secrets/**`) is gone (PHNX-3989 Track D); the standalone
+ * `@phnx-labs/secrets-cli` package is the only implementation.
  */
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -57,12 +56,16 @@ import type {
   BundleEntryInfo,
   RenameOptions,
   RotateOptions,
-} from './secrets/bundles.js';
-import type { BundleValue, KeychainReadContext, SecretRef } from './secrets/index.js';
-import type { AgentStatusEntry } from './secrets/agent.js';
-import type { PushBundleOptions, PushBundleResult } from './secrets/push.js';
-import type { RemoteBundleSummary, PullOptions } from './secrets/sync.js';
-import type { RcSecretFinding } from './secrets/rc-hygiene.js';
+  BundleValue,
+  KeychainReadContext,
+  SecretRef,
+  AgentStatusEntry,
+  PushBundleOptions,
+  PushBundleResult,
+  RemoteBundleSummary,
+  PullOptions,
+  RcSecretFinding,
+} from './secrets-types.js';
 
 /**
  * Wire contract, mirrored from `secrets-cli/src/protocol.ts`. Both sides MUST
@@ -841,4 +844,43 @@ export function masterPassphraseInEnv(context?: SecretsContext): Promise<boolean
 }
 export function masterPassphraseInEnvSync(context?: SecretsContext): boolean {
   return secretsRequestSync('rc-hygiene.masterPassphraseInEnv', [], context);
+}
+
+// --- env sanitization (EXEC-1: deny loader/interpreter overrides) ----------
+//
+// Pure, engine-free — every spawn boundary strips these before either an
+// injected secrets env or the bare process env reaches a child, so a bundle
+// (or an inherited shell) can never smuggle a loader/interpreter override into
+// an agent's process.
+
+/** True for a dynamic-loader or language-interpreter override env var. */
+export function isLoaderOrInterpreterEnv(name: string): boolean {
+  const upper = name.toUpperCase();
+  return (
+    upper.startsWith('LD_') ||
+    upper.startsWith('DYLD_') ||
+    [
+      'NODE_OPTIONS',
+      'PYTHONPATH',
+      'PYTHONSTARTUP',
+      'BASH_ENV',
+      'ENV',
+      'PERL5OPT',
+      'RUBYOPT',
+      'PROMPT_COMMAND',
+      'IFS',
+      'CDPATH',
+    ].includes(upper)
+  );
+}
+
+/** Strip loader/interpreter overrides from an env before it reaches a spawned child. */
+export function sanitizeProcessEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = {};
+  for (const [k, v] of Object.entries(env)) {
+    if (v === undefined) continue;
+    if (isLoaderOrInterpreterEnv(k)) continue;
+    out[k] = v;
+  }
+  return out;
 }

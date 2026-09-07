@@ -2,8 +2,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { randomBytes } from 'node:crypto';
-import type { KeychainBackend } from '../secrets/index.js';
 import type { PhoenixSession } from '../identity/client.js';
 import { PHOENIX_ID_BASE, writeSession, clearSession, sessionFilePath } from '../identity/client.js';
 import { writeShareConfig, DEFAULT_SHARE_DOMAIN } from './config.js';
@@ -18,26 +16,6 @@ import {
   phoenixIdBaseForDeploy,
   SHARE_BACKEND_ENV,
 } from './backend.js';
-import {
-  setKeychainBackendForTest,
-  setKeychainServiceHashingForTest,
-} from '../secrets/index.js';
-import { setKeychainAgentOnlyBypassForTest } from '../secrets/bundles.js';
-
-class MemBackend implements KeychainBackend {
-  store = new Map<string, string>();
-  has(item: string) { return this.store.has(item); }
-  get(item: string) {
-    const v = this.store.get(item);
-    if (v === undefined) throw new Error(`missing ${item}`);
-    return v;
-  }
-  set(item: string, value: string) { this.store.set(item, value); }
-  delete(item: string) { return this.store.delete(item); }
-  list(prefix: string) { return [...this.store.keys()].filter((k) => k.startsWith(prefix)); }
-}
-
-setKeychainAgentOnlyBypassForTest(true);
 
 const ALICE: PhoenixSession = {
   access_token: 'pid_alice_token',
@@ -46,15 +24,10 @@ const ALICE: PhoenixSession = {
 };
 
 describe('ShareBackend chooser (RUSH-3135)', () => {
-  let mem: MemBackend;
-  let prevBackend: KeychainBackend | null;
   const prevBackendEnv = process.env[SHARE_BACKEND_ENV];
   const prevShareToken = process.env.SHARE_WRITE_TOKEN;
 
   beforeEach(() => {
-    mem = new MemBackend();
-    prevBackend = setKeychainBackendForTest(mem);
-    setKeychainServiceHashingForTest(randomBytes(16).toString('hex'));
     const home = process.env.HOME ?? os.homedir();
     fs.rmSync(path.join(home, '.agents'), { recursive: true, force: true });
     const session = sessionFilePath();
@@ -65,8 +38,6 @@ describe('ShareBackend chooser (RUSH-3135)', () => {
   });
 
   afterEach(() => {
-    setKeychainServiceHashingForTest(null);
-    setKeychainBackendForTest(prevBackend);
     clearSession();
     if (prevBackendEnv === undefined) delete process.env[SHARE_BACKEND_ENV];
     else process.env[SHARE_BACKEND_ENV] = prevBackendEnv;

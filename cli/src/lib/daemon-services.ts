@@ -15,7 +15,6 @@ import { atomicWriteFileSync } from './fs-atomic.js';
 
 /** Every service the daemon can host. IDs are kebab-case and stable. */
 export type DaemonServiceId =
-  | 'secrets-broker'
   | 'scheduler'
   | 'catchup'
   | 'monitors'
@@ -23,7 +22,6 @@ export type DaemonServiceId =
   | 'webhook-receiver'
   | 'self-heal'
   | 'self-update'
-  | 'keychain-reap'
   | 'account-state'
   | 'account-auth'
   | 'watchdog'
@@ -47,11 +45,6 @@ export interface DaemonServiceDef {
 }
 
 export const DAEMON_SERVICES: DaemonServiceDef[] = [
-  {
-    id: 'secrets-broker',
-    title: 'Secrets broker',
-    description: 'Hosts the keychain-backed secrets broker socket so unlocked bundles stay warm across agent runs.',
-  },
   {
     id: 'scheduler',
     title: 'Routine scheduler',
@@ -86,11 +79,6 @@ export const DAEMON_SERVICES: DaemonServiceDef[] = [
     id: 'self-update',
     title: 'Self-update',
     description: 'Checks npm for a newer agents-cli, installs + verifies it, then exits so the OS supervisor relaunches onto the new code (PHNX-3695).',
-  },
-  {
-    id: 'keychain-reap',
-    title: 'Keychain reap',
-    description: 'Reaps orphaned keychain helpers and stuck agents processes.',
   },
   {
     id: 'account-state',

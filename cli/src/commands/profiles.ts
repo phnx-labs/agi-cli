@@ -32,7 +32,7 @@ import {
   secretsKeychainItem,
   setKeychainToken,
 } from '../lib/secrets-client.js';
-import type { SecretsBundle } from '../lib/secrets/bundles.js';
+import type { SecretsBundle } from '../lib/secrets-types.js';
 import { isInteractiveTerminal } from './utils.js';
 import { ALL_AGENT_IDS } from '../lib/agents.js';
 import { findAccount } from '../lib/account-registry.js';

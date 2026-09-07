@@ -28,19 +28,19 @@ never permission to signal it, erase its files, or launch a duplicate.
 escalates and waits again; it removes a registry marker only after death is
 observed, so a wedged duplicate cannot survive while becoming invisible.
 
-**Two runtime models coexist today (RUSH-3193 plus PHNX-3265/PHNX-3608/PHNX-3695 migrated 20 of 21
-declared services; 1 declared service remains inline).** `cli/src/lib/daemon-services.ts`
-defines `DaemonServiceId` (21 ids:
-`secrets-broker`, `scheduler`, `catchup`, `monitors`, `browser-ipc`,
-`webhook-receiver`, `self-heal`, `self-update`, `keychain-reap`, `account-state`, `account-auth`,
-`watchdog`, `device-probe`, `state-dir-check`, `session-index`, `auth-sync`,
-`daemon-heartbeat`, `tmux-reap`, `browser-task-reap`, `session-state`,
-`usage-sync`) — the
-catalog every id in `runDaemon()` is expected to register under, whichever
-model it uses.
+**Two runtime models coexist today (RUSH-3193 plus PHNX-3265/PHNX-3608/PHNX-3695
+migrated every declared service but one onto the supervisor; 1 declared service
+remains inline).** `cli/src/lib/daemon-services.ts` defines `DaemonServiceId` —
+the catalog every id in `runDaemon()` is expected to register under, whichever
+model it uses. Two services that used to live here, `secrets-broker` and
+`keychain-reap`, moved out of this daemon entirely with the standalone
+`secrets` engine (PHNX-3989 OWN-1) — this daemon no longer hosts, self-heals,
+or reaps that broker at all; `agents daemon status`/`services` only probes its
+reachability (`probeSecretsBroker`, `commands/daemon.ts`), reporting a health
+record of `null` for it.
 
-- **Supervised (`ServiceSupervisor`, `supervisor.ts`), 20 services:**
-  `secrets-broker` (`secrets-broker-service.ts`), `browser-ipc`
+- **Supervised (`ServiceSupervisor`, `supervisor.ts`):**
+  `browser-ipc`
   (`browser-ipc-service.ts`), `account-state` + `account-auth`
   (`account-state-daemon-service.ts` — PHNX-3608 split the old single
   account-state service into `AccountUsageService` and `AccountAuthService`, two
@@ -51,7 +51,7 @@ model it uses.
   (`session-index-service.ts`), `monitors` (`monitor-engine-service.ts`)
   (all P1/P2), and — since P3 — `watchdog` (`watchdog-service.ts`),
   `device-probe` (`device-probe-service.ts`), `self-heal`
-  (`self-heal-service.ts`), `keychain-reap` (`keychain-reap-service.ts`), and
+  (`self-heal-service.ts`), and
   `state-dir-check` (`state-dir-check-service.ts`), `session-state`
   (`session-state-service.ts`), and `webhook-receiver`
   (`webhook-receiver-service.ts`), `daemon-heartbeat`
@@ -321,8 +321,11 @@ new periodic supervised service — the daemon previously ran with
 `AGENTS_CLI_DISABLE_AUTO_UPDATE=1` forced on (`bootstrap.ts`), so R5 ("the
 installed CLI auto-updates") held for the interactive CLI but silently did NOT
 hold for the one process that runs unattended for days. `agents daemon
-services` now reports measured health for 20 of 21 declared services and
-infers only `scheduler`.
+services` now reports measured health for every declared service but one
+and infers only `scheduler`. (Two services counted in the P2/P3 history
+above, `secrets-broker` and `keychain-reap`, no longer exist in this daemon
+at all — they moved out entirely with the standalone `secrets` engine,
+PHNX-3989 OWN-1.)
 This doc's Current architecture section
 above is the source of truth for all of it.
 

@@ -10,9 +10,9 @@
        sufficient (verified empirically; the heavier
        allow-unsigned-executable-memory / disable-executable-page-protection
        exceptions from bun's docs are NOT needed).
-       This is deliberately NOT keychain-entitlements.plist: the CLI never
-       touches the keychain itself - that is brokered through the separately
-       signed "Agents CLI.app" helper (scripts/build-keychain-helper.sh). -->
+       This CLI never touches the OS keychain itself - that is the standalone
+       `secrets` engine's job (PHNX-3989), a separate signed helper release
+       entirely outside this repo. -->
   <key>com.apple.security.cs.allow-jit</key>
   <true/>
 </dict>

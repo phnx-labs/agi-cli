@@ -30,8 +30,8 @@ function sh(args: string[]): { status: number; out: string } {
 const describeUnix = process.platform === 'win32' ? describe.skip : describe;
 
 describeUnix('release-manifest.sh', () => {
-  it('input-digest is stable for unchanged computer-mac / keychain / menubar inputs', () => {
-    for (const helper of ['computer-mac', 'keychain', 'menubar'] as const) {
+  it('input-digest is stable for unchanged computer-mac / menubar inputs', () => {
+    for (const helper of ['computer-mac', 'menubar'] as const) {
       const a = sh(['input-digest', '--repo-root', REPO, '--helper', helper]);
       const b = sh(['input-digest', '--repo-root', REPO, '--helper', helper]);
       expect(a.status, a.out).toBe(0);
@@ -47,8 +47,8 @@ describeUnix('release-manifest.sh', () => {
     expect(created.status, created.out).toBe(0);
     fs.writeFileSync(file, created.out);
 
-    const digest = sh(['input-digest', '--repo-root', REPO, '--helper', 'keychain']).out.trim();
-    const asset = path.join(dir, 'keychain.bin');
+    const digest = sh(['input-digest', '--repo-root', REPO, '--helper', 'computer-mac']).out.trim();
+    const asset = path.join(dir, 'computer-mac.bin');
     fs.writeFileSync(asset, 'signed-bytes');
     const sha = spawnSync('sha256sum', [asset], { encoding: 'utf-8' });
     const assetDigest =
@@ -61,7 +61,7 @@ describeUnix('release-manifest.sh', () => {
       '--file',
       file,
       '--helper',
-      'keychain',
+      'computer-mac',
       '--helper-version',
       '3.0.0',
       '--input-digest',
@@ -75,7 +75,7 @@ describeUnix('release-manifest.sh', () => {
     ]);
     expect(put.status, put.out).toBe(0);
 
-    const reuse = sh(['reuse', '--file', file, '--helper', 'keychain', '--input-digest', digest]);
+    const reuse = sh(['reuse', '--file', file, '--helper', 'computer-mac', '--input-digest', digest]);
     expect(reuse.status, reuse.out).toBe(0);
     expect(JSON.parse(reuse.out).assetDigest).toBe(assetDigest);
 
@@ -89,7 +89,7 @@ describeUnix('release-manifest.sh', () => {
       '--file',
       file,
       '--helper',
-      'keychain',
+      'computer-mac',
       '--input-digest',
       'sha256:0000000000000000000000000000000000000000000000000000000000000000',
     ]);
@@ -141,8 +141,8 @@ describeUnix('release-manifest.sh', () => {
     const dir = tmp('rel-manifest-copy-');
     const file = path.join(dir, 'manifest.json');
     fs.writeFileSync(file, sh(['new', '--cli-version', '1.22.40', '--cli-tree', 'abc']).out);
-    const digest = sh(['input-digest', '--repo-root', REPO, '--helper', 'keychain']).out.trim();
-    const asset = path.join(dir, 'keychain-src.bin');
+    const digest = sh(['input-digest', '--repo-root', REPO, '--helper', 'computer-mac']).out.trim();
+    const asset = path.join(dir, 'computer-mac-src.bin');
     fs.writeFileSync(asset, 'signed-helper-bytes');
     const sum = spawnSync(process.platform === 'linux' ? 'sha256sum' : 'shasum',
       process.platform === 'linux' ? [asset] : ['-a', '256', asset], { encoding: 'utf-8' });
@@ -153,7 +153,7 @@ describeUnix('release-manifest.sh', () => {
         '--file',
         file,
         '--helper',
-        'keychain',
+        'computer-mac',
         '--helper-version',
         '3.0.0',
         '--input-digest',
@@ -165,7 +165,7 @@ describeUnix('release-manifest.sh', () => {
       ]).status,
     ).toBe(0);
     const dest = path.join(dir, 'out');
-    const copied = sh(['copy-asset', '--file', file, '--helper', 'keychain', '--asset-path', dest]);
+    const copied = sh(['copy-asset', '--file', file, '--helper', 'computer-mac', '--asset-path', dest]);
     expect(copied.status, copied.out).toBe(0);
     expect(fs.readFileSync(copied.out.trim())).toEqual(fs.readFileSync(asset));
   });

@@ -102,51 +102,49 @@ describe('resource profiles', () => {
     expect(JSON.parse(result.stdout)).toEqual(['keep']);
   });
 
-  it('filters secrets listing and injection through the active profile', () => {
+  // PHNX-3989: the standalone `secrets` engine has no concept of a resource
+  // profile (DEP-1) — the old in-repo engine used to auto-filter listBundles()
+  // and auto-reject readAndResolveBundleEnv() for an inactive bundle, INSIDE
+  // bundles.ts. That enforcement point is gone with the engine; the policy now
+  // lives entirely in agents-cli (`secrets-policy.ts`'s
+  // resolveSecretsContextForRun / resolveAllowedBundlesForActiveProfile),
+  // which computes the allowed set from a real (unfiltered) bundle listing and
+  // forwards it as `SecretsContext.allowedBundles` for the standalone to
+  // enforce server-side. This proves the agents-cli-owned half: the computed
+  // context is exactly the profile-restricted set, derived from the real
+  // standalone's own listing.
+  it('computes SecretsContext.allowedBundles from the active profile against the real bundle listing', () => {
     const home = makeHome();
     const result = runProbe(home, `
       const { setActiveResourceProfile, upsertResourceProfilePreset } = await import('./src/lib/resource-profiles.ts');
-      const { setKeychainBackendForTest } = await import('./src/lib/secrets/index.ts');
-      const { listBundles, readAndResolveBundleEnv, writeBundle } = await import('./src/lib/secrets/bundles.ts');
+      const { listBundles, writeBundle } = await import('./src/lib/secrets-client.ts');
+      const { resolveSecretsContextForRun } = await import('./src/lib/secrets-policy.ts');
 
-      class MemBackend {
-        store = new Map();
-        has(item) { return this.store.has(item); }
-        get(item) {
-          const value = this.store.get(item);
-          if (value === undefined) throw new Error('missing ' + item);
-          return value;
-        }
-        set(item, value) { this.store.set(item, value); }
-        delete(item) { return this.store.delete(item); }
-        list(prefix) { return [...this.store.keys()].filter((key) => key.startsWith(prefix)); }
-      }
+      await writeBundle({ name: 'prod', vars: { API_KEY: { value: 'prod-key' } } });
+      await writeBundle({ name: 'personal', vars: { API_KEY: { value: 'personal-key' } } });
 
-      setKeychainBackendForTest(new MemBackend());
-      writeBundle({ name: 'prod', vars: { API_KEY: { value: 'prod-key' } } });
-      writeBundle({ name: 'personal', vars: { API_KEY: { value: 'personal-key' } } });
+      const noProfileContext = await resolveSecretsContextForRun('claude');
 
       upsertResourceProfilePreset('work', { secrets: ['prod'] });
       setActiveResourceProfile('work');
 
-      let inactiveError = '';
-      try {
-        readAndResolveBundleEnv('personal', { caller: 'test' });
-      } catch (err) {
-        inactiveError = err.message;
-      }
+      const scopedContext = await resolveSecretsContextForRun('claude');
       console.log(JSON.stringify({
-        bundles: listBundles().map((bundle) => bundle.name),
-        prod: readAndResolveBundleEnv('prod', { caller: 'test' }).env,
-        inactiveError,
+        bundles: (await listBundles()).map((bundle) => bundle.name).sort(),
+        noProfileContext,
+        scopedContext,
       }));
     `);
 
     expect(result.status, result.stderr).toBe(0);
     expect(JSON.parse(result.stdout)).toEqual({
-      bundles: ['prod'],
-      prod: { API_KEY: 'prod-key' },
-      inactiveError: "Secrets bundle 'personal' is not active in profile 'work'.",
+      // The real listing is never auto-filtered — that filtering is now the
+      // caller's job (resolveAllowedBundlesForActiveProfile), not the engine's.
+      bundles: ['personal', 'prod'],
+      // No active profile: full trust, only the scope rides the context.
+      noProfileContext: { scope: 'claude' },
+      // Active profile: allowedBundles is exactly the profile's restricted set.
+      scopedContext: { allowedBundles: ['prod'], scope: 'claude' },
     });
   });
 });

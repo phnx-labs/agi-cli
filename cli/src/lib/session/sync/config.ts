@@ -12,7 +12,7 @@
  * keychain on macOS, libsecret on Linux) — never from env or disk.
  */
 
-import { readAndResolveBundleEnv } from '../../secrets/bundles.js';
+import { readAndResolveBundleEnvSync } from '../../secrets-client.js';
 
 /** Secrets bundle holding the R2 credentials. */
 export const SYNC_BUNDLE = 'r2.backups';
@@ -50,7 +50,7 @@ function resolveR2Config(): R2Config {
   // and degrades to no-transport (sync disabled) with no prompt and no crash —
   // unlock once (`agents secrets unlock r2.backups`) or set it no-ACL
   // (`agents secrets policy r2.backups never`) for silent zero-friction sync.
-  const { env } = readAndResolveBundleEnv(SYNC_BUNDLE, { caller: 'session-transport', agentOnly: true });
+  const { env } = readAndResolveBundleEnvSync(SYNC_BUNDLE, { caller: 'session-transport', agentOnly: true });
   const accountId = env.R2_ACCOUNT_ID?.trim();
   const bucket = env.R2_BUCKET_NAME?.trim();
   const accessKeyId = env.R2_ACCESS_KEY_ID?.trim();

@@ -89,9 +89,12 @@ state, or sit next to credentials, and have no normative contract today:
    cross-teammate seam is unguarded by any requirement.
 3. **`cloud`** (`commands/cloud.ts`) — dispatches to external infrastructure whose state
    lives off this machine entirely.
-4. **`wallet`, `helper`** (`commands/wallet.ts`, `commands/helper.ts`) — a payment-card
-   vault and the signed Keychain helper sit directly against the credential boundary
-   that [§Secrets](#secrets) specifies, without inheriting any of its requirements.
+4. **`wallet`** (`commands/wallet.ts`) — a payment-card vault sitting directly
+   against the credential boundary that [§Secrets](#secrets) specifies,
+   without inheriting any of its requirements. (The signed keychain-broker
+   helper this used to also name moved out of this repo entirely with the
+   standalone `secrets` engine, PHNX-3989 — its own contract now lives in
+   `phnx-labs/secrets-cli`.)
 5. **`sync` / `apply` / `status`** — the fleet-reconciliation trio that mutates every
    installed version's config on every machine.
 
@@ -1715,745 +1718,146 @@ and its assistant text is searchable again, and the ledger's
 
 ## Secrets
 
-This is the **contract** for `agents secrets`: what a human, an agent, or a
-downstream tool is entitled to rely on, stated as testable requirements — not a
-how-to (that is [secrets.md](secrets.md)). It exists because features have
-regressed by quietly deviating from an unwritten contract. When code and this
-spec disagree, one of them is a bug; fixing the drift is mandatory, not optional.
+This is the **contract** for `agents secrets` and the boundary between
+agents-cli and the standalone secrets engine (PHNX-3989) — what a human, an
+agent, or a downstream tool is entitled to rely on, stated as testable
+requirements — not a how-to (that is [secrets.md](secrets.md)). When code and
+this spec disagree, one of them is a bug; fixing the drift is mandatory, not
+optional.
 
 Requirement keywords **MUST / MUST NOT / SHOULD / MAY** are used per
 [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119). Every requirement cites the
-`file:line` that implements it, under `cli/src/` unless noted. Behavioral
-scenarios are written Given/When/Then so they map 1:1 to tests.
+`file:line` that implements it, under `cli/src/` unless noted.
 
 ---
 
-### 1. Purpose & scope
+### 1. Purpose & scope, and the extraction boundary
 
-`agents secrets` exists to **share credentials between humans and agents safely
-and without noise**: a human (or agent) stashes a secret once; any later agent
-run injects it into the child process that needs it, on any of the user's
-machines, without the value ever landing on disk as plaintext, in shell history,
-in the agent's context window, or in the session transcript — and without a wall
-of prompts or output.
+`agents secrets` exists to **share credentials between humans and agents
+safely and without noise**: a human (or agent) stashes a secret once; any
+later agent run injects it into the child process that needs it, on any of
+the user's machines, without the value ever landing on disk as plaintext, in
+shell history, in the agent's context window, or in the session transcript —
+and without a wall of prompts or output.
 
-**In scope:** storage backends (macOS Keychain, Linux libsecret, Windows
-Credential Manager, encrypted-file fallback, age synced vault), the bundle model,
-the human↔agent and agent↔agent sharing flows, the plaintext trust boundary,
-prompt/noise suppression, and cross-fleet sync.
+**The engine — storage backends, the bundle model, materialization
+guarantees, prompt/noise suppression, and cross-machine transport — lives
+entirely in the standalone [`phnx-labs/secrets-cli`](https://github.com/phnx-labs/secrets-cli)
+repository.** That repository owns the normative contract for all of it (its
+own `SEC-*`/`CTX-*`/`RPC-*` requirement families); this document does not
+restate them. agents-cli reaches the engine **only** through the bounded
+process client (`cli/src/lib/secrets-client.ts`, documented in
+[secrets-client.md](secrets-client.md)) and never rebundles it:
 
-**Out of scope (non-goals):** defending a logged-in user against another binary
-running as that same user (§7); being a team secret-manager with server-side
-access control (that is 1Password/Vault; this tool is device-local first).
+- **DIST-1 (MUST).** agents-cli MUST NOT package the extracted engine. A
+  missing or unreachable `secrets` executable MUST fail loud with install
+  guidance (`resolveSecretsBin`, `secrets-client.ts`) — there is no fallback to
+  an in-repo implementation, because none exists. Verified by a real `npm
+  pack` + `tar tzf` of the produced tarball (`scripts/packed-tarball.test.ts`).
+- **RPC-1 (MUST).** The client MUST speak the standalone's private
+  request/response protocol over inherited pipes (fd 3 in, fd 4 out),
+  separate from the child's stdout, and MUST verify the protocol version via a
+  handshake before the first real request (`secrets-client.ts`).
+- **MIG-1 (MUST).** `SECRETS_HOME` MUST default to the user agents dir
+  (`getUserAgentsDir()`, `~/.agents`) so the standalone adopts a user's
+  pre-extraction store **in place** — no copy, no re-encryption. An explicit
+  `SECRETS_HOME` in the caller's environment wins (`buildServeEnv`).
+- **OWN-1 (MUST).** The agents-cli daemon MUST NOT host or take over the
+  secrets broker. The standalone owns its own broker lifecycle exclusively;
+  `agents daemon status`/`services` only probe its reachability
+  (`probeSecretsBroker`, `commands/daemon.ts`) and report a health record of
+  `null` for it, never a daemon-recorded one.
+- **CTX-1 (MUST).** agents-cli MUST compute and forward its own access policy
+  as an opaque `SecretsContext` on every bounded client call; the client
+  itself only carries what the caller supplies, never computes policy
+  (`secrets-client.ts`, `secrets-policy.ts`). See §3 below for what that
+  policy is.
 
 ---
 
 ### 2. Terminology
 
-- **Bundle** — a named container mapping env-var names to values or typed refs
-  (`SecretsBundle`, `lib/secrets/bundles.ts:237-255`).
-- **Ref kind** — how a var's value is sourced: `keychain` / `literal` / `env` /
-  `file` / `exec` (`REF_PATTERN`, `lib/secrets/index.ts:51`).
-- **Backend** — where values physically live: `keychain` | `file` | `vault`
-  (`SecretsBackend`, `lib/secrets/bundles.ts:64`).
-- **Policy (tier)** — per-bundle prompt tier: `always` | `hold` | `never`
-  (`SecretsPolicy`, `lib/secrets/bundles.ts:218`; persisted under the legacy wire
-  key `tier`, where `session`/`daily` ≡ `hold`, `biometry` ≡ `always`, `none` ≡
-  `never`, `lib/secrets/bundles.ts:452-454`). `hold` is the default
-  (`secretsDefaultPolicy`, `lib/secrets/bundles.ts:463-465`): one Touch ID, then
-  held silently for the hold window. `always` prompts every read. `never` is
-  silent forever (SEC-19, SEC-29).
-- **Broker / secrets-agent** — the macOS-only in-memory holder that dedups Touch
-  ID across processes (`lib/secrets/agent.ts`).
+- **Bundle** — a named container mapping env-var names to values or typed
+  refs. Owned entirely by the standalone; agents-cli only re-declares the wire
+  shape (`SecretsBundle`, `cli/src/lib/secrets-types.ts`).
+- **Reserved store** — an agents-cli naming convention, not an engine concept:
+  `__<harness>__` (one per `ALL_AGENT_IDS` entry) plus the legacy `auth` alias
+  for Claude (`cli/src/lib/reserved-stores.ts`).
 - **Materialize** — print a resolved plaintext value to this process's stdout
-  (where an agent reader captures it into context + transcript).
+  (where an agent reader captures it into context + transcript). Governed
+  entirely by the standalone now (its own `MAT-1`).
 - **Inject** — place a resolved value only into a child process's environment
   (invisible to the agent reader).
+- **Scope** — the opaque harness-name string agents-cli forwards on a
+  `SecretsContext`, folded into the standalone's own resolution/audit.
 
 ---
 
-### 3. Requirements
+### 3. Requirements agents-cli itself still owns
 
-#### 3.1 Storage boundary — plaintext never on disk
+None of this is portable secret-storage behavior, so none of it lives in the
+engine.
 
-- **SEC-1 (MUST).** A secret value MUST NOT exist as on-disk plaintext in the
-  primary path on any platform. macOS stores it in the data-protection Keychain
-  (`lib/secrets/keychain-helper.swift:47-53`); Linux via `secret-tool`/libsecret
-  (`lib/secrets/linux.ts:161-166`); Windows via Credential Manager
-  `CRED_TYPE_GENERIC`/`CRED_PERSIST_LOCAL_MACHINE` (`lib/secrets/windows.ts:89-90`).
-- **SEC-2 (MUST).** When no OS store is usable (headless Linux/Windows with a
-  locked/absent keyring, or an opt-in `--backend file` bundle), the value MUST be
-  encrypted at rest with AES-256-GCM under a scrypt-derived key, written mode
-  `0600` in a `0700` directory (`lib/secrets/filestore.ts:259-260,267-270,324-328,44`).
-- **SEC-3 (MUST).** `--synced` bundles MUST be sealed in a single age-encrypted
-  `~/.agents/vault.age` blob (mode `0600`, scrypt work-factor 2^18) via the
-  re-invoked `agents __vault-age-helper` child, never written as plaintext
-  (`lib/secrets/vault.ts:49,209,349`).
-- **SEC-4 (MUST).** Bundle **metadata** (names, descriptions, var list, `--value`
-  literals) MUST be stored WITHOUT the biometry ACL, so enumeration is silent —
-  only actual values carry the policy ACL (`lib/secrets/bundles.ts:602-613`;
-  test `bundles.test.ts:476-495`). Literals are non-sensitive **by contract**;
-  callers MUST NOT put a secret in a `--value` literal.
-- **SEC-5 (SHOULD).** On macOS, stored keychain **service names** SHOULD be
-  opaque HMAC-SHA256 hashes (`agents-cli.h.*`) so a passive enumerator learns
-  only counts/grouping, never bundle/key/provider names
-  (`lib/secrets/index.ts:178-217`). See SEC-CROSS-3 for the platform gap.
-- **SEC-5a (MUST).** The HMAC-key item (`agents-cli.hmackey`) MUST be stored
-  no-ACL and its reads MUST stay prompt-free — it is read before every hashed
-  keychain lookup, so a biometry-ACL'd copy makes nearly every secrets-touching
-  command pop a generic Touch ID sheet. It is written no-ACL (`writeHmacKeyRecord`,
-  `lib/secrets/index.ts`), and a copy an older helper re-stamped with an ACL MUST
-  self-heal: on the first read where hashing is active, an un-healed record is
-  re-stored no-ACL exactly once (`healHmacKeyNoAclOnce`, gated by `healedNoAcl`).
-
-#### 3.2 Materialization boundary — the agent never sees plaintext unless a command says so
-
-- **SEC-6 (MUST).** Every command MUST be on exactly one side of the
-  materialization boundary **by construction** — there is no "sometimes"
-  (`secrets-trust-boundaries.md:28-29`). The classification
-  in §4.2 is normative.
-- **SEC-7 (MUST).** The injection path MUST place resolved values only in the
-  child process env, never on this process's stdout: `agents secrets exec` and
-  `agents run --secrets` build the child env with `buildSecretsExecEnv` and
-  `spawn(..., { stdio: 'inherit', env })` (`commands/secrets.ts:369-376,2006-2009`).
-- **SEC-8 (MUST).** The master passphrase MUST be stripped from every injected
-  child env: `buildSecretsExecEnv` deletes `AGENTS_SECRETS_PASSPHRASE` before
-  spawn (`commands/secrets.ts:369-376`, quoted in
-  `secrets-trust-boundaries.md:61-65`).
-- **SEC-8a (MUST).** A resolved secret value MUST NOT reach any process's
-  command line. SEC-7 keeps values out of stdout and SEC-8 strips the master
-  passphrase, but the tmux launch path put the ENTIRE exec env — every resolved
-  bundle value — into the pane's argv as `exec env K=V … <agent>`, where any
-  process of the same user reads it with a plain `ps -eo command`. The pane now
-  sources a `0600` file it unlinks before `exec`
-  (`buildTmuxAgentCommand` / `writeTmuxEnvFile`, `lib/exec.ts`), so only the file
-  PATH is ever argv-visible. Every key is routed through the file rather than a
-  curated secret-bearing subset, so a newly added credential is covered by
-  construction rather than by remembering to list it. (RUSH-2100. Observed: six
-  live processes on one fleet box carrying `AGENTS_SECRETS_PASSPHRASE`, which
-  decrypts every file-backed bundle on that machine.)
-- **SEC-9 (MUST).** Materializing commands (`view --reveal`, the raw-item
-  `get <item>`, and the marker-gated remote-resolve transport) are the ONLY
-  commands that print a plaintext value. The former public printers are gone
-  (RUSH-2774): `export`'s shell-eval mode (`eval "$(agents secrets export …
-  --plaintext)"`) is deleted outright — `export` without a destination flag
-  refuses and names `secrets exec` / `view --reveal` — and the bundle-key
-  `get <bundle> <KEY>` refuses unconditionally, naming
-  `agents secrets exec <bundle> -- printenv <KEY>` (`commands/secrets.ts`,
-  export action tail + `get` action).
-- **SEC-9b (MUST).** A bundle-materializing command MUST refuse under an **agent
-  invocation context** — `isAgentInvocationContext()`
-  (`lib/secrets/headless.ts`): `AGENTS_RUNTIME`, `AGENT_SESSION_ID`,
-  `AGENTS_SESSION_ID`, or `CLAUDECODE` present — regardless of TTY (an agent
-  inside tmux has one). Anything printed by an agent's shell tool lands in the
-  model's context and the session `.jsonl`; the agent path to values is
-  injection only (`secrets exec`, `run --secrets`). This gate covers
-  `view --reveal` and the transport shape below. The raw-item `get <item>` is
-  **deliberately exempt**: fleet shell hooks run inside agent sessions (they
-  inherit the session env markers) and capture a single ad-hoc token into their
-  own variables, where it never reaches the transcript — a single raw item is
-  the accepted narrower residual, and its reads stay in the value-free audit
-  stream.
-- **SEC-9c (MUST).** The machine-to-machine SSH resolve (`remoteResolveEnv`,
-  `verifyRemoteKeychainPush`, `lib/secrets/remote.ts`) is the sole surviving
-  JSON emitter: `export <b> --plaintext --format json` emits ONLY when
-  `AGENTS_SECRETS_REMOTE_TRANSPORT=1` is present AND SEC-9b's agent gate is
-  clear. Both flags are hidden from help. The marker rides the legacy argv so a
-  newer driver keeps resolving from an older remote during a fleet rollout; an
-  older driver against a newer remote fails loud through the transport's
-  existing "remote agents-cli new enough" error path.
-- **SEC-10 (MUST).** `exec:` refs MUST be gated by the bundle's `allow_exec` at
-  both write and resolve time (`commands/secrets.ts:1388-1390`;
-  `lib/secrets/index.ts:1398-1403`) and MUST run argv-only (`shell:false`,
-  `execFileSync`) so a secret identifier can never inject a shell command
-  (`lib/secrets/index.ts:1404-1405`).
-
-#### 3.3 The "without noise" contract
-
-- **SEC-11 (MUST).** `agents secrets list` and every internal metadata scan MUST
-  complete with no Touch ID prompt and MUST print metadata only, never values
-  (`commands/secrets.ts:991`; SEC-4).
-- **SEC-12 (MUST).** Value reads MUST be batched so a bundle costs at most one
-  Touch ID prompt, not one per key (`commands/secrets.ts:1073-1076`;
-  `lib/secrets/bundles.ts:772-776,1262-1273`).
-- **SEC-13 (MUST).** A headless/detached (no-TTY or agent-runtime) context on macOS MUST resolve
-  broker-only and fail loudly, and MUST NOT pop a Touch ID sheet on the
-  interactive user's screen (`isHeadlessSecretsContext`,
-  `lib/secrets/headless.ts:28-37`, re-exported from `lib/secrets/bundles.ts`;
-  `commands/secrets.ts:1172-1175,1925-1929`;
-  `mcp.ts:112-114`). This covers raw item reads too, not just bundles:
-  `getKeychainToken`/`getKeychainTokens` consult `assertRawKeychainReadAllowed`
-  (`lib/secrets/index.ts:877-899`) BEFORE any helper process is spawned, and
-  throw an actionable error naming the item (and, for bundle-triggered reads,
-  the `agents secrets unlock <bundle>` fix). **Given** a TTY-less process or
-  any `AGENTS_RUNTIME` launch **When** it attempts a read of an ACL-protected
-  keychain item **Then** the read fails fast and no sheet is raised. Reads the
-  caller attests as no-ACL via `silentNoAcl` (bundle metadata per SEC-4,
-  `never`-policy bundles per SEC-19, the unlock session store, the usage OAuth
-  cache) are prompt-free by construction and MUST NOT be blocked by this guard.
-- **SEC-13a (MUST).** An **agent launch** MUST NOT raise a Touch ID sheet on its
-  own **regardless of tty** — a `--interactive` run is still a launch, not a human
-  asking for a secret. The `agents run --secrets <bundle>` injection and the
-  auto-share read therefore resolve `agentOnly: true` unconditionally
-  (`commands/exec.ts` secrets injection; `lib/share/config.ts` `shareRuntimeEnv`),
-  NOT gated on `isHeadlessSecretsContext()`. Gating the launch read on tty let a
-  watchdog's `agents run auto --interactive` (daemon-owned pass)
-  prompt for a `hold` bundle and pile up helper sheets. **Given** an interactive
-  `agents run --secrets <hold-bundle>` whose bundle is not broker-held **When** it
-  launches **Then** it fails fast naming `agents secrets unlock <bundle>`, no sheet.
-  This does NOT cover the explicit `agents artifacts share` / `agents artifacts setup` commands —
-  those are user-initiated, not launches, and keep the `isHeadlessSecretsContext()`
-  gate (`readWriteTokenFromBundle`, `readCloudflareCreds`).
-- **SEC-13b (MUST).** A **deliberate human reveal/run** at a real interactive
-  terminal on a **locked** keychain bundle MUST resolve with **exactly one** Touch
-  ID sheet, then reveal the value / run the command / push the bundle. This covers
-  exactly three commands: `agents secrets view --reveal`, `agents secrets exec`, and
-  `agents secrets export --device` — all three gate `agentOnly` on
-  `isHeadlessSecretsContext() || !isInteractiveTerminal()`
-  (`commands/secrets.ts`), the push forwarding it
-  through `resolveBundleForPush` (`lib/secrets/push.ts:117`, which defaults to
-  `true` so an automated caller that says nothing stays broker-only), and
-  `view --reveal` additionally refusing under SEC-9b's agent gate before any
-  resolve. Conversely, the **automation primitives** — the raw-item
-  `agents secrets get <item>`, the `export` destination variants (`--to-file`,
-  `--to-1password`), and the marker-gated remote-resolve transport (SEC-9c) —
-  MUST stay `agentOnly: true` **unconditionally** and MUST NOT prompt even at an
-  interactive terminal: prompting there would either dump plaintext onto a
-  visible screen or block a `$(…)` capture mid-pipeline. (The former
-  ungated bundle printers, `export --plaintext` shell mode and
-  `get <bundle> <KEY>`, were removed by RUSH-2774 — see SEC-9.)
-  `export --device` is on the human side because neither hazard
-  applies: it prints a key COUNT, never a value, and nothing captures its stdout,
-  so it is strictly less exposed than the `view --reveal` that already prompts.
-  Under an agent (`AGENTS_RUNTIME`) or
-  no TTY, **all** of these stay broker-only and fail closed per SEC-13. **Given** a
-  human at a TTY (no `AGENTS_RUNTIME`) runs `agents secrets view --reveal <locked>`,
-  `agents secrets exec <locked> -- <cmd>`, or `agents secrets export <locked> --device
-  <target>` **When** the bundle is not
-  broker-held **Then** exactly one Touch ID sheet is raised and the value is
-  revealed / command run / bundle pushed; whereas a raw-item `get` or a
-  destination `export` on the same locked bundle
-  fails fast naming `agents secrets unlock <bundle>`, no sheet. This is the
-  reveal-vs-automation split — `view --reveal`/`exec`/`export --device` are the only
-  interactive
-  biometric surfaces besides `unlock` (SEC-13a governs the separate `agents run
-  --secrets` launch-injection path, which is always `agentOnly`).
-- **SEC-14 (MUST).** A broker `get` for a bundle it does not hold MUST return
-  `{ ok:true, hit:false }` — never an error, never a prompt, never a human
-  escalation — and the caller MUST fall through to the real store
-  (`lib/secrets/agent.ts:356-363,840-844`; test `agent.test.ts:43-46`).
-- **SEC-15 (MUST NOT).** The `lib/secrets` layer MUST NOT print a secret **value**
-  to `console.*`; state changes flow through structured audit events whose
-  payloads MUST NOT carry values — only bundle name + key NAMES + count. Every
-  value read and every unlock grant funnels through the canonical
-  `emitSecretAudit` helper (`lib/secrets/audit.ts`), which emits `secrets.get`
-  (a value was read) or `secrets.unlocked` (a bundle was granted into the broker),
-  value-free, tagged with the resolving agent scope
-  (`lib/secrets/bundles.ts` reader sites; `commands/secrets.ts` `view --reveal` /
-  raw `get` / `unlock`; `lib/secrets/sync.ts`; `lib/secrets/remote.ts`). (The lib layer is *not* fully `console`-free — a
-  few operational diagnostics use `console.error` for names/paths only, e.g.
-  `lib/secrets/index.ts:500,505`, `lib/secrets/vault-age-helper.ts:41`; the
-  invariant is "no value on any stream," not "no console at all.")
-- **SEC-16 (MUST).** The following non-actionable operations — and no others
-  without a change to this spec — MUST be silent no-ops rather than errors: `lock`/`unlock` on a non-macOS host
-  (exit 0, no value output), a best-effort session-store write that fails
-  (resolution still succeeds), a throttled `last_used` stamp, and a best-effort
-  usage-metadata write to the read-model DB (`~/.agents/secrets/secrets.db`) that
-  fails or is suppressed by `AGENTS_NO_USAGE_TRACK`
-  (`commands/secrets.ts:2219,2282`; `lib/secrets/session-store.ts:24-25`;
-  `lib/secrets/bundles.ts:938-945`; `lib/secrets/usage-db.ts`). A silent no-op MUST
-  NOT be used to swallow an actionable failure (a real resolution error, a missing
-  bundle, a decrypt failure) — those MUST surface.
-- **SEC-17 (SHOULD).** `agents doctor` SHOULD warn (name + line only, never the
-  value) when a credential-shaped var is exported from a shell rc file, and point
-  the user at `agents secrets` (`lib/secrets/rc-hygiene.ts:16-17` for the scan;
-  the `rc-secret-export` finding in `lib/devices/doctor-findings.ts` for the
-  warning the user sees).
-- **SEC-26 (MUST).** `emitSecretAudit` (`lib/secrets/audit.ts`) MUST be the single
-  write path for every secret lifecycle/access event — create, import, export,
-  view, access (read), unlock. One call writes to BOTH the append-only
-  `~/.agents/.history/events/YYYY-MM-DD/events.jsonl` audit log (via `emit()`) AND the derived per-bundle
-  usage read-model DB (`~/.agents/secrets/secrets.db`, `lib/secrets/usage-db.ts`);
-  there MUST be no standalone write path parallel to it. **Given** an access is
-  recorded **When** it flows through `emitSecretAudit` **Then** it appears exactly
-  once in each sink. Both sinks MUST be **value-free** — bundle name, event kind,
-  key count, resolving agent/host, and a status only, never a secret value. The
-  reads the read-model drives — the `secrets view` usage summary + held state,
-  `secrets list --sort used|uses`, and `secrets activity` — MUST NOT expose a value
-  and MUST degrade cleanly (no usage shown) when the DB is unavailable
-  (`commands/secrets.ts` `view` / `list` / `activity` actions). The read-model is a
-  bounded 90-day history; the full audit trail is `agents events --module secrets`.
-- **SEC-27 (MUST).** A cancelled or failed interactive keychain read MUST open a
-  short-TTL negative memo (5 minutes, `KEYCHAIN_READ_BACKOFF_TTL_MS`, keyed by
-  the requested item name, under `~/.agents/.cache/keychain-read-backoff/` —
-  `lib/secrets/read-backoff.ts`) so a polling caller cannot re-raise a Touch ID
-  sheet every few seconds; a subsequent read of the same item within the window
-  MUST fail fast with the back-off error instead of prompting
-  (`assertRawKeychainReadAllowed`, `lib/secrets/index.ts:877-899`). Any
-  successful read or write (or delete) of the item MUST clear the memo. A plain
-  miss (helper exit 1, item not found) MUST NOT open the memo — no prompt was
-  raised. The memo is regenerable, best-effort state and MUST carry no secret
-  material (item name + deadline only). **Given** a user cancels a read's
-  prompt **When** a poller retries the read within 5 minutes **Then** the retry
-  throws the back-off error without spawning the helper.
-- **SEC-28 (MUST).** **Every secret access is attributable to the session that
-  triggered it — no exceptions.** Every value read and every unlock recorded via
-  `emitSecretAudit` (SEC-26) MUST carry the **requesting** identity intact: agent,
-  `sessionId`, `parentSessionId`, `pid`, and `caller` (provenance-stamped in
-  `lib/secrets/audit.ts` / `lib/secrets/event-provenance.ts`). The requesting
-  session MUST NOT be overwritten by the global-scope sentinel `*`
-  (`GLOBAL_HARNESS`, `lib/secrets/scope.ts:20`): a global-grant read records the
-  scope separately but MUST preserve the session that asked (`lib/secrets/bundles.ts`
-  reader sites, where the `opts.agent || AGENTS_AGENT_NAME || GLOBAL_HARNESS`
-  collapse currently discards it). The usage read-model MUST persist enough to
-  answer "which session read which bundle" — `sessionId` + `bundle`
-  (`lib/secrets/usage-db.ts`) — and `agents events` MUST expose `--session` and
-  `--bundle` filters over secrets events (`commands/events.ts`,
-  `lib/events/event-stream.ts`). A read that hit the ACL-gated (potentially
-  prompting) keychain path SHOULD be distinguishable in the log from a silent broker
-  / no-ACL read, so a Touch ID sheet is traceable to its trigger even though the
-  macOS sheet itself emits no event. **No read path is exempt** from the audit
-  funnel — a code path that resolves a value without an `emitSecretAudit` record is a
-  spec violation.
-- **SEC-30 (MUST).** **An existence answer and a read answer MUST NOT contradict, and a
-  read refusal MUST be reported as a refusal, never as absence.** A bundle read MUST
-  build its keychain read set from the bundle's **declared keys** (the `keychain:` refs
-  in its metadata), not solely from an enumeration of its namespace: the macOS helper's
-  `list` omits biometry-ACL'd items (`kSecUseAuthenticationUISkip`) and skips the whole
-  data-protection pass on a locked keychain (`keychain-helper.swift` `list`), so an
-  enumeration-only read set turns a present secret into a false "not found"
-  (`readAndResolveBundleEnv` unions the declared keys with the enumeration —
-  `lib/secrets/bundles.ts`). When a declared item still resolves to no value, the read
-  MUST classify it before erroring: an item that `hasKeychainToken` reports **present**
-  (which counts `errSecInteractionNotAllowed` as present, matching what `secrets view`
-  shows) MUST be reported as **present-but-unreadable** with how to unlock, and MUST NOT
-  print a remediation that would overwrite it (`agents secrets add`); only a **proven
-  absence** may print the add remediation (`missingBundleKeychainItemError`,
-  `lib/secrets/bundles.ts`). **Given** `secrets view` shows a key as `stored` **When**
-  `secrets view --reveal` / `unlock` reads it **Then** it returns the value or an
-  explicit read-failure — never `stored item '<item>' not found`.
-- **SEC-31 (MUST).** An existence or delete probe that cannot reach the keychain MUST
-  fail loud, never answer a false "no". `hasKeychainToken` and `deleteKeychainToken`
-  (`lib/secrets/index.ts`) MUST treat only the helper's exit 0 (present / deleted) and
-  exit 1 (genuinely absent / nothing to delete) as answers; any other outcome — helper
-  error, spawn failure, or the SIGKILL timeout (`spawnKeychainHelper`,
-  `KeychainHelperTimeoutError`) — MUST throw a reachability error rather than return
-  `false`, because a swallowed failure silently disarms the destructive-write guards
-  (`bundleExists`, the `--force` overwrite checks, the rename/purge) that key on these
-  primitives (RUSH-2235). Every keychain-helper spawn stays bounded by that timeout +
-  SIGKILL so a wedged `coreauthd` can never hang the parent (RUSH-2231/2232).
-
-#### 3.4 Authorization model
-
-- **SEC-18 (MUST).** Authorization MUST be **filesystem-scoped, not
-  role-scoped**: there is no human-vs-agent identity branch. Broker requests
-  (except liveness `ping`) MUST carry a per-broker capability token stored `0600`
-  in a `0700` dir; a missing/empty token MUST reject everything but `ping`
-  (`lib/secrets/agent.ts:188-195,400-416`).
-- **SEC-19 (MUST).** The `never` policy MUST store items with no biometry ACL
-  (fully silent reads) and MUST be gated behind explicit acknowledgment
-  (`--i-understand` or an interactive confirm), because it is the
-  on-disk-plaintext-equivalent downgrade (`keychain-helper.swift:557-559`;
-  `commands/secrets.ts:2457-2483`). It MUST NOT be settable as a global default.
-  **Enforcement is on the stored item, not the metadata label.** macOS enforces
-  the ACL baked onto the value item at write time on every read, regardless of the
-  bundle's declared tier — so the item's actual ACL MUST match the tier at all
-  times, not only at first write:
-    - Changing a bundle's tier MUST reconcile the stored **value items'** ACL to the
-      new tier (re-store via `set-no-acl` / `set`), not only rewrite the metadata
-      item — a metadata-only tier change that leaves a biometry ACL on a `never`
-      item is a spec violation (`reAclBundleItems` in `lib/secrets/bundles.ts`, from
-      the `policy` command `commands/secrets.ts`).
-    - A read that finds a `never` bundle's item still carrying a biometry ACL (drift
-      from a legacy write or an interrupted change) MUST self-heal it to no-ACL
-      rather than prompt, so the bundle converges to silent instead of prompting
-      forever (`lib/secrets/bundles.ts` read path).
-    - Any just-in-time keychain migration/rehome MUST honor the owning bundle's tier
-      — a `never` key MUST NOT be re-stamped with a biometry ACL on read
-      (`keychain-helper.swift` `migrateInline` / `rehomeOrphan`).
-- **SEC-20 (MUST).** Destructive ops (`delete`) MUST confirm interactively and
-  MUST refuse in a non-interactive shell without `--yes`
-  (`commands/secrets.ts:1565-1582`).
-- **SEC-29 (MUST).** **Unlock once, stays unlocked — the durability contract.** A
-  bundle on the `never` tier MUST read silently *forever* once set: through process
-  death, system sleep, a full power-off/reboot, an arbitrarily long gap (30+ days),
-  an agi-cli upgrade, **and a macOS upgrade** — with **no Touch ID, no
-  passphrase, and no environment variable** — until the value is rotated, the tier
-  is changed, or the bundle is deleted. This is achievable only because a `never`
-  item carries no biometric ACL (`set-no-acl`,
-  `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`,
-  `keychain-helper.swift:571-577`): it survives reboot (readable after the first
-  post-boot unlock) and an OS upgrade (device-local, not biometry-bound). A
-  biometry-gated tier **cannot** satisfy this — `.biometryCurrentSet`
-  (`keychain-helper.swift:43`) deliberately re-locks when enrolled biometrics change
-  (a common OS-upgrade side effect), and `kSecAttrAccessibleWhenUnlocked` blocks
-  locked-screen reads — so "never re-prompts across an OS upgrade" and
-  "biometry-gated per read" are mutually exclusive by construction. The `hold` tier
-  gives the weaker durability: one prompt, then held silently for the hold window,
-  surviving a broker restart / agi-cli upgrade via the durable no-ACL session
-  store (`lib/secrets/session-store.ts:1-26`) but re-prompting once after the window
-  expires or biometrics are re-enrolled.
-- **SEC-29a (MUST NOT).** The default keychain flow MUST NOT require a passphrase or
-  read one from an environment variable to keep a bundle unlocked. On macOS the
-  Keychain is gated by the OS login only; `AGENTS_SECRETS_PASSPHRASE` applies
-  **exclusively** to the encrypted-file store (SEC-2) — it is that store's master
-  key and nothing else — and MUST NOT be introduced into, or required by, the
-  keychain path (SEC-8 already strips it from every injected child env). The
-  age-vault backend (SEC-3) does NOT read it; that backend is gated by
-  `agents secrets vault unlock` (`lib/secrets/vault.ts`).
-- **SEC-29b (MUST).** Transport passphrases MUST use `AGENTS_SYNC_PASSPHRASE`, not
-  the file-store master key: `push`/`pull` (SEC-23) and the portable
-  `export --to-file` / `import --from-file` envelope seal data for a DIFFERENT
-  trust boundary than the local store. `AGENTS_SECRETS_PASSPHRASE` MUST remain
-  honoured there only as a deprecated fallback, warned exactly once per process
-  (`lib/secrets/sync-passphrase.ts`). Overloading one variable for both is what
-  put a file-store master key into a shell rc file on seven worker boxes
-  (RUSH-1968): the store stopped needing a passphrase, headless sync still did,
-  so the master key was exported fleet-wide to satisfy sync.
-
-#### 3.5 Sharing & sync
-
-- **SEC-21 (MUST).** `agents secrets exec <bundle>@<host>` / `--device` /
-  `run --secrets <bundle>@<host>` MUST resolve a peer's bundle over hardened SSH,
-  inject the values ephemerally, and MUST NOT write them to this machine's
-  keychain or disk (`lib/secrets/remote.ts:11,165-234`).
-- **SEC-22 (MUST).** A peer's exported env is untrusted input: dangerous
-  override-shaped keys (loader/interpreter vars, `GIT_*`, `*_PROXY`,
-  `*_BASE_URL`) MUST be stripped, with one stderr line, before injection
-  (`lib/secrets/remote.ts:29-51,214-219`).
-- **SEC-23 (MUST).** `push`/`pull` MUST seal the bundle client-side with
-  AES-256-GCM (PBKDF2-SHA256, 600k iterations, per-envelope random salt+IV, GCM
-  tag verified) before upload; the sync backend MUST only ever see ciphertext +
-  KDF params (`lib/secrets/sync.ts:37-104`; `lib/secrets/sync-backend.ts:14-15,43-52`).
-- **SEC-24 (MUST).** `pull` MUST refuse to overwrite an existing local bundle
-  without `--force` (`lib/secrets/sync.ts:272-278`). Sync has no merge/CRDT model:
-  `push` is an unconditional overwrite of the remote copy and `updated_at` is
-  stored but never consulted for conflict resolution
-  (`lib/secrets/sync.ts:230-251`).
-- **SEC-25 (MUST).** `import-keyring` and `migrate-acl` MUST be **dry-run by
-  default** (`--commit` to write), print item names + status only (never values),
-  and `migrate-acl` MUST write an AES-encrypted backup and verify read-back before
-  mutating (`commands/secrets-import.ts:24-34,58-68`;
-  `commands/secrets-migrate.ts:129-131,148-150,236`).
+- **SEC-13 (MUST).** An **agent launch** MUST NOT raise an interactive OS
+  prompt (e.g. Touch ID) on its own. agents-cli enforces this by always
+  passing `agentOnly: true` on the run/exec injection path
+  (`commands/exec.ts`, `lib/exec.ts`, `lib/browser/chrome.ts`,
+  `commands/webhook.ts`) — the standalone resolves broker-only in that mode
+  and fails loud (naming `agents secrets unlock <bundle>`) rather than
+  prompting. **Given** an agent launch **When** it resolves a `hold`/`always`
+  bundle the broker does not already hold **Then** the resolution throws
+  instead of prompting, and the caller surfaces that as a clear error, never a
+  hang.
+- **SEC-17 (SHOULD).** `agents doctor` SHOULD warn (name + line only, never
+  the value) when a credential-shaped var is exported from a shell rc file,
+  and point the user at `agents secrets`. The scan itself is the standalone's
+  `rc-hygiene.*` op family, reached through `scanUserRcFiles`/
+  `masterPassphraseInEnv` (`secrets-client.ts`); the `rc-secret-export`
+  finding (`lib/devices/doctor-findings.ts`) is what the user sees.
+- **SEC-GAP-3 (MUST, closed).** The reserved `auth` bundle MUST be file-backed
+  (headless, fleet-shareable — credential-management.md invariant 7).
+  `cli/src/lib/reserved-stores.ts` asserts this on every read
+  (`assertReservedAuthBackend`); the standalone enforces the same rule on its
+  write path and answers `WRONG_BACKEND`. `isReservedBundleBackendError`
+  recognizes the refusal in either shape. **Given** an `auth` bundle on the
+  keychain or vault backend **When** anything reads it **Then** the read fails
+  loud rather than being silently treated as absent.
+- **Resource-profile scoping (CTX-1 concretely).** `agents run --secrets`
+  computes `SecretsContext.allowedBundles` once per run
+  (`resolveSecretsContextForRun`, `secrets-policy.ts`) from a fresh, unfiltered
+  bundle listing filtered by the active resource profile
+  (`resolveAllowedBundlesForActiveProfile`), and forwards it on every bundle
+  resolution the run makes. No active profile MUST mean full trust
+  (`allowedBundles` absent) — this is agents-cli's own gate; the standalone
+  has no concept of a profile.
+- **`bundle@host` is agents-cli's own flag syntax.** `--secrets
+  <bundle>@<host>` is parsed and validated (`splitBundleRef`,
+  `assertRemoteBundleFlagsUnsupported`, `secrets-policy.ts`) before the client
+  is ever called; the standalone never sees the `@host` suffix.
+- **Fleet sync of reserved credentials is agents-cli's own fleet model, not
+  portable secret-storage behavior.** `syncReservedAuthBundle` /
+  `syncReservedStores` / `reconcileLocalWorkerSlots` (`secrets-policy.ts`),
+  run from the daemon's `auth-sync` service, publish only a
+  `ready`/`missing`/`invalid` verdict to the owning device's tracked
+  `~/.agents/devices/<device>/daemon-state.json` — never a credential — and a
+  bounded, kill-deadlined Git exchange plus a targeted SSH push (through the
+  client's `pushBundleToHostAsync`) deliver the real bundle only to a pinned,
+  reachable, `role=worker` peer whose synced verdict says `missing`. **Given**
+  a local file-backed `auth` bundle and a pinned worker peer reporting
+  `missing` **When** this device is the one deterministically elected ready
+  publisher **Then** the push is async, `--backend file`, and the destination
+  auto-provisions its own machine-local key — no credential ever enters Git.
 
 ---
 
-### 4. Interface contract
-
-#### 4.1 Command surface
-
-The command surface is the reference table in [secrets.md](secrets.md#command-reference)
-(bundle / secret / agent / sync / utility commands). That table is normative for
-flags and examples; this spec governs the **guarantees** behind them.
-
-#### 4.2 Materialization classification (normative)
-
-Two orthogonal axes: **Boundary side** (does a plaintext value cross into the
-agent's process / a child / stdout?) and **Prompts (locked)?** (can this raise a
-Touch ID sheet on a *locked* bundle — see SEC-13b). They are independent: `exec`
-and `export --device` inject yet CAN prompt interactively, while the raw-item
-`get` materializes yet NEVER prompts.
-
-| Command | Boundary side | Prompts (locked)? | Evidence |
-|---|---|---|---|
-| `secrets exec <b> -- <cmd>` | **Inject** (child env) | **interactive TTY only** (SEC-13b) | `commands/secrets.ts` exec action |
-| `run --secrets <b>` | **Inject** (run child env) | never (SEC-13a) | `commands/exec.ts` secrets injection |
-| `secrets export --device` (SSH push) | **Inject** (over ssh stdin) | **interactive TTY only** (SEC-13b) | `commands/secrets.ts`, `lib/secrets/push.ts:117` |
-| `secrets export --to-1password` / `--to-file` | **Neither** (to `op` argv / AES file) | never | `commands/secrets.ts` export action |
-| `secrets mcp` (`get_secret`) | **JIT, per-request** — never `process.env`, names-only in `tools/list` | never | `lib/secrets/mcp.ts` |
-| `secrets export` shell mode / `secrets get <b> <KEY>` | **REMOVED** (RUSH-2774) — refuse, naming `secrets exec` | n/a | `commands/secrets.ts` export/get actions |
-| remote-resolve transport (`export --plaintext --format json` + marker) | **Materialize** (json, SSH transport only; SEC-9c) | never | `commands/secrets.ts`, `lib/secrets/remote.ts` |
-| `secrets view --reveal` | **Materialize** | **interactive TTY only, non-agent** (SEC-9b, SEC-13b) | `commands/secrets.ts` view action |
-| `secrets get <item>` (raw item) | **Materialize** (ungated scripting primitive — deliberate SEC-9b exemption) | never | `commands/secrets.ts` get action |
-| `list` / `view` (default) / all CRUD / `unlock` / `lock` / `status` / `push` / `pull` | **Neither** (metadata/status/counts only) | only `unlock` prompts | e.g. `commands/secrets.ts` list/view/unlock |
-
-Rule of thumb (normative): **no `agents secrets` command materializes a BUNDLE
-value inside an agent session** (SEC-9b) — if a bundle value appears in an
-agent's transcript it traveled through `secrets exec`'s child choosing to print
-(e.g. `exec <b> -- env`), a deliberate composition the value-free audit stream
-records. The two narrow exceptions print single values, never bundles: the
-raw-item `get <item>` (the deliberate SEC-9b exemption fleet shell hooks rely
-on) and the marker-gated SSH transport (SEC-9c, unreachable from an agent
-context). Injection and MCP never materialize (`secrets-trust-boundaries.md`).
-
-#### 4.3 stdout / stderr / exit discipline
-
-- **SEC-IF-1 (MUST).** Machine-readable value output goes to **stdout** only
-  (the raw-item `get <item>`, the marker-gated remote-resolve transport);
-  human/advisory/warning output
-  goes to **stderr** (dangerous-key drops, rc-hygiene notices, the SEC-9
-  refusals) so a piped value or captured payload
-  is never polluted (`lib/secrets/remote.ts:214-219`; `rc-hygiene` advisories).
-- **SEC-IF-2 (MUST).** A masked marker (`redact()` emits `'*'` × min(len,8)) MUST be
-  shown wherever a value would otherwise appear but reveal was not requested
-  (`commands/secrets.ts` `redact`, ~`:647-650`).
-- **SEC-IF-3 (MUST).** Error strings MUST reference names/paths only, never values or
-  the passphrase (`commands/secrets.ts:452,1361,1463`).
+Everything else — the storage boundary, the materialization boundary, prompt
+policy, bundle sync, cross-platform parity — is the standalone repository's
+own normative contract now. Consult `phnx-labs/secrets-cli`'s own
+specification for those guarantees; this document only speaks for the seam
+and the policy layered on top of it in this repo.
 
 ---
 
-### 5. Cross-platform parity matrix
-
-The backend API is uniform (`KeychainBackend`: `has/get/set/delete/list`,
-`lib/secrets/index.ts:134-142`); the **guarantees** are not. This matrix is
-normative — a change that widens or narrows a cell is a spec change.
-
-| Guarantee | macOS | Linux | Windows |
-|---|---|---|---|
-| OS-backed store | Keychain | libsecret / `secret-tool` | Credential Manager |
-| Encrypted-file fallback (AES-256-GCM) | opt-in `--backend file` | auto on locked/absent keyring | auto on locked/absent keyring |
-| User-presence gate (biometry/passcode) | **yes** (`keychain-helper.swift:35-39`) | **no** (`index.ts:12`) | **no** (`index.ts:18`) |
-| Single-prompt batch read | yes (`index.ts:6-8`) | n/a (no prompt) | n/a (no prompt) |
-| Service-name confidentiality (HMAC hashing) | **yes** (`index.ts:178-217`) | **no** — names verbatim (`linux.ts:17,148`) | **no** — names verbatim (`windows.ts:24-26`) |
-| Broker / secrets-agent (Touch ID dedup) | yes (`agent.ts`) | n/a (no-op) | n/a (no-op) |
-| `never` policy = silent read | yes | yes (already silent) | yes (already silent) |
-| Value-size ceiling | none | none | 2560 B → file fallback (`windows.ts:64,415-420`) |
-
-- **SEC-CROSS-1 (MUST).** All three desktop platforms MUST be supported. Windows IS
-  a first-class backend (`lib/secrets/windows.ts`, full Credential Manager
-  implementation + tests); [secrets.md](secrets.md):64 states the platform line as
-  "cross-platform" accordingly.
-- **SEC-CROSS-2 (SHOULD).** Off-macOS, the biometry/broker layer is a documented
-  no-op; `unlock`/`lock`/`status` SHOULD degrade to friendly no-ops, not errors
-  (`docs/secrets.md:563`).
-- **SEC-CROSS-3 (KNOWN WEAKER GUARANTEE).** Service-name confidentiality (SEC-5)
-  holds on macOS only. On Linux/Windows, item names are stored verbatim and are
-  enumerable by any same-user process. This is a real asymmetry to close or
-  document, not to hide.
-
----
-
-### 6. Compatibility & stability guarantees
-
-- **SEC-COMPAT-1 (MUST).** Policy MUST persist under the legacy `tier` wire key
-  (`session`≡`daily`, `biometry`≡`always`, `none`≡`never`, absent≡inherit) so
-  bundles stay readable across mixed CLI versions on synced machines
-  (`docs/secrets.md:546`; `lib/secrets/bundles.ts:243-244,567-576`).
-- **SEC-COMPAT-2 (MUST).** The `--format json` wire output of `secrets export` is the
-  machine-readable contract other subsystems (remote resolve, `--secrets`) depend
-  on; its shape MUST NOT change incompatibly without a version note
-  (`docs/secrets.md:173`).
-- **SEC-COMPAT-3 (MUST).** An older CLI that predates a capability MUST fail closed,
-  not silently downgrade: a pre-`set-no-acl` helper MUST reject a `never` write
-  rather than store it as an ACL'd item (`docs/secrets.md:542`); a stale install
-  after re-key MUST NOT be assumed to see re-keyed items (`docs/secrets.md:497`).
-- **SEC-COMPAT-4 (MUST).** Bundle name charset `^[a-z0-9][a-z0-9\-_.]{0,48}$/i` and
-  key charset (with optional `.account` suffix) MUST remain accepted
-  (`lib/secrets/bundles.ts:266-268,319-334`).
-
----
-
-### 7. Non-goals & known gaps
-
-**Non-goals (by design):**
-- Not a defense against another process running as the same logged-in user, nor
-  against a user who approves an attacker's Touch ID prompt, nor against `root`
-  (`docs/secrets.md:505-510`).
-- No server-side per-teammate access control — device-local first; sharing is
-  SSH-scoped or client-encrypted push/pull.
-
-**Known gaps (implemented-vs-intended drift to fix, not to paper over):**
-- **SEC-GAP-1 (resolved).** [secrets.md](secrets.md)'s platform line once said
-  "Windows is not supported" while `lib/secrets/windows.ts` implemented a full
-  backend (SEC-CROSS-1); it now reads "cross-platform"
-  ([secrets.md](secrets.md):64).
-- **SEC-GAP-2.** The `env:`-ref allowlist control exists (`envAllowlist` on
-  `ResolveOptions`, `lib/secrets/index.ts` ~`:1392,1411`) but no command wires it
-  up — `env:` refs are effectively unrestricted today. Either wire it or remove it.
-- **SEC-GAP-3 (closed).** `auth` is reserved in the secrets layer
-  (`AUTH_BUNDLE_NAME` / `RESERVED_BUNDLE_NAMES`, `lib/secrets/bundles.ts`).
-  `writeBundle` and `agents secrets create/import auth` refuse a non-file
-  backend with `ReservedBundleWrongBackendError` (the recreate command in the
-  message). `resolveClaudeSetupToken` throws that same error instead of
-  returning null, so usage/probe cannot silently fall through to Touch ID.
-  `agents doctor` emits `auth-bundle-wrong-backend` for an existing
-  keychain/vault-backed `auth` bundle.
-- **SEC-GAP-4.** The broker's per-request capability-token auth (SEC-18) is not
-  reflected in `secrets.md` / `secrets-agent-process-model.md`, which still
-  describe only the same-UID/socket-permission model.
-- **SEC-GAP-5 (closed by this change).** Changing a bundle's tier to `never` rewrote
-  only the metadata item (`writeBundle`), leaving the value items' biometry ACL in
-  place — so a `never` bundle kept prompting forever, violating SEC-19. Fixed by
-  reconciling value-item ACLs on every tier change (`reAclBundleItems` from the
-  `policy` command) and self-healing an ACL-vs-tier mismatch on read.
-- **SEC-GAP-6 (closed by this change).** JIT keychain migration (`migrateInline` /
-  `rehomeOrphan`) re-stamped a biometry ACL onto any item it touched on read,
-  ignoring the owning bundle's tier — resurrecting the prompt on a `never` bundle
-  (and, where it matched the metadata service name, re-ACL'ing metadata too, causing
-  a SECOND prompt: SEC-12). Fixed by honoring the tier in the migration write.
-- **SEC-GAP-7 (open — attribution follow-up).** Secret-access events collapse the
-  requesting session to the global `*` sentinel and the usage DB drops `sessionId`,
-  so a prompt cannot yet be traced to the agent that caused it (SEC-28). The fix —
-  preserving session identity on every event and adding `--session`/`--bundle` query
-  filters — lands in a dedicated observability change, not this one; SEC-28 is the
-  contract it must satisfy.
-- **SEC-GAP-8 (closed by this change).** A resolve/unlock could pop TWO Touch ID
-  sheets — one for metadata, one for the value — when the two were read in separate
-  helper processes and/or the metadata item carried a stale ACL, violating SEC-12.
-  Fixed by keeping metadata reads no-ACL and batched with the value read so a bundle
-  costs at most one prompt.
-- **SEC-GAP-9 (closed by this change).** `agents run` auto-injects the `share` R2
-  write token via `shareRuntimeEnv`, which read the `share` bundle with
-  `agentOnly` only in a headless context — so an INTERACTIVE `agents run` popped a
-  Touch ID sheet on every launch (the per-run storm), violating the spirit of
-  SEC-13 (an agent launch never raises a sheet on its own). Fixed two ways: the
-  auto-inject read is now ALWAYS `agentOnly` (broker/no-ACL or silently skip, never
-  prompt), and a new `share` bundle defaults to the `never` tier (the write token is
-  low-sensitivity automation infra), so auto-share is silent with no unlock. An
-  existing `share` bundle keeps its tier (no silent downgrade).
-- **SEC-GAP-10 (closed by RUSH-2774).** The spec previously declared the ungated
-  bundle printers — `export --plaintext` shell mode and `get <bundle> <KEY>` —
-  intentional "automation primitives" whose appearance in a transcript was "the
-  audit signal, not a bug" (old GWT-S2). In practice agents copied the
-  `eval "$(agents secrets export … --plaintext)"` one-liner from first-party
-  scripts/help/docs and exfiltrated whole bundles into session transcripts
-  reflexively. That call is reversed: the two printers are removed (SEC-9), the
-  survivors refuse under agent context (SEC-9b), the SSH transport is
-  marker-gated (SEC-9c), and every first-party script/doc teaches the injection
-  path instead.
-
----
-
-### 8. Given/When/Then scenarios
-
-**GWT-S1 — Injection never materializes.**
-Given a bundle `prod` with a `keychain:STRIPE_API_KEY` ref;
-When an agent runs `agents secrets exec prod -- ./deploy.sh`;
-Then the value is placed only in the child env (`commands/secrets.ts:2009`), is
-never written to this process's stdout, and does not appear in the agent's
-tool-call output or the session `.jsonl`.
-
-**GWT-S2 — bundle materializers refuse, naming the injection path (SEC-9, RUSH-2774).**
-Given the same bundle; When an agent (or anyone) runs
-`agents secrets get prod STRIPE_API_KEY` or
-`eval "$(agents secrets export prod --plaintext)"`;
-Then no value is printed: `get <bundle> <KEY>` refuses unconditionally naming
-`agents secrets exec prod -- printenv STRIPE_API_KEY`, and `export` without a
-destination refuses naming `--device`/`--to-1password`/`--to-file`, `secrets
-exec`, and `view --reveal`. (This reverses the pre-RUSH-2774 contract that
-called ungated materialization "the audit signal, not a bug" — see SEC-GAP-10.)
-
-**GWT-S2a — the remote-resolve transport still emits, for machines only (SEC-9c).**
-Given `AGENTS_SECRETS_REMOTE_TRANSPORT=1` in the environment of an SSH login
-shell with no agent markers; When `remoteResolveEnv` drives
-`agents secrets export prod --plaintext --format json` on that remote;
-Then a single JSON object of resolved values crosses ssh stdout (encrypted in
-transit), and the same invocation without the marker — or with any SEC-9b agent
-marker present — exits 1 with the refusal.
-
-**GWT-S2b — `view --reveal` / `exec` prompt once, interactively, by design (SEC-13b).**
-Given a locked `hold` bundle `prod` not held by the broker; When a **human** at a
-real terminal (no `AGENTS_RUNTIME`) runs `agents secrets view --reveal prod` or
-`agents secrets exec prod -- ./deploy.sh`; Then exactly **one** Touch ID sheet is
-raised and the value is revealed / the command runs
-(`agentOnly: isHeadlessSecretsContext() || !isInteractiveTerminal()` →
-`false` for a TTY human). Whereas the same command
-under an agent runtime or with no TTY resolves broker-only and fails fast naming
-`agents secrets unlock prod`, no sheet — so release/CI scripts never prompt; and
-`view --reveal` under any SEC-9b agent marker refuses before resolving at all.
-
-**GWT-S3 — `list` is silent and value-free.**
-Given several `hold`/`always` bundles; When the human runs `agents secrets list`;
-Then only names/counts print and no Touch ID fires, because metadata is written
-no-ACL (`bundles.ts:602-613`; test `bundles.test.ts:476-479`).
-
-**GWT-S4 — Repeated agent reads never re-prompt.**
-Given `agents secrets unlock prod` ran once (one Touch ID) and the broker holds
-`prod`; When N concurrent runs read `prod` within the TTL;
-Then each read returns from broker memory over the `0600`-token-authorized socket
-with no prompt (`agent.ts:1-25,412-416`).
-
-**GWT-S5 — Silent miss, not escalation.**
-Given the broker does not hold `staging`; When an agent requests `get staging`;
-Then it gets `{ ok:true, hit:false }` (`agent.ts:356-363`) and falls through to
-the real store — no error, no prompt.
-
-**GWT-S6 — Master passphrase never reaches the child or an rc file.**
-Given `AGENTS_SECRETS_PASSPHRASE` is set; When `agents secrets exec prod -- printenv`;
-Then the child env has `prod`'s values but not the passphrase
-(`commands/secrets.ts:374`), and `agents doctor` warns (name+line only) if that
-var is exported from any shell rc file (`rc-hygiene.ts:157-179`).
-
-**GWT-S7 — Cross-host resolve strips override-shaped keys, stays ephemeral.**
-Given a peer holds `ci` with a benign `TOKEN` plus `LD_PRELOAD` and
-`NPM_CONFIG_PROXY`; When `agents secrets exec ci@peer -- <cmd>` resolves over SSH;
-Then `LD_PRELOAD`/`*_PROXY` are dropped with one stderr line
-(`remote.ts:29-51,214-219`) and `TOKEN` is injected without touching the local
-keychain (`remote.ts:11,165-234`).
-
-**GWT-S8 — Sync ships ciphertext only; pull won't clobber.**
-Given local `prod` and a remote copy; When `push prod` then `pull prod`;
-Then push sends an AES-256-GCM/PBKDF2-600k envelope the backend can't read
-(`sync.ts:66-85`), and pull refuses to overwrite the local copy without `--force`
-(`sync.ts:272-278`).
-
-**GWT-S9 — `never` policy double-warns and is never a default.**
-Given a bundle; When `agents secrets policy prod never`;
-Then a red warning prints that reads become fully silent and confirmation /
-`--i-understand` is required (`commands/secrets.ts:2457-2483`); the global default
-can never be `never` (`docs/secrets.md:544`).
-
-**GWT-S10 — Linux/Windows fall back with no biometry (weaker by construction).**
-Given a headless Linux server with a locked keyring; When `agents secrets get`
-runs; Then `isLockedCollectionError` fires (`linux.ts:79-82`) and the value
-round-trips through AES-256-GCM keyed by the resolved passphrase
-(`filestore.ts:259-291`) — at no point a biometric/user-presence check, unlike
-macOS.
-
-**GWT-S11 — `never` bundle stays unlocked across reboot and OS upgrade (SEC-29).**
-Given `agents secrets policy share never` ran once (its value item now stored
-no-ACL via `set-no-acl`); When the user powers the Mac off, waits 30 days, upgrades
-macOS, and an agent reads `share`; Then the read returns silently — no Touch ID, no
-passphrase, no env var — because the no-ACL item
-(`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`) is not biometry-bound and
-survives the reboot and the upgrade (`keychain-helper.swift:571-577`). A biometry
-tier would have re-prompted after the upgrade re-enrolled biometrics.
-
-**GWT-S12 — changing tier to `never` strips the biometry ACL (SEC-19).**
-Given a bundle created under `hold` (its value item carries the biometry ACL);
-When `agents secrets policy <b> never` runs; Then the command re-stores the value
-items no-ACL (`reAclBundleItems` → `writeBundleWithItems { noAcl:true }`), not just
-the metadata, so the very next read is silent — a metadata-only change that leaves
-the biometry ACL on the item is a bug this scenario pins (`policy.test.ts` asserts
-the item ACL after the flip, not only `bundlePolicy`).
-
-**GWT-S13 — every read traces to the triggering session, never `*` (SEC-28).**
-Given two agent sessions `A` and `B` each read `share`; When the human runs
-`agents events --module secrets --bundle share --session <A>`; Then only session
-`A`'s reads are returned, each carrying `sessionId`/`parentSessionId`/`pid`, and the
-requesting session is never recorded as the global-scope `*` sentinel — so a Touch
-ID sheet is always attributable to the agent that caused it.
-
-**GWT-S14 — auto-share on `agents run` never prompts (SEC-13, SEC-GAP-9).**
-Given `share:` is configured and the `share` bundle is biometry-gated and not
-broker-held; When a human runs `agents run <agent>` in an interactive terminal;
-Then `shareRuntimeEnv` resolves the token `agentOnly` and returns undefined without
-a Touch ID sheet (`lib/share/config.ts`), so the launch is silent — and a `share`
-bundle created by `agents artifacts setup` is `never`-tier (no-ACL), so the token is
-injected silently with no unlock at all.
-
-**GWT-S15 — reserved `auth` bundle is file-backed or fails loud (SEC-GAP-3).**
-Given no `auth` bundle; When `agents secrets create auth` (or `create auth
---backend keychain`); Then the bundle is created file-backed, or the keychain
-attempt throws `ReservedBundleWrongBackendError` naming
-`agents secrets create auth --backend file`. Given an existing keychain-backed
-`auth` bundle; When `resolveClaudeSetupToken` runs; Then it throws that error
-instead of returning null, and `agents doctor` emits
-`auth-bundle-wrong-backend`.
-
-**GWT-S16 — `auth` fleet sync never forwards AGENTS_SECRETS_PASSPHRASE (PHNX-2371).**
-Given a local file-backed `auth` bundle and a pinned fleet device without it;
-When the daemon `auth-sync` tick publishes its non-secret readiness verdict and
-the bounded automatic user-repo exchange delivers it, and the elected source
-sees the peer's synced verdict is `missing` (or `fleet apply`
-/ `repo push user` explicitly provisions it); Then the remote import is async,
-bounded per SSH operation, `--backend file`, with no
-`AGENTS_SECRETS_PASSPHRASE` prologue, the destination auto-provisions its
-machine-local key, and the push read-back-verifies decryptability (a
-decrypt failure is an error, not "Imported N key(s)"). The tracked shared file
-contains only `ready`/`missing`/`invalid`; no credential or token is Git-synced.
-
----
 
 ## Agent execution
 

@@ -200,10 +200,10 @@ agents config set <key> <value>          Set a config key
 agents config unset <key>                Unset a config key (restore default behavior)
 ```
 
-## daemon — The always-on daemon: secrets broker, browser IPC, watchdog, and the routines scheduler. Bare `agents daemon` shows status.
+## daemon — The always-on daemon: browser IPC, watchdog, and the routines scheduler. Bare `agents daemon` shows status.
 
 ```
-agents daemon                             The always-on daemon: secrets broker, browser IPC, watchdog, and the routines scheduler. Bare `agents daemon` shows status.
+agents daemon                             The always-on daemon: browser IPC, watchdog, and the routines scheduler. Bare `agents daemon` shows status.
 agents daemon disable                     Persist daemon.enabled: false — nothing auto-starts the daemon until re-enabled. Does not stop a running daemon.
 agents daemon doctor                      One-shot health check: identity, duplicates, hosted services, scheduler. Non-zero exit on problems.
 agents daemon enable                      Clear the daemon.enabled kill switch. Does not start the daemon by itself.

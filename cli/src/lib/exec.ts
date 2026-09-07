@@ -16,7 +16,7 @@ import { compareVersions, getBinaryPath, getVersionHomePath, isVersionInstalled,
 import { resolveModel, buildReasoningFlags } from './models.js';
 import { isTierToken, resolveTier } from './model-tiers.js';
 import { emit, emitStart, createTimer, redactPrompt, redactArgs, type EventPayload } from './feed/events.js';
-import { sanitizeProcessEnv } from './secrets/bundles.js';
+import { sanitizeProcessEnv } from './secrets-client.js';
 import { resolveActor, actorEnv } from './actor.js';
 import { expandLocalHome } from './project-root.js';
 import { getShimsDir, getHistoryDir, getUserAgentsDir, getRuntimeStateDir } from './state.js';

@@ -1,8 +1,22 @@
 <!-- guide -->
 # Secrets: trust boundaries & what the agent sees (design)
 
-> Status: **accepted** · Related: [secrets.md](secrets.md) (reference),
-> [secrets-agent-process-model.md](secrets-agent-process-model.md) (broker process model)
+> **Enforcement moved (PHNX-3989 Track D).** The concept this document
+> describes — inject into the child process, never into the agent, by
+> construction — still holds and is still the right mental model. What
+> changed is WHO enforces it: the storage and materialization boundaries
+> below were enforced by the in-repo secrets engine (`lib/secrets/*`), which
+> is deleted; the standalone [`@phnx-labs/secrets-cli`](https://github.com/phnx-labs/secrets-cli)
+> engine enforces both now (its own `MAT-1`/`EXEC-1`), reached only through
+> the bounded process client (`secrets-client.ts`). The file:line citations
+> below describing the old engine's implementation are historical. The
+> `secrets.md#security-model` section this doc cross-references was folded
+> into the rewritten [secrets.md](secrets.md), which now scopes to what
+> agents-cli itself still owns.
+
+> Status: **accepted** (mental model still current; enforcement moved, see
+> above) · Related: [secrets.md](secrets.md) (reference),
+> [secrets-agent-process-model.md](secrets-agent-process-model.md) (broker process model, superseded)
 
 A design record for the **one question every operator eventually asks**: when an
 AI coding agent runs a release (or any task) with `agents secrets`, *does the agent

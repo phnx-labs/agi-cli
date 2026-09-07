@@ -17,8 +17,8 @@ import {
   assertReservedAuthBackend,
   isReservedBundleBackendError,
   isReservedStoreName,
-} from './secrets/reserved-stores.js';
-import type { SecretsBundle } from './secrets/bundles.js';
+} from './reserved-stores.js';
+import type { SecretsBundle } from './secrets-types.js';
 import { ensureSlot, recordSlot } from './accounts/slots.js';
 import { harnessWorkerKinds } from './harness-auth-capabilities.js';
 import type { DeviceAccountSlot, NativeAccountRecord } from './types.js';

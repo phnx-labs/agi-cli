@@ -1042,7 +1042,7 @@ Harness worker credentials are minted by `agents accounts add &lt;harness&gt; [n
 <article id="config-list" data-search="list config list  list configured config keys and their values --device &lt;name&gt; list config for a specific device instead of this machine --json output machine-readable json -h, --help show help  "><div class="command-head"><h3><code>agents config list</code></h3></div><p>List configured config keys and their values</p><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--device &lt;name&gt;</code></td><td>List config for a specific device instead of this machine</td><td></td><td></td></tr><tr><td><code>--json</code></td><td>Output machine-readable JSON</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table></article>
 <article id="config-set" data-search="set config set  set a config key key  value  -h, --help show help  "><div class="command-head"><h3><code>agents config set &lt;key&gt; &lt;value&gt;</code></h3></div><p>Set a config key</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>&lt;key&gt;</code></td><td>—</td><td></td><td></td></tr><tr><td><code>&lt;value&gt;</code></td><td>—</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table></article>
 <article id="config-unset" data-search="unset config unset  unset a config key (restore default behavior) key  -h, --help show help  "><div class="command-head"><h3><code>agents config unset &lt;key&gt;</code></h3></div><p>Unset a config key (restore default behavior)</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>&lt;key&gt;</code></td><td>—</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table></article>
-<article id="daemon" data-search="daemon daemon  the always-on daemon: secrets broker, browser ipc, watchdog, and the routines scheduler. bare `agents daemon` shows status. --json emit as json -h, --help show help # identity, duplicates, and per-service health in one view
+<article id="daemon" data-search="daemon daemon  the always-on daemon: browser ipc, watchdog, and the routines scheduler. bare `agents daemon` shows status. --json emit as json -h, --help show help # identity, duplicates, and per-service health in one view
       agents daemon status
 
       # machine-readable status (for scripts / agi ext)
@@ -1064,12 +1064,12 @@ Harness worker credentials are minted by `agents accounts add &lt;harness&gt; [n
       agents daemon services
 
       # toggle or restart a service live — applies without a daemon restart
-      # for supervisor-managed services (secrets-broker, browser-ipc,
-      # account-state, session-index, monitors&#39; off-transition, watchdog,
-      # device-probe, self-heal, keychain-reap, state-dir-check)
-      agents daemon services disable secrets-broker
-      agents daemon services enable secrets-broker
-      agents daemon services restart secrets-broker
+      # for supervisor-managed services (browser-ipc, account-state,
+      # session-index, monitors&#39; off-transition, watchdog, device-probe,
+      # self-heal, state-dir-check)
+      agents daemon services disable browser-ipc
+      agents daemon services enable browser-ipc
+      agents daemon services restart browser-ipc
 
       # host a signed webhook receiver here, supervised and restarted on crash
       agents daemon webhooks add --secrets-bundle linear-webhook
@@ -1099,7 +1099,7 @@ Harness worker credentials are minted by `agents accounts add &lt;harness&gt; [n
       toggle on every reload as well. a boot-disabled service other than
       browser-ipc, the monitor on-transition, and webhook-receiver still need an
       operator &#39;agents daemon restart&#39;. &#39;agents daemon services&#39; names which
-      case you&#39;re in per row."><div class="command-head"><h3><code>agents daemon</code></h3></div><p>The always-on daemon: secrets broker, browser IPC, watchdog, and the routines scheduler. Bare `agents daemon` shows status.</p><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--json</code></td><td>Emit as JSON</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code># Identity, duplicates, and per-service health in one view
+      case you&#39;re in per row."><div class="command-head"><h3><code>agents daemon</code></h3></div><p>The always-on daemon: browser IPC, watchdog, and the routines scheduler. Bare `agents daemon` shows status.</p><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--json</code></td><td>Emit as JSON</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code># Identity, duplicates, and per-service health in one view
       agents daemon status
 
       # Machine-readable status (for scripts / AGI EXT)
@@ -1121,12 +1121,12 @@ Harness worker credentials are minted by `agents accounts add &lt;harness&gt; [n
       agents daemon services
 
       # Toggle or restart a service live — applies without a daemon restart
-      # for supervisor-managed services (secrets-broker, browser-ipc,
-      # account-state, session-index, monitors&#39; off-transition, watchdog,
-      # device-probe, self-heal, keychain-reap, state-dir-check)
-      agents daemon services disable secrets-broker
-      agents daemon services enable secrets-broker
-      agents daemon services restart secrets-broker
+      # for supervisor-managed services (browser-ipc, account-state,
+      # session-index, monitors&#39; off-transition, watchdog, device-probe,
+      # self-heal, state-dir-check)
+      agents daemon services disable browser-ipc
+      agents daemon services enable browser-ipc
+      agents daemon services restart browser-ipc
 
       # Host a signed webhook receiver here, supervised and restarted on crash
       agents daemon webhooks add --secrets-bundle linear-webhook
@@ -1171,17 +1171,18 @@ Harness worker credentials are minted by `agents accounts add &lt;harness&gt; [n
       agents daemon services
 
       # machine-readable — additive: also carries the pre-existing
-      # secretsbroker/browseripc hosted-socket fields
+      # secretsbroker (reachability-only probe, phnx-3989)/browseripc
+      # hosted-socket fields
       agents daemon services --json
 
       # just the enable/disable metadata, no health probe
       agents daemon services list
 
       # toggle or restart live — no daemon restart for a supervisor-managed
-      # service (secrets-broker, browser-ipc, account-state, session-index)
-      agents daemon services disable secrets-broker
-      agents daemon services enable secrets-broker
-      agents daemon services restart secrets-broker a service disabled at daemon boot is normally not registered on the
+      # service (browser-ipc, account-state, session-index)
+      agents daemon services disable browser-ipc
+      agents daemon services enable browser-ipc
+      agents daemon services restart browser-ipc a service disabled at daemon boot is normally not registered on the
       supervisor, so enabling it needs an operator restart. browser-ipc is the
       exception: it is registered stopped and can be enabled live. the inline
       scheduler also applies enable/disable on reload; webhook-receiver and the
@@ -1191,17 +1192,18 @@ Harness worker credentials are minted by `agents accounts add &lt;harness&gt; [n
       agents daemon services
 
       # Machine-readable — additive: also carries the pre-existing
-      # secretsBroker/browserIpc hosted-socket fields
+      # secretsBroker (reachability-only probe, PHNX-3989)/browserIpc
+      # hosted-socket fields
       agents daemon services --json
 
       # Just the enable/disable metadata, no health probe
       agents daemon services list
 
       # Toggle or restart live — no daemon restart for a supervisor-managed
-      # service (secrets-broker, browser-ipc, account-state, session-index)
-      agents daemon services disable secrets-broker
-      agents daemon services enable secrets-broker
-      agents daemon services restart secrets-broker</code></pre><h4>Notes</h4><p class="notes">A service disabled at daemon boot is normally not registered on the
+      # service (browser-ipc, account-state, session-index)
+      agents daemon services disable browser-ipc
+      agents daemon services enable browser-ipc
+      agents daemon services restart browser-ipc</code></pre><h4>Notes</h4><p class="notes">A service disabled at daemon boot is normally not registered on the
       supervisor, so enabling it needs an operator restart. browser-ipc is the
       exception: it is registered stopped and can be enabled live. The inline
       scheduler also applies enable/disable on reload; webhook-receiver and the

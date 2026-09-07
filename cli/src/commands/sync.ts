@@ -34,7 +34,7 @@
 import * as path from 'path';
 import { Command, Option } from 'commander';
 import chalk from 'chalk';
-import { resolveSyncPassphraseFromEnv } from '../lib/secrets/sync-passphrase.js';
+import { resolveSyncPassphraseFromEnv } from '../lib/sync-passphrase.js';
 import { agentLabel, resolveAgentName, MANAGED_AGENT_IDS, isAgentHardDeprecated, hardDeprecationError } from '../lib/agents.js';
 import type { AgentId } from '../lib/types.js';
 import { autoEvictCentralBrowserProfiles } from '../lib/browser/registry.js';

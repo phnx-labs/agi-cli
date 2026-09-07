@@ -9,32 +9,15 @@ agents-cli reaches it only through this seam. agents-cli **never rebundles the
 extracted engine** (delta-spec DIST-1); a missing executable fails loud with
 install guidance rather than falling back to anything in-repo.
 
-> Status: the client exists and the consumer-conversion wave (tasks.md item 6) is
-> **in progress** (PHNX-3989). Three tracks have landed:
->
-> - **run/exec hot path** (`commands/exec.ts`, `lib/exec.ts`, `lib/crabbox/*`,
->   `lib/cloud/{cursor,antigravity}.ts`) resolves through this client. Agents-owned
->   policy that happens to live in the engine tree (spawn-env hardening,
->   `bundle@host` fleet-alias resolution) is passed into the client, not converted,
->   and relocates out of the engine tree as part of that retirement.
-> - **accounts / profiles / auth consumers** are converted (`account-registry.ts`,
->   `account-schema.ts`, `profiles.ts`, `byok-usage.ts`, `auth-mint.ts`,
->   `claude-account-token.ts`, `accounting/usage.ts`,
->   `accounting/account-pool-collect.ts`, and the `accounts`, `profiles`, `lease`,
->   `harness-wizard` commands). The reserved `auth` bundle's file-backend rule
->   (`lib/secrets/reserved-stores.ts`) and the SSH host-pinning guard
->   (`lib/hosts/credential-transport.ts`) are agents-owned policy passed into the
->   client, not reimplemented on the engine side.
-> - **browser, share, ssh, apply, sync, webhook, fleet-capture, doctor,
->   setup-secrets** and their library dependencies are converted too — including
->   making `agents secrets` itself a thin exec passthrough
->   (`commands/secrets-passthrough.ts`), with the old `commands/secrets.ts`
->   registrar left in the tree, unregistered, until every other track's consumers
->   convert.
->
-> Every other consumer in `inventory.json` is still being converted, and the
-> in-repo `cli/src/lib/secrets/` engine is **not yet removed** — it stays until
-> every consumer is off it (tasks.md item 7).
+> Status: **complete** (PHNX-3989 Track D). Every consumer resolves through
+> this client; the in-repo `cli/src/lib/secrets/` engine is deleted. Agents-owned
+> policy that used to live in the engine tree — reserved per-harness stores,
+> resource-profile scoping, `bundle@host` fleet-alias resolution, spawn-env
+> hardening, the reserved-`auth` fleet sync — now lives in
+> `cli/src/lib/reserved-stores.ts` and `cli/src/lib/secrets-policy.ts`. `agents
+> secrets <anything>` is a thin exec passthrough
+> (`commands/secrets-passthrough.ts`); the old in-repo command registrar and
+> its command files are gone too.
 
 ## The seam
 
@@ -159,26 +142,42 @@ secrets` passthrough (`commands/secrets-passthrough.ts`, execs any subcommand
 verbatim) and `agents setup secrets` (hands off to the standalone's own
 interactive `secrets migrate`) both use it.
 
-The wrapper types are imported `type`-only from the in-repo engine so they are
-exactly the shapes today's consumers pass and receive. `import type` is fully
-erased at compile time, so it adds no runtime edge and nothing to the npm
-tarball. When the engine is deleted, repoint those type imports at the published
-`@phnx-labs/secrets-cli` SDK types.
+The wrapper types are imported `type`-only from `cli/src/lib/secrets-types.ts` —
+a pure re-declaration of the standalone's wire types with no runtime code, so
+they add no runtime edge and nothing to the npm tarball. Keep it byte-for-byte
+in sync with `secrets-cli/src/schema.ts` — this is the one seam both sides
+legitimately re-declare rather than share a package for.
 
 ## Policy that stays in agents-cli
 
-The client forwards policy; it never re-implements it. Two pieces the
-accounts/auth consumers depend on live beside their callers, not in the engine:
+The client forwards policy; it never re-implements it. The pieces
+accounts/auth/run consumers depend on live beside their callers, not in the
+engine:
 
 - **The reserved `auth` bundle is file-backed** (credential-management.md
-  invariant 7). `cli/src/lib/secrets/reserved-stores.ts` carries the rule
+  invariant 7). `cli/src/lib/reserved-stores.ts` carries the rule
   (`AUTH_BUNDLE_BACKEND`, `assertReservedAuthBackend`,
-  `ReservedBundleWrongBackendError`, `isReservedBundleBackendError`). The
+  `ReservedBundleWrongBackendError`, `isReservedBundleBackendError`) and every
+  reserved per-harness store name (`__<harness>__`, `RESERVED_STORES`). The
   standalone enforces the same rule on its write path and answers `WRONG_BACKEND`;
   agents-cli asserts it on every read of `auth`, so a keychain- or vault-backed
   `auth` left over from an older layout fails loud instead of being silently
   ignored by usage/probe (SEC-GAP-3). `isReservedBundleBackendError` matches both
-  shapes.
+  shapes. It is a deliberate leaf module (no import of `claude-account-token.ts`
+  or `secrets-policy.ts`) — both of those need it, and folding it into either
+  would form a real circular import.
+- **Resource-profile scoping computes `SecretsContext.allowedBundles`**
+  (`cli/src/lib/secrets-policy.ts`'s `resolveSecretsContextForRun`,
+  `resolveAllowedBundlesForActiveProfile`). `agents run --secrets` calls it once
+  per run and forwards the result on every bundle resolution the run makes; no
+  active profile is full trust (`undefined`).
+- **`bundle@host` remote-reference parsing is agents' own flag syntax**
+  (`secrets-policy.ts`'s `splitBundleRef`, `assertRemoteBundleFlagsUnsupported`)
+  — the standalone has no concept of a host suffix.
+- **Fleet sync of reserved credentials** (`secrets-policy.ts`'s
+  `syncReservedAuthBundle`, `syncReservedStores`, `reconcileLocalWorkerSlots`)
+  — device roles, election, and the delivery memo are agents-cli's fleet
+  model, not portable secret-storage behavior.
 - **Credential transport is gated on the SSH host-key pin.**
   `cli/src/lib/hosts/credential-transport.ts` holds
   `assertCredentialTransportHostPinned` and `resolveHostSshTarget`; `accounts

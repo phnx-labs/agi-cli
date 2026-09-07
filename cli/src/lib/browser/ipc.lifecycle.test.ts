@@ -240,7 +240,7 @@ describePosix('browser lifecycle stays service-scoped (integration: real daemon 
       expect(runningStatus.stdout).toContain('Browser service: running (shared daemon unchanged)');
 
       const health = JSON.parse(fs.readFileSync(healthPath, 'utf-8')) as Record<string, { state?: string }>;
-      expect(health['secrets-broker']?.state).toBe('running');
+      expect(health['monitors']?.state).toBe('running');
       expect(health['usage-sync']?.state).toBe('running');
       expect(health['session-index']?.state).toBe('running');
     } finally {

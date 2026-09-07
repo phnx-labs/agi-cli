@@ -572,45 +572,11 @@ git -C "\$REPO_ROOT" worktree add --quiet --detach "\$WT" "v$1" \\
   || { echo "could not create home-base publish worktree at \$WT" >&2; exit 1; }
 [ -z "\$(git -C "\$WT" status --short | grep '^ D')" ] \\
   || { echo "home-base publish worktree \$WT is incomplete -- refusing to build" >&2; exit 1; }
-# The signed keychain + menu-bar helpers need bin/embedded.provisionprofile -- an
-# Apple provisioning profile that is a COMMITTED input as of commit 2567004b4
-# (negated out of .gitignore: /cli/bin/* + !/cli/bin/embedded.provisionprofile,
-# pre-flatten /apps/cli/bin/*), so any tag cut after that commit already carries it
-# in the checked-out \$WT tree, with nothing left to seed. Two cases still need
-# recovery: an OLDER tag cut before 2567004b4 (e.g. the stuck v1.22.36) genuinely
-# lacks it in its own tree, and a home base whose own on-disk checkout (REPO_ROOT)
-# has simply never been git-pulled past that commit -- "any Mac that has not
-# previously been home base" (RUSH-2541) -- lacks it on disk even though origin
-# does not. The fetch above always refreshes origin/\$DEFAULT_BRANCH's
-# remote-tracking ref regardless of REPO_ROOT's local working-tree state, so
-# recover the blob from THAT ref rather than trusting whatever happens to be
-# checked out on REPO_ROOT's disk. Recovery sources try the cli/ layout first and
-# fall back to the pre-flatten apps/cli/ layout, since a stale REPO_ROOT checkout
-# (or origin at the transition) may still carry the old path.
+# bin/embedded.provisionprofile existed only for the keychain helper's signed
+# build (build-keychain-helper.sh), which moved out of this repo entirely with
+# the standalone \`secrets\` engine (PHNX-3989) -- there is no longer a build
+# step here that embeds a provisioning profile, so no recovery is needed.
 mkdir -p "\$WT/\$CLI_DIR/bin"
-# Guarded with \`|| true\`, NOT a bare assignment: under this snippet's own
-# \`set -euo pipefail\` (top of this heredoc), symbolic-ref returning non-zero --
-# the normal state of a checkout bootstrapped via \`init && remote add && fetch\`
-# rather than \`clone\`, i.e. plausibly a brand-new fleet home base -- trips
-# errexit on the assignment itself and kills the phase silently, before the
-# very next line's "main" fallback ever runs. Same anti-pattern, same fix
-# assert_promote_home_base uses for this reason.
-DEFAULT_BRANCH="\$(git -C "\$REPO_ROOT" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')" || true
-[ -n "\$DEFAULT_BRANCH" ] || DEFAULT_BRANCH="main"
-if [ -f "\$WT/\$CLI_DIR/bin/embedded.provisionprofile" ]; then
-  : # already in the tagged tree -- nothing to seed
-elif git -C "\$REPO_ROOT" show "origin/\$DEFAULT_BRANCH:cli/bin/embedded.provisionprofile" > "\$WT/\$CLI_DIR/bin/embedded.provisionprofile" 2>/dev/null; then
-  : # recovered from the freshly-fetched origin/\$DEFAULT_BRANCH ref (cli/ layout)
-elif git -C "\$REPO_ROOT" show "origin/\$DEFAULT_BRANCH:apps/cli/bin/embedded.provisionprofile" > "\$WT/\$CLI_DIR/bin/embedded.provisionprofile" 2>/dev/null; then
-  : # recovered from origin/\$DEFAULT_BRANCH ref (pre-flatten apps/cli/ layout)
-elif [ -f "\$REPO_ROOT/cli/bin/embedded.provisionprofile" ]; then
-  cp "\$REPO_ROOT/cli/bin/embedded.provisionprofile" "\$WT/\$CLI_DIR/bin/embedded.provisionprofile"
-elif [ -f "\$REPO_ROOT/apps/cli/bin/embedded.provisionprofile" ]; then
-  cp "\$REPO_ROOT/apps/cli/bin/embedded.provisionprofile" "\$WT/\$CLI_DIR/bin/embedded.provisionprofile"
-else
-  echo "error: cli/bin/embedded.provisionprofile (pre-flatten apps/cli/bin/embedded.provisionprofile) not found on the tagged tree, on origin/\$DEFAULT_BRANCH, or on this home base's disk. It is a committed file (see commit 2567004b4) -- recover it from git history and verify cli/bin/embedded.provisionprofile is tracked on origin/\$DEFAULT_BRANCH, then retry. Do NOT regenerate it at developer.apple.com; the existing profile is valid until 2044." >&2
-  exit 1
-fi
 cd "\$WT/\$CLI_DIR"
 scripts/release.sh $1 --home-base-phase --device "$RELEASE_HOME_BASE" --deploy-worker "$DEPLOY_WORKER"
 SNIPPET

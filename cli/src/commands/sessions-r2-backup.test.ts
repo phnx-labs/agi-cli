@@ -5,8 +5,9 @@
  *
  *  - Pure, always-run: the fail-loud gates (`r2ExportGateError`,
  *    `r2ImportGateError`), the object-key selection (`r2KeyForRecord`), and the
- *    backup-key resolution (`resolveR2BackupKey`) against a real in-memory
- *    keychain (the same seam config.test.ts uses — no mocking of the resolver).
+ *    backup-key resolution (`resolveR2BackupKey`) against the real standalone
+ *    `secrets` engine (PHNX-3989) in a fresh, isolated store — no mocking of
+ *    the resolver.
  *  - MinIO-gated round-trip: `uploadToR2` → `pullFromR2` against a real
  *    S3-compatible endpoint, so the ACTUAL command functions (not a hand-copied
  *    wire format) are exercised end-to-end. SKIPS when AGENTS_TEST_R2_ENDPOINT is
@@ -38,28 +39,13 @@ import { decryptTranscriptBody, generateSyncEncKey, isTranscriptEnvelope } from 
 import { renderSessionsWorkerScript } from '../lib/session/sync/worker-template.js';
 import { SessionsHttpClient } from '../lib/session/sync/net-client.js';
 import { resolveManagedBackupKey, backupKeyCachePath } from '../lib/session/sync/managed-key.js';
-import { setKeychainBackendForTest, type KeychainBackend } from '../lib/secrets/index.js';
-import { writeBundle, type SecretsBundle } from '../lib/secrets/bundles.js';
+import { writeBundle } from '../lib/secrets-client.js';
+import type { SecretsBundle } from '../lib/secrets-types.js';
+import { useFreshSecretsHome } from '../../tests/secrets-standalone.js';
 
-// ── in-memory keychain seam (mirrors config.test.ts) ──────────────────────────
-class MemBackend implements KeychainBackend {
-  store = new Map<string, string>();
-  has(item: string) { return this.store.has(item); }
-  get(item: string) {
-    const v = this.store.get(item);
-    if (v === undefined) throw new Error(`missing ${item}`);
-    return v;
-  }
-  set(item: string, value: string) { this.store.set(item, value); }
-  delete(item: string) { return this.store.delete(item); }
-  list(prefix: string) { return [...this.store.keys()].filter(k => k.startsWith(prefix)); }
-}
-
-let prevBackend: KeychainBackend | null = null;
-
-function writeR2Bundle(vars: Record<string, string>): void {
+async function writeR2Bundle(vars: Record<string, string>): Promise<void> {
   const b: SecretsBundle = { name: SYNC_BUNDLE, policy: 'never', vars };
-  writeBundle(b);
+  await writeBundle(b);
 }
 
 // ── pure gate + key helpers (always run) ──────────────────────────────────────
@@ -125,21 +111,19 @@ describe('managed upload encryption boundary', () => {
   });
 });
 
-describe('resolveR2BackupKey (real keychain seam)', () => {
+describe('resolveR2BackupKey (real standalone secrets store)', () => {
+  useFreshSecretsHome();
+
   beforeEach(() => {
-    prevBackend = setKeychainBackendForTest(new MemBackend());
-    process.env.AGENTS_SECRETS_NO_AGENT = '1';
     clearR2ConfigCache();
   });
   afterEach(() => {
-    setKeychainBackendForTest(prevBackend);
-    delete process.env.AGENTS_SECRETS_NO_AGENT;
     clearR2ConfigCache();
   });
 
-  it('returns the shared 32-byte key when R2_SYNC_ENC_KEY is present', () => {
+  it('returns the shared 32-byte key when R2_SYNC_ENC_KEY is present', async () => {
     const enc = generateSyncEncKey();
-    writeR2Bundle({
+    await writeR2Bundle({
       R2_ACCOUNT_ID: 'acct', R2_BUCKET_NAME: 'b', R2_ACCESS_KEY_ID: 'ak', R2_SECRET_ACCESS_KEY: 'sk',
       R2_SYNC_ENC_KEY: enc,
     });
@@ -149,8 +133,8 @@ describe('resolveR2BackupKey (real keychain seam)', () => {
     expect(key!.toString('base64')).toBe(enc);
   });
 
-  it('returns null (unencrypted, warned) when the bundle carries no enc key', () => {
-    writeR2Bundle({ R2_ACCOUNT_ID: 'acct', R2_BUCKET_NAME: 'b', R2_ACCESS_KEY_ID: 'ak', R2_SECRET_ACCESS_KEY: 'sk' });
+  it('returns null (unencrypted, warned) when the bundle carries no enc key', async () => {
+    await writeR2Bundle({ R2_ACCOUNT_ID: 'acct', R2_BUCKET_NAME: 'b', R2_ACCESS_KEY_ID: 'ak', R2_SECRET_ACCESS_KEY: 'sk' });
     expect(resolveR2BackupKey()).toBeNull();
   });
 });
@@ -175,21 +159,19 @@ suite('uploadToR2 → pullFromR2 round-trip (AGENTS_TEST_R2_ENDPOINT)', () => {
     endpoint: ENDPOINT || `https://${ACCOUNT}.r2.cloudflarestorage.com`,
   });
 
-  beforeEach(() => {
-    prevBackend = setKeychainBackendForTest(new MemBackend());
-    process.env.AGENTS_SECRETS_NO_AGENT = '1';
+  useFreshSecretsHome();
+
+  beforeEach(async () => {
     clearR2ConfigCache();
     // A real r2.backups bundle pointing at the test endpoint, so the command
     // functions' own loadR2Config() resolves it — no injection, real path.
-    writeR2Bundle({
+    await writeR2Bundle({
       R2_ACCOUNT_ID: ACCOUNT, R2_BUCKET_NAME: BUCKET, R2_ACCESS_KEY_ID: ACCESS,
       R2_SECRET_ACCESS_KEY: SECRET, R2_ENDPOINT: ENDPOINT || '',
       R2_SYNC_ENC_KEY: generateSyncEncKey(),
     });
   });
   afterEach(() => {
-    setKeychainBackendForTest(prevBackend);
-    delete process.env.AGENTS_SECRETS_NO_AGENT;
     clearR2ConfigCache();
   });
 

@@ -1,8 +1,8 @@
 /**
  * Daemon registry, auto-start circuit breaker, and misc daemon utilities:
  * stopResidueArtifacts, ensureDaemonStarted, the RUSH-2418 auto-start circuit
- * breaker, shouldTakeOverBroker, anchorDaemonCwd, the ephemeral-root
- * detectors, schedulerGateTransition, and the instance registry + reaper.
+ * breaker, anchorDaemonCwd, the ephemeral-root detectors,
+ * schedulerGateTransition, and the instance registry + reaper.
  *
  * RUSH-2819: split out of daemon.test.ts (2201 lines / 88 tests / ~112s in CI)
  * so vitest can parallelize this suite across worker forks. Shared helpers
@@ -25,7 +25,6 @@ import {
   removeDaemonPid,
   isDaemonAutostartCircuitOpen,
   DAEMON_AUTOSTART_FAILURE_LIMIT,
-  shouldTakeOverBroker,
   schedulerGateTransition,
   anchorDaemonCwd,
   describeEphemeralDaemonRoot,
@@ -153,12 +152,12 @@ describe('stopResidueArtifacts (RUSH-2421: reclaim only what a DEAD owner left)'
 
 /**
  * #415: the daemon must be always-on for any background need, not only after
- * `routines add`. `ensureDaemonStarted` is the shared side-effect entrypoint the
- * secrets-unlock path (src/commands/secrets.ts) now calls after bringing up the
- * standalone secrets broker. It must reuse the single `startDaemon` entrypoint,
- * so the #414 single-instance guard makes a second unlock a no-op rather than a
- * relaunch. The pid file names a real daemon-shaped process so the production
- * command-identity check is exercised rather than bypassed with the test pid.
+ * `routines add`. `ensureDaemonStarted` is the shared side-effect entrypoint any
+ * such background-need path calls. It must reuse the single `startDaemon`
+ * entrypoint, so the #414 single-instance guard makes a second call a no-op
+ * rather than a relaunch. The pid file names a real daemon-shaped process so
+ * the production command-identity check is exercised rather than bypassed
+ * with the test pid.
  */
 describe('ensureDaemonStarted (#415: always-on beyond routines)', () => {
   let priorPid: number | null = null;
@@ -380,26 +379,6 @@ describe('daemon auto-start circuit breaker (RUSH-2418)', () => {
     },
     45_000,
   );
-});
-
-describe('shouldTakeOverBroker (RUSH-1817: daemon self-heals a dead standalone)', () => {
-  it('takes over ONLY when not hosting and no healthy broker answers', () => {
-    // The regression that wedged secrets on zion: the daemon deferred to a
-    // standalone at startup (not hosting) and that standalone later died
-    // (unreachable) — the one state where self-heal must fire.
-    expect(shouldTakeOverBroker(false, false)).toBe(true);
-  });
-
-  it('never takes over while the daemon is already hosting', () => {
-    // Our in-process broker is alive as long as the daemon is; re-hosting would
-    // fight our own socket. True regardless of the ping result.
-    expect(shouldTakeOverBroker(true, false)).toBe(false);
-    expect(shouldTakeOverBroker(true, true)).toBe(false);
-  });
-
-  it('never clobbers a reachable (healthy) standalone broker', () => {
-    expect(shouldTakeOverBroker(false, true)).toBe(false);
-  });
 });
 
 describe('anchorDaemonCwd', () => {

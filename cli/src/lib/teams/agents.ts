@@ -22,7 +22,7 @@ import type { AgentId } from '../types.js';
 import { getAgentsDir as getSystemAgentsDir, getShimsDir } from '../state.js';
 import { AGENTS, getAccountInfo } from '../agents.js';
 import { resolveVersion, isVersionInstalled, verifyInstalledBinaryLaunches } from '../installations/versions.js';
-import { sanitizeProcessEnv } from '../secrets/bundles.js';
+import { sanitizeProcessEnv } from '../secrets-client.js';
 import { resolveActor, actorEnv } from '../actor.js';
 import { recordRunName } from '../session/run-names.js';
 import { sshExec, shellQuote } from '../ssh-exec.js';

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # prepack gate: refuse to pack unless dist/bin/agents is exactly the signed +
 # notarized binary that scripts/sign-cli-binary.sh produced (issue #315).
-# Mirrors scripts/verify-keychain-helper.sh, plus two checks the helper does
+# Mirrors scripts/verify-menubar-helper.sh, plus two checks that helper does
 # not need:
 #   - the embedded version must match package.json - the binary is rebuilt
 #     every release, and a stale binary+pin pair from an earlier release

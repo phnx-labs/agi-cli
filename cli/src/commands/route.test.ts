@@ -8,26 +8,13 @@ import * as state from '../lib/state.js';
 import { registerRouteCommands } from './route.js';
 import { readRouter, routerExists } from '../lib/routers.js';
 import { addAccount } from '../lib/account-registry.js';
-import { setKeychainBackendForTest, type KeychainBackend } from '../lib/secrets/index.js';
-import { _resetFileStoreForTest } from '../lib/secrets/filestore.js';
-
-class MemoryKeychain implements KeychainBackend {
-  store = new Map<string, string>();
-  has(item: string) { return this.store.has(item); }
-  get(item: string): string {
-    const v = this.store.get(item);
-    if (v === undefined) throw new Error(`Keychain item not found: ${item}`);
-    return v;
-  }
-  set(item: string, value: string) { this.store.set(item, value); }
-  delete(item: string) { return this.store.delete(item); }
-  list(prefix: string) { return [...this.store.keys()].filter((k) => k.startsWith(prefix)); }
-}
+import { useFreshSecretsHome } from '../../tests/secrets-standalone.js';
 
 let TEST_ROOT: string;
 let USER_DIR: string;
 let PROJECT_DIR: string;
-let previousMetaIndex: string | undefined;
+
+useFreshSecretsHome();
 
 beforeEach(() => {
   TEST_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'route-cmd-test-'));
@@ -38,20 +25,12 @@ beforeEach(() => {
   vi.spyOn(state, 'getSystemAgentsDir').mockReturnValue(path.join(TEST_ROOT, 'system', '.agents'));
   vi.spyOn(state, 'getProjectAgentsDir').mockReturnValue(null);
 
-  previousMetaIndex = process.env.AGENTS_SECRETS_META_INDEX_FILE;
-  process.env.AGENTS_SECRETS_META_INDEX_FILE = path.join(TEST_ROOT, 'bundle-index.json');
-  _resetFileStoreForTest({ fileDir: path.join(TEST_ROOT, 'secrets'), passphrase: 'route-cmd-test' });
-  setKeychainBackendForTest(new MemoryKeychain());
   // Real, registered accounts every link-account/unlink-account test can reference.
   addAccount('personal', 'openrouter', 'api-key', 'sk-personal-test', USER_DIR);
   addAccount('work', 'openrouter', 'api-key', 'sk-work-test', USER_DIR);
 });
 
 afterEach(() => {
-  setKeychainBackendForTest(null);
-  _resetFileStoreForTest();
-  if (previousMetaIndex === undefined) delete process.env.AGENTS_SECRETS_META_INDEX_FILE;
-  else process.env.AGENTS_SECRETS_META_INDEX_FILE = previousMetaIndex;
   vi.restoreAllMocks();
   fs.rmSync(TEST_ROOT, { recursive: true, force: true });
 });
