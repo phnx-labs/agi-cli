@@ -14,8 +14,10 @@ import Foundation
 // FSEvents rather than a poll timer: a poll would be a repeating timer stat-ing
 // three directories forever, and the helper's rule is that a repeating timer must
 // earn its keep (ChildProcess.swift). FSEvents is edge-triggered — zero cost while
-// nothing changes — and the stream only runs while the panel is VISIBLE, so a
-// palette nobody has open watches nothing.
+// nothing changes. Two instances exist: the palette's strip watcher runs only
+// while the panel is VISIBLE, so a palette nobody has open watches nothing, and
+// ScreenshotIndex keeps a second one for the whole helper lifetime so a capture
+// taken (or deleted) with the palette closed is indexed (or pruned) promptly.
 //
 // This is not a second scheduler (spec SING-2): it detects a local file change and
 // re-renders a view. It never starts, resumes, kills, or dispatches anything.

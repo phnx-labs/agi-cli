@@ -5,7 +5,9 @@ import Foundation
 // the menu-bar helper. Runs REAL Vision recognition over the two committed fixture
 // PNGs into a REAL temp SQLite DB, then asserts the stored first_line, hash
 // dedupe (a renamed duplicate collapses onto one row and is not re-OCR'd), and the
-// tokenized case-insensitive search. Also pins the pure grouping helper.
+// tokenized case-insensitive search, then that a deleted capture drops out of
+// search, the grid, and the row count (and that deleting only a duplicate keeps
+// the surviving original's row). Also pins the pure grouping helper.
 //
 //   MENUBAR_OCR_TEST=1 "AGI Menu"
 //
@@ -76,6 +78,7 @@ enum ScreenshotOCRSelfTest {
         check(ScreenshotIndex.searchTokens("  Needs   YOU ") == ["needs", "you"],
               "searchTokens lowercases, splits, drops empties")
 
+        testDeletedCaptures(index, srcDir: srcDir)
         testGrouping()
         testOffMainThread(index)
 
@@ -83,6 +86,48 @@ enum ScreenshotOCRSelfTest {
 
         if failures == 0 { print("\nALL PASS"); exit(0) }
         print("\n\(failures) FAILED"); exit(1)
+    }
+
+    // A row lives exactly as long as its file. Entering here the index holds two
+    // rows: needs-you (its row re-pointed at duplicate-of-needs-you.png by the
+    // dedupe pass, with shot-needs-you.png still on disk) and deploy.
+    private static func testDeletedCaptures(_ index: ScreenshotIndex, srcDir: String) {
+        let fm = FileManager.default
+
+        // Deleting only the duplicate must NOT lose the capture: the row re-points
+        // to the surviving original on the next scan.
+        try? fm.removeItem(atPath: "\(srcDir)/duplicate-of-needs-you.png")
+        index.indexSynchronouslyForTest()
+        let needsYou = index.searchSyncForTest("needs you")
+        check(index.rowCountSyncForTest() == 2,
+              "deleting a duplicate keeps the row while the original survives (\(index.rowCountSyncForTest()) rows)")
+        check(needsYou.first.map { ($0.path as NSString).lastPathComponent } == "shot-needs-you.png",
+              "row re-points to the surviving original (got \(needsYou.map(\.path)))")
+
+        // Delete a capture outright. Before any scan runs (the FSEvents coalescing
+        // window), search and grid must already refuse to return it...
+        try? fm.removeItem(atPath: "\(srcDir)/shot-deploy.png")
+        check(index.searchSyncForTest("deploy").isEmpty,
+              "search drops a deleted capture before the next scan")
+        check(index.recentRowsSyncForTest().count == 1,
+              "grid drops a deleted capture before the next scan (got \(index.recentRowsSyncForTest().count))")
+        check(index.rowCountSyncForTest() == 2,
+              "the stale row is still stored until a scan prunes it")
+
+        // ...and the scan the watcher fires on the deletion prunes the row itself.
+        index.indexSynchronouslyForTest()
+        check(index.rowCountSyncForTest() == 1,
+              "scan prunes the deleted capture's row (got \(index.rowCountSyncForTest()) rows)")
+        check(index.searchSyncForTest("deploy").isEmpty, "search after prune -> empty")
+        check(index.recentRowsSyncForTest().map(\.firstLine) == ["Needs you now"],
+              "grid after prune holds only the surviving capture")
+
+        // A re-created file is indexed again: the prune dropped its hash from the
+        // known set along with the row, so a fresh recognition rebuilds it.
+        copy(fixturesDir() + "/ocr-deploy.png", "\(srcDir)/shot-deploy.png")
+        index.indexSynchronouslyForTest()
+        check(index.rowCountSyncForTest() == 2 && index.searchSyncForTest("deploy").count == 1,
+              "a capture restored after pruning is re-indexed (\(index.rowCountSyncForTest()) rows)")
     }
 
     // Grouping is a pure function over rows: last-24h captures bucket by hour, older
