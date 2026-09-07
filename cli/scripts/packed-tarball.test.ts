@@ -1,6 +1,6 @@
 /**
  * Proves the packed `@phnx-labs/agents-cli` tarball ships no trace of the
- * in-repo secrets engine (PHNX-3989 DIST-1) — real `bun run build` + real
+ * in-repo secrets engine (PHNX-3989 DIST-1) — a real `tsc` build + real
  * `npm pack` + a real `tar tzf` of the produced .tgz, not a grep of the
  * `files` allowlist in package.json. The engine (`cli/src/lib/secrets/**`,
  * the keychain-helper Swift source, the two build/verify scripts) is gone
@@ -16,28 +16,55 @@ import * as path from 'node:path';
 const CLI_ROOT = path.resolve(__dirname, '..');
 
 function packedEntries(): string[] {
-  // Always rebuild — never trust a pre-existing dist/. `dist/` is gitignored, so on a
-  // shared/reused worktree (a fleet test-runner's cached tree, in particular) a stale
-  // build from a prior commit can still be sitting there; skipping the rebuild let this
-  // test pass against yesterday's artifact instead of proving anything about the tree
-  // it just checked out.
-  execFileSync('bun', ['run', 'build'], { cwd: CLI_ROOT, stdio: 'inherit' });
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-pack-'));
+  // Build into a throwaway package dir and pack THAT — never the live `dist/`.
+  //
+  // `dist/` is gitignored and `tsc` never deletes an output whose source is gone,
+  // so on a reused worktree (a fleet test-runner's cached tree, in particular) a
+  // rebuild in place still leaves yesterday's `dist/lib/secrets/*.js` sitting
+  // beside today's output, and `npm pack` ships them: this test then fails on a
+  // tree that is actually clean (the 1.22.85 attestation run on a shard box).
+  // Wiping `dist/` first is not an option either — other tests in the same run
+  // exec `dist/index.js`. So the build goes to a fresh dir, mirroring what
+  // `release-attestation-produce.sh` does (`rm -rf dist` before its build):
+  // the listing proves the checked-out tree, not whatever the box had lying around.
+  const stage = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-pack-'));
   try {
-    const pack = spawnSync('npm', ['pack', '--silent', '--pack-destination', tmp], {
-      cwd: CLI_ROOT,
+    execFileSync(
+      path.join(CLI_ROOT, 'node_modules', '.bin', 'tsc'),
+      ['-p', CLI_ROOT, '--outDir', path.join(stage, 'dist')],
+      { cwd: CLI_ROOT, stdio: 'inherit' },
+    );
+    // Everything else the `files` allowlist admits, copied from the tree so the
+    // pack sees the same allowlist against the same non-dist inputs a release does.
+    // `prepack` (`cp ../README.md README.md`) is what puts README.md in place; the
+    // pack below runs with --ignore-scripts, so do that copy here.
+    const pkg = JSON.parse(fs.readFileSync(path.join(CLI_ROOT, 'package.json'), 'utf-8')) as {
+      files: string[];
+    };
+    for (const entry of pkg.files) {
+      if (entry.startsWith('dist/')) continue;
+      const src = path.join(CLI_ROOT, entry);
+      if (!fs.existsSync(src)) continue;
+      fs.mkdirSync(path.dirname(path.join(stage, entry)), { recursive: true });
+      fs.cpSync(src, path.join(stage, entry), { recursive: true });
+    }
+    fs.copyFileSync(path.join(CLI_ROOT, 'package.json'), path.join(stage, 'package.json'));
+    fs.copyFileSync(path.join(CLI_ROOT, '..', 'README.md'), path.join(stage, 'README.md'));
+
+    const pack = spawnSync('npm', ['pack', '--silent', '--ignore-scripts', '--pack-destination', stage], {
+      cwd: stage,
       encoding: 'utf-8',
     });
     if (pack.status !== 0) {
       throw new Error(`npm pack failed (status ${pack.status}): ${pack.stdout}${pack.stderr}`);
     }
     const tgzName = pack.stdout.trim().split('\n').pop()!;
-    const tgzPath = path.join(tmp, tgzName);
-    expect(fs.existsSync(tgzPath), `npm pack did not produce ${tgzName} in ${tmp}`).toBe(true);
+    const tgzPath = path.join(stage, tgzName);
+    expect(fs.existsSync(tgzPath), `npm pack did not produce ${tgzName} in ${stage}`).toBe(true);
     const listing = execFileSync('tar', ['tzf', tgzPath], { encoding: 'utf-8' });
     return listing.trim().split('\n');
   } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
+    fs.rmSync(stage, { recursive: true, force: true });
   }
 }
 
