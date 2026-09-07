@@ -111,11 +111,40 @@ describe('postinstall alias shims', () => {
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe('');
 
-    for (const name of ['sessions', 'secrets', 'browser', 'pty', 'teams']) {
+    for (const name of ['sessions', 'browser', 'pty', 'teams']) {
       const script = readShim(home, name);
       expect(script).toContain(`exec "$AGENTS_BIN" ${name} "$@"`);
       expect(script).toContain(path.join(root, 'dist', 'index.js'));
     }
+    // `secrets` is the standalone binary's name (PHNX-3989): never written here.
+    expect(fs.existsSync(path.join(home, '.agents', '.cache', 'shims', 'secrets'))).toBe(false);
+  });
+
+  it('removes the retired `secrets` alias a previous install wrote, and only that (PHNX-3989)', () => {
+    // An in-place upgrade from a pre-standalone release leaves the old alias
+    // behind; every install path runs this script, so this is where it goes.
+    const home = makeTempHome();
+    const root = stagePackageTree();
+    const shims = path.join(home, '.agents', '.cache', 'shims');
+    fs.mkdirSync(shims, { recursive: true });
+    const legacy = `#!/bin/sh\nAGENTS_BIN='/old/install/dist/index.js'\nexec "$AGENTS_BIN" secrets "$@"\n`;
+    fs.writeFileSync(path.join(shims, 'secrets'), legacy, { mode: 0o755 });
+    fs.writeFileSync(path.join(shims, 'secrets.cmd'), `@echo off\r\nnode "/old/install/dist/index.js" secrets %*\r\n`);
+    // An unrelated file under a retired name is not ours and must survive.
+    const foreign = path.join(shims, 'secrets-foreign');
+    fs.writeFileSync(foreign, '#!/bin/sh\necho unrelated\n', { mode: 0o755 });
+
+    const result = runPostinstall(root, home, {
+      npm_config_global: undefined,
+      AGENTS_INIT_SHELL: undefined,
+      AGENTS_POSTINSTALL_SHIMS_ONLY: '1',
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(fs.existsSync(path.join(shims, 'secrets'))).toBe(false);
+    expect(fs.existsSync(path.join(shims, 'secrets.cmd'))).toBe(false);
+    expect(fs.existsSync(foreign)).toBe(true);
+    expect(readShim(home, 'sessions')).toContain('exec "$AGENTS_BIN" sessions "$@"');
   });
 });
 

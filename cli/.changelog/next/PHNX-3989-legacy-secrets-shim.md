@@ -8,6 +8,9 @@
   shim without bound. The resolver now skips agents-cli's own shims dir when looking
   for the standalone (`SECRETS_BIN` still wins; a miss still fails loud with the
   install command), and the self-heal shim pass removes that legacy `secrets` shim
-  even though its target install is alive, since it can only recurse. Install the
-  standalone with `npm i -g @phnx-labs/secrets-cli` if `agents secrets` reports it
-  missing.
+  even though its target install is alive, since it can only recurse. The package's
+  postinstall — which used to write that very shim on every install, so an upgrade
+  kept bringing it back — no longer writes a `secrets` alias at all and removes one
+  a previous install left behind; the bare-command aliases are now `sessions`,
+  `browser`, `pty`, and `teams`. Install the standalone with
+  `npm i -g @phnx-labs/secrets-cli` if `agents secrets` reports it missing.
