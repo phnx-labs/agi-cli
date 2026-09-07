@@ -170,6 +170,21 @@ if ProcessInfo.processInfo.environment["MENUBAR_OCR_TEST"] == "1" {
     ScreenshotOCRSelfTest.run()
 }
 
+// Row-model self-test (PHNX-4003): decode real feed-row JSON, drive the pure
+// SessionRowModel, and assert every status color, PR-chip state, progress tally,
+// phase line, subagents glyph, and the latest-action ladder. No GUI, no network —
+// a build gate. See RowModelSelfTest.swift.
+if ProcessInfo.processInfo.environment["MENUBAR_ROWMODEL_TEST"] == "1" {
+    RowModelSelfTest.run()
+}
+
+// Reply self-test (PHNX-4003): pin the exact `agents` argv for each reply
+// capability (feed block choice/text, terminal/tmux inject, cloud, team, none).
+// No GUI, no network — a build gate. See ReplySelfTest.swift.
+if ProcessInfo.processInfo.environment["MENUBAR_REPLY_TEST"] == "1" {
+    ReplySelfTest.run()
+}
+
 // Everything past here installs the status item and registers the global
 // chords, so it must only run where those chords can actually be serviced.
 // Refuses an ssh-started launch or an unrecognized flag — the two ways a helper
@@ -243,11 +258,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .init(id: HotkeyManager.promptID, keyCode: UInt32(kVK_ANSI_O), modifiers: mods,
                   label: "Cmd-Shift-O (quick capture)",
                   onFire: { [weak self] in self?.promptController.summon() }),
+            .init(id: HotkeyManager.sessionsID, keyCode: UInt32(kVK_ANSI_I), modifiers: mods,
+                  label: "Cmd-Shift-I (Sessions window)",
+                  onFire: { SessionsWindowController.shared.toggle() }),
         ])
         // Preview the quick-issue panel without the global hotkey (QA / a machine
         // where synthesizing a system hotkey isn't possible): MENUBAR_PROMPT_PREVIEW=1.
         if ProcessInfo.processInfo.environment["MENUBAR_PROMPT_PREVIEW"] == "1" {
             promptController.summon()
+        }
+        // Same for the Sessions window (PHNX-4003): MENUBAR_SESSIONS_PREVIEW=1 opens
+        // it at launch so QA / a screenshot capture never has to synthesize Cmd-Shift-I.
+        if ProcessInfo.processInfo.environment["MENUBAR_SESSIONS_PREVIEW"] == "1" {
+            SessionsWindowController.shared.open(selecting: nil)
         }
     }
 }

@@ -415,10 +415,11 @@ One rule shapes the menu: **attention floats up, context groups down.**
 ```
  a !                      icon + badge (red ! = needs you, green N = N running)
  ┌─ agents ──────────────────────────────────────┐
- │ ⚠ NEEDS YOU (3)                               │   triage strip: wait-time sorted
- │   ⚠ Claude · api — Apply rename?    ·  2h 25m ›│   across ALL projects, question
- │   ⚠ Claude · web — awaiting input   ·  3m     ›│   + how long it's waited
- │   ✕ 2 routines failing                        ›│
+ │ Sessions                       3 need you     │   opens the Sessions window (⌘⇧I)
+ │ ● working  ● needs you  ● idle                │   status-color legend
+ ├────────────────────────────────────────────────┤
+ │ ⚠ NEEDS YOU (1)                               │   non-session triage only:
+ │   ✕ 2 routines failing                        ›│   load / scheduler / routines
  ├────────────────────────────────────────────────┤
  │ New Task…                                  ⌘T │   opens the quick-dispatch bar
  │ New Session                                ⌘N │   submenu: one entry per agent
@@ -433,7 +434,15 @@ One rule shapes the menu: **attention floats up, context groups down.**
  │   ✕ crm-brief  failed                       ›  │   the rest
  │   All routines…                             ›  │
  ├────────────────────────────────────────────────┤
- │ RECENT TICKETS / RECENT                       │   dedicated, glanceable
+ │ RECENT TICKETS                                │   tickets filed via quick dispatch
+ ├────────────────────────────────────────────────┤
+ │ RECENT                                        │   live sessions, grouped by
+ │   agents-cli (2) · 1 need you                 │   project, newest first, from
+ │   ● Fix auth  2/5  working · 18h · s0         │   the shared row model; a row
+ │       edited exec.ts · bun test   PR #99 ✓    │   opens the window on that session
+ ├────────────────────────────────────────────────┤
+ │ Notifications (2)                           ›  │   today's feed banners (24h),
+ │   ⚠ Runaway agent · yosemite-m6             ›  │   unanswered first → open window
  ├────────────────────────────────────────────────┤
  │ ◆ NEW DEVICES (2)                             │   pending tailnet nodes to approve
  │   ◆ ci-runner-fsn1 · linux                  ›  │   Register / Ignore
@@ -447,14 +456,19 @@ One rule shapes the menu: **attention floats up, context groups down.**
  └────────────────────────────────────────────────┘
 ```
 
-- **⚠ NEEDS YOU** — the triage strip, pinned on top and never nested in a project
-  group. Blocked sessions are grouped by (agent, repo): a group of 1 renders
-  inline with the actual question it's waiting on (or bare when the Notification
-  hook wrote no message); a group of 2+ collapses to one
-  `<Agent> · <repo> · N waiting · oldest <elapsed> ›` row with a submenu that
-  lists each session (oldest first). Groups themselves sort by their oldest
-  wait. Failed / overdue routines and a stopped scheduler append here. Empty
-  when nothing needs attention.
+- **Sessions** — the top row, pinned above everything (`Cmd-Shift-I`). It opens
+  the [Sessions window](#sessions-window-cmd-shift-i-phnx-4003) and shows
+  `n need you` in yellow when any fleet session is waiting, so the one place to go
+  for blocked work is always the first thing you see. The **legend** below it
+  (`● working · ● needs you · ● idle`) names the status colors the RECENT rows and
+  the window share.
+- **⚠ NEEDS YOU** — the triage strip for the work the Sessions window does *not*
+  cover: high device load, a stopped scheduler, and failed / overdue routines.
+  **Blocked sessions no longer render here** (PHNX-4003) — session attention is
+  owned by the Sessions row + window above, which surface the reconciled feed
+  attention with its real reply/approve controls. Failing routines lead the strip
+  (always visible, no click); routines sharing an identical cause collapse into one
+  row. Empty when nothing non-session needs attention.
 - **New Task…** — opens the quick-dispatch bar (the same panel as `Cmd-Shift-O`):
   type the task, pick agents and a repo, and it runs headless. One panel serves
   both entry points, so an interrupted capture is restored whichever way you come
@@ -502,8 +516,18 @@ One rule shapes the menu: **attention floats up, context groups down.**
   both the inline rows and the "All routines…" submenu are grouped by that label.
   Routines with no `projectGroup` (cross-project or unassigned) appear last,
   ungrouped.
-- **RECENT TICKETS / RECENT** — tickets filed via quick dispatch and recent
-  sessions, unchanged dedicated sections.
+- **RECENT TICKETS** — tickets filed via the quick-dispatch bar (`Cmd-Shift-O`),
+  clickable to open. Its own dedicated section, unchanged.
+- **RECENT** — live sessions across the fleet, grouped by project (newest first),
+  two lines per row from the shared [row model](#the-row-model-sessionrowmodelswift):
+  a status dot + title + `n/N` checklist + `working · 18h · s0` on line one, the
+  latest action + PR chip on line two. Each project header carries `· n need you`
+  in yellow when any of its sessions is waiting. Clicking a row opens the Sessions
+  window on that session. This replaces the historical recent-sessions list with
+  the same feed-driven projection the window renders.
+- **Notifications** — today's feed banners (bounded to 24 h, cached 30 s),
+  unanswered first, as a submenu. Selecting one opens the Sessions window on that
+  session to Approve / Reply.
 - **NEW DEVICES** — newly-discovered tailnet nodes awaiting approval, each with a
   Register / Ignore submenu. Shown only when there are pending nodes, and it now
   sits just above the DEVICES roster at the bottom (previously it floated up under
@@ -682,6 +706,60 @@ asserts row counts, attention keys, reset-on-gap, backoff, and the breaker;
 run in `scripts/test-menubar.sh` (a `build.sh` gate). `MENUBAR_FEED_SMOKE=1` runs
 the real stream for 60s and prints row/attention/device counts + health — a live
 check, not a gate, like `MENUBAR_DUMP`.
+
+## Sessions window (`Cmd-Shift-I`, PHNX-4003)
+
+A persistent `NSPanel` (`SessionsWindow.swift`) that projects `FeedStream` +
+`ArtifactIndex` into a grouped, filterable list on the left and a session card on
+the right. Toggled by `Cmd-Shift-I`, by the dropdown's **Sessions** row, or by
+clicking any dropdown RECENT row (which opens the window on that session). It is a
+document-style window — not floating — and remembers its frame
+(`setFrameAutosaveName`). Closing hides it; `FeedStream` stays attached, so
+re-opening is instant. `MENUBAR_SESSIONS_PREVIEW=1` opens it at launch (QA / a
+screenshot capture on a machine where synthesizing the chord is not possible), the
+same way `MENUBAR_PROMPT_PREVIEW=1` opens the palette.
+
+- **List** — `NSTableView`, view-based, grouped by project with collapsible group
+  rows (a group header shows `n need you` in yellow when any session in it is
+  waiting). Toolbar filter chips **Recent** / **Needs you** / **Running** /
+  **Done today** carry live counts; the search field (`Cmd-F`) matches label,
+  topic, project, ticket, and device. A device strip above the split shows each
+  reporting device with a `stale Nm` marker when its heartbeat ages out; offline
+  devices collapse to a count. The status bar reads stream health, last-event age,
+  devices reporting/stale, helper RSS, and row count. The only timer is a 1 s
+  relative-time refresh that re-renders **only the visible cells**; every other
+  redraw is a `FeedStream` diff.
+- **Card** (`SessionCard.swift`) — header (dot + title, harness+version, project,
+  host), phase pill + PR chip + subagents glyph, the REQUEST excerpt, the attention
+  block when present (question text with numbered option buttons; permission
+  Allow/Deny; plan-review Approve/Send-back — all answered atomically through
+  `agents feed answer <key> --choice <id>`), PROGRESS (checklist tally + latest
+  action), FILES & ARTIFACTS from `ArtifactIndex.artifacts(forSession:)` with an
+  **Open** button (`NSWorkspace.open`), and a reply field. Keys on a selected row:
+  `1`–`9` answer an option, `Return` focuses the reply field, `Cmd-Return` opens
+  the terminal (`agents focus <id>`), `Cmd-K` sends `Continue.` as a nudge, `Cmd-V`
+  attaches an image ref the same way the palette does.
+
+### The row model (`SessionRowModel.swift`)
+
+One pure derivation from a `SessionRow` (+ its `AttentionItem`) to what a surface
+renders — `statusColor` (green working / yellow needs-you / red idle / grey done),
+`phaseText` (`working · 18h · s0`), `progress`, `latestAction`, `prChip`,
+`subagents`, `groupKey`, title. The window **and** the dropdown RECENT section both
+consume `SessionRowModel.present`; nothing re-derives a status color or PR chip.
+`MENUBAR_ROWMODEL_TEST=1` asserts every branch (a `build.sh` gate).
+
+### Reply routes (`Reply.swift`)
+
+Every operator action is one bounded `agents` argv, built by pure argv builders and
+routed by capability: an open feed block → `agents feed answer <key>
+--choice <id>` / `--text`; `terminal`/`tmux` → `agents sessions inject <id> "…"`;
+`cloud` → `agents cloud message <id> "…"`; `team` → `agents teams message <team>
+<mate> "…"`; `none` disables the reply field with the CLI's reason (only Terminal
+remains). Each runs through a bounded `ChildProcess.runResult` (deadline,
+group-killed, reaped) and the ok/stderr result renders inline in the card, never as
+a toast. `MENUBAR_REPLY_TEST=1` pins the argv for each capability (a `build.sh`
+gate).
 
 ## Lifecycle
 

@@ -23,8 +23,9 @@ final class HotkeyManager {
     }
 
     // Stable ids so main.swift and this file can't drift.
-    static let clipID: UInt32 = 1    // Cmd-Shift-V → Clip.run()
-    static let promptID: UInt32 = 2  // Cmd-Shift-O → prompt panel
+    static let clipID: UInt32 = 1     // Cmd-Shift-V → Clip.run()
+    static let promptID: UInt32 = 2   // Cmd-Shift-O → prompt panel
+    static let sessionsID: UInt32 = 3 // Cmd-Shift-I → Sessions window
 
     // Demux table: EventHotKeyID.id → action. Static for the same reason the old
     // `shared` was — the C callback has no context pointer.
