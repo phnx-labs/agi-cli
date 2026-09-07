@@ -158,16 +158,21 @@ enum NotifyResponse: Equatable {
     case openFile(path: String)
     case openWeb(url: String)
     case openSession(sessionId: String)
+    /// The tapped button named a target (`report` / `PR`) the banner did not
+    /// carry — the CLI's single `--action` holds one link, so a done banner with
+    /// both open-report and open-pr can only deliver one of them. Surfaced as a
+    /// follow-up banner rather than swallowed as a no-op.
+    case unavailable(target: String)
     case none
 
     /// The argv AFTER `agents` (the delegate prepends the resolved binary), or
-    /// nil for openFile/openWeb (opened via NSWorkspace) and none.
+    /// nil for openFile/openWeb (opened via NSWorkspace), unavailable, and none.
     var agentsArgs: [String]? {
         switch self {
         case let .feedAnswerChoice(key, id): return ["feed", "answer", key, "--choice", id]
         case let .feedAnswerText(key, text): return ["feed", "answer", key, "--text", text]
         case let .openSession(sessionId): return ["open", "agents://session/\(sessionId)"]
-        case .openFile, .openWeb, .none: return nil
+        case .openFile, .openWeb, .unavailable, .none: return nil
         }
     }
 
@@ -223,16 +228,22 @@ func resolveNotifyResponse(actionIdentifier: String,
         return .none
 
     case NotifyAction.openReport:
-        // `open:<path>` → open the report file. No other prefix has a target here.
-        guard let action = context.action, action.hasPrefix("open:") else { return .none }
+        // `open:<path>` → open the report file. Any other action means the
+        // banner offered the button without carrying the report: say so.
+        guard let action = context.action, action.hasPrefix("open:") else {
+            return .unavailable(target: "report")
+        }
         return .openFile(path: String(action.dropFirst("open:".count)))
 
     case NotifyAction.openPR:
-        // `url:<https…>` → open the PR page. Web schemes only.
-        guard let action = context.action, action.hasPrefix("url:") else { return .none }
-        let raw = String(action.dropFirst("url:".count))
-        guard let url = URL(string: raw), let scheme = url.scheme?.lowercased(),
-              scheme == "https" || scheme == "http" else { return .none }
+        // `url:<https…>` → open the PR page. Web schemes only; a banner whose
+        // single `--action` went to the report (or carries no usable URL) has
+        // no PR link to open, so the tap surfaces a follow-up instead of nothing.
+        guard let action = context.action, action.hasPrefix("url:"),
+              let url = URL(string: String(action.dropFirst("url:".count))),
+              let scheme = url.scheme?.lowercased(), scheme == "https" || scheme == "http" else {
+            return .unavailable(target: "PR")
+        }
         return .openWeb(url: url.absoluteString)
 
     case NotifyAction.reply:
@@ -468,9 +479,14 @@ enum Notifier {
 
     // MARK: Response handling (persistent instance)
 
-    /// Run the command a tapped action maps to. openFile/openWeb go straight to
-    /// NSWorkspace; the answer/open-session cases run one bounded `agents` argv,
-    /// and a non-zero `feed answer` raises the "could not deliver" follow-up.
+    /// Run the command a tapped action maps to and return at once. openFile/openWeb
+    /// go straight to NSWorkspace; an unavailable target posts its follow-up; the
+    /// answer/open-session cases run one bounded `agents` argv OFF the calling
+    /// thread — `didReceive` is not guaranteed to arrive off main, and a `feed
+    /// answer` routing over a remote rail can take the full 20 s deadline, which
+    /// on the main thread would freeze the status item (the same rule every
+    /// timer-driven `ChildProcess` caller follows). A non-zero `feed answer` hops
+    /// back to main to raise the "could not deliver" follow-up.
     static func handleResponse(_ response: NotifyResponseContext, actionIdentifier: String,
                                typedText: String?, agent: String?,
                                runner: NotifyCommandRunning = ChildProcessCommandRunner()) {
@@ -481,13 +497,20 @@ enum Notifier {
             NSWorkspace.shared.open(URL(fileURLWithPath: path))
         case let .openWeb(url):
             if let u = URL(string: url) { NSWorkspace.shared.open(u) }
+        case let .unavailable(target):
+            postFollowUp(title: "Could not open the \(target)",
+                         body: "This notice carried no \(target) link. Open the session in its terminal to find it.",
+                         agent: agent, context: response)
         case .none:
             return
         default:
             guard let args = resolved.agentsArgs else { return }
-            let result = runner.run(agentsArgs: args, timeout: responseTimeout)
-            if result.code != 0, resolved.isAnswer {
-                postAnswerFailure(stderr: result.stderr, agent: agent, context: response)
+            DispatchQueue.global(qos: .userInitiated).async {
+                let result = runner.run(agentsArgs: args, timeout: responseTimeout)
+                guard result.code != 0, resolved.isAnswer else { return }
+                DispatchQueue.main.async {
+                    postAnswerFailure(stderr: result.stderr, agent: agent, context: response)
+                }
             }
         }
     }
@@ -498,9 +521,18 @@ enum Notifier {
     private static func postAnswerFailure(stderr: String, agent: String?, context: NotifyResponseContext) {
         let tail = stderr.split(whereSeparator: \.isNewline).suffix(3).joined(separator: " ")
             .trimmingCharacters(in: .whitespaces)
+        postFollowUp(title: "Could not deliver your reply",
+                     body: tail.isEmpty ? "Open the session in its terminal to answer directly." : tail,
+                     agent: agent, context: context)
+    }
+
+    /// One follow-up banner shape for every response the helper could not carry
+    /// out: category `agents.failure` (Open terminal), the session's thread and
+    /// avatar, so the operator lands in the session instead of a dead tap.
+    private static func postFollowUp(title: String, body: String, agent: String?, context: NotifyResponseContext) {
         let content = UNMutableNotificationContent()
-        content.title = "Could not deliver your reply"
-        content.body = tail.isEmpty ? "Open the session in its terminal to answer directly." : tail
+        content.title = title
+        content.body = body
         content.subtitle = "Open in terminal"
         content.categoryIdentifier = NotifyCategory.failure
         content.interruptionLevel = .active
