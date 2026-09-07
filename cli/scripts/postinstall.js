@@ -22,7 +22,6 @@ const AGENTS_JS_ENTRYPOINT = fileURLToPath(new URL('../dist/index.js', import.me
 // is what EDR (CrowdStrike Falcon) flags when an editor child spawns it (#315).
 const AGENTS_NATIVE_MACOS_BIN = fileURLToPath(new URL('../dist/bin/agents', import.meta.url));
 const AGENTS_BIN = resolveAgentsBin();
-const INSTALL_HELPER_SCRIPT = fileURLToPath(new URL('./install-helper.js', import.meta.url));
 
 function resolveAgentsBin() {
   if (process.platform !== 'darwin') return AGENTS_JS_ENTRYPOINT;
@@ -44,15 +43,6 @@ function resolveAgentsBin() {
   console.warn(`  warning: the signed agents binary at ${AGENTS_NATIVE_MACOS_BIN} failed to run (${why}).`);
   console.warn(`  Falling back to the JS entrypoint; 'agents' still works but is not code-signed.`);
   return AGENTS_JS_ENTRYPOINT;
-}
-
-function installKeychainHelper() {
-  if (process.platform !== 'darwin') return;
-  if (!fs.existsSync(INSTALL_HELPER_SCRIPT)) return;
-  // Sub-process so a hard failure (codesign / spctl missing on a weird host)
-  // can't take down the rest of postinstall. install-helper.js stays silent
-  // on no-op and emits one stdout line on success.
-  spawnSync(process.execPath, [INSTALL_HELPER_SCRIPT], { stdio: 'inherit' });
 }
 
 function shellQuote(value) {
@@ -93,7 +83,6 @@ const isGlobalInstall = process.env.npm_config_global || process.argv.includes('
 if (!isGlobalInstall) {
   // Still create user directories for local installs
   fs.mkdirSync(USER_DIR, { recursive: true, mode: 0o700 });
-  installKeychainHelper();
   console.log(`
 agents-cli installed locally.
 To complete setup, run: npx agents setup
@@ -114,10 +103,6 @@ To complete setup, run: npx agents setup
 // needed.
 fs.mkdirSync(USER_DIR, { recursive: true, mode: 0o700 });
 fs.mkdirSync(SHIMS_DIR, { recursive: true });
-
-// Copy the signed macOS Keychain helper to a stable user path so its trusted-app
-// ACLs survive future npm publishes (which re-sign the bundle).
-installKeychainHelper();
 
 const shellName = path.basename(process.env.SHELL || '/bin/bash');
 
