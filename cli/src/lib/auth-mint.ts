@@ -381,9 +381,9 @@ export function seedReservedStoreKey(
     // A standalone older than 0.1.1 rejects the `__<harness>__` bundle name and
     // the client only sees a sanitized code. Name the real requirement instead
     // of leaving `accounts add` to fail with `OPERATION_FAILED`.
-    if (isSecretsClientError(err) && err.code !== 'LOCKED' && err.code !== 'ACCESS_DENIED') {
+    if (isSecretsClientError(err, 'OPERATION_FAILED')) {
       throw new Error(
-        `Could not write the reserved store '${name}' as a bundle (${err.code}). agents-cli needs @phnx-labs/secrets-cli 0.1.1 or newer, which accepts the __<harness>__ bundle name: npm i -g @phnx-labs/secrets-cli@latest`,
+        `Could not write the reserved store '${name}' as a bundle: ${err.message}. agents-cli needs @phnx-labs/secrets-cli 0.1.1 or newer, which accepts the __<harness>__ bundle name: npm i -g @phnx-labs/secrets-cli@latest`,
       );
     }
     throw err;
