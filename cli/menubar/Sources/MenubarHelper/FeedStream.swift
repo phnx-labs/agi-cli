@@ -25,11 +25,29 @@ import Foundation
 //       func addObserver(_ id: AnyObject, _ handler: @escaping (Diff) -> Void)
 //       func removeObserver(_ id: AnyObject)
 //       func start(); func stop(); func restart()
+//       // Dispatch placeholders (PHNX-4005): a launch the palette fired but the
+//       // feed has not reported yet rides `rows` as a `launching` row.
+//       var placeholders: [PendingLaunch] { get }          // main-queue reads only
+//       func registerPlaceholder(_ launch: PendingLaunch)
+//       func failPlaceholder(key: String, stderrTail: String)
 //   }
 //
 // `upserted`/`removed` are rowKeys; `attentionChanged` are sessionIds. Reads of
 // `rows`/`attention`/`health`/`deviceHeartbeat` are published snapshots that are
 // mutated only on the main queue, so a UI caller reads them on the main queue.
+//
+// ── Placeholders ────────────────────────────────────────────────────────────────
+//
+// `registerPlaceholder` adds a synthetic row (rowKey `launching/<key>`, phase
+// `launching`, see `PendingLaunch.placeholderRow`) to the published `rows` and
+// fires an `upserted` diff for it, so the palette's pulse strip and the Sessions
+// window render it with no wiring beyond observing `rows`. It is removed — with a
+// `removed` diff — when a REAL row fulfils it (matched on the minted session id,
+// or on `--name`), when the launch's child exits non-zero (`failPlaceholder`,
+// carrying the stderr tail), or when the 60 s ttl passes with no row, which
+// posts "did not start". Reconciliation runs on every ingested envelope and on
+// the existing health tick; neither is a scheduler — expiring a placeholder only
+// drops a projection row and notifies, it never acts on a session (SING-2).
 final class FeedStream {
     static let shared = FeedStream()
 
@@ -43,9 +61,13 @@ final class FeedStream {
     private var publishedDeviceHeartbeat: [String: Date] = [:]
     private var publishedScopeStatus: [String: FeedScopeStatus] = [:]
     private var publishedHealth: StreamHealth = .stopped
+    private var publishedPlaceholders: [PendingLaunch] = []
 
-    /// Live rows keyed by rowKey. Main-queue reads only.
+    /// Live rows keyed by rowKey, including the `launching` placeholder rows.
+    /// Main-queue reads only.
     var rows: [String: SessionRow] { publishedRows }
+    /// Dispatch placeholders not yet fulfilled by a real row. Main-queue reads only.
+    var placeholders: [PendingLaunch] { publishedPlaceholders }
     /// Attention items keyed by sessionId. Main-queue reads only.
     var attention: [String: AttentionItem] { publishedAttention }
     /// Last-seen time per device scope. Main-queue reads only.
@@ -59,6 +81,7 @@ final class FeedStream {
 
     private let queue = DispatchQueue(label: "com.phnx-labs.agents-menubar.feedstream")
     private var state = FeedState()
+    private var placeholderRegistry = LaunchPlaceholders()
     private var handle: ChildProcess.StreamHandle?
     private var policy = RespawnPolicy()
     private var started = false
@@ -137,6 +160,52 @@ final class FeedStream {
         queue.async { self.observers[key] = nil }
     }
 
+    // MARK: - Placeholders
+
+    /// Register a launch the palette just fired. Its `launching` row is published
+    /// immediately and reconciled against real rows from then on.
+    func registerPlaceholder(_ launch: PendingLaunch) {
+        queue.async {
+            let diff = self.placeholderRegistry.register(launch)
+            self.publish(diff)
+        }
+    }
+
+    /// The launch's child exited non-zero before its row arrived: expire the
+    /// placeholder now with the captured stderr tail. No-op for a key that has
+    /// already resolved or expired.
+    func failPlaceholder(key: String, stderrTail: String) {
+        queue.async {
+            let (diff, expired) = self.placeholderRegistry.fail(key: key, stderrTail: stderrTail)
+            if let expired { self.notifyExpired([expired]) }
+            self.publish(diff)
+        }
+    }
+
+    /// Fold a reconcile pass over the REAL rows into `diff`. Queue-confined.
+    private func reconcilePlaceholders(into diff: inout Diff) {
+        guard !placeholderRegistry.pending.isEmpty else { return }
+        let now = Date().timeIntervalSince1970 * 1000
+        let (change, expired) = placeholderRegistry.reconcile(
+            realRows: Array(state.rows.values), now: now)
+        diff.upserted.formUnion(change.upserted)
+        diff.removed.formUnion(change.removed)
+        notifyExpired(expired)
+    }
+
+    /// "did not start" for each expired launch — the one user-visible outcome of
+    /// a user-initiated dispatch that never surfaced, posted from the registry's
+    /// single owner so every window sees it exactly once.
+    private func notifyExpired(_ expired: [PendingLaunch]) {
+        guard !expired.isEmpty else { return }
+        DispatchQueue.main.async {
+            for p in expired {
+                Notifier.post(title: "Dispatch did not start",
+                              body: PendingLaunches.expiredMessage(p), agent: p.agent)
+            }
+        }
+    }
+
     // MARK: - Child spawn
 
     private func spawnChild() {
@@ -173,7 +242,8 @@ final class FeedStream {
             sawDataSinceSpawn = true
             policy.recordHealthy() // a working connection clears the breaker path
         }
-        let diff = state.apply(env)
+        var diff = state.apply(env)
+        reconcilePlaceholders(into: &diff)
         setHealth(.live)
         publish(diff)
     }
@@ -214,6 +284,12 @@ final class FeedStream {
     }
 
     private func checkHealth() {
+        // A placeholder must expire even when the feed is silent, so the ttl
+        // check rides this tick too. It only drops a projection row + notifies.
+        var placeholderDiff = Diff()
+        reconcilePlaceholders(into: &placeholderDiff)
+        if !placeholderDiff.isEmpty { publish(placeholderDiff) }
+
         guard !stopping, !restarting else { return }
         // Only meaningful once a child is up and the breaker is not tripped.
         if case .breakerTripped = publishedHealth { return }
@@ -234,12 +310,16 @@ final class FeedStream {
     // MARK: - Publish
 
     private func publish(_ diff: Diff) {
-        let rowsSnap = state.rows
+        // Real rows first, placeholders on top — the namespaced rowKey means the
+        // two never collide, so this is a union, not an override.
+        let rowsSnap = state.rows.merging(placeholderRegistry.rows) { _, placeholder in placeholder }
+        let placeholdersSnap = placeholderRegistry.pending
         let attnSnap = state.attention
         let heartbeatSnap = state.deviceHeartbeat
         let scopeSnap = state.scopeStatus
         DispatchQueue.main.async {
             self.publishedRows = rowsSnap
+            self.publishedPlaceholders = placeholdersSnap
             self.publishedAttention = attnSnap
             self.publishedDeviceHeartbeat = heartbeatSnap
             self.publishedScopeStatus = scopeSnap

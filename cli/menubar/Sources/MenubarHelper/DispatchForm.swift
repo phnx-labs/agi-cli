@@ -112,8 +112,14 @@ struct RunOnOption: Equatable {
 // MARK: - The form view
 
 final class DispatchFormView: NSView {
-    // Dimensions the form owns.
+    // Dimensions the form owns. `mode` is the REMEMBERED mode (what the control
+    // persists); `forcedMode` is the Cmd-P override for one dispatch only.
     private(set) var mode: DispatchMode = .auto
+    /// Set by Cmd-P: the mode THIS dispatch runs under, never persisted. Cleared
+    /// when the operator picks a mode, and by `apply` on the next summon.
+    private(set) var forcedMode: DispatchMode?
+    /// The mode the next dispatch actually runs under.
+    var effectiveMode: DispatchMode { forcedMode ?? mode }
     private(set) var surface: DispatchSurface = .interactive
     private(set) var watchdog: WatchdogPolicy = .keep
     private(set) var runOn: String = "local"
@@ -266,8 +272,10 @@ final class DispatchFormView: NSView {
     // MARK: Apply / read defaults
 
     /// Apply remembered defaults to the controls (agents/project live on the
-    /// panel; this view owns the other four dimensions).
+    /// panel; this view owns the other four dimensions). Drops any one-dispatch
+    /// override — a summon or project switch starts from the remembered set.
     func apply(_ defaults: DispatchDefaults) {
+        forcedMode = nil
         mode = defaults.mode
         surface = defaults.surface
         watchdog = defaults.watchdog
@@ -279,23 +287,40 @@ final class DispatchFormView: NSView {
         refreshSummary()
     }
 
-    /// Fold this view's four dimensions into a DispatchDefaults, given the agents
-    /// and run-on the panel resolved.
-    func defaults(agents: [String]) -> DispatchDefaults {
+    /// The set to PERSIST as this project's remembered defaults: the four
+    /// dimensions with the remembered mode, never the Cmd-P override.
+    func rememberedDefaults(agents: [String]) -> DispatchDefaults {
         DispatchDefaults(agents: agents, runOn: runOn, mode: mode,
                          surface: surface, watchdog: watchdog)
     }
 
-    /// Force the mode to Plan for this dispatch only (Cmd-P), without persisting.
-    func forcePlanForThisDispatch() {
-        setMode(.plan)
+    /// The set the next dispatch RUNS under (the summary line renders this): the
+    /// remembered defaults with the Cmd-P override applied when one is set.
+    func dispatchDefaults(agents: [String]) -> DispatchDefaults {
+        rememberedDefaults(agents: agents).with(mode: effectiveMode)
     }
 
-    private func setMode(_ next: DispatchMode) {
-        mode = next
+    /// Force the mode to Plan for this dispatch only (Cmd-P), without persisting.
+    func forcePlanForThisDispatch() {
+        setMode(.plan, persist: false)
+    }
+
+    /// Move the mode control. `persist: true` is the operator picking a mode: it
+    /// becomes the remembered mode, clears any override, and fires `onChange` so
+    /// the controller writes the defaults. `persist: false` is the Cmd-P path: the
+    /// control and summary show the forced mode and the dispatch runs under it,
+    /// but `onChange` does NOT fire, so nothing is written and
+    /// `rememberedDefaults` keeps reporting the mode the operator chose.
+    private func setMode(_ next: DispatchMode, persist: Bool) {
+        if persist {
+            mode = next
+            forcedMode = nil
+        } else {
+            forcedMode = next
+        }
         modeControl.selectedSegment = DispatchMode.allCases.firstIndex(of: next) ?? 1
-        onChange?()
         refreshSummary()
+        if persist { onChange?() }
     }
 
     func refreshSummary() {
@@ -322,8 +347,7 @@ final class DispatchFormView: NSView {
     var contentHeight: CGFloat { isExpanded ? 24 + 4 * 30 : 24 }
 
     @objc private func onMode(_ sender: NSSegmentedControl) {
-        mode = DispatchMode.allCases[safe: sender.selectedSegment] ?? .auto
-        onChange?(); refreshSummary()
+        setMode(DispatchMode.allCases[safe: sender.selectedSegment] ?? .auto, persist: true)
     }
 
     @objc private func onSurface(_ sender: NSSegmentedControl) {

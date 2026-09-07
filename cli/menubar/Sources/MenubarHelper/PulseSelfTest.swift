@@ -17,6 +17,7 @@ enum PulseSelfTest {
         testHeadlineMilestone()
         testLiveRollup()
         testLiveOrdering()
+        testLaunchingPlaceholder()
         if failures == 0 {
             print("\nALL PASS")
             exit(0)
@@ -139,6 +140,31 @@ enum PulseSelfTest {
         check("NOW ordering not-progressing first", order == ["need", "idle", "run"], "\(order)")
         let capped = ProjectLiveRollup.rollup(rows: rows, project: "agi", nowLimit: 2)
         check("NOW respects the limit", capped.nowRows.count == 2)
+    }
+
+    /// The `launching` placeholder rows FeedStream publishes for a fresh palette
+    /// dispatch (PHNX-4005) are counted, ranked first as NOW chips, and rendered
+    /// as `◌ launching · <name>`.
+    private static func testLaunchingPlaceholder() {
+        let launch = PendingLaunch(key: "sid-new", byUuid: true, agent: "claude",
+                                   name: "fix-the-thing", project: "agi", cwd: nil,
+                                   launchedAtMs: 1_000, stderrTail: nil)
+        var rows = decodeRows("""
+        [ {"sessionId":"need","project":"agi","phase":"waiting","lastActivityMs":900},
+          {"sessionId":"run","project":"agi","phase":"running","lastActivityMs":800} ]
+        """)
+        rows.append(launch.placeholderRow)
+        let r = ProjectLiveRollup.rollup(rows: rows, project: "agi")
+        check("launching bucket", ProjectLiveRollup.bucket(launch.placeholderRow) == "launching")
+        check("launching is counted separately",
+              r.launching == 1 && r.needYou == 1 && r.running == 1 && r.idle == 0, "\(r)")
+        check("launching chip ranks first",
+              r.nowRows.first?.rowKey == "launching/sid-new", "\(r.nowRows.compactMap(\.sessionId))")
+        let counts = ProjectPulseView.countsText(pulse: nil, live: r)
+        check("counts line shows the launching glyph", counts == "\u{25CC}1 \u{25B6}1 \u{26A0}1", counts)
+        let title = ProjectPulseView.chipTitle(launch.placeholderRow)
+        check("chip reads launching + name",
+              title == "\u{25CC} launching \u{00B7} fix-the-thing", title)
     }
 
     private static func decodeRows(_ json: String) -> [SessionRow] {

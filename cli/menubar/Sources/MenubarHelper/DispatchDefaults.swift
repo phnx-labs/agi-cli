@@ -198,19 +198,21 @@ struct DispatchDefaults: Codable, Equatable {
 // MARK: - Pending-launch registry
 
 /// A launch the palette fired but has not yet seen come back on the feed. It
-/// shows as a `launching` placeholder so the operator sees the dispatch took,
-/// and it is resolved when a matching feed row appears — keyed by the minted
-/// session id for Claude (the id rides `--session-id`, exec.ts:1181), or by
-/// `--name` for the harnesses that coin their own id until the
+/// shows as a `launching` placeholder row so the operator sees the dispatch
+/// took, and it is resolved when a matching feed row appears — keyed by the
+/// minted session id for Claude (the id rides `--session-id`, exec.ts:1181), or
+/// by `--name` for the harnesses that coin their own id until the
 /// `@@AGENTS_SESSION_ID <id>@@` stdout marker resolves it
 /// (session-marker.ts:21-34). A placeholder with no matching row after
 /// `ttlMs` expires as "did not start".
 ///
 /// The matching + expiry are PURE static functions over the placeholder set and
-/// the current feed rows, so the self-test drives them with a decoded fixture
-/// and no FeedStream. The live wrapper (`PendingLaunchRegistry`) only holds the
-/// set and hooks FeedStream's documented observer seam — it never reaches into
-/// FeedStream internals.
+/// the current feed rows, and `LaunchPlaceholders` is the pure registry that
+/// folds them into a row map + diff, so the self-tests drive both with a decoded
+/// fixture and no FeedStream. FeedStream owns ONE `LaunchPlaceholders` behind
+/// its `registerPlaceholder` / `failPlaceholder` API and merges its rows into
+/// the rows it publishes, which is what lets the palette's pulse strip and the
+/// Sessions window render a placeholder with no wiring of their own.
 struct PendingLaunch: Equatable {
     /// The key the feed row is expected to carry: a session id (byUuid) or a
     /// `--name` slug.
@@ -222,8 +224,14 @@ struct PendingLaunch: Equatable {
     /// The run's `--name` slug, always recorded so a name match works even for
     /// the Claude case once the row surfaces before its id.
     let name: String
+    /// The project the palette dispatched under, so the placeholder row is
+    /// attributed the way the real row will be (`SessionRow.project`) and the
+    /// pulse strip counts it. Nil on the no-definitions path.
+    let project: String?
+    /// The narrowed working directory, when the dispatch used `--cwd`.
+    let cwd: String?
     let launchedAtMs: Double
-    /// The tail of the child's stderr, filled if the launch failed — shown with
+    /// The tail of the child's stderr, filled when the launch failed — shown with
     /// "did not start" when the placeholder expires.
     var stderrTail: String?
 
@@ -235,11 +243,39 @@ struct PendingLaunch: Equatable {
         if let rowName = row.name, !rowName.isEmpty, rowName == name { return true }
         return false
     }
+
+    /// The rowKey the placeholder occupies in the published rows map. Namespaced
+    /// so it can never collide with a real `<device>/<session>` key.
+    var rowKey: String { PendingLaunches.rowKeyPrefix + key }
+
+    /// The synthetic feed row for this launch: phase `launching`, the harness as
+    /// `kind`, the `--name` slug as the title, and the project it was dispatched
+    /// under, so every consumer of `FeedStream.rows` renders it like a real row
+    /// that has not reported yet. The session id rides only on a uuid-keyed
+    /// launch (a name-keyed one has no id until the harness coins it).
+    var placeholderRow: SessionRow {
+        SessionRow(rowKey: rowKey,
+                   sessionId: byUuid ? key : nil,
+                   name: name,
+                   title: name,
+                   project: project,
+                   cwd: cwd,
+                   kind: agent,
+                   phase: PendingLaunches.launchingPhase,
+                   status: PendingLaunches.launchingPhase,
+                   startedAtMs: launchedAtMs,
+                   lastActivityMs: launchedAtMs)
+    }
 }
 
 enum PendingLaunches {
     /// The default lifetime of a placeholder before it reads "did not start".
     static let defaultTTLMs: Double = 60_000
+    /// The `phase` a placeholder row carries — distinct from every feed bucket
+    /// (running | waiting | failed | done | idle) so a consumer can style it.
+    static let launchingPhase = "launching"
+    /// rowKey namespace for placeholder rows.
+    static let rowKeyPrefix = "launching/"
 
     /// The keys of placeholders that a feed row now fulfils — remove these.
     static func resolvedKeys(_ pending: [PendingLaunch], rows: [SessionRow]) -> Set<String> {
@@ -269,5 +305,64 @@ enum PendingLaunches {
         guard let tail = p.stderrTail?.trimmingCharacters(in: .whitespacesAndNewlines),
               !tail.isEmpty else { return head }
         return "\(head): \(tail)"
+    }
+}
+
+/// The pure placeholder registry FeedStream wraps. Holds the unresolved
+/// launches, projects them as `launching` rows, and reconciles them against the
+/// REAL feed rows (never against its own rows — a uuid placeholder would
+/// otherwise fulfil itself). Every mutation returns the `FeedDiff` FeedStream
+/// forwards to its observers, in the same rowKey vocabulary as real rows.
+struct LaunchPlaceholders: Equatable {
+    private(set) var pending: [PendingLaunch] = []
+
+    /// Placeholder rows keyed by their namespaced rowKey, for merging into the
+    /// published rows map.
+    var rows: [String: SessionRow] {
+        var out: [String: SessionRow] = [:]
+        for p in pending { out[p.rowKey] = p.placeholderRow }
+        return out
+    }
+
+    /// Register a launch. Re-registering a key replaces the earlier entry (a
+    /// retry of the same `--name`) rather than duplicating its row.
+    mutating func register(_ launch: PendingLaunch) -> FeedDiff {
+        pending.removeAll { $0.key == launch.key }
+        pending.append(launch)
+        var diff = FeedDiff()
+        diff.upserted.insert(launch.rowKey)
+        return diff
+    }
+
+    /// The launch's child exited non-zero before its row arrived: attach the
+    /// stderr tail and expire it now — waiting out the ttl would only delay the
+    /// "did not start" the operator needs. A key that already resolved (or
+    /// expired) is a no-op. Returns the expired launch for the notification.
+    mutating func fail(key: String, stderrTail: String) -> (diff: FeedDiff, expired: PendingLaunch?) {
+        guard let idx = pending.firstIndex(where: { $0.key == key }) else { return (FeedDiff(), nil) }
+        var launch = pending.remove(at: idx)
+        launch.stderrTail = stderrTail
+        var diff = FeedDiff()
+        diff.removed.insert(launch.rowKey)
+        return (diff, launch)
+    }
+
+    /// Drop every placeholder a real row now fulfils, and expire the ones past
+    /// the ttl with no row. Returns the diff plus the expired launches (the
+    /// caller notifies "did not start" for each).
+    mutating func reconcile(realRows: [SessionRow], now: Double,
+                            ttlMs: Double = PendingLaunches.defaultTTLMs)
+        -> (diff: FeedDiff, expired: [PendingLaunch]) {
+        guard !pending.isEmpty else { return (FeedDiff(), []) }
+        let resolved = PendingLaunches.resolvedKeys(pending, rows: realRows)
+        let expiredKeys = PendingLaunches.expiredKeys(pending, rows: realRows, now: now, ttlMs: ttlMs)
+        var diff = FeedDiff()
+        var expired: [PendingLaunch] = []
+        for p in pending where resolved.contains(p.key) || expiredKeys.contains(p.key) {
+            diff.removed.insert(p.rowKey)
+            if expiredKeys.contains(p.key) { expired.append(p) }
+        }
+        pending.removeAll { resolved.contains($0.key) || expiredKeys.contains($0.key) }
+        return (diff, expired)
     }
 }

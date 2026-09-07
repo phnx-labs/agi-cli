@@ -197,7 +197,14 @@ The form starts **collapsed** to a single summary line —
 `Claude 2.1.263 · this-mac · agi · Auto · Interactive · Keep moving` — with a
 `▸ details` disclosure that expands it to the control rows. **Cmd-Return**
 dispatches from either state; **Cmd-P** switches this one dispatch to Plan without
-persisting it.
+persisting it. The form keeps two modes for that: the **remembered** mode the
+control persists, and a **forced** override Cmd-P sets (`DispatchFormView.setMode`
+with `persist: false`), which moves the control and summary and decides what the
+dispatch runs under but never fires the form's `onChange` — so the controller's
+`rememberDispatchDefaults` never sees it, and the persisted set
+(`rememberedDefaults`) keeps the mode the operator chose. Picking a mode by hand
+clears the override; so does the next summon, which re-applies the remembered
+defaults. Pinned by the `MENUBAR_DISPATCH_TEST` self-test against the real view.
 
 Every dimension is **remembered per project** under
 `menubar.quickDispatch.defaults.<project>` (`DispatchDefaults`), so switching
@@ -212,13 +219,34 @@ A **Claude** dispatch mints a lowercase UUID and passes it as `--session-id <uui
 (`AgentsCLI.mintedSessionId`; the CLI forces this id onto the Claude conversation,
 exec.ts). That lets the palette do two things before the feed reports the row:
 register a **launching placeholder** keyed by the id, and set a non-default
-watchdog policy on it. The placeholder is resolved when a matching feed row
-appears (`PendingLaunches.resolvedKeys`, matched on session id, or on `--name` for
-the harnesses that coin their own id and surface it through the
-`@@AGENTS_SESSION_ID <id>@@` stdout marker) and **expires after 60 s** with "did
-not start" plus the stderr tail if no row ever arrives. Watchdog-at-dispatch is
-Claude-only, because `--session-id` is Claude-only (exec.ts); other harnesses
-coin their id asynchronously and keep the daemon default (`keep`).
+watchdog policy on it. Watchdog-at-dispatch is Claude-only, because `--session-id`
+is Claude-only (exec.ts); other harnesses coin their id asynchronously and keep
+the daemon default (`keep`).
+
+The placeholder lives in **`FeedStream`**, not the palette:
+`FeedStream.registerPlaceholder` (keyed by the minted uuid, or by `--name` for a
+harness that coins its own id) adds a synthetic row — rowKey `launching/<key>`,
+phase `launching`, the harness as `kind`, the `--name` slug as title, attributed
+to the dispatched project — to the `rows` it publishes and fires an `upserted`
+diff for it. Every consumer of the feed rows renders it with no wiring of its own:
+the palette's pulse strip counts it (`◌1`) and shows a `◌ launching · <name>`
+NOW chip ranked first; the Sessions window (track C) gets it the same way. It is
+removed, with a `removed` diff, when a REAL row fulfils it
+(`PendingLaunches.resolvedKeys`, matched on session id, or on `--name` for the
+harnesses that surface theirs through the `@@AGENTS_SESSION_ID <id>@@` stdout
+marker), when the launch's child **exits non-zero** before the row arrives
+(`FeedStream.failPlaceholder`, posting "did not start: <stderr tail>" at once), or
+**after 60 s** with no row ("did not start"). Reconciliation runs on every
+ingested envelope and on the stream's existing 5 s health tick, so a placeholder
+expires even while the feed is silent; neither path acts on a session (SING-2).
+The stderr tail is real: `AgentsCLI.dispatchRun` launches through
+`runDetachedWithStderrTail`, which drains the child's stderr into a 2 KiB ring via
+a readability handler (no blocked thread, no deadline — the run still outlives the
+helper) and hands the status plus tail to the placeholder on exit. The pure
+registry (`LaunchPlaceholders`) and the FeedStream publish path are pinned by
+`MENUBAR_FEED_TEST` against the same fixture as the reducer; the placeholder row
+and `MENUBAR_DISPATCH_TEST` / `MENUBAR_PULSE_TEST` pin the row shape and the
+pulse rendering.
 
 ### Project pulse
 
