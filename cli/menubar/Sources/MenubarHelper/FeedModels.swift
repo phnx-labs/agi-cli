@@ -102,7 +102,8 @@ struct SessionRow: Decodable, Equatable {
     init(rowKey: String? = nil, sourceDevice: String? = nil, sessionId: String? = nil,
          label: String? = nil, name: String? = nil, title: String? = nil, topic: String? = nil,
          project: String? = nil, cwd: String? = nil, host: String? = nil, machine: String? = nil,
-         kind: String? = nil, harness: String? = nil, phase: String? = nil, status: String? = nil,
+         kind: String? = nil, context: String? = nil, teamName: String? = nil, agentId: String? = nil,
+         cloudTaskId: String? = nil, harness: String? = nil, phase: String? = nil, status: String? = nil,
          activity: String? = nil, awaitingReason: String? = nil, question: SessionQuestion? = nil,
          todos: TodoProgress? = nil, timeline: TimelineSummary? = nil, lastAgentLine: String? = nil,
          preview: String? = nil, files: SessionFilesRef? = nil, request: SessionRequestRef? = nil,
@@ -113,7 +114,8 @@ struct SessionRow: Decodable, Equatable {
         self.rowKey = rowKey; self.sourceDevice = sourceDevice; self.sessionId = sessionId
         self.label = label; self.name = name; self.title = title; self.topic = topic
         self.project = project; self.cwd = cwd; self.host = host; self.machine = machine
-        self.kind = kind; self.harness = harness; self.phase = phase; self.status = status
+        self.kind = kind; self.context = context; self.teamName = teamName; self.agentId = agentId
+        self.cloudTaskId = cloudTaskId; self.harness = harness; self.phase = phase; self.status = status
         self.activity = activity; self.awaitingReason = awaitingReason; self.question = question
         self.todos = todos; self.timeline = timeline; self.lastAgentLine = lastAgentLine
         self.preview = preview; self.files = files; self.request = request
