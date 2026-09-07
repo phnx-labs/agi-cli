@@ -170,6 +170,8 @@ function cleanup(prevDefault: string | null): void {
     if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
     const trash = path.join(getHistoryDir(), 'trash', 'versions', 'claude', label);
     if (fs.existsSync(trash)) fs.rmSync(trash, { recursive: true, force: true });
+    const homeTrash = path.join(getHistoryDir(), 'trash', 'homes', 'claude', label);
+    if (fs.existsSync(homeTrash)) fs.rmSync(homeTrash, { recursive: true, force: true });
   }
   const accountsDir = path.join(getHistoryDir(), 'accounts', 'claude');
   if (fs.existsSync(accountsDir)) {
@@ -373,7 +375,7 @@ describe('accounts migrate (PHNX-3940 T7)', () => {
     expect(action?.accountId).toBe(gmailAcct.id);
     const canonicalAction = plan.harnesses.find((h) => h.agent === 'claude')?.actions.find((a) => a.label === pinnedDefault);
     expect(canonicalAction?.kind).toBe('canonical');
-    expect(canonicalAction?.reason).toMatch(/already holds a slot/);
+    expect(canonicalAction?.reason).toMatch(/already holds a slot — stale home trashed/);
 
     const result = await applyAccountMigration(['claude'], { isActive: async () => false });
     expect(result.manifest.status).toBe('complete');
@@ -385,8 +387,15 @@ describe('accounts migrate (PHNX-3940 T7)', () => {
     expect(fs.readdirSync(slotDir('claude', gmailAcct.id))).toEqual(slotBefore);
     const bindings = { ...readMeta().accounts?.bindings, ...readMeta().deviceAccounts?.bindings };
     expect(bindings[`claude@${extra}`]).toBe(gmailAcct.id);
-    // The canonical home stayed where it was.
-    expect(fs.existsSync(path.join(getVersionDir('claude', pinnedDefault), 'home', '.claude.json'))).toBe(true);
+    // The canonical install keeps its binary with an empty home; its stale
+    // credential copy went to the homes trash and the manifest names the path.
+    const canonicalHome = path.join(getVersionDir('claude', pinnedDefault), 'home');
+    expect(fs.existsSync(canonicalHome)).toBe(true);
+    expect(fs.readdirSync(canonicalHome)).toEqual([]);
+    const homeTrash = result.manifest.map[`claude@${pinnedDefault}#home`];
+    expect(homeTrash).toContain(path.join('trash', 'homes', 'claude', pinnedDefault));
+    expect(fs.existsSync(path.join(homeTrash!, '.claude.json'))).toBe(true);
+    expect(fs.existsSync(path.join(getVersionDir('claude', pinnedDefault), 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude-launcher'))).toBe(true);
     unbindAccount(gmailAcct.id, `claude@${extra}`, 'claude');
   });
 

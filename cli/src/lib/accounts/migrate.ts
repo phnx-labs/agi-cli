@@ -274,6 +274,33 @@ function plannedTrashPath(agent: AgentId, label: string): string {
   return path.join(getHistoryDir(), 'trash', 'versions', agent, label, '<stamp>');
 }
 
+/**
+ * Where a canonical install's stale `home/` goes when its account already holds
+ * a slot: the binary and the (recreated, empty) home stay under `versions/`, so
+ * the old home cannot use the versions trash — `agents trash restore` would put a
+ * whole install back over a live one. Restoring is a plain move back; the
+ * migration manifest records the path under `<agent>@<label>#home`.
+ */
+function homeTrashDir(agent: AgentId, label: string): string {
+  return path.join(getHistoryDir(), 'trash', 'homes', agent, label);
+}
+
+function plannedHomeTrashPath(agent: AgentId, label: string): string {
+  return path.join(homeTrashDir(agent, label), '<stamp>');
+}
+
+function trashHome(agent: AgentId, item: InstallationInventory): string {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const dest = path.join(homeTrashDir(agent, item.label), stamp);
+  fs.mkdirSync(path.dirname(dest), { recursive: true, mode: 0o700 });
+  if (!fs.existsSync(item.home)) {
+    throw new Error(`Home ${item.home} is missing; cannot trash it.`);
+  }
+  fs.renameSync(item.home, dest);
+  fs.mkdirSync(item.home, { recursive: true, mode: 0o700 });
+  return dest;
+}
+
 function emptyDir(dir: string): boolean {
   if (!fs.existsSync(dir)) return true;
   try {
@@ -396,20 +423,21 @@ async function planHarness(
       // per-version home is a stale copy of a credential the slot now carries.
       // Routing it to `slot` would only trip `assertSlotAbsent` and abort the
       // whole apply with nothing done — the state every auth-synced worker was
-      // in. Trash it instead (`agents trash restore` reverses); a busy or
-      // canonical home is never moved, so the canonical case keeps its binary
-      // and leaves the home where it is.
+      // in. Trash it instead (`agents trash restore` reverses). The canonical
+      // install keeps its binary and ends up with an empty home, exactly as it
+      // does when its home is the one that moves into the slot: two on-disk
+      // copies of one credential is not an end state the migration leaves.
       if (canonical && item.label === canonical.label) {
         actions.push({
           kind: 'canonical',
           label: item.label,
           release: item.release,
-          reason: 'canonical install (binary kept); account already holds a slot — home left in place',
+          reason: 'canonical install (binary kept); account already holds a slot — stale home trashed, empty home recreated',
           accountId: item.accountId,
           identityKey: item.identityKey,
           email: item.email,
           sessionCount: item.sessionCount,
-          pathMoves: [],
+          pathMoves: [{ from: item.home, to: plannedHomeTrashPath(agent, item.label) }],
         });
         continue;
       }
@@ -709,6 +737,21 @@ export async function applyAccountMigration(
       if (!item.identityKey) continue;
       const kept = identityToAccount.get(item.identityKey);
       if (kept) labelToAccount.set(item.label, kept);
+    }
+
+    for (const action of h.actions.filter((a) => a.kind === 'canonical' && a.accountId)) {
+      // Canonical install whose account already holds a slot: hand the stale
+      // home off to the homes trash and leave an empty home behind, mirroring
+      // the slot branch's end state for a canonical home.
+      const item = byLabel.get(action.label);
+      if (!item) throw new Error(`Plan named ${h.agent}@${action.label} but inventory has no such install.`);
+      const trashPath = trashHome(h.agent, item);
+      remaps.push({ from: item.home, to: trashPath });
+      labelToAccount.set(item.label, action.accountId!);
+      movedAccountIds.push(action.accountId!);
+      entry.trashed.push({ label: item.label, reason: 'stale canonical home — account already holds a provisioned slot', trashPath });
+      manifest.map[`${h.agent}@${item.label}#home`] = trashPath;
+      persistManifest(manifestPath, manifest);
     }
 
     for (const action of trashActions) {

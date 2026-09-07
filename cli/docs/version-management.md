@@ -556,7 +556,13 @@ upgrade only prints the report. The planner:
    row when the identity is unknown). The canonical install's home moves too;
    its binary stays. Duplicate identities keep the best home
    (`planDuplicatePrune`: captured identity → signed-in → newest release) and
-   trash the rest. Empty logged-out homes go to trash.
+   trash the rest. Empty logged-out homes go to trash. A home whose account
+   already holds a populated slot on this device (the daemon's auth-sync
+   provisions worker slots on its own) is a stale copy of a credential the slot
+   now carries: a non-canonical one is trashed whole, the canonical one has its
+   `home/` moved to `~/.agents/.history/trash/homes/<harness>/<label>/<stamp>`
+   (recorded in the manifest under `<harness>@<label>#home`) and an empty home
+   recreated beside the kept binary.
 4. Repoints `agent@label` bindings at the account, the global default at the
    canonical install, and re-indexes `sessions.db` file paths (including Claude
    `projects/<cwd-key>` under the home) in the same transaction.
@@ -571,7 +577,8 @@ move or trash (so a crash lists exactly what already moved), and marked
 the kept account for that identity (a duplicate's binding follows the kept
 home); they are never collapsed onto one bare-agent binding. Unreadable
 `installation.json`, an identity mismatch between a home and its account row,
-or a slot that already exists for that account fail loud. Native OAuth files
+or a regular file sitting where that account's slot directory belongs fail
+loud (a populated slot directory is folded, as above). Native OAuth files
 stay inside the moved home on this device and are never copied onto a worker.
 
 ## Key Functions
