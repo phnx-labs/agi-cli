@@ -156,7 +156,7 @@ export type EventType =
   // logged-out version is visible instead of silent (the yosemite-m3 2.1.219
   // incident). See spawnAgent in lib/exec.ts.
   | 'run.launch'
-  // Daemon lifecycle (always-on process: secrets broker, browser IPC, scheduler)
+  // Daemon lifecycle (always-on process: browser IPC, scheduler, monitors)
   | 'daemon.start'
   | 'daemon.stop'
   | 'daemon.error'

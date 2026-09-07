@@ -4,9 +4,10 @@
  * `~/.agents/daemon/webhooks.yaml` declares which signed webhook receivers THIS
  * box hosts — bundle, local port, rate limit, and an optional public Tailscale
  * Funnel port. The daemon's `webhook-receiver` service reads it and binds one
- * receiver per entry, drawing each receiver's signing secret from the broker /
- * machine-local file store (no `AGENTS_SECRETS_PASSPHRASE`, no `nohup`). An
- * absent or empty file hosts nothing, so an unconfigured box binds nothing.
+ * receiver per entry, drawing each receiver's signing secret through the
+ * standalone `secrets` CLI (an agentOnly read via secrets-client.ts — no
+ * `AGENTS_SECRETS_PASSPHRASE`, no `nohup`). An absent or empty file hosts
+ * nothing, so an unconfigured box binds nothing.
  *
  * This is per-box operational state (a public receiver runs on exactly one box),
  * so it is deliberately NOT part of the fleet-synced device config — it mirrors
@@ -188,15 +189,15 @@ function reconcileFunnel(publicPort: FunnelPort, localPort: number, log: Logger)
  * `server.listen()` surfaces EADDRINUSE as an `'error'` event, so a `try/catch`
  * around the start call never sees it and the event reaches the process-level
  * `uncaughtException` handler (`index.ts`), which exits 1 for the supervisor to
- * restart — a crash loop that would take the secrets broker, scheduler,
- * monitors, browser IPC, and self-heal down with it. `waitForListening` is what
- * turns that into one skipped receiver.
+ * restart — a crash loop that would take the scheduler, monitors, browser IPC,
+ * and self-heal down with it. `waitForListening` is what turns that into one
+ * skipped receiver.
  */
 export async function startHostedWebhookReceivers(opts: {
   log: Logger;
   /**
    * How a receiver's signing secrets are resolved. Defaults to
-   * `resolveReceiverSecrets` (the real broker read). Injectable for the same
+   * `resolveReceiverSecrets` (the real secrets-client read). Injectable for the same
    * reason `FireWebhookOptions.dispatch` is — so a test can exercise the bind
    * path against real sockets without a machine-local secrets bundle.
    */

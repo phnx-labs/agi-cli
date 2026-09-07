@@ -177,8 +177,10 @@ record of `null` for it.
 `setInterval` is scheduler catch-up, which is part of the one remaining inline
 declared service and shares that service's live boot/stop/reload lifecycle.
 Resource-local timers may still live inside lower-level socket implementations
-(for example TTL eviction inside the hosted secrets broker); those own the
-resource they maintain and are closed by the surrounding service lifecycle.
+(for example the browser IPC server's own idle/reap timers); those own the
+resource they maintain and are closed by the surrounding service lifecycle. (The
+secrets broker's own eviction timers are no longer an example here — that broker
+moved out with the standalone `secrets` engine, PHNX-3989 OWN-1.)
 
 Enabled/disabled state lives separately in a `DaemonServicesConfig`, read
 and written via `isDaemonServiceEnabled` (`daemon-services.ts`),

@@ -2921,8 +2921,8 @@ nothing but its own view cache.
   starts on a direct `systemctl start`. This is the daemon-wide sibling of
   `scheduler.enabled`: `scheduler.enabled` gates only the routines `JobScheduler`
   inside a running daemon (SING-5), while `daemon.enabled` gates whether the
-  daemon itself may be auto-started at all (the secrets broker, browser IPC, and
-  watchdog with it).
+  daemon itself may be auto-started at all (browser IPC and the watchdog with
+  it — never a secrets broker, which the standalone `secrets` CLI owns, OWN-1).
 - **SING-5 (MUST).** Routines MUST fire only from the daemon's pid-claimed
   `JobScheduler` (`lib/daemon/daemon.ts` — the pid-file claim exists precisely so a second
   scheduler cannot double-fire). A UI MAY request an immediate run
@@ -3080,12 +3080,14 @@ a machine-wide process sweep.)
   (its own `HOME`, a test fixture) MUST be left completely untouched.
   `claimDaemonInstance` (`lib/daemon/daemon.ts`) SIGTERMs the live pid-file owner and MUST
   wait for it to be provably dead — its graceful `handleShutdown` releasing the
-  browser IPC binding (`await browserIPC.stop()`) and the secrets broker socket
-  (`hostedBroker?.close()`), or a `killTree` escalation (POSITIVE pid, so the kill never
+  browser IPC binding (`await browserIPC.stop()`), or a `killTree` escalation
+  (POSITIVE pid, so the kill never
   reaches the incumbent's detached job children) after the grace window —
-  **before binding any of its own resources**. Binding before the incumbent's
-  release recreates the two-brokers-on-one-socket orphan (`daemon.ts` broker
-  hosting), so the pid file MUST NOT be written until the prior owner is dead.
+  **before binding any of its own resources**. (The daemon no longer hosts a
+  secrets broker socket to release — the standalone `secrets` CLI owns its own
+  broker lifecycle, OWN-1; the historical two-brokers-on-one-socket takeover
+  orphan this ordering guarded against can no longer occur.) The pid file MUST
+  NOT be written until the prior owner is dead.
   `reapStrayDaemons` (`lib/daemon/daemon.ts`) reaps only registrants of THIS state dir's
   instance registry (`<daemonDir>/instances/`) — because the registry lives inside the
   daemon dir, a different state dir's daemons register elsewhere and are invisible, so
@@ -3136,11 +3138,10 @@ a machine-wide process sweep.)
   not assume it. The full read → signal → verify → cleanup transaction MUST hold the
   same `<daemonDir>/daemon.lock` used by start/claim, and every direct signal MUST
   revalidate that the pid is a live `__daemon-run`. After the SIGTERM → grace → `killTree` sequence it MUST verify the
-  browser IPC binding was released, the secrets broker socket was released (a stale
-  socket present on disk but unreachable is the orphan of SING-11 — a still-live
-  standalone broker owning it is a release, not a survivor), and no `__daemon-run`
+  browser IPC binding was released and no `__daemon-run`
   registered for THIS state dir survives — reclaiming any stale socket an ungraceful
-  exit left behind — and it MUST return a structured result naming what released, what
+  exit left behind. (There is no secrets broker socket in this inventory — the
+  standalone `secrets` CLI owns its own broker, OWN-1.) It MUST return a structured result naming what released, what
   survived, and any detached children (which survive deliberately per SING-11a and are
   reported, never killed). `agents daemon stop` MUST surface that result (human summary
   plus `--json`) and exit non-zero when a resource could not be released. It MUST NOT
@@ -3154,16 +3155,17 @@ a machine-wide process sweep.)
   (the signalled target OR any surviving successor for this state dir) is proven to
   own it, rather than being reported as ownership-unverifiable and leaked (PHNX-3618).
 - **SING-12a (MUST).** A clean daemon shutdown MUST enumerate and release the full
-  state-directory resource inventory: the browser IPC socket, the secrets broker
-  socket, the daemon pid registration, the lifetime marker file, the heartbeat file,
-  and the daemon's instance-registry entry. The shutdown postcondition MUST name any
+  state-directory resource inventory: the browser IPC socket, the daemon pid
+  registration, the lifetime marker file, the heartbeat file, and the daemon's
+  instance-registry entry. (The secrets broker socket is no longer in this
+  inventory — the standalone `secrets` CLI owns its own broker, OWN-1.) The
+  shutdown postcondition MUST name any
   survivor and MUST NOT report success merely because the daemon process exited. The
-  graceful path already attempts all six releases in `handleShutdown`
-  (`lib/daemon/daemon.ts:1033-1054`); `stopDaemon` independently verifies the full inventory
-  via `stopResidueArtifacts` (`lib/daemon/daemon.ts:1596-1640`), consumed at
-  `lib/daemon/daemon.ts:1825-1831` on both the graceful and escalated `killTree` paths, and
+  graceful path already attempts all five releases in `handleShutdown`;
+  `stopDaemon` independently verifies the full inventory
+  via `stopResidueArtifacts`, consumed on both the graceful and escalated `killTree` paths, and
   distinguishes residue from a provably dead owner (reclaimed) from state belonging to
-  a live successor (left untouched) the same way the broker-socket branch above does
+  a live successor (left untouched) the same way the browser IPC socket branch does
   (RUSH-2421, SING-GAP-5 resolved).
 - **SING-12b (MUST).** Only the explicit operator lifecycle surface
   (`agents daemon start|stop|restart`) MAY deliberately stop or restart the shared
@@ -3190,9 +3192,10 @@ a machine-wide process sweep.)
   (`lib/daemon-services.ts`) binds one signed receiver per entry in
   `~/.agents/daemon/webhooks.yaml` (`lib/daemon-webhooks.ts`,
   `startHostedWebhookReceivers`), wrapped by `WebhookReceiverService`
-  (`lib/daemon/webhook-receiver-service.ts`) and started after the secrets broker so each
-  receiver's signing secret resolves headlessly through the broker
-  (`resolveReceiverSecrets`, `agentOnly: true` per SEC-13) — no
+  (`lib/daemon/webhook-receiver-service.ts`) so each
+  receiver's signing secret resolves headlessly through the standalone `secrets`
+  CLI (`resolveReceiverSecrets`, `agentOnly: true` per SEC-13, via
+  `secrets-client.ts` — OWN-1, no daemon-hosted broker) — no
   `AGENTS_SECRETS_PASSPHRASE` and no `nohup`. Every receiver MUST be torn down on
   shutdown (`handleShutdown`, `lib/daemon/daemon.ts`). A box that declares no receiver
   MUST bind nothing. A receiver whose bundle is locked or carries neither
@@ -3260,12 +3263,12 @@ a machine-wide process sweep.)
   processes by recorded identity, leaving no dangling pid or orphaned process.
 - **GIVEN** a wedged daemon that ignores SIGTERM, **WHEN** `agents daemon stop` runs,
   **THEN** stop escalates to `killTree` after the grace window, then VERIFIES the
-  broker socket and browser IPC binding released and no `__daemon-run` survives, and
+  browser IPC binding released and no `__daemon-run` survives, and
   returns a structured result (exit non-zero if any resource could not be released),
   reporting surviving detached children rather than pretending the tree is clean
   (SING-12).
-- **GIVEN** a daemon owns all six state-directory resources, **WHEN** graceful shutdown
-  completes, **THEN** the browser IPC socket, secrets broker socket, pid registration,
+- **GIVEN** a daemon owns all five state-directory resources, **WHEN** graceful shutdown
+  completes, **THEN** the browser IPC socket, pid registration,
   lifetime marker, heartbeat, and instance-registry entry are all absent or released;
   any survivor is named and makes the stop fail (SING-12a).
 - **GIVEN** the daemon exits immediately on every supervised start, **WHEN** launchd,

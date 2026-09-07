@@ -18,10 +18,13 @@ Each job is a YAML file in `~/.agents/routines/`. A background scheduler parses 
 
 ### Daemon runtime — `agents daemon`
 
-The scheduler above is one job the daemon runs; the daemon itself also hosts the
-secrets broker, browser IPC, and the watchdog pass (RUSH-2354). `agents routines
-start`/`stop`/`status`/`scheduler-logs` remain as scheduler-scoped convenience
-wrappers, but the daemon's own runtime surface is `agents daemon`:
+The scheduler above is one job the daemon runs; the daemon itself also hosts
+browser IPC and the watchdog pass (RUSH-2354). The secrets broker is **not** one
+of them — the standalone `secrets` CLI owns its own broker lifecycle (PHNX-3989),
+and the daemon reaches secrets only as a client, through `secrets-client.ts`.
+`agents routines start`/`stop`/`status`/`scheduler-logs` remain as
+scheduler-scoped convenience wrappers, but the daemon's own runtime surface is
+`agents daemon`:
 
 ```bash
 agents daemon                # identity, duplicate __daemon-run processes, per-service health
@@ -44,8 +47,8 @@ failure detail instead of duplicating it.
 not the same thing:
 
 - `scheduler.enabled` (device config) gates only the routines `JobScheduler`
-  inside an already-running daemon — the secrets broker, browser IPC, and
-  watchdog keep running when it is off.
+  inside an already-running daemon — browser IPC and the watchdog keep running
+  when it is off.
 - `daemon.enabled` (device config, new) is the daemon-wide kill switch. With it
   `false`, nothing **auto-starts** the daemon — not `routines add`, not
   `routines start`, not `routines catchup`, not a webhook trigger. `agents daemon
@@ -55,9 +58,9 @@ not the same thing:
 A per-subsystem health record (`{subsystem, lastError, lastErrorAt,
 consecutiveFailures, lastOkAt}`, persisted at
 `~/.agents/.cache/helpers/daemon/health.json`) backs `agents daemon status` and
-`services`: the secrets broker and browser IPC record a success/failure on every
-(re)start attempt, so a failure survives past whatever line of the daemon log it
-would otherwise scroll out of.
+`services`: browser IPC and the other hosted services record a success/failure on
+every (re)start attempt, so a failure survives past whatever line of the daemon
+log it would otherwise scroll out of.
 
 A third subsystem, `daemon-start`, records the daemon's own startup and is the
 one record that also **gates** behaviour rather than just reporting. It is
@@ -455,11 +458,12 @@ edits that receiver. `agents daemon webhooks remove <port>` stops hosting it. A
 box with no declarations binds nothing, and the whole service can be turned off
 with `agents daemon services disable webhook-receiver`.
 
-The daemon resolves each receiver's signing secret through the secrets broker,
-so a hosted receiver needs no `AGENTS_SECRETS_PASSPHRASE` and no `nohup`. A
-bundle that is locked or holds neither webhook secret **fails that receiver
-loud** in `agents daemon logs` rather than binding ingress it cannot verify; the
-other receivers are unaffected.
+The daemon resolves each receiver's signing secret through the standalone
+`secrets` CLI (an `agentOnly` read via `secrets-client.ts`, SEC-13), so a hosted
+receiver needs no `AGENTS_SECRETS_PASSPHRASE` and no `nohup`. A bundle that is
+locked or holds neither webhook secret **fails that receiver loud** in
+`agents daemon logs` rather than binding ingress it cannot verify; the other
+receivers are unaffected.
 
 **Foreground.** For a one-off or for testing, run the receiver yourself — same
 HTTP surface, no supervision:

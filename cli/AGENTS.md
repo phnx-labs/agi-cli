@@ -1605,10 +1605,11 @@ which is what a cleaned dev prefix leaves behind). A dev build that answered to
 `agents` made PATH order decide which code ran — see the root
 [AGENTS.md](../../AGENTS.md) §Never install a dev build over the user's `agents`.
 
-The routines daemon is **shared** (secrets broker, browser IPC, scheduler), so
+The routines daemon is **shared** (browser IPC, scheduler, and more), so
 the install leaves it on production code. `--bounce-daemon` restarts it onto the
 dev build when you need that, and says plainly that it changes what the user's
-everyday `agents` talks to.
+everyday `agents` talks to. (The secrets broker is a separate process the
+standalone `secrets` CLI owns, PHNX-3989 — this daemon never hosts it.)
 
 **Bin entrypoints need `chmod 755`.** [`scripts/build.sh`](scripts/build.sh) chmods
 every `package.json#bin` entry after `tsc` emits. Newer npm preserves tarball file

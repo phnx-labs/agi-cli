@@ -10,7 +10,7 @@
  * staging an npm install into a sibling directory, `fs.renameSync`/`fs.cpSync`
  * swaps, `fs.rmSync` cleanup — potentially across several installations in one
  * tick. Running that inline on the daemon's own event loop would stall every
- * other service (secrets broker, browser IPC, the scheduler) for the
+ * other service (browser IPC, the scheduler, monitors) for the
  * duration, the same class of problem `self-update-service.ts` solves for the
  * CLI's OWN upgrade by installing into a fresh process it then exits into.
  * Here there is no "exit and let the supervisor restart" option (the daemon

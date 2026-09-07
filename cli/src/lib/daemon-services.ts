@@ -68,7 +68,7 @@ export const DAEMON_SERVICES: DaemonServiceDef[] = [
   {
     id: 'webhook-receiver',
     title: 'Webhook receiver',
-    description: 'Hosts signed GitHub/Linear webhook ingress declared in daemon/webhooks.yaml, drawing signing secrets from the broker; binds nothing when no receivers are declared.',
+    description: 'Hosts signed GitHub/Linear webhook ingress declared in daemon/webhooks.yaml, drawing signing secrets from the standalone secrets CLI; binds nothing when no receivers are declared.',
   },
   {
     id: 'self-heal',
