@@ -205,6 +205,8 @@ enum ProjectSelfTest {
 
         check("a project's own base path is inside it",
               ProjectCatalog.contains(agi, dir: base))
+        check("its worktrees are inside it",
+              ProjectCatalog.contains(agi, dir: "\(base)/.agents/worktrees/menubar-palette"))
         check("a sibling repo bound by the definition is inside it",
               ProjectCatalog.contains(agi, dir: "\(home)/src/github.com/me/linear-cli"))
         check("an unrelated repo is not",
@@ -213,6 +215,32 @@ enum ProjectSelfTest {
         // inside `agents-cli`.
         check("a sibling whose name merely starts the same is not inside it",
               !ProjectCatalog.contains(agi, dir: "\(base)-old"))
+
+        // Two subprojects of ONE monorepo must not leak into each other. Treating
+        // the shared `root` as bound would give `prix` every `rush` directory.
+        guard let prix = ProjectCatalog.named("prix", in: defs),
+              let rush = ProjectCatalog.named("rush", in: defs) else {
+            check("prix/rush decode for containment", false); return
+        }
+        let monorepo = "\(home)/src/github.com/me/agents"
+        check("a monorepo subproject owns its own subdirectory",
+              ProjectCatalog.contains(prix, dir: "\(monorepo)/prix/api"))
+        check("and NOT its sibling subproject's",
+              !ProjectCatalog.contains(prix, dir: "\(monorepo)/rush/cli"))
+        check("nor the sibling the other way round",
+              !ProjectCatalog.contains(rush, dir: "\(monorepo)/prix"))
+        // A worktree is cut from the repo ROOT, so a subproject still sees it.
+        check("a subproject still sees the monorepo's worktrees",
+              ProjectCatalog.contains(prix, dir: "\(monorepo)/.agents/worktrees/some-branch"))
+        // Recent-dir narrowing follows the same rule.
+        let prixDirs = AgentsCLI.recentDirs(in: prix, from: [
+            session("\(monorepo)/prix/api"),
+            session("\(monorepo)/rush/cli"),
+            session("\(monorepo)/.agents/worktrees/some-branch"),
+        ])
+        check("prix is offered its own dirs and the shared worktrees, never rush's",
+              prixDirs == ["\(monorepo)/prix/api", "\(monorepo)/.agents/worktrees/some-branch"],
+              detail: prixDirs.joined(separator: ","))
     }
 
     // A pasted image lands on a timestamped, collision-proof name so the strip's

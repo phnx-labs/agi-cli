@@ -378,17 +378,31 @@ struct ProjectDef: Codable, Equatable {
     var basePathAbs: String? { (defaultPath ?? root).map(Self.expandTilde) }
 
     /// Every local directory this project binds — the base path plus each
-    /// `repos[].path`. Used to decide whether a recent session cwd belongs to
-    /// this project.
+    /// `repos[].path`, mirroring `projectDirsAbs` in src/lib/projects.ts.
+    ///
+    /// `root` is deliberately NOT in here. A monorepo subproject narrows itself
+    /// with `defaultPath` (`prix` -> `<root>/prix`, `rush` -> `<root>/rush`) while
+    /// sharing one `root`, so treating the root as bound would offer each of them
+    /// the other's directories. Worktrees are handled separately
+    /// (`ProjectCatalog.contains`), because they land under the repo ROOT.
     var boundDirsAbs: [String] {
         var out: [String] = []
         var seen = Set<String>()
-        for candidate in [basePathAbs, rootAbs].compactMap({ $0 })
+        for candidate in [basePathAbs].compactMap({ $0 })
             + (repos ?? []).compactMap({ $0.absPath }) {
             let norm = (candidate as NSString).standardizingPath
             if seen.insert(norm).inserted { out.append(norm) }
         }
         return out
+    }
+
+    /// Where this project's git worktrees live: `<root>/.agents/worktrees`. A
+    /// worktree is created off the repo ROOT, not off a subproject's
+    /// `defaultPath` (root AGENTS.md), so a subproject would otherwise never see
+    /// its own worktrees.
+    var worktreesDirAbs: String? {
+        rootAbs.map { (($0 as NSString).standardizingPath as NSString)
+            .appendingPathComponent(".agents/worktrees") }
     }
 }
 
@@ -420,12 +434,14 @@ enum ProjectCatalog {
         }
     }
 
-    /// True when `dir` is the project's base path or sits inside one of its bound
-    /// directories (a worktree, a monorepo subdirectory, a sibling repo).
+    /// True when `dir` is the project's base path, sits inside one of its bound
+    /// directories (a monorepo subdirectory, a sibling repo), or is one of its
+    /// git worktrees. Prefix matching respects path boundaries, so `agents-cli-old`
+    /// is not inside `agents-cli`.
     static func contains(_ def: ProjectDef, dir: String) -> Bool {
         let norm = (dir as NSString).standardizingPath
-        return def.boundDirsAbs.contains { bound in
-            norm == bound || norm.hasPrefix(bound + "/")
-        }
+        func under(_ base: String) -> Bool { norm == base || norm.hasPrefix(base + "/") }
+        if def.boundDirsAbs.contains(where: under) { return true }
+        return def.worktreesDirAbs.map(under) ?? false
     }
 }
