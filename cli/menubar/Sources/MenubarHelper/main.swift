@@ -42,6 +42,14 @@ if ProcessInfo.processInfo.environment["MENUBAR_ISSUE_TEST"] == "1" {
     IssueSelfTest.run()
 }
 
+// Projects self-test (PHNX-4001): decode `agents projects list --json`, prove the
+// palette keys projects by NAME (two definitions may share one checkout), resolve
+// the Linear scope from the definition's binding rather than folder names, and
+// narrow to a directory inside a project. See ProjectSelfTest.swift.
+if ProcessInfo.processInfo.environment["MENUBAR_PROJECTS_TEST"] == "1" {
+    ProjectSelfTest.run()
+}
+
 // Launch-guard self-test: exercise the remote-shell and argument predicates
 // that gate the interactive mode below, print PASS/FAIL, exit. See Guards.swift.
 if ProcessInfo.processInfo.environment["MENUBAR_GUARD_TEST"] == "1" {

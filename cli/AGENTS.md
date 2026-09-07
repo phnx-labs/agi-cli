@@ -2151,12 +2151,17 @@ Separately, **`doctor --json` taking 136s on an idle machine is its own defect**
 — the helper is now safe against it, not a reason to consider it acceptable.
 
 **These self-tests are a build gate now, not just manual modes.** The helper's
-env-gated self-tests (`MENUBAR_SINGLE_TEST`, `MENUBAR_CHILD_TEST`,
-`MENUBAR_GUARD_TEST`, `MENUBAR_ISSUE_TEST`) are headless — they exit before the
+env-gated self-tests (`MENUBAR_GUARD_TEST`, `MENUBAR_ISSUE_TEST`,
+`MENUBAR_PROJECTS_TEST`, `MENUBAR_SINGLE_TEST`, `MENUBAR_CHILD_TEST`,
+`MENUBAR_ACTIVE_TEST`, `MENUBAR_ROUTINE_TEST`, `MENUBAR_DOCTOR_TEST`,
+`MENUBAR_DEVICE_TEST`) are headless — they exit before the
 AppKit path (`Guards.enforceForInteractiveLaunch`) so they need no GUI or signing.
-[`menubar/scripts/test-menubar.sh`](menubar/scripts/test-menubar.sh) runs all four against
+[`menubar/scripts/test-menubar.sh`](menubar/scripts/test-menubar.sh) runs every one against
 the just-built binary and [`build.sh`](menubar/scripts/build.sh) invokes it before
-signing, so no helper artifact ships whose invariants regressed. Nothing ran these
+signing, so no helper artifact ships whose invariants regressed. A mode that needs
+a per-login-session facility the runner may not have (the pasteboard server behind
+`MENUBAR_PROJECTS_TEST`'s paste/drop coverage) SKIPS that case with a printed
+reason rather than failing the build on the runner's limitation. Nothing ran these
 before — PR CI is Linux (can't build Swift) and prepack only checks the shipped
 bundle's signature — which is how the flock fd-inheritance deadlock escaped. Do NOT
 add `MENUBAR_DUMP` / `MENUBAR_PROMPT_PREVIEW` to the gate: those reach AppKit and
