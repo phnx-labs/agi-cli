@@ -29,6 +29,8 @@ enum ChildProcessSelfTest {
         testReapRecoversChildSpawnedBeforeRegistrationCompletes()
         testReapKillsARealOrphanFromAPreviousLaunch()
         testChildDoesNotInheritSingleInstanceFlock()
+        testStreamDeliversLinesAndReapsOnExit()
+        testStreamStopBeforeOutputStillReapsOnce()
         if failures == 0 {
             print("\nALL PASS")
             exit(0)
@@ -316,6 +318,86 @@ enum ChildProcessSelfTest {
         var st: Int32 = 0
         while waitpid(childPid, &st, 0) == -1 && errno == EINTR {}
         check(free, "flock is free after the holder drops its fd (child never inherited it)")
+    }
+
+    // MARK: The long-lived streaming child (PHNX-4002).
+
+    // `stream()` is the `feed watch --json` path: it must deliver each stdout LINE
+    // as it arrives, fire `onExit` EXACTLY once when the child is gone, and remove
+    // its durable registry entry as part of that single reap — the same tracking
+    // that lets the next launch reap it if the helper crashes. Real child, real
+    // pipe, no mock.
+    private static func testStreamDeliversLinesAndReapsOnExit() {
+        let file = "\(NSTemporaryDirectory())menubar-children-stream-\(getpid())"
+        try? FileManager.default.removeItem(atPath: file)
+
+        let lock = NSLock()
+        var lines: [String] = []
+        var exitCount = 0
+        let done = DispatchSemaphore(value: 0)
+
+        // Emits three whole lines then exits on its own — the reader must EOF and
+        // reap without anyone calling stop(). A trailing newline-less fragment is
+        // deliberately absent: stream() only delivers newline-terminated lines.
+        let handle = ChildProcess.stream(
+            ["/bin/sh", "-c", "printf 'alpha\\nbeta\\ngamma\\n'"],
+            onLine: { line in lock.lock(); lines.append(line); lock.unlock() },
+            onExit: { lock.lock(); exitCount += 1; lock.unlock(); done.signal() },
+            registryFile: file)
+        check(handle != nil, "stream() starts the child and returns a handle")
+        guard handle != nil else { return }
+
+        check(done.wait(timeout: .now() + 10) == .success,
+              "onExit fires when the child exits on its own")
+        // Give any (erroneous) second onExit a beat to land before asserting once.
+        usleep(300_000)
+        lock.lock(); let got = lines; let exits = exitCount; lock.unlock()
+        check(got == ["alpha", "beta", "gamma"],
+              "every stdout line is delivered in order (got \(got))")
+        check(exits == 1, "onExit fires exactly once (fired \(exits)x)")
+        check((try? ChildProcess.Registry.readAll(file: file).isEmpty) == true,
+              "the registry entry is removed as part of the on-EOF reap")
+        try? FileManager.default.removeItem(atPath: file)
+        try? FileManager.default.removeItem(atPath: file + ".lock")
+    }
+
+    // stop() called before the child ever writes: the group-kill forces the reader
+    // to EOF, and the SAME single reap runs — onExit once, no lines, registry clean.
+    // This is the operator closing the menu while `feed watch` is still idle.
+    private static func testStreamStopBeforeOutputStillReapsOnce() {
+        let file = "\(NSTemporaryDirectory())menubar-children-stream-stop-\(getpid())"
+        try? FileManager.default.removeItem(atPath: file)
+
+        let lock = NSLock()
+        var lines: [String] = []
+        var exitCount = 0
+        let done = DispatchSemaphore(value: 0)
+
+        // Sleeps without ever writing a line, so stop() is the only thing that ends it.
+        let handle = ChildProcess.stream(
+            ["/bin/sh", "-c", "sleep 30"],
+            onLine: { line in lock.lock(); lines.append(line); lock.unlock() },
+            onExit: { lock.lock(); exitCount += 1; lock.unlock(); done.signal() },
+            registryFile: file)
+        check(handle != nil, "stream() starts the idle child and returns a handle")
+        guard let handle else { return }
+
+        handle.stop()
+        check(done.wait(timeout: .now() + 10) == .success,
+              "stop() before any output still drives the reader to EOF and onExit")
+        usleep(300_000)
+        lock.lock(); let got = lines; let exits = exitCount; lock.unlock()
+        check(got.isEmpty, "a child killed before writing delivers no lines (got \(got))")
+        check(exits == 1, "onExit fires exactly once after stop() (fired \(exits)x)")
+        // stop() is idempotent — a second call after the reap must not re-signal.
+        handle.stop()
+        usleep(200_000)
+        lock.lock(); let exitsAfterSecondStop = exitCount; lock.unlock()
+        check(exitsAfterSecondStop == 1, "a second stop() after exit is a no-op (fired \(exitsAfterSecondStop)x)")
+        check((try? ChildProcess.Registry.readAll(file: file).isEmpty) == true,
+              "the registry entry is removed after a stop()-driven reap")
+        try? FileManager.default.removeItem(atPath: file)
+        try? FileManager.default.removeItem(atPath: file + ".lock")
     }
 
     /// `sleep 300` in its own process group, reparented away from this process.
