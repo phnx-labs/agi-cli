@@ -116,6 +116,18 @@ describe('resolveSecretsBin', () => {
       expect(resolveSecretsBin()).toBe(fs.realpathSync(path.join(realDir, 'secrets')));
     });
 
+    it('skips a non-executable namesake earlier on PATH, like `which` does', () => {
+      const decoy = fs.mkdtempSync(path.join(os.tmpdir(), 'secrets-decoy-'));
+      try {
+        fs.writeFileSync(path.join(decoy, 'secrets'), 'not a program\n', { mode: 0o644 });
+        process.env.PATH = [shimsDir, decoy, realDir].join(path.delimiter);
+        _resetSecretsClientForTest();
+        expect(resolveSecretsBin()).toBe(fs.realpathSync(path.join(realDir, 'secrets')));
+      } finally {
+        fs.rmSync(decoy, { recursive: true, force: true });
+      }
+    });
+
     it('reports SECRETS_BIN_MISSING when the shim is the only `secrets` on PATH', () => {
       process.env.PATH = shimsDir;
       _resetSecretsClientForTest();
