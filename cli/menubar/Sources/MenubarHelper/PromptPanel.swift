@@ -603,6 +603,10 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         inFlight = true
         let agents = selectedAgentList()
         let scope = dispatchScope()
+        guard scope.project != nil || scope.cwd != nil else {
+            refuseUnscopedDispatch()
+            return
+        }
         rememberProjectPick()
         switch action {
         case .plan:
@@ -621,9 +625,27 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
     /// repos; only a narrowed worktree/subdirectory — which no project name
     /// addresses — falls back to `--cwd`.
     private func dispatchScope() -> (project: String?, cwd: String?) {
-        guard let def = selectedProject() else { return (nil, nil) }
+        // No definitions on this box: the path picker is offering recent session
+        // cwds instead, so scope by directory (rebuildPathPicker).
+        guard let def = selectedProject() else { return (nil, selectedPathDir()) }
         if let dir = selectedPathDir() { return (nil, dir) }
         return (def.name, nil)
+    }
+
+    /// Refuse to dispatch with NO scope at all. `agents run` with neither
+    /// `--project` nor `--cwd` inherits the spawning process's cwd, and this
+    /// helper is started by launchd with no `WorkingDirectory` — so the agent
+    /// would land at `/`, a far broader permission surface than the `$HOME` this
+    /// picker has always refused to offer. Fails loud with the fix rather than
+    /// running somewhere the user did not choose (cli/AGENTS.md, "Fail loud at
+    /// boundaries").
+    private func refuseUnscopedDispatch() {
+        Notifier.post(
+            title: "Nowhere to run",
+            body: "Define a project first: agents projects add <name>. "
+                + "The palette will not dispatch an agent with no working directory.")
+        inFlight = false
+        updateHint()
     }
 
     private func rememberProjectPick() {
@@ -791,9 +813,29 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         let previous = selectedPathDir()
         pathPicker.removeAllItems()
         guard let def = selectedProject() else {
-            pathDirs = []
-            pathPicker.addItem(withTitle: "This Mac")
-            pathPicker.isEnabled = false
+            // No project DEFINITION is selected. On a box that simply has none
+            // defined yet — `agents projects` is a separate, opt-in resource, so
+            // an existing palette user has none on upgrade — degrade to the recent
+            // session cwds this picker used to offer, rather than dispatching with
+            // no scope at all (which the helper's launchd process resolves as `/`).
+            pathDirs = projects.isEmpty ? AgentsCLI.recentDirs(from: recentSessions) : []
+            guard !pathDirs.isEmpty else {
+                pathPicker.addItem(withTitle: "No project — add one first")
+                pathPicker.lastItem?.toolTip =
+                    "agents projects add <name>, or open a session in a repo so a recent directory is offered"
+                pathPicker.isEnabled = false
+                return
+            }
+            pathPicker.isEnabled = true
+            for dir in pathDirs {
+                pathPicker.addItem(withTitle: "\u{1F4C1} \((dir as NSString).lastPathComponent)")
+                pathPicker.lastItem?.toolTip = "\(dir)\n\nRecent directory — define a project with agents projects add <name>"
+            }
+            if let previous, let idx = pathDirs.firstIndex(of: previous) {
+                pathPicker.selectItem(at: idx)
+            } else {
+                pathPicker.selectItem(at: 0)
+            }
             return
         }
         pathDirs = AgentsCLI.recentDirs(in: def, from: recentSessions)
@@ -813,8 +855,11 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
 
     /// The narrowed directory inside the project, or nil when the project itself
     /// is selected (row 0) — in which case dispatch uses `--project <name>`.
+    ///
+    /// In the degraded no-definitions mode there is no project row, so row 0 is
+    /// already a directory and the offset is 0.
     private func selectedPathDir() -> String? {
-        let idx = pathPicker.indexOfSelectedItem - 1
+        let idx = pathPicker.indexOfSelectedItem - (selectedProject() == nil ? 0 : 1)
         guard idx >= 0, idx < pathDirs.count else { return nil }
         return pathDirs[idx]
     }
@@ -1052,6 +1097,10 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         guard !inFlight else { return }
         inFlight = true
         let scope = dispatchScope()
+        guard scope.project != nil || scope.cwd != nil else {
+            refuseUnscopedDispatch()
+            return
+        }
         rememberProjectPick()
         AgentsCLI.dispatchTicketWork(ticket: ticket, agents: selectedAgentList(),
                                      action: action, cwd: scope.cwd, project: scope.project)
@@ -1251,11 +1300,18 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
             ? " · ⌘V or drop to attach"
             : " · click attaches · ⌫ removes · dbl-click previews"
         let agents = selectedAgentList().map(LocalState.agentLabel).joined(separator: ", ")
-        let scope = selectedPathDir().map { " in \(($0 as NSString).lastPathComponent)" }
-            ?? selectedProject().map { " in \($0.name)" } ?? ""
-        let actionText = action == .plan
-            ? "file ticket + plan with \(agents)\(scope)"
-            : "run \(agents)\(scope) · balanced"
+        let where_ = dispatchScope()
+        let scope = where_.cwd.map { " in \(($0 as NSString).lastPathComponent)" }
+            ?? where_.project.map { " in \($0)" }
+        let actionText: String
+        if let scope {
+            actionText = action == .plan
+                ? "file ticket + plan with \(agents)\(scope)"
+                : "run \(agents)\(scope) · balanced"
+        } else {
+            // Never render an unscoped dispatch as if it were a normal one.
+            actionText = "no project — agents projects add <name>"
+        }
         let tickets = ticketsExpanded ? "⌘T hides tickets" : "⌘T tickets"
         let pinned = panel?.isPinned == true ? " · pinned" : ""
         // Deliberately unchanged in length by the ticket list: this label's

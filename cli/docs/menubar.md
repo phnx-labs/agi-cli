@@ -153,6 +153,16 @@ persisted at `~/.agents/.history/menubar/projects.json`, refreshed on the same
 tick as the menu-bar snapshot. A cold cache fetches on the first summon rather
 than waiting up to three minutes for that tick.
 
+**With no projects defined at all**, the palette degrades to the recent session
+cwds this dropdown used to offer, and dispatches with `--cwd`. `agents projects`
+is a separate, opt-in resource, so a box that has never run `agents projects add`
+would otherwise have no scope to offer. With **neither** a project nor a recent
+directory, the palette **refuses to dispatch** and says
+`no project — agents projects add <name>` rather than running the agent
+unscoped: `agents run` with no `--project`/`--cwd` inherits the spawning process's
+working directory, and launchd starts this helper with none, so the agent would
+land at `/` — broader than the `$HOME` this picker has always refused to offer.
+
 This replaced a dropdown of the last eight session cwds (PHNX-4001), which could
 not name a project you had not worked in recently, listed worktrees as if they
 were projects, and carried no Linear binding to scope tickets by.

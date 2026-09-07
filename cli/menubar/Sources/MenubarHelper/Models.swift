@@ -333,8 +333,19 @@ struct ActiveSession: Decodable {
 struct ProjectRepoRef: Codable, Equatable {
     let slug: String?
     let path: String?
+    /// The subdirectory of this repo the project actually cares about. When set,
+    /// the bound directory is `path/subpath`, NOT the whole `path` tree —
+    /// `projectDirsAbs`'s `joinSubpath` in src/lib/projects.ts. Dropping it would
+    /// over-bind the checkout and reintroduce the sibling-directory leak that
+    /// `boundDirsAbs` excludes `root` to avoid.
+    let subpath: String?
 
-    var absPath: String? { path.map(ProjectDef.expandTilde) }
+    var absPath: String? {
+        guard let path else { return nil }
+        let base = ProjectDef.expandTilde(path)
+        guard let subpath, !subpath.isEmpty else { return base }
+        return (base as NSString).appendingPathComponent(subpath)
+    }
 }
 
 // The project's Linear binding — the ONLY thing that scopes the palette's ticket
