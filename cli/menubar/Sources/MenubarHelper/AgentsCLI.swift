@@ -55,6 +55,13 @@ enum AgentsCLI {
         return [binary] + args
     }
 
+    /// Public projection of `argv` — the PATH-independent argv that runs
+    /// `agents <args>` (node+entry when the daemon exported an interpreter, else
+    /// the resolved `agents` binary). The notification-response handler drives
+    /// `agents feed answer` / `agents open` through ChildProcess with the exact
+    /// resolution the menu's own CLI calls use.
+    static func agentsArgv(_ args: [String]) -> [String] { argv(args) }
+
     // MARK: Daemon liveness — read the scheduler PID file + signal 0.
     // Path from src/lib/daemon.ts:24 + src/lib/state.ts (helpers/daemon).
     static func daemonPid() -> Int? {

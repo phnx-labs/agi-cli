@@ -688,25 +688,33 @@ complementary — the tick-driven watchdog is what makes the outage visible
 
 Because the poster is the app bundle, macOS attributes the notification to the
 agents-cli helper and shows its `AppIcon` (the agents-cli mark) instead of the
-generic osascript icon. The one-shot delivers via `NSUserNotificationCenter`,
-briefly spins the runloop so delivery flushes, then exits — it never starts the
-status-bar UI. The persistent menu-bar instance registers the click delegate at
-launch (`Notifier.wireClickHandler`), so clicking a notification runs its
-`--action`: `open:<path>` opens a run report/log, `url:<https…>` opens a web
-target (the PR or ticket a finished run produced — `http`/`https` only, so a
-notification argument can never become an open-anything primitive), and
-`routines:list` opens the runs folder. The Node side lives in
-`src/lib/menubar/notify-desktop.ts` (routing), `src/lib/routine-notify.ts`
-(routine start/finish content + anti-spam threshold; see
-[routines.md](routines.md#desktop-notifications)), and `src/lib/run-notify.ts`
-(the `agents run --notify` finish notice).
+generic osascript icon. The one-shot delivers via `UNUserNotificationCenter`
+(`menubar/Sources/MenubarHelper/Notifier.swift`), briefly spins the runloop so
+the add flushes, then exits — it never starts the status-bar UI. The persistent
+menu-bar instance is the `UNUserNotificationCenterDelegate`, installed at launch
+(`Notifier.configureForLaunch`, which also registers the action categories and
+requests authorization once); it runs the command a tapped action or a body tap
+maps to. A body tap opens the session (`agents open agents://session/<id>`); the
+`--action` deep-link drives the report/PR opens (`open:<path>` opens a run
+report/log, `url:<https…>` opens a web target — `http`/`https` only, so a
+notification argument can never become an open-anything primitive). When macOS
+will not authorize UserNotifications, delivery degrades to the deprecated
+`NSUserNotification` path (a plain banner, no buttons) so a notice is never
+silently lost — the same preserve-delivery principle `notify-desktop.ts` applies
+with osascript. The Node side lives in `src/lib/menubar/notify-desktop.ts`
+(routing), `src/lib/routine-notify.ts` (routine start/finish content + anti-spam
+threshold; see [routines.md](routines.md#desktop-notifications)), and
+`src/lib/run-notify.ts` (the `agents run --notify` finish notice).
 
 **Two images: the app on the left, the agent on the right.** macOS draws the
-sending bundle's icon on the LEFT of a banner and its `contentImage` on the
-RIGHT — the layout a YouTube notification uses for "YouTube" plus the channel's
-avatar. The left slot is the agents-cli mark, resolved by LaunchServices from the
-installed bundle (`refreshBundleIconRegistration` re-registers it at install, or
-that slot renders blank). The right slot is `--agent`: the harness the
+sending bundle's icon on the LEFT of a banner and a content image on the RIGHT —
+the layout a YouTube notification uses for "YouTube" plus the channel's avatar.
+On the UserNotifications path the right slot is a `UNNotificationAttachment` (the
+avatar written to a temp PNG by `AgentAvatar.attachmentURL`); the
+`NSUserNotification` fallback uses `contentImage` for the same slot. The left
+slot is the agents-cli mark, resolved by LaunchServices from the installed bundle
+(`refreshBundleIconRegistration` re-registers it at install, or that slot renders
+blank). The right slot is `--agent`: the harness the
 notification is *about*, drawn by `AgentAvatar` (`menubar/Sources/MenubarHelper/
 AgentAvatar.swift`) as a brand-colored tile with the agent's two-letter mark —
 `CL` for claude, `CX` for codex, `GK` for grok. The mark is drawn rather than
@@ -760,16 +768,22 @@ The one-shot argv extends the base `--notify` contract with four optional fields
   --choice approve=Approve --choice approve-session=Approve for session --choice deny=Deny
 ```
 
-> **Track D2 status.** The CLI emits all four fields today; the Swift receiver
-> (`menubar/Sources/MenubarHelper/PromptPanel.swift`) does not yet parse
-> `--category` / `--key` / `--session` / `--choice` — it still renders the base
-> `--notify` toast. The category-to-action-set mapping below describes the intended
-> round trip once the receiver lands (Track D2), not what the shipped helper renders.
+The Swift receiver is `menubar/Sources/MenubarHelper/Notifier.swift`. The one-shot
+parses these fields into a `UNMutableNotificationContent` with the mapped
+`categoryIdentifier`, `interruptionLevel` (`.timeSensitive` for permission /
+question / plan_review, `.active` otherwise), `threadIdentifier = <session-id>`
+(so a session's banners group), and the `--agent` avatar as an attachment; the
+`--key` / `--session` / `--action` / choice ids ride in `userInfo`. The persistent
+instance's delegate reads them back in `didReceive` and runs the mapped command.
 
 - **`--category`** picks the companion's action set: `permission` → Approve /
   Approve for session / Deny; `question` → the options plus a typed reply;
   `plan_review` → Approve / Send back; `done`/`failure` → open-report / open-pr /
-  open-terminal.
+  open-terminal. A static `UNNotificationCategory` cannot carry per-notification
+  button titles, so a question's option buttons are generic `Option 1…3`
+  (categories `agents.question.1…3`, plus `agents.question` for a reply-only ask)
+  and the numbered option labels are appended to the body so the buttons are
+  legible; each `optN` maps back to the Nth `--choice` id via `userInfo`.
 - **`--key`** is the `AttentionItem.key` (`host/session/generation`) the companion
   hands to `agents feed answer <key> --choice <id>`. It is the stable handle the
   reply rail resolves against.
@@ -802,6 +816,28 @@ session"); a `deny` / `send-back` choice carries the `esc` delivery key, which t
 answer router (`src/lib/answer-router.ts`) turns into a real Escape control byte
 with **no** trailing Enter — so the prompt is cancelled, never confirmed by a
 stray newline.
+
+**How the helper delivers it.** The delegate maps `response.actionIdentifier`
+(and, for a `reply` / `send-back` text field, the typed text) to exactly one
+`agents` argv and runs it through `ChildProcess` with a 20 s deadline — the same
+bounded, group-killed, reapable path every other CLI call the helper makes uses.
+A choice button runs `agents feed answer <key> --choice <id>`; a typed reply runs
+`agents feed answer <key> --text "<typed>"` (a typed send-back becomes free text,
+an empty one the plain `send-back` choice); `open-terminal` and a body tap run
+`agents open agents://session/<id>`; `open-report` / `open-pr` open the `--action`
+target directly through `NSWorkspace`. On a non-zero `feed answer` exit the helper
+posts a follow-up **"Could not deliver your reply · Open in terminal"** banner
+(category `agents.failure`) carrying the stderr tail, so a failed reply is visible
+rather than swallowed. The pure argv → content mapping and the response → argv
+mapping for every action are pinned by the `MENUBAR_NOTIFY_TEST` self-test (a
+build gate via `scripts/test-menubar.sh`), which uses a capturing runner so it
+never touches the notification center.
+
+**Suppression.** When the Sessions window (track C) is showing and the banner's
+session is the selected row, the delegate's `willPresent` returns `[]` — the item
+still lands in Notification Center, it just does not interrupt. The hook
+(`Notifier.isSessionSelectedInSessionsWindow`) defaults to nil so the notifier
+compiles and runs without that surface; it never suppresses until wired.
 
 **Who posts, and once.** The `attention-notify` daemon service
 (`src/lib/daemon/attention-notify-service.ts`, tick 5 s, deadline 10 s,

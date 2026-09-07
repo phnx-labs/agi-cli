@@ -119,6 +119,31 @@ enum AgentAvatar {
         }
     }
 
+    /// Write the agent's avatar to a temp PNG and return its file URL, for use as
+    /// a `UNNotificationAttachment` on a UserNotifications banner (the right-hand
+    /// image slot the deprecated `NSUserNotification.contentImage` used to fill).
+    /// nil when there is no agent to depict or the PNG could not be encoded. The
+    /// caller owns the file; the notification center copies it into its own store,
+    /// so it can be left in the temp dir.
+    static func attachmentURL(for agent: String?) -> URL? {
+        guard let image = image(for: agent),
+              let tiff = image.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff),
+              let png = rep.representation(using: .png, properties: [:]) else { return nil }
+        // A stable-per-agent name keeps the temp dir from growing one file per
+        // banner: UNNotificationAttachment copies the bytes at add time, so
+        // overwriting the same path between banners is safe.
+        let key = normalize(agent) ?? "agent"
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("agents-notify-avatar-\(key).png")
+        do {
+            try png.write(to: url)
+            return url
+        } catch {
+            return nil
+        }
+    }
+
     /// Lowercased, trimmed agent id, or nil when blank.
     private static func normalize(_ agent: String?) -> String? {
         guard let raw = agent?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
