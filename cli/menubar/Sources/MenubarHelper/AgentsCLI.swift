@@ -821,30 +821,6 @@ enum AgentsCLI {
         }
     }
 
-    // Fire-and-forget: the run is launched detached and posts its OWN completion
-    // notification via `agents run --notify`. It used to be monitored here, with
-    // the finish notice in the process-termination callback — but that callback
-    // lives in THIS process, so a helper that restarted (an upgrade replacing the
-    // bundle, a crash) took it with it while the run carried on reparented to
-    // launchd. A dispatch could then never report back. The run process owns the
-    // notice now, so nothing that happens to the menu bar can lose it.
-    static func dispatchQuickFix(note: String, screenshotPaths: [String], agents: [String],
-                                 cwd: String? = nil, project: String? = nil,
-                                 device: String? = nil) {
-        let selected = agents.isEmpty ? ["claude"] : agents
-        let prompt = quickFixPrompt(note: note, screenshotPaths: screenshotPaths)
-        let name = quickDispatchName(note: note)
-        // The avatar depicts one harness, so it rides only a single-agent dispatch;
-        // a fan-out across several agents has no one agent to show.
-        Notifier.post(title: "Dispatching \(selected.count) agent\(selected.count == 1 ? "" : "s")…",
-                      body: shortenForNotice(note),
-                      agent: selected.count == 1 ? selected[0] : nil)
-        for agent in selected {
-            runDetached(argv(quickFixRunArgs(agent: agent, prompt: prompt, name: name,
-                                             cwd: cwd, project: project, device: device)))
-        }
-    }
-
     // The Linear ticket URL the agent printed (so the notification can deep-link).
     static func parseTicketURL(_ output: String) -> String? {
         guard let re = try? NSRegularExpression(pattern: "https://linear\\.app/\\S+"),
@@ -945,6 +921,194 @@ enum AgentsCLI {
             args.append(device)
         }
         return args
+    }
+
+    // MARK: Dispatch form (Track E, PHNX-4005)
+
+    // A fresh session id for a Claude dispatch. `agents run --session-id` forces a
+    // NEW conversation onto this exact id (exec.ts:731, applied to the claude argv
+    // at exec.ts:1181), so the palette can register a placeholder keyed by it and
+    // set the watchdog policy on it — all before the feed reports the row. Lowercased
+    // because the brief mints a lowercase uuid (the CLI validator accepts either,
+    // exec.ts:136, but `randomUUID()` on the TS side is lowercase and we match it).
+    static func mintedSessionId() -> String { UUID().uuidString.lowercased() }
+
+    // The canonical `agents run` argv for a dispatch-form Run — a PURE builder so
+    // the self-test pins the exact request for every mode/surface/watchdog combo
+    // (MENUBAR_DISPATCH_TEST). Every flag is quoted to exec.ts:
+    //   --mode auto|edit (exec.ts:685) · --terminal for Interactive (exec.ts:736) ·
+    //   --balanced (exec.ts:748) · --notify (exec.ts:733) · --name (exec.ts:732) ·
+    //   --project / --cwd (exec.ts:710/709) · --device for a non-local target,
+    //   which accepts "auto" (exec.ts:795) · --session-id for Claude only
+    //   (exec.ts:1181).
+    //
+    // Watchdog is deliberately NOT here: `agents run` has no watchdog flag. The
+    // policy is a separate command (`watchdogArgs`) applied on the minted id.
+    static func dispatchArgs(agent: String, prompt: String, name: String,
+                             mode: DispatchMode, surface: DispatchSurface,
+                             runOn: String, project: String? = nil, cwd: String? = nil,
+                             sessionId: String? = nil) -> [String] {
+        // Plan never reaches here (it uses the ticket-agent flow); fall back to
+        // `auto` defensively rather than emit an empty --mode value.
+        var args = ["run", agent, prompt, "--mode", mode.runModeValue ?? "auto",
+                    "--balanced", "--notify", "--name", name]
+        if surface == .interactive { args.append("--terminal") }
+        if let project, !project.isEmpty {
+            args += ["--project", project]
+        } else if let cwd, !cwd.isEmpty {
+            args += ["--cwd", cwd]
+        }
+        if runOn != "local", !runOn.isEmpty {
+            args += ["--device", runOn]
+        }
+        if let sessionId, !sessionId.isEmpty, agent == "claude" {
+            args += ["--session-id", sessionId]
+        }
+        return args
+    }
+
+    // The per-session watchdog policy command — `agents watchdog policy <id>
+    // off|keep|handsoff` (watchdog.ts:418-422). `keep` is the daemon default and
+    // emits no command (WatchdogPolicy.needsPolicyCommand), so this only builds
+    // the deviations. Pure so the self-test pins it.
+    static func watchdogArgs(sessionId: String, policy: WatchdogPolicy) -> [String] {
+        ["watchdog", "policy", sessionId, policy.policyToken]
+    }
+
+    // Fan a dispatch-form Run out across the selected agents. Mirrors
+    // dispatchQuickFix (detached + `--notify` so the run outlives this helper), but
+    // carries the new dimensions and mints a Claude session id so it can (a) return
+    // a placeholder to register with the feed and (b) set a non-default watchdog
+    // policy on it at dispatch. Returns the placeholders for the caller to register
+    // — the launch is fire-and-forget, but the palette shows it took.
+    @discardableResult
+    static func dispatchRun(note: String, screenshotPaths: [String], agents: [String],
+                            mode: DispatchMode, surface: DispatchSurface,
+                            watchdog: WatchdogPolicy, runOn: String,
+                            cwd: String? = nil, project: String? = nil) -> [PendingLaunch] {
+        let selected = agents.isEmpty ? ["claude"] : agents
+        let prompt = quickFixPrompt(note: note, screenshotPaths: screenshotPaths)
+        let name = quickDispatchName(note: note)
+        Notifier.post(title: "Dispatching \(selected.count) agent\(selected.count == 1 ? "" : "s")…",
+                      body: shortenForNotice(note),
+                      agent: selected.count == 1 ? selected[0] : nil)
+        let nowMs = Date().timeIntervalSince1970 * 1000
+        var pendings: [PendingLaunch] = []
+        for agent in selected {
+            let sessionId = agent == "claude" ? mintedSessionId() : nil
+            let runArgv = dispatchArgs(agent: agent, prompt: prompt, name: name,
+                                       mode: mode, surface: surface, runOn: runOn,
+                                       project: project, cwd: cwd, sessionId: sessionId)
+            runDetached(argv(runArgv))
+            // A non-default watchdog policy is a one-shot command on the minted id.
+            // It can only run when the id is known at dispatch, which the CLI mints
+            // only for Claude (--session-id is Claude-only, exec.ts:1181); other
+            // harnesses coin their id asynchronously and keep the daemon default
+            // (`keep`). One-shot, user-initiated — not a timer that acts (SING-2).
+            if let sessionId, watchdog.needsPolicyCommand {
+                runDetached(argv(watchdogArgs(sessionId: sessionId, policy: watchdog)))
+            }
+            pendings.append(PendingLaunch(key: sessionId ?? name,
+                                          byUuid: sessionId != nil,
+                                          agent: agent, name: name,
+                                          launchedAtMs: nowMs, stderrTail: nil))
+        }
+        return pendings
+    }
+
+    // MARK: Project pulse (`agents projects status <name> --json`, Track E)
+
+    // The pulse strip's source: milestone progress, in-flight counts, and the
+    // repo/PR/release signals for ONE project. Read on this machine first and
+    // decoded into ProjectPulse (only the fields that exist). A pure argv builder
+    // so the self-test pins the request.
+    static func projectsStatusArgs(_ name: String) -> [String] {
+        ["projects", "status", name, "--json"]
+    }
+
+    static let projectsStatusCacheTTL: TimeInterval = 5 * 60
+
+    /// Per-project memo + inflight guard, main-queue only (like projectsAsync).
+    private static var pulseMemo: [String: ProjectPulse] = [:]
+    private static var pulseFetchedAt: [String: Date] = [:]
+    private static var pulseInFlight = Set<String>()
+
+    /// Fetch the pulse for a project, honoring a 5-minute memo. `completion` runs
+    /// on the main queue with the decoded pulse, or the cached one when still
+    /// fresh (no child spawned), or nil when there is nothing cached and the call
+    /// failed. Bounded through ChildProcess — the pulse refreshes alongside the
+    /// timer-driven snapshot, the one shape that can stack copies of itself.
+    static func projectsStatusAsync(project: String, force: Bool = false,
+                                    completion: @escaping (ProjectPulse?) -> Void) {
+        let warm = pulseMemo[project]
+        if !force, let at = pulseFetchedAt[project],
+           Date().timeIntervalSince(at) < projectsStatusCacheTTL {
+            DispatchQueue.main.async { completion(warm) }
+            return
+        }
+        if pulseInFlight.contains(project) {
+            DispatchQueue.main.async { completion(warm) }
+            return
+        }
+        pulseInFlight.insert(project)
+        DispatchQueue.global(qos: .utility).async {
+            let data = capture(argv(projectsStatusArgs(project)))
+            let decoded = data.flatMap { ProjectPulse.decode($0, project: project) }
+            DispatchQueue.main.async {
+                pulseInFlight.remove(project)
+                guard let decoded else { completion(warm); return }
+                pulseMemo[project] = decoded
+                pulseFetchedAt[project] = Date()
+                completion(decoded)
+            }
+        }
+    }
+
+    // MARK: Agent captions (`agents view --json`, Track E)
+
+    // The dispatch form's agent chips show the active account state + version per
+    // harness. `agents view --json` is a heavy command, so this is a bounded,
+    // best-effort adornment — the form renders fine without it. A pure argv
+    // builder plus a decode into the small AgentCaption map.
+    static func agentsViewArgs() -> [String] { ["view", "--json"] }
+
+    static func agentCaptionsAsync(completion: @escaping ([String: AgentCaption]) -> Void) {
+        DispatchQueue.global(qos: .utility).async {
+            let data = capture(argv(agentsViewArgs()))
+            let map = data.flatMap { AgentCaption.decodeMap($0) } ?? [:]
+            DispatchQueue.main.async { completion(map) }
+        }
+    }
+
+    // The fleet devices for the run-on popup. The status controller owns the
+    // repeating `menubar snapshot` poll; the form needs the devices only on a
+    // summon, so this is a bounded, 60s-memoized one-shot rather than a second
+    // timer. Main-queue memo (set from the completion, read from the form).
+    private static var dispatchDevicesMemo: [Device] = []
+    private static var dispatchDevicesFetchedAt: Date?
+    private static var dispatchDevicesInFlight = false
+
+    static func devicesForDispatchAsync(completion: @escaping ([Device]) -> Void) {
+        if let at = dispatchDevicesFetchedAt, Date().timeIntervalSince(at) < 60 {
+            DispatchQueue.main.async { completion(dispatchDevicesMemo) }
+            return
+        }
+        if dispatchDevicesInFlight {
+            DispatchQueue.main.async { completion(dispatchDevicesMemo) }
+            return
+        }
+        dispatchDevicesInFlight = true
+        DispatchQueue.global(qos: .utility).async {
+            let devices = menubarSnapshot()?.devices ?? []
+            DispatchQueue.main.async {
+                dispatchDevicesInFlight = false
+                if !devices.isEmpty {
+                    dispatchDevicesMemo = devices
+                    dispatchDevicesFetchedAt = Date()
+                }
+                completion(dispatchDevicesMemo)
+            }
+        }
     }
 
     // MARK: Process helpers

@@ -35,6 +35,8 @@ final class PromptPanel: NSPanel {
     var onToggleTickets: (() -> Void)?
     // Cmd-Shift-F focuses the screenshot OCR search field.
     var onSearchShortcut: (() -> Void)?
+    // Cmd-P switches the dispatch to Plan for this one dispatch (not persisted).
+    var onForcePlan: (() -> Void)?
     // Image files dropped on the panel; the drag's own pasteboard is handed over.
     var onDropImages: ((NSPasteboard) -> Void)?
 
@@ -103,6 +105,7 @@ final class PromptPanel: NSPanel {
                 return true
             }
             if key == "t" { onToggleTickets?(); return true }
+            if key == "p" { onForcePlan?(); return true }
             if key == "v", onPasteImages?() == true { return true }
             let selector: Selector?
             switch key {
@@ -367,6 +370,8 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
     // and the ticket list each add their own block when they have content.
     private static let baseHeight: CGFloat = 156
     private static let thumbStripHeight: CGFloat = 92
+    // The pulse strip's three lines (milestone · counts+NOW · NEXT UP) plus spacing.
+    private static let pulseStripHeight: CGFloat = 66
     private static let ticketSectionChrome: CGFloat = 36   // one control row + spacing
     // Fixed viewport for the ticket list — rows scroll inside; panel height does not
     // grow with every ticket (keeps the capture field pinned).
@@ -375,10 +380,19 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
 
     private var panel: PromptPanel?
     private let field = NSTextField()
-    private let modeControl = NSSegmentedControl(labels: ["Plan", "Run"],
-                                                 trackingMode: .selectOne,
-                                                 target: nil,
-                                                 action: nil)
+    // Track E (PHNX-4005): the dispatch form (mode / run-on / surface / watchdog +
+    // collapsed summary) and the project pulse strip embedded below the field.
+    private let dispatchForm = DispatchFormView()
+    private let pulseView = ProjectPulseView()
+    /// Launches fired this session that the feed has not reported yet — shown as
+    /// `launching` placeholders and resolved/expired against FeedStream.rows on
+    /// each diff (never a timer that acts). See DispatchDefaults.swift.
+    private var pendingLaunches: [PendingLaunch] = []
+    /// Per-harness caption (version + sign-in) from `agents view --json`, a
+    /// best-effort adornment cached on summon and folded into the summary line.
+    private var agentCaptions: [String: AgentCaption] = [:]
+    /// True once this controller is a FeedStream observer (started on first summon).
+    private var feedObserving = false
     private let agentStrip = NSStackView()
     private let hint = NSTextField(labelWithString: "")
     private let thumbStrip = NSStackView()
@@ -491,12 +505,20 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         // which is up to 3 minutes away. `projectsAsync` is memoized + singleflight,
         // so this is the same fetch, not a second one.
         if projects.isEmpty { refreshProjects() }
+        // Apply the initial project's remembered defaults so a first summon shows
+        // the right agent/mode without a project change.
+        applyDispatchDefaults(for: selectedProject()?.name)
+        dispatchForm.refreshSummary()
         rescanAttachments()
         loadLinearCache()
         // Start OCR indexing of the screenshot folders once, at helper launch. The
         // index owns its own FSEvents watcher for the whole lifetime, so a capture
         // taken with the palette closed is still recognized and searchable.
         ScreenshotIndex.shared.start()
+    }
+
+    deinit {
+        FeedStream.shared.removeObserver(self)
     }
 
     private func refreshProjects() {
@@ -540,11 +562,18 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         let restoredDraft = draft
         inFlight = false
         field.stringValue = restoredDraft?.note ?? ""
-        action = restoredDraft?.action ?? .plan
-        modeControl.setSelected(true, forSegment: action.rawValue)
-        selectedAgents = restoredDraft?.selectedAgents ?? defaultAgentSelection()
+        // Apply this project's remembered dispatch defaults to the form, then let
+        // an interrupted draft override the mode + agents it captured.
+        applyDispatchDefaults(for: selectedProject()?.name)
+        if let restoredDraft {
+            setFormMode(fromAction: restoredDraft.action)
+            selectedAgents = restoredDraft.selectedAgents
+        }
+        action = dispatchForm.mode.isRun ? .run : .plan
         normalizeSelectionForAction()
         updateAgentButtons()
+        dispatchForm.refreshSummary()
+        refreshDispatchAdornments()
         pendingRestoredSelection = restoredDraft?.selectedPaths
 
         dismissArmed = false
@@ -572,8 +601,14 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
                                    restoring: self.pendingRestoredSelection)
                 self.pendingRestoredSelection = nil
             }
+            // Start observing the feed on first summon (not at launch) so the pulse
+            // counts and pending-launch reconciliation have live rows, without an
+            // always-on child before the palette is ever used.
+            self.startFeedObservingIfNeeded()
             self.restoreTicketControls()
             self.refreshTicketScope()
+            self.refreshPulse()
+            self.reconcilePending()
             self.rescanAttachments()
             self.loadLinearCache()
             // Live strip: watch the screenshot dirs for as long as the palette is
@@ -638,14 +673,24 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
             return
         }
         rememberProjectPick()
-        switch action {
+        rememberDispatchDefaults(agents: agents)
+        switch dispatchForm.mode {
         case .plan:
+            // Plan keeps the ticket-agent flow: investigate + file a ticket / post
+            // a plan (it runs --mode auto internally to read the repo + comment).
             AgentsCLI.dispatchTicketAgent(note: note, screenshotPaths: selected,
                                           agent: agents.first, cwd: scope.cwd,
                                           project: scope.project)
-        case .run:
-            AgentsCLI.dispatchQuickFix(note: note, screenshotPaths: selected, agents: agents,
-                                       cwd: scope.cwd, project: scope.project)
+        case .auto, .edit:
+            // Auto / Edit run headless-or-interactive with the form's dimensions,
+            // minting a Claude session id so the launch can register a placeholder
+            // and carry a non-default watchdog policy.
+            let pendings = AgentsCLI.dispatchRun(
+                note: note, screenshotPaths: selected, agents: agents,
+                mode: dispatchForm.mode, surface: dispatchForm.surface,
+                watchdog: dispatchForm.watchdog, runOn: dispatchForm.runOn,
+                cwd: scope.cwd, project: scope.project)
+            registerPending(pendings)
         }
         dismiss(preservingDraft: false)
     }
@@ -693,8 +738,149 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
 
     // MARK: Dispatch mode / agents
 
-    @objc private func onModeChanged(_ sender: NSSegmentedControl) {
-        action = QuickDispatchAction(rawValue: sender.selectedSegment) ?? .plan
+    /// The dispatch form changed a dimension (mode / run-on / surface / watchdog).
+    /// Keep `action` — which drives single vs multi agent selection — in sync with
+    /// the form's mode, refresh the dependent UI, and persist the defaults so the
+    /// next summon on this project starts where the owner left it.
+    private func formDidChange() {
+        action = dispatchForm.mode.isRun ? .run : .plan
+        normalizeSelectionForAction()
+        updateAgentButtons()
+        dispatchForm.refreshSummary()
+        updateHint()
+        rememberDispatchDefaults(agents: selectedAgentList())
+    }
+
+    // MARK: Dispatch form + defaults (Track E)
+
+    /// The full collapsed summary line, e.g.
+    /// `Claude 2.1.263 · this-mac · agi · Auto · Interactive · Keep moving`.
+    private func dispatchSummaryLine() -> String {
+        let agents = selectedAgentList()
+        let defaults = dispatchForm.defaults(agents: agents)
+        let version = agents.count == 1 ? agentCaptions[agents[0]]?.version : nil
+        return defaults.summaryLine(project: selectedProject()?.name, primaryVersion: version)
+    }
+
+    /// Load a project's remembered dispatch defaults and apply them to the form +
+    /// agent selection. Falls back to the roster's first agent on a project with
+    /// nothing stored.
+    private func applyDispatchDefaults(for project: String?) {
+        let fallback = roster.first?.id ?? "claude"
+        let defaults = DispatchDefaults.load(project: project, fallbackAgent: fallback)
+        dispatchForm.apply(defaults)
+        let visible = Set(roster.map(\.id))
+        let restored = defaults.agents.filter { visible.contains($0) }
+        selectedAgents = Set(restored.isEmpty ? [fallback] : restored)
+        action = dispatchForm.mode.isRun ? .run : .plan
+        normalizeSelectionForAction()
+        updateAgentButtons()
+    }
+
+    /// Persist the current form + agents as this project's remembered defaults.
+    private func rememberDispatchDefaults(agents: [String]) {
+        guard let project = selectedProject()?.name else { return }
+        dispatchForm.defaults(agents: agents).save(project: project)
+    }
+
+    /// Map a restored draft's coarse action onto the form's mode: Plan is exact,
+    /// Run keeps the form's current run mode (auto/edit) or defaults to Auto.
+    private func setFormMode(fromAction restored: QuickDispatchAction) {
+        if restored == .plan {
+            dispatchForm.apply(dispatchForm.defaults(agents: selectedAgentList())
+                .with(mode: .plan))
+        } else if dispatchForm.mode == .plan {
+            dispatchForm.apply(dispatchForm.defaults(agents: selectedAgentList())
+                .with(mode: .auto))
+        }
+    }
+
+    /// Fetch the run-on devices and the per-harness captions on a summon — bounded,
+    /// memoized one-shots, not a second poll.
+    private func refreshDispatchAdornments() {
+        AgentsCLI.devicesForDispatchAsync { [weak self] devices in
+            self?.dispatchForm.setDevices(devices)
+            self?.dispatchForm.refreshSummary()
+        }
+        AgentsCLI.agentCaptionsAsync { [weak self] captions in
+            self?.agentCaptions = captions
+            self?.dispatchForm.refreshSummary()
+        }
+    }
+
+    // MARK: Pending launches + pulse (Track E)
+
+    /// Record placeholders for a fresh dispatch and reconcile immediately.
+    private func registerPending(_ pendings: [PendingLaunch]) {
+        pendingLaunches.append(contentsOf: pendings)
+        reconcilePending()
+    }
+
+    /// Start observing the feed once, so the pulse counts and pending-launch
+    /// placeholders update as rows arrive. FeedStream.start()/addObserver are the
+    /// documented seam (a projection, never a second scheduler).
+    private func startFeedObservingIfNeeded() {
+        guard !feedObserving else { return }
+        feedObserving = true
+        FeedStream.shared.start()
+        FeedStream.shared.addObserver(self) { [weak self] _ in
+            self?.reconcilePending()
+            self?.refreshPulse()
+        }
+    }
+
+    /// Resolve placeholders whose feed row arrived and expire the ones that never
+    /// started. Runs on feed diffs (never a timer that acts).
+    private func reconcilePending() {
+        guard !pendingLaunches.isEmpty else { return }
+        let rows = Array(FeedStream.shared.rows.values)
+        let now = Date().timeIntervalSince1970 * 1000
+        let resolved = PendingLaunches.resolvedKeys(pendingLaunches, rows: rows)
+        let expired = PendingLaunches.expiredKeys(pendingLaunches, rows: rows, now: now)
+        for p in pendingLaunches where expired.contains(p.key) {
+            Notifier.post(title: "Dispatch did not start", body: PendingLaunches.expiredMessage(p),
+                          agent: p.agent)
+        }
+        pendingLaunches.removeAll { resolved.contains($0.key) || expired.contains($0.key) }
+    }
+
+    /// Recompute + render the pulse strip for the selected project from the feed
+    /// rows and the ranked ticket list the panel already holds.
+    private func refreshPulse() {
+        guard let def = selectedProject() else {
+            pulseView.render(project: nil, pulse: nil, live: ProjectLiveRollup(), nextUp: nil)
+            applyContentHeight()
+            return
+        }
+        let rows = Array(FeedStream.shared.rows.values)
+        let live = ProjectLiveRollup.rollup(rows: rows, project: def.name)
+        let nextUp = nextUpTicket()
+        AgentsCLI.projectsStatusAsync(project: def.name) { [weak self] pulse in
+            guard let self, self.selectedProject()?.name == def.name else { return }
+            self.pulseView.render(project: def.name, pulse: pulse, live: live, nextUp: nextUp)
+            self.applyContentHeight()
+        }
+    }
+
+    /// The top-ranked open ticket for the bound Linear project — NEXT UP.
+    private func nextUpTicket() -> LinearTicket? {
+        guard let project = activeProject,
+              let tickets = linearCache.scopes[project.name]?.tickets else { return nil }
+        return LinearTickets.rank(tickets).first
+    }
+
+    /// Cmd-N on a NOW chip: take the operator to that session (attach + resume, or
+    /// open the session URL when no live process). `focus` decides.
+    private func openPulseSession(_ row: SessionRow) {
+        if let sid = row.sessionId, !sid.isEmpty {
+            AgentsCLI.focusSession(sid)
+        }
+    }
+
+    /// Cmd-P: switch to Plan for THIS dispatch only (not persisted).
+    func forcePlanForThisDispatch() {
+        dispatchForm.forcePlanForThisDispatch()
+        action = .plan
         normalizeSelectionForAction()
         updateAgentButtons()
         updateHint()
@@ -778,9 +964,14 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         guard !rebuildingProjectPicker else { return }
         rememberProjectPick()
         rebuildPathPicker()
+        // Each project remembers its own dispatch defaults — switching projects
+        // restores the agent/mode/run-on the owner last used there.
+        applyDispatchDefaults(for: selectedProject()?.name)
+        dispatchForm.refreshSummary()
         updateHint()
         // The project IS the ticket scope: switching it switches the Linear project.
         refreshTicketScope()
+        refreshPulse()
     }
 
     @objc private func onProjectFilterChanged(_ sender: NSSearchField) {
@@ -1477,6 +1668,10 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
     private func applyContentHeight() {
         guard let panel else { return }
         var height = Self.baseHeight
+        // The dispatch form (collapsed summary, or expanded control rows) and the
+        // pulse strip (only when a project is selected) each add their block.
+        height += dispatchForm.contentHeight + 10
+        if !pulseView.isHidden { height += Self.pulseStripHeight }
         if ticketsExpanded {
             height += Self.ticketSectionChrome
             if !ticketScroll.isHidden { height += Self.ticketViewportHeight }
@@ -1516,6 +1711,7 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         panel.onPasteImages = { [weak self] in self?.pasteImagesFromPasteboard() ?? false }
         panel.onToggleTickets = { [weak self] in self?.toggleTickets() }
         panel.onSearchShortcut = { [weak self] in self?.focusScreenshotSearch() }
+        panel.onForcePlan = { [weak self] in self?.forcePlanForThisDispatch() }
 
         let bg = PromptDropView()
         bg.material = .hudWindow
@@ -1550,11 +1746,19 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         thumbStrip.alignment = .centerY
         thumbStrip.spacing = 8
 
-        modeControl.target = self
-        modeControl.action = #selector(onModeChanged(_:))
-        modeControl.selectedSegment = QuickDispatchAction.plan.rawValue
-        modeControl.segmentStyle = .rounded
-        modeControl.translatesAutoresizingMaskIntoConstraints = false
+        // Dispatch form (mode / run-on / surface / watchdog) below the field. It
+        // owns the collapsed summary; the panel supplies the full line because it
+        // knows the agents and the project.
+        dispatchForm.summaryProvider = { [weak self] in self?.dispatchSummaryLine() ?? "" }
+        dispatchForm.onChange = { [weak self] in self?.formDidChange() }
+        dispatchForm.onLayoutChange = { [weak self] in self?.applyContentHeight() }
+
+        // Project pulse strip under the project row. Render-only: the panel drives
+        // its data from the feed rows + Linear cache it already holds.
+        pulseView.onOpenSession = { [weak self] row in self?.openPulseSession(row) }
+        pulseView.onAttachTicket = { [weak self] ticket in self?.dispatchTicket(ticket) }
+        pulseView.onFullTicketList = { [weak self] in self?.toggleTickets() }
+        pulseView.isHidden = true
 
         agentStrip.orientation = .horizontal
         agentStrip.alignment = .centerY
@@ -1644,7 +1848,7 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         ticketScroll.documentView = ticketList
         clip.postsBoundsChangedNotifications = true
 
-        let controlRow = NSStackView(views: [modeControl, projectFilter, projectPicker,
+        let controlRow = NSStackView(views: [projectFilter, projectPicker,
                                             pathPicker, pinButton])
         controlRow.orientation = .horizontal
         controlRow.alignment = .centerY
@@ -1696,9 +1900,9 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         screenshotGrid.onAttach = { [weak self] path in self?.attachFromGrid(path) }
         screenshotGrid.onPreview = { [weak self] path in self?.previewPath(path) }
 
-        let stack = NSStackView(views: [field, controlRow, agentStrip, screenshotBar,
-                                        thumbStrip, screenshotGrid,
-                                        header, ticketScroll, hint])
+        let stack = NSStackView(views: [field, dispatchForm, agentStrip, controlRow,
+                                        pulseView, screenshotBar, thumbStrip,
+                                        screenshotGrid, header, ticketScroll, hint])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 10
@@ -1709,11 +1913,12 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
             stack.trailingAnchor.constraint(equalTo: bg.trailingAnchor, constant: -22),
             stack.centerYAnchor.constraint(equalTo: bg.centerYAnchor),
             field.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            modeControl.widthAnchor.constraint(equalToConstant: 180),
             screenshotBar.widthAnchor.constraint(equalTo: stack.widthAnchor),
             screenshotSearch.widthAnchor.constraint(equalToConstant: 260),
             screenshotGrid.widthAnchor.constraint(equalTo: stack.widthAnchor),
             screenshotGrid.heightAnchor.constraint(equalToConstant: Self.gridViewportHeight),
+            dispatchForm.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            pulseView.widthAnchor.constraint(equalTo: stack.widthAnchor),
             ticketScroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
             ticketScroll.heightAnchor.constraint(equalToConstant: Self.ticketViewportHeight),
             // The panel is a fixed-width bar: cap the popups so long names truncate
