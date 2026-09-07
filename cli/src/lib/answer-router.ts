@@ -33,6 +33,13 @@ export interface AnswerRoute {
   inject?: InjectTarget;
   /** Session id + agent kind for resume. */
   resume?: { sessionId: string; agent: string };
+  /**
+   * Whether to append Enter after the injected payload. Default (omitted) is
+   * true. A cancel keystroke (Escape, from a deny / send-back choice) sets this
+   * false — the ESC byte itself dismisses the prompt, and a trailing newline
+   * would submit a stray empty line into the composer behind it.
+   */
+  enter?: boolean;
 }
 
 export interface AnswerRouterInput {
@@ -45,6 +52,9 @@ export interface AnswerRouterInput {
   /** Live session row matching the mailbox, if any. */
   session?: ActiveSession | null;
 }
+
+/** The Escape keystroke as its raw control byte — what a PTY/tmux/iterm rail reads as a real Escape. */
+const ESCAPE_KEY = '\u001b';
 
 /**
  * Match free-text answer against question options.
@@ -74,11 +84,20 @@ export function matchOptionIndex(
 export function keystrokesForAnswer(
   answer: string,
   options?: Array<Pick<BlockOption, 'label'>>,
-): { payload: string; matched: 'option' | 'free-text' | 'other' } {
+): { payload: string; matched: 'option' | 'free-text' | 'other'; enter?: boolean } {
   const idx = matchOptionIndex(answer, options);
   if (idx >= 0) {
     // AskUserQuestion / plan select-lists are 1-indexed digits.
     return { payload: `${idx + 1}`, matched: 'option' };
+  }
+  // A symbolic cancel token — the `esc` deliveryKey a deny / send-back choice
+  // carries — is the Escape KEY, not the letters "esc". Send the ESC control
+  // byte (a real cancel on every raw pty/tmux/iterm rail) and suppress the
+  // trailing Enter, so the prompt is dismissed rather than confirmed by a stray
+  // newline. Runs after the option match so an option literally labelled "esc"
+  // still wins as a selection.
+  if (/^(?:esc|escape)$/i.test(answer.trim())) {
+    return { payload: ESCAPE_KEY, matched: 'other', enter: false };
   }
   if (options?.length) {
     const otherIdx = options.findIndex((o) => /^other$/i.test((o.label ?? '').trim()));
@@ -142,7 +161,7 @@ export function resolveAnswerRoute(input: AnswerRouterInput): AnswerRoute {
 
   if (openQ && parked && session) {
     const inject = injectTargetForSession(session);
-    const { payload, matched } = keystrokesForAnswer(answer, options);
+    const { payload, matched, enter } = keystrokesForAnswer(answer, options);
 
     if (inject) {
       const kind: AnswerRouteKind =
@@ -155,6 +174,7 @@ export function resolveAnswerRoute(input: AnswerRouterInput): AnswerRoute {
         reason: `Parked on open question — drive ${inject.backend} selection (${matched}).`,
         payload,
         inject,
+        ...(enter === false ? { enter: false } : {}),
       };
     }
 

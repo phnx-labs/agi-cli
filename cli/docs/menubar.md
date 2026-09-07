@@ -722,9 +722,13 @@ known; a stall/failure carries a single `open-terminal`.
 **The answer path.** `agents feed answer <key> --choice <id>`
 (`src/lib/feed/answer.ts`) resolves the id to the choice's `deliveryKey` (falling
 back to the label), atomically claims the first answer, and routes it over the
-session's recorded reply rail — a keystroke into the parked TUI (`1` selects
-option 1, `2` selects "don't ask again this session"), a headless resume, or the
-mailbox for a running agent between tool calls.
+session's recorded reply rail — a keystroke into the parked TUI, a headless
+resume, or the mailbox for a running agent between tool calls. A numbered
+selection injects its digit (`1` approves, `2` is Claude's "don't ask again this
+session"); a `deny` / `send-back` choice carries the `esc` delivery key, which the
+answer router (`src/lib/answer-router.ts`) turns into a real Escape control byte
+with **no** trailing Enter — so the prompt is cancelled, never confirmed by a
+stray newline.
 
 **Who posts, and once.** The `attention-notify` daemon service
 (`src/lib/daemon/attention-notify-service.ts`, tick 5 s, deadline 10 s,
