@@ -1247,23 +1247,25 @@ agents run claude "charge a test card" --secrets prod-stripe
 
 Merge order: profile env < `--secrets` < `--env K=V`. A missing keychain item aborts before the child starts.
 
-### Cross-machine sync via iCloud Keychain
+### Cross-machine sync
 
-Secret bundles sync through iCloud Keychain by default. Sign into the same iCloud account on another Mac (with iCloud Keychain enabled) and the bundle appears there within seconds — no copy-paste, no `.env` files emailed to yourself, no shared secret stores. Pass `--no-icloud-sync` when creating a bundle if it should stay device-local.
+Secrets are provided by the standalone [`@phnx-labs/secrets-cli`](https://github.com/phnx-labs/secrets-cli)
+engine (`agents setup secrets` checks whether it's installed). Its `push`/`pull`
+verbs move a bundle between machines by encrypting it and round-tripping it
+through `api.prix.dev` — no copy-paste, no `.env` files emailed to yourself:
 
 ```bash
 # On laptop:
 agents secrets create npm-tokens
-agents secrets add npm-tokens NPM_TOKEN          # value lives in iCloud Keychain
+agents secrets add npm-tokens NPM_TOKEN          # value lives in the local keychain/file store
+agents secrets push npm-tokens                   # encrypt + upload
 
-# On another Mac (same iCloud account):
-agents secrets list                              # npm-tokens is already there;
+# On another machine:
+agents secrets pull npm-tokens                   # decrypt + restore locally
 agents run claude "..." --secrets npm-tokens     # injects NPM_TOKEN automatically
 ```
 
-Under the hood, synced bundles route writes through a notarized helper app (`Agents CLI.app`) that holds the entitlement macOS requires for `kSecAttrSynchronizable`. Bundles created with `--no-icloud-sync` stay device-local.
-
-Bundle definitions sync via iCloud Keychain too — no `agents repo push` needed for secrets, no recreate step on each Mac. Nothing about secrets ever lives in plaintext on disk.
+Nothing about a secret's value ever lives in plaintext on disk, on either end.
 
 ### Per-secret metadata and rotation
 
@@ -1323,8 +1325,8 @@ some of it is planned (RUSH-2290), and the section marks what is landed vs inten
 
 ### Daemon
 
-Routines, the secrets broker, browser IPC, and the watchdog pass all run inside
-one always-on daemon per device. `agents daemon` is its runtime surface:
+Routines, browser IPC, and the watchdog pass all run inside one always-on
+daemon per device. `agents daemon` is its runtime surface:
 
 ```bash
 agents daemon                # identity + duplicates + per-service health (same as status)
@@ -1338,9 +1340,9 @@ agents daemon disable        # persist daemon.enabled: false -- nothing auto-sta
 agents daemon enable         # clear the kill switch
 
 agents daemon reload                        # SIGHUP -- reload jobs, re-evaluate scheduler.enabled, no restart
-agents daemon services                      # health of the two hosted services (secrets broker, browser IPC)
+agents daemon services                      # health of every hosted service (browser IPC, scheduler, ...)
 agents daemon services list                 # every toggleable service and its current on/off state
-agents daemon services enable secrets-broker
+agents daemon services enable scheduler
 agents daemon services disable browser-ipc  # stop hosting browser IPC without stopping the daemon
 agents browser stop --service               # browser-scoped alias; next browser action requiring IPC re-enables it
 agents routines stop                        # disable/reload only the scheduler service
@@ -1348,9 +1350,9 @@ agents daemon logs -f --level warn --since 1h
 agents daemon doctor                        # one-shot health check; non-zero exit on problems
 ```
 
-Each hosted responsibility (secrets broker, browser IPC, scheduler, monitors,
-watchdog, device probe, self-heal, self-update, keychain reap, account-state refresh,
-state-dir checks) is an independent toggle in `~/.agents/daemon/services.yaml`.
+Each hosted responsibility (browser IPC, scheduler, monitors, watchdog, device
+probe, self-heal, self-update, account-state refresh, state-dir checks) is an
+independent toggle in `~/.agents/daemon/services.yaml`.
 Self-update checks npm on its own schedule, installs + verifies a newer
 agents-cli with the same primitives `agents upgrade` uses, then exits so the OS
 supervisor relaunches the daemon onto the new code — the daemon used to run
@@ -1657,14 +1659,17 @@ The index lives at `~/.agents/.history/sessions/sessions.db` (SQLite + FTS5). A 
 
 ### Secrets
 
-API keys and credentials are stored in macOS Keychain, never in plaintext files. Bundle definitions also live in Keychain.
+Secrets are provided by the standalone `@phnx-labs/secrets-cli` engine, stored
+in the OS keychain or an encrypted file store — never in plaintext files.
+Bundle definitions live alongside their values.
 
 ```bash
 agents secrets create my-keys
-agents secrets add my-keys API_KEY    # Prompts for value, stores in Keychain
+agents secrets add my-keys API_KEY    # Prompts for value, stores in the keychain/file backend
 ```
 
-By default, secrets sync via iCloud Keychain to your other Macs. With `--no-icloud-sync`, they stay device-local. See [Secrets](#secrets) for full usage.
+Move a bundle to another machine with `secrets push`/`secrets pull` (encrypted
+round trip through `api.prix.dev`). See [Secrets](#secrets) for full usage.
 
 ### Summary
 
@@ -1672,7 +1677,7 @@ By default, secrets sync via iCloud Keychain to your other Macs. With `--no-iclo
 |------|----------|--------------|---------|
 | Event log | `~/.agents/.cache/logs/` | You only (0600) | `AGENTS_DISABLE_EVENT_LOG=1` |
 | Session index | `~/.agents/.history/sessions/` | You only | Delete the directory |
-| Secrets | macOS Keychain | You + apps you authorize | Don't use `agents secrets` |
+| Secrets | OS keychain / encrypted file store | You + apps you authorize | Don't use `agents secrets` |
 | Config | `~/.agents/` | You only | N/A |
 
 ---
@@ -1769,7 +1774,7 @@ For full transparency: `agi-cli` keeps a local event log at `~/.agents/.cache/lo
 
 macOS and Linux. Windows via WSL works but isn't first-class yet.
 
-**macOS-only features:** Keychain-based secrets (`agents secrets`, `agents accounts add`) require macOS. Default iCloud sync for bundles requires macOS + iCloud Keychain enabled; use `--no-icloud-sync` for device-local bundles. On Linux, use environment variables or `.env` files for API keys. Native Linux credential store support is planned.
+**macOS-only features:** `agents accounts add` requires macOS. `agents secrets` itself is cross-platform — macOS Keychain, Linux libsecret, or the `file` backend everywhere, including Windows (non-WSL) via environment variables or a `.env` file as a fallback when neither native store applies.
 
 Interactive runs spawn directly by default. Enable `tmux.enabled` on a device to
 give each run an addressable pane for `agents message`, injection, and `agents

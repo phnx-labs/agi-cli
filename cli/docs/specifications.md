@@ -3335,6 +3335,9 @@ a machine-wide process sweep.)
   fingerprint. The live-daemon exclusion is re-asserted on that path
   (`lib/secrets/reaper.ts:170-172`), so auto-lock-on-sleep for a running daemon is
   untouched; `lib/secrets/reaper.test.ts:347-354` covers the predicate.
+  (Historical: `lib/secrets/agent.ts` and `lib/secrets/reaper.ts` were deleted with the
+  embedded engine (PHNX-3989); the standalone `secrets-cli` now owns its own broker's
+  reap/leak-freedom guarantee — see `secrets-agent-process-model.md`.)
 - **SING-GAP-5 (resolved, RUSH-2421).** SING-12a's shutdown postcondition once verified
   only the browser IPC socket, the secrets broker socket, and pid registration — not the
   lifetime marker, heartbeat file, or instance-registry entry, which `handleShutdown`'s
@@ -3343,11 +3346,12 @@ a machine-wide process sweep.)
   (`lib/daemon/daemon.ts:1596-1640`) unconditionally on both paths, reclaiming residue from a
   provably dead owner and leaving alone anything a live successor owns
   (`daemon.registry.test.ts` covers both the escalated-reclaim case and the
-  live-owner-protection case). Both socket teardowns now await the real `net.Server` `'close'` event instead of
-  firing and forgetting: the secrets broker via `closeServerBounded`
-  (`lib/secrets/agent.ts:928-941`, `:953-973`, RUSH-2421) and the browser IPC server via
+  live-owner-protection case). Both socket teardowns awaited the real `net.Server` `'close'` event instead of
+  firing and forgetting: the secrets broker via `closeServerBounded` (now historical —
+  `lib/secrets/agent.ts` was deleted with the embedded engine, PHNX-3989; the daemon no
+  longer owns a broker socket to close) and the browser IPC server via
   `BrowserIPCServer.stop` (`lib/browser/ipc.ts:284-295`, bounded by
-  `IPC_CLOSE_TIMEOUT_MS = 5_000` at `ipc.ts:19`, RUSH-2421).
+  `IPC_CLOSE_TIMEOUT_MS = 5_000` at `ipc.ts:19`, RUSH-2421, still current).
 - **SING-GAP-6 (resolved, RUSH-2418).** SING-14's restart bound was previously
   unenforced: `generateLaunchdPlist` set `KeepAlive` with no `ThrottleInterval`,
   `generateSystemdUnit` set `Restart=always` with no `StartLimitIntervalSec`/

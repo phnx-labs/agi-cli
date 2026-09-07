@@ -34,7 +34,7 @@ agents secrets add prod DB_PASSWORD --env DB_PASSWORD
 DB_PASSWORD=xxx agents run claude "..." --secrets prod
 ```
 
-Vault providers (1Password, AWS Secrets Manager, HashiCorp Vault) are planned for headless environments.
+1Password is already supported (`import --from 1password:<vault>`, `export --to-1password`) — see below. AWS Secrets Manager and HashiCorp Vault providers remain planned.
 
 ## Why not just use .zshrc or 1Password?
 
@@ -72,15 +72,25 @@ echo "$NEW_API_KEY" | agents secrets add prod STRIPE_KEY --value-stdin
 agents secrets generate --copy    # copies to clipboard, prints nothing
 ```
 
-## "I have multiple Macs and want secrets to sync"
+## "I have multiple machines and want secrets to sync"
 
-Bundles auto-sync via iCloud Keychain by default. Create on one Mac, and the bundle appears on every Mac signed into the same iCloud account:
+Move a bundle between machines with `push`/`pull` — it's encrypted, uploaded to
+`api.prix.dev`, and decrypted back into the local keychain/file store on the
+other end:
 
 ```bash
+# On one machine:
 agents secrets create work
+agents secrets add work SOME_KEY
+agents secrets push work
+
+# On another machine:
+agents secrets pull work      # work now exists locally too
 ```
 
-Pass `--no-icloud-sync` to keep values device-local instead.
+A bundle created with `--synced` instead stores it in an age-encrypted local
+file (`$SECRETS_HOME/vault.age`) that you sync yourself (e.g. via a synced
+folder) rather than through `api.prix.dev`.
 
 ## "I want to track when API keys expire"
 
@@ -179,19 +189,24 @@ On a **locked** keychain bundle:
 
 So a sheet only ever appears for a deliberate human action (`unlock`, or a `view --reveal` / `exec` you type) on a *locked* bundle. `get`/`export` stay silent so they never block a script mid-pipeline — `export` now also refuses without a real destination (`--device` / `--to-1password` / `--to-file`), so it never prints a bundle to stdout.
 
-For a machine running lots of agents, run `agents secrets start` once — it installs the broker as a persistent background service (launchd) that stays up across the session, so a cold-started broker can't get starved under load. It self-heals onto new code after `npm i -g` upgrades. `agents secrets status` shows whether it's installed.
+For a machine running lots of agents, run `agents secrets start` once to bring the broker up ahead of time, so a cold-started broker can't get starved under load. `agents secrets status` shows what's held and when it locks.
 
-**Skip `unlock` entirely** — mark a bundle `session` tier and turn on auto-cache, then the first prompt of a run populates the broker for you:
+**You usually don't need `unlock` at all** — a bundle's default prompt policy is
+`hold` (ask once per hold window, `secrets.agent.holdMs` — 7d by default), so the
+FIRST read of a run already populates the broker and every read after that in
+the same window is silent:
 
 ```bash
-agents secrets tier prod session            # or: secrets create prod --tier session
-# in ~/.agents/agents.yaml:
-#   secrets:
-#     agent:
-#       auto: true
+agents secrets policy prod             # show the current policy
+agents secrets policy prod always      # switch to "ask every time" instead
 ```
 
-A `biometry`-tier bundle (the default) is never auto-held — keep high-value bundles there so every read is confirmed. While a bundle is unlocked, any process running as you can read it from the socket without a prompt; that's the trade-off, so keep TTLs short and `lock` when you step away.
+`always` re-prompts on every read — reach for it on a high-value bundle where
+every access should be confirmed. `never` is silent with NO biometry ACL at
+all (`--i-understand` required to create one) — never put a high-value secret
+there. While a bundle is held, any process running as you can read it from the
+socket without a prompt; that's the trade-off, so keep hold windows short and
+`lock` when you step away.
 
 ## "Which bundles do I actually use, and when was one last touched?"
 
