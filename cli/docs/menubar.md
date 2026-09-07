@@ -516,6 +516,38 @@ Liveness is a `kill(pid, 0)` check; running-vs-idle is the transcript file's
 mtime. The teams directory accumulates history, so the periodic badge refresh
 skips it — the full teams scan runs only when the menu opens.
 
+### Live feed + artifact index (PHNX-4002)
+
+The dispatch-and-inbox surfaces (the Sessions window, the dropdown, the dispatch
+form) do not poll the snapshot command per row. Instead a single long-lived data
+layer projects the fleet:
+
+- **`FeedStream`** owns exactly one `agents feed watch --json` child (no
+  `--local`), spawned through `ChildProcess` so it is group-killed on quit and
+  reaped by the next launch if the helper dies — the same durable-registry
+  treatment the bounded pollers get. It parses NDJSON off the main thread into a
+  pure reducer (`FeedState`, `FeedModels.swift`): `rows` (keyed by rowKey),
+  `attention` (keyed by sessionId), per-device `deviceHeartbeat`, and
+  `StreamHealth`. Each device's `reset` replaces only that device's slice; a
+  `sequence` gap or a new `streamId` (a respawned coordinator) drops all rows and
+  rebuilds from the next `reset`. Backoff is 1s doubling to 30s with a circuit
+  breaker after 10 consecutive failures; a silent stream (no line for 45s) reads
+  stale and (120s) restarts the child. It is a projection only — it never
+  schedules a fleet-affecting action (spec SING-2). Observers get a
+  `Diff { upserted, removed, attentionChanged }` on the main queue.
+- **`ArtifactIndex`** joins the `~/.agents/artifacts/<date>/<slug>/.artifact.json`
+  sidecars and the `~/.agents/artifact-history/<id>/manifest.json` render ledger
+  into `artifacts(forSession:)` (matches a full UUID or an 8-char prefix) and a
+  `recent` list, scanned once on a background queue and refreshed via FSEvents on
+  both roots.
+
+Both are headless-testable: `MENUBAR_FEED_TEST=1` replays a fixture NDJSON and
+asserts row counts, attention keys, reset-on-gap, backoff, and the breaker;
+`MENUBAR_ARTIFACT_TEST=1` scans a fixture tree and asserts the session map. Both
+run in `scripts/test-menubar.sh` (a `build.sh` gate). `MENUBAR_FEED_SMOKE=1` runs
+the real stream for 60s and prints row/attention/device counts + health — a live
+check, not a gate, like `MENUBAR_DUMP`.
+
 ## Lifecycle
 
 The helper is a launchd user service (`com.phnx-labs.agents-menubar`,
