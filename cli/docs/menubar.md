@@ -825,13 +825,22 @@ A choice button runs `agents feed answer <key> --choice <id>`; a typed reply run
 `agents feed answer <key> --text "<typed>"` (a typed send-back becomes free text,
 an empty one the plain `send-back` choice); `open-terminal` and a body tap run
 `agents open agents://session/<id>`; `open-report` / `open-pr` open the `--action`
-target directly through `NSWorkspace`. On a non-zero `feed answer` exit the helper
-posts a follow-up **"Could not deliver your reply · Open in terminal"** banner
-(category `agents.failure`) carrying the stderr tail, so a failed reply is visible
-rather than swallowed. The pure argv → content mapping and the response → argv
-mapping for every action are pinned by the `MENUBAR_NOTIFY_TEST` self-test (a
-build gate via `scripts/test-menubar.sh`), which uses a capturing runner so it
-never touches the notification center.
+target directly through `NSWorkspace`. The `agents` child runs **off the delegate
+thread** (`DispatchQueue.global(qos: .userInitiated)`) and `didReceive` returns at
+once: macOS does not promise the callback arrives off main, and a `feed answer`
+routing over a remote rail can take its full deadline, which on the main thread
+would freeze the status item. On a non-zero `feed answer` exit the helper hops
+back to main and posts a follow-up **"Could not deliver your reply · Open in
+terminal"** banner (category `agents.failure`) carrying the stderr tail, so a
+failed reply is visible rather than swallowed. The same follow-up shape covers a
+tapped `open-report` / `open-pr` whose target the banner did not carry — the CLI's
+single `--action` holds one link, so a done banner offering both buttons can only
+deliver one — as **"Could not open the PR"** / **"Could not open the report"**,
+never a silent no-op. The pure argv → content mapping, the response → argv mapping
+for every action, and the off-thread guarantee (a slow fake runner is still inside
+`run` when `handleResponse` has returned) are pinned by the `MENUBAR_NOTIFY_TEST`
+self-test (a build gate via `scripts/test-menubar.sh`), which uses a capturing
+runner so it never touches the notification center.
 
 **Suppression.** When the Sessions window (track C) is showing and the banner's
 session is the selected row, the delegate's `willPresent` returns `[]` — the item

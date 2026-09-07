@@ -132,12 +132,14 @@ enum AgentAvatar {
               let png = rep.representation(using: .png, properties: [:]) else { return nil }
         // A stable-per-agent name keeps the temp dir from growing one file per
         // banner: UNNotificationAttachment copies the bytes at add time, so
-        // overwriting the same path between banners is safe.
+        // overwriting the same path between banners is safe — atomically, so two
+        // one-shot `--notify` processes for the same agent never hand the center
+        // a half-written file.
         let key = normalize(agent) ?? "agent"
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("agents-notify-avatar-\(key).png")
         do {
-            try png.write(to: url)
+            try png.write(to: url, options: .atomic)
             return url
         } catch {
             return nil

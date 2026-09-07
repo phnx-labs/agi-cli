@@ -8,13 +8,40 @@ import UserNotifications
 // MENUBAR_NOTIFY_TEST=1 (main.swift); no GUI, no authorization, a build gate.
 enum NotifierSelfTest {
     /// Records the argv a resolved response would run, so a test asserts the
-    /// mapping without spawning `agents`.
+    /// mapping without spawning `agents`. `handleResponse` runs the runner off
+    /// the calling thread, so a test waits on `finished` before reading the argv.
     final class CapturingRunner: NotifyCommandRunning {
         var lastArgs: [String]?
         var exitCode: Int32 = 0
+        let finished = DispatchSemaphore(value: 0)
         func run(agentsArgs: [String], timeout: TimeInterval) -> (code: Int32, stderr: String) {
             lastArgs = agentsArgs
+            finished.signal()
             return (code: exitCode, stderr: "")
+        }
+        /// True when the runner ran within `timeout` seconds.
+        func ran(within timeout: TimeInterval = 2) -> Bool {
+            finished.wait(timeout: .now() + timeout) == .success
+        }
+    }
+
+    /// A runner that blocks inside `run` until the test releases it, standing in
+    /// for a `feed answer` that takes its full 20 s deadline — pins that
+    /// `handleResponse` returns to the delegate while the child is still running,
+    /// and that the child never runs on the caller's (possibly main) thread.
+    final class SlowRunner: NotifyCommandRunning {
+        var lastArgs: [String]?
+        var ranOnMainThread: Bool?
+        let started = DispatchSemaphore(value: 0)
+        let release = DispatchSemaphore(value: 0)
+        let finished = DispatchSemaphore(value: 0)
+        func run(agentsArgs: [String], timeout: TimeInterval) -> (code: Int32, stderr: String) {
+            lastArgs = agentsArgs
+            ranOnMainThread = Thread.isMainThread
+            started.signal()
+            release.wait()
+            finished.signal()
+            return (code: 0, stderr: "")
         }
     }
 
@@ -152,9 +179,21 @@ enum NotifierSelfTest {
         check("open-pr → open web",
               resolveNotifyResponse(actionIdentifier: NotifyAction.openPR, context: prCtx, typedText: nil)
                 == .openWeb(url: "https://github.com/x/pull/1"))
-        check("open-pr with non-url action → none",
+        // A done banner offers both buttons but `--action` carries ONE link, so
+        // the button whose target it did not carry must say so, never no-op.
+        check("open-pr with the action on the report → unavailable(PR)",
               resolveNotifyResponse(actionIdentifier: NotifyAction.openPR, context: doneCtx, typedText: nil)
-                == NotifyResponse.none)
+                == .unavailable(target: "PR"))
+        check("open-report with the action on the PR → unavailable(report)",
+              resolveNotifyResponse(actionIdentifier: NotifyAction.openReport, context: prCtx, typedText: nil)
+                == .unavailable(target: "report"))
+        let badUrlCtx = NotifyResponseContext(key: nil, sessionId: "sd", action: "url:javascript:alert(1)", choiceIds: [])
+        check("open-pr with a non-web url → unavailable(PR)",
+              resolveNotifyResponse(actionIdentifier: NotifyAction.openPR, context: badUrlCtx, typedText: nil)
+                == .unavailable(target: "PR"))
+        check("unavailable has no argv and is not an answer",
+              NotifyResponse.unavailable(target: "PR").agentsArgs == nil
+                && !NotifyResponse.unavailable(target: "PR").isAnswer)
         let failCtx = NotifyResponseContext(key: nil, sessionId: "sf", action: nil, choiceIds: [])
         check("open-terminal → open session",
               resolveNotifyResponse(actionIdentifier: NotifyAction.openTerminal, context: failCtx, typedText: nil)
@@ -177,24 +216,43 @@ enum NotifierSelfTest {
         Notifier.handleResponse(permCtx, actionIdentifier: NotifyAction.deny, typedText: nil,
                                 agent: "claude", runner: runner)
         check("handleResponse(deny) runs feed answer --choice deny",
-              runner.lastArgs == ["feed", "answer", "zion/abc/1", "--choice", "deny"])
+              runner.ran() && runner.lastArgs == ["feed", "answer", "zion/abc/1", "--choice", "deny"])
 
         let runner2 = CapturingRunner()
         Notifier.handleResponse(questionCtx, actionIdentifier: NotifyAction.reply, typedText: "ship it",
                                 agent: nil, runner: runner2)
         check("handleResponse(reply) runs feed answer --text",
-              runner2.lastArgs == ["feed", "answer", "h/s/2", "--text", "ship it"])
+              runner2.ran() && runner2.lastArgs == ["feed", "answer", "h/s/2", "--text", "ship it"])
 
         let runner3 = CapturingRunner()
         Notifier.handleResponse(failCtx, actionIdentifier: NotifyAction.openTerminal, typedText: nil,
                                 agent: nil, runner: runner3)
         check("handleResponse(open-terminal) runs agents open agents://session",
-              runner3.lastArgs == ["open", "agents://session/sf"])
+              runner3.ran() && runner3.lastArgs == ["open", "agents://session/sf"])
 
         let runner4 = CapturingRunner()
         Notifier.handleResponse(permCtx, actionIdentifier: UNNotificationDismissActionIdentifier,
                                 typedText: nil, agent: nil, runner: runner4)
-        check("handleResponse(dismiss) runs nothing", runner4.lastArgs == nil)
+        check("handleResponse(dismiss) runs nothing", !runner4.ran(within: 0.3) && runner4.lastArgs == nil)
+
+        // MARK: handleResponse never blocks the delegate on the child
+        // The delegate callback may arrive on the main thread and a `feed answer`
+        // routing over a remote rail can take its full 20 s deadline, so the
+        // call must return while the runner is still inside `run`, off-thread.
+        let slow = SlowRunner()
+        let calledAt = Date()
+        Notifier.handleResponse(permCtx, actionIdentifier: NotifyAction.approve, typedText: nil,
+                                agent: "claude", runner: slow)
+        let returnedAfter = Date().timeIntervalSince(calledAt)
+        let started = slow.started.wait(timeout: .now() + 2) == .success
+        let stillRunning = slow.finished.wait(timeout: .now()) == .timedOut
+        check("handleResponse returns before a slow runner completes", started && stillRunning)
+        check("handleResponse returns without waiting on the runner (<100 ms)", returnedAfter < 0.1)
+        check("the runner runs off the calling thread", slow.ranOnMainThread == false)
+        slow.release.signal()
+        check("the slow runner still ran the mapped argv",
+              slow.finished.wait(timeout: .now() + 2) == .success
+                && slow.lastArgs == ["feed", "answer", "zion/abc/1", "--choice", "approve"])
 
         print(pass ? "ALL PASS" : "SOME FAILED")
         exit(pass ? 0 : 1)
