@@ -21,6 +21,7 @@ import {
   isNpxCacheInstall,
   isTouchIdStormFixedVersion,
   manualUninstallCommand,
+  installLooksSettled,
   MULTI_INSTALL_SCAN_TTL_MS,
   NPM_PACKAGE_NAME,
   purgeRemovableAgentsCliInstalls,
@@ -1218,5 +1219,45 @@ describe('resolveRunningPackageRoot', () => {
     const nested = path.join(tmp, 'dist', 'lib');
     fs.mkdirSync(nested, { recursive: true });
     expect(() => resolveRunningPackageRoot(nested)).toThrow(/no @phnx-labs\/agents-cli package.json above/);
+  });
+});
+
+describe('installLooksSettled', () => {
+  const roots: string[] = [];
+  afterEach(() => {
+    for (const dir of roots.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  function makeInstall(bin: string | Record<string, string> | undefined, opts: { writeBins?: boolean } = {}): string {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-settled-'));
+    roots.push(root);
+    fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: NPM_PACKAGE_NAME, version: '1.0.0', bin }));
+    if (opts.writeBins !== false) {
+      const targets = typeof bin === 'string' ? [bin] : Object.values(bin ?? {});
+      for (const rel of targets) {
+        fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
+        fs.writeFileSync(path.join(root, rel), '#!/usr/bin/env node\n');
+      }
+    }
+    return root;
+  }
+
+  it('a package.json written moments ago is not settled, the same tree a minute later is', () => {
+    const root = makeInstall({ agents: 'dist/index.js', ag: 'dist/index.js' });
+    const written = fs.statSync(path.join(root, 'package.json')).mtimeMs;
+    expect(installLooksSettled(root, 60_000, written + 5_000)).toBe(false);
+    expect(installLooksSettled(root, 60_000, written + 61_000)).toBe(true);
+  });
+
+  it('a settled package.json whose bin entry has not landed yet is not settled (bun mid-extraction)', () => {
+    const root = makeInstall('dist/index.js', { writeBins: false });
+    const written = fs.statSync(path.join(root, 'package.json')).mtimeMs;
+    expect(installLooksSettled(root, 60_000, written + 61_000)).toBe(false);
+  });
+
+  it('an unreadable or missing package.json is never settled', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-settled-none-'));
+    roots.push(root);
+    expect(installLooksSettled(root, 60_000)).toBe(false);
   });
 });

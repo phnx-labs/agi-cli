@@ -293,18 +293,22 @@ function isPackageRoot(dir: string): boolean {
 /**
  * The on-disk package root of the copy that is currently running.
  *
- * For a plain JS install this is just `<__dirname>/..`. Under the compiled
- * standalone binary (shipped since 1.20.53) it is not: Bun sets `__dirname` to
- * its embedded virtual FS, so `<__dirname>/..` yields `/$bunfs` — a path that
- * exists nowhere. That phantom value was reported as a second install by the
- * multi-install check, and rejected by deriveGlobalPrefix as "not an
- * npm-managed install", so every self-upgrade from a compiled copy failed.
+ * For a plain JS install, walk up from the CALLING module's directory to the
+ * directory whose package.json names this package. Never assume a fixed depth:
+ * `<__dirname>/..` is the root only for a module directly under `dist/`, and
+ * from `dist/lib/daemon/self-update-service.js` it answered `dist/lib`, which
+ * deriveGlobalPrefix rejected as "not an npm-managed install" on every daemon
+ * self-update tick (2026-09-07 fleet incident).
  *
- * The physical executable is `process.execPath`, which ships inside the
- * package (`<packageRoot>/dist/bin/agents`). Walk up from it to the directory
- * whose package.json actually names this package rather than assuming a fixed
- * depth, so a change to the dist layout surfaces as a clear throw here instead
- * of a wrong prefix that npm would happily install into.
+ * Under the compiled standalone binary (shipped since 1.20.53) `__dirname` is
+ * Bun's embedded virtual FS, so walking up from it yields `/$bunfs` — a path
+ * that exists nowhere. That phantom value was reported as a second install by
+ * the multi-install check and rejected by deriveGlobalPrefix, so every
+ * self-upgrade from a compiled copy failed. The physical executable is
+ * `process.execPath`, which ships inside the package
+ * (`<packageRoot>/dist/bin/agents`); walk up from it instead. Either way a
+ * change to the dist layout surfaces as a clear throw here rather than a wrong
+ * prefix that npm would happily install into.
  */
 export function resolveRunningPackageRoot(
   dirname: string,
@@ -460,8 +464,43 @@ export async function installPackageIntoPrefix(spec: string, prefix: string, sig
  * alias shims afterwards via refreshAliasShims() rather than relying on the
  * package's postinstall hook.
  *
+ * Unlike npm's arborist (see {@link sweepStaleInstallStaging}: retire-rename,
+ * then one final rename), bun's write into the package directory is NOT known
+ * to be atomic — files may land incrementally. Anything that trusts a version
+ * bump on disk written by ANOTHER process (the daemon's stale-install relaunch
+ * in `daemon/self-update-service.ts`) must therefore gate on
+ * {@link installLooksSettled} rather than on the version alone.
+ *
  * `signal` behaves exactly as documented on {@link installPackageIntoPrefix}.
  */
+/** How long an install's package.json must have been at rest before a foreign version bump is trusted. */
+export const INSTALL_SETTLE_MS = 60_000;
+
+/**
+ * True when the install at `packageRoot` looks complete: its package.json has
+ * not been modified for at least `settleMs`, and every `bin` entry it declares
+ * exists on disk. This is the guard for trusting a version bump that a
+ * DIFFERENT process wrote (an operator's `agents` auto-update, `agents
+ * upgrade`, the installer) without re-running that process's own verification:
+ * npm's reify is an atomic rename, but bun's is not (see
+ * {@link installPackageWithBun}), so a reader can catch bun mid-extraction —
+ * package.json present, `dist/` still landing. An install finishes in seconds;
+ * a minute of quiet plus the bin entry present rules that window out. Any
+ * read error means "not settled".
+ */
+export function installLooksSettled(packageRoot: string, settleMs: number = INSTALL_SETTLE_MS, now: number = Date.now()): boolean {
+  try {
+    const pkgJsonPath = path.join(packageRoot, 'package.json');
+    const stat = fs.statSync(pkgJsonPath);
+    if (now - stat.mtimeMs < settleMs) return false;
+    const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf-8')) as { bin?: string | Record<string, string> };
+    const bins = typeof pkg.bin === 'string' ? [pkg.bin] : Object.values(pkg.bin ?? {});
+    return bins.every((rel) => fs.existsSync(path.join(packageRoot, rel)));
+  } catch {
+    return false;
+  }
+}
+
 export async function installPackageWithBun(spec: string, signal?: AbortSignal): Promise<void> {
   const { execFile } = await import('child_process');
   const { promisify } = await import('util');
