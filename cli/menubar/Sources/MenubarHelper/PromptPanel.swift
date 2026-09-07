@@ -33,6 +33,8 @@ final class PromptPanel: NSPanel {
     var onPasteImages: (() -> Bool)?
     // Cmd-T folds the ticket list open/closed.
     var onToggleTickets: (() -> Void)?
+    // Cmd-Shift-F focuses the screenshot OCR search field.
+    var onSearchShortcut: (() -> Void)?
     // Image files dropped on the panel; the drag's own pasteboard is handed over.
     var onDropImages: ((NSPasteboard) -> Void)?
 
@@ -88,6 +90,12 @@ final class PromptPanel: NSPanel {
     // it here, ahead of `sendAction`, keeps one interception point for the one
     // keystroke that can carry an image.
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if mods == [.command, .shift],
+           event.charactersIgnoringModifiers?.lowercased() == "f" {
+            onSearchShortcut?()
+            return true
+        }
         if event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
            let key = event.charactersIgnoringModifiers?.lowercased() {
             if let digit = Int(key), digit >= 1, digit <= 9,
@@ -435,6 +443,23 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
     }
     private static let hydrationQueue = DispatchQueue(label: "agents.quick-dispatch.hydration",
                                                        qos: .userInitiated)
+    // Screenshot OCR search + grouped grid (PHNX-4006). The search field filters the
+    // strip by the recognized text on each capture; the "more" disclosure expands
+    // the strip into ScreenshotGridView. `recentImagePaths` stays the canonical
+    // newest-six list — a search only changes what the STRIP renders, so clearing it
+    // restores the newest six without a re-scan.
+    private let screenshotSearch = NSSearchField()
+    private let moreButton = NSButton()
+    private let screenshotBar = NSStackView()
+    private lazy var screenshotGrid = ScreenshotGridView()
+    private var gridExpanded = false
+    private var isSearching = false
+    private var searchShownCount = 0
+    private var searchMatchCount = 0
+    // Padded like thumbStripHeight so the additive panel height leaves room for the
+    // stack's own row spacing rather than clipping the top/bottom rows.
+    private static let searchBarHeight: CGFloat = 40
+    private static let gridViewportHeight: CGFloat = 240
     private var selectedAgents = Set<String>()
     private var roster: [MenuAgent] = []
     private var agentButtons: [NSButton] = []
@@ -468,6 +493,10 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         if projects.isEmpty { refreshProjects() }
         rescanAttachments()
         loadLinearCache()
+        // Start OCR indexing of the screenshot folders once, at helper launch. The
+        // index owns its own FSEvents watcher for the whole lifetime, so a capture
+        // taken with the palette closed is still recognized and searchable.
+        ScreenshotIndex.shared.start()
     }
 
     private func refreshProjects() {
@@ -566,6 +595,7 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
     private func dismiss(preservingDraft: Bool = true) {
         dismissArmed = false
         screenshotWatcher.stop()
+        resetScreenshotSearchUI()
         if preservingDraft {
             saveDraftForDismissal()
         } else {
@@ -1143,6 +1173,7 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
             thumbStrip.addArrangedSubview(thumb)
         }
         thumbStrip.isHidden = thumbStrip.arrangedSubviews.isEmpty
+        applyScreenshotBarVisibility()
         applyContentHeight()
         updateHint()
     }
@@ -1198,8 +1229,12 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
                 self.recentImagePaths = paths
                 self.thumbnailCache = thumbnails
                 // Rebuilding an unchanged strip would throw away the current
-                // selection chrome and refocus nothing; skip it.
-                if !unchanged || self.pendingRestoredSelection != nil {
+                // selection chrome and refocus nothing; skip it. An active OCR
+                // search owns the strip, so a background rescan updates the
+                // canonical list + cache but must not replace the search results.
+                if self.isSearching {
+                    self.applyScreenshotBarVisibility()
+                } else if !unchanged || self.pendingRestoredSelection != nil {
                     let selectionToRestore = self.pendingRestoredSelection
                         ?? (self.panel?.isVisible == true ? self.selected : nil)
                     self.rebuildThumbs(paths: paths, thumbnails: thumbnails,
@@ -1270,6 +1305,102 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
                       restoring: recentImagePaths.filter { keep.contains($0) })
     }
 
+    // MARK: Screenshot OCR search + grid (PHNX-4006)
+
+    /// The search/more bar rides above the strip whenever there is anything to
+    /// search — i.e. there are recent captures, or a search is in progress (so a
+    /// zero-match search can still be cleared).
+    private func applyScreenshotBarVisibility() {
+        screenshotBar.isHidden = recentImagePaths.isEmpty && !isSearching
+    }
+
+    private func focusScreenshotSearch() {
+        guard let panel, panel.isVisible else { return }
+        applyScreenshotBarVisibility()
+        panel.makeFirstResponder(screenshotSearch)
+    }
+
+    @objc private func onScreenshotSearchChanged(_ sender: NSSearchField) {
+        let query = sender.stringValue
+        if ScreenshotIndex.searchTokens(query).isEmpty {
+            isSearching = false
+            restoreNewestStrip()
+            return
+        }
+        isSearching = true
+        ScreenshotIndex.shared.search(query) { [weak self] rows in
+            guard let self, self.isSearching else { return }
+            self.renderSearchResults(rows)
+        }
+    }
+
+    /// Show up to six matching captures in the strip (decoding their thumbnails off
+    /// the main thread) and set the `n of m match` hint. `recentImagePaths` is left
+    /// untouched, so clearing the search restores the newest six with no re-scan.
+    private func renderSearchResults(_ rows: [ScreenshotRow]) {
+        let shown = Array(rows.prefix(6)).map(\.path)
+        searchMatchCount = rows.count
+        searchShownCount = shown.count
+        Self.hydrationQueue.async { [weak self] in
+            var thumbs: [String: CGImage] = [:]
+            for p in shown where !p.isEmpty {
+                if let image = Self.thumbnail(at: p) { thumbs[p] = image }
+            }
+            DispatchQueue.main.async {
+                guard let self, self.isSearching else { return }
+                for (k, v) in thumbs { self.thumbnailCache[k] = v }
+                self.rebuildThumbs(paths: shown, thumbnails: self.thumbnailCache, restoring: [])
+            }
+        }
+    }
+
+    private func restoreNewestStrip() {
+        searchMatchCount = 0
+        searchShownCount = 0
+        rebuildThumbs(paths: recentImagePaths, thumbnails: thumbnailCache)
+    }
+
+    @objc private func onMoreToggled(_ sender: NSButton) { toggleGrid() }
+
+    private func toggleGrid() {
+        gridExpanded.toggle()
+        moreButton.title = gridExpanded ? "fewer" : "more"
+        moreButton.state = gridExpanded ? .on : .off
+        screenshotGrid.isHidden = !gridExpanded
+        if gridExpanded {
+            ScreenshotIndex.shared.recentRows { [weak self] rows in
+                guard let self, self.gridExpanded else { return }
+                self.screenshotGrid.setGroups(ScreenshotGrouping.groupRows(rows, now: Date()))
+            }
+        }
+        applyContentHeight()
+    }
+
+    /// A grid click attaches the capture — same as a strip click, so it joins the
+    /// selection and shows selected in the strip.
+    private func attachFromGrid(_ path: String) { attachNewly([path]) }
+
+    /// A grid double-click previews the full image in Preview.app. Same dismissal
+    /// suppression as the strip preview so Preview taking focus doesn't drop the note.
+    private func previewPath(_ path: String) {
+        suppressDismiss = true
+        NSWorkspace.shared.open(URL(fileURLWithPath: path))
+    }
+
+    /// Reset the ephemeral search/grid UI so the next summon opens clean.
+    private func resetScreenshotSearchUI() {
+        isSearching = false
+        searchMatchCount = 0
+        searchShownCount = 0
+        screenshotSearch.stringValue = ""
+        if gridExpanded {
+            gridExpanded = false
+            moreButton.state = .off
+            moreButton.title = "more"
+            screenshotGrid.isHidden = true
+        }
+    }
+
     // MARK: Tickets fold
 
     @objc private func toggleTickets() {
@@ -1293,6 +1424,13 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
     }
 
     private func updateHint() {
+        if isSearching {
+            let matchText = searchMatchCount == 0
+                ? "no match"
+                : "\(searchShownCount) of \(searchMatchCount) match"
+            hint.stringValue = "\(matchText)    click attaches · clear to restore the newest six"
+            return
+        }
         let count = selected.count
         let attach = count == 0 ? "no image attached"
             : count == 1 ? "1 image attached" : "\(count) images attached"
@@ -1343,7 +1481,9 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
             height += Self.ticketSectionChrome
             if !ticketScroll.isHidden { height += Self.ticketViewportHeight }
         }
+        if !screenshotBar.isHidden { height += Self.searchBarHeight }
         if !thumbStrip.isHidden { height += Self.thumbStripHeight }
+        if gridExpanded { height += Self.gridViewportHeight + 10 }
         guard abs(panel.frame.height - height) > 0.5 else { return }
         let top = panel.frame.maxY
         panel.setContentSize(NSSize(width: Self.panelWidth, height: height))
@@ -1375,6 +1515,7 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         panel.onTicketShortcut = { [weak self] index in self?.dispatchTicket(at: index) ?? false }
         panel.onPasteImages = { [weak self] in self?.pasteImagesFromPasteboard() ?? false }
         panel.onToggleTickets = { [weak self] in self?.toggleTickets() }
+        panel.onSearchShortcut = { [weak self] in self?.focusScreenshotSearch() }
 
         let bg = PromptDropView()
         bg.material = .hudWindow
@@ -1521,7 +1662,42 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         header.spacing = 8
         ticketHeader = header
 
-        let stack = NSStackView(views: [field, controlRow, agentStrip, thumbStrip,
+        // Screenshot OCR search: filters the strip by the recognized text on each
+        // capture. Focused with Cmd-Shift-F; emptying it restores the newest six.
+        screenshotSearch.translatesAutoresizingMaskIntoConstraints = false
+        screenshotSearch.controlSize = .small
+        screenshotSearch.font = .systemFont(ofSize: 12)
+        screenshotSearch.placeholderString = "Search screenshots (⌘⇧F)"
+        screenshotSearch.sendsSearchStringImmediately = true
+        screenshotSearch.sendsWholeSearchString = false
+        screenshotSearch.target = self
+        screenshotSearch.action = #selector(onScreenshotSearchChanged(_:))
+        screenshotSearch.toolTip = "Find a screenshot by the text on it"
+
+        // "more" disclosure: expand the strip into the grouped grid.
+        moreButton.translatesAutoresizingMaskIntoConstraints = false
+        moreButton.bezelStyle = .recessed
+        moreButton.controlSize = .small
+        moreButton.setButtonType(.pushOnPushOff)
+        moreButton.title = "more"
+        moreButton.font = .systemFont(ofSize: 11)
+        moreButton.target = self
+        moreButton.action = #selector(onMoreToggled(_:))
+        moreButton.toolTip = "Show every recent screenshot, grouped by time"
+
+        screenshotBar.orientation = .horizontal
+        screenshotBar.alignment = .centerY
+        screenshotBar.spacing = 8
+        screenshotBar.addArrangedSubview(screenshotSearch)
+        screenshotBar.addArrangedSubview(moreButton)
+        screenshotBar.isHidden = true
+
+        screenshotGrid.isHidden = true
+        screenshotGrid.onAttach = { [weak self] path in self?.attachFromGrid(path) }
+        screenshotGrid.onPreview = { [weak self] path in self?.previewPath(path) }
+
+        let stack = NSStackView(views: [field, controlRow, agentStrip, screenshotBar,
+                                        thumbStrip, screenshotGrid,
                                         header, ticketScroll, hint])
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -1534,6 +1710,10 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
             stack.centerYAnchor.constraint(equalTo: bg.centerYAnchor),
             field.widthAnchor.constraint(equalTo: stack.widthAnchor),
             modeControl.widthAnchor.constraint(equalToConstant: 180),
+            screenshotBar.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            screenshotSearch.widthAnchor.constraint(equalToConstant: 260),
+            screenshotGrid.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            screenshotGrid.heightAnchor.constraint(equalToConstant: Self.gridViewportHeight),
             ticketScroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
             ticketScroll.heightAnchor.constraint(equalToConstant: Self.ticketViewportHeight),
             // The panel is a fixed-width bar: cap the popups so long names truncate

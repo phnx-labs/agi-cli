@@ -137,6 +137,14 @@ if ProcessInfo.processInfo.environment["MENUBAR_FEED_SMOKE"] == "1" {
     FeedSmoke.run()
 }
 
+// Screenshot OCR self-test (PHNX-4006): run real Vision recognition over the two
+// committed fixture PNGs into a temp SQLite DB and assert the stored first_line,
+// hash dedupe, and tokenized search, plus the pure grouping helper. No GUI, no
+// hotkey. See ScreenshotOCRSelfTest.swift.
+if ProcessInfo.processInfo.environment["MENUBAR_OCR_TEST"] == "1" {
+    ScreenshotOCRSelfTest.run()
+}
+
 // Everything past here installs the status item and registers the global
 // chords, so it must only run where those chords can actually be serviced.
 // Refuses an ssh-started launch or an unrecognized flag — the two ways a helper
