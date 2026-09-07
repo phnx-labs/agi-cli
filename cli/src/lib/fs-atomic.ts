@@ -65,6 +65,23 @@ export function atomicWriteJsonSync(filePath: string, data: unknown): void {
 }
 
 /**
+ * Async counterpart of {@link atomicWriteFileSync} for callers on the daemon's
+ * shared event loop (PHNX-3695): a `writeFileSync`/`renameSync` on a tick freezes
+ * every service and the browser IPC server until the disk write returns. Same
+ * tmp-then-rename atomicity, but every syscall is awaited via `fs/promises`.
+ */
+export async function atomicWriteFile(filePath: string, content: string, options: fs.WriteFileOptions = 'utf-8'): Promise<void> {
+  const tmpPath = `${filePath}.tmp-${process.pid}-${randomBytes(8).toString('hex')}`;
+  await fs.promises.writeFile(tmpPath, content, options);
+  try {
+    await fs.promises.rename(tmpPath, filePath);
+  } catch (err) {
+    try { await fs.promises.unlink(tmpPath); } catch { /* best-effort cleanup */ }
+    throw err;
+  }
+}
+
+/**
  * Acquires an exclusive proper-lockfile lock on filePath, runs fn, then
  * releases the lock. Retries with capped linear back-off until either the lock
  * is acquired or LOCK_ACQUIRE_TIMEOUT_MS elapses. Breaks stale locks older than

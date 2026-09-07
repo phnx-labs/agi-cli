@@ -725,6 +725,12 @@ The one-shot argv extends the base `--notify` contract with four optional fields
   --choice approve=Approve --choice approve-session=Approve for session --choice deny=Deny
 ```
 
+> **Track D2 status.** The CLI emits all four fields today; the Swift receiver
+> (`menubar/Sources/MenubarHelper/PromptPanel.swift`) does not yet parse
+> `--category` / `--key` / `--session` / `--choice` — it still renders the base
+> `--notify` toast. The category-to-action-set mapping below describes the intended
+> round trip once the receiver lands (Track D2), not what the shipped helper renders.
+
 - **`--category`** picks the companion's action set: `permission` → Approve /
   Approve for session / Deny; `question` → the options plus a typed reply;
   `plan_review` → Approve / Send back; `done`/`failure` → open-report / open-pr /

@@ -23,7 +23,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { atomicWriteFileSync } from '../fs-atomic.js';
+import { atomicWriteFile } from '../fs-atomic.js';
 import { getFeedDir } from '../state.js';
 import { machineId } from '../machine-id.js';
 import { getActiveSessions, type ActiveSession } from '../session/active.js';
@@ -148,14 +148,14 @@ export class AttentionNotifyService extends BasePeriodicService {
         nowMs: this.now(),
       });
       if (!item || !BANNER_KINDS[item.kind]) continue;
-      if (this.hasNotified(item.key)) continue;
+      if (await this.hasNotified(item.key)) continue;
       const notification = buildAttentionNotification(item, projected);
       if (!notification) continue;
       this.notify(notification);
-      this.markNotified(item.key);
+      await this.markNotified(item.key);
       ctx.log('INFO', `attention-notify: posted ${item.kind} banner for ${item.key}`);
     }
-    this.pruneLedger();
+    await this.pruneLedger();
   }
 
   /** Filesystem-safe sidecar name for an attention key (`host/session/generation`). */
@@ -163,30 +163,36 @@ export class AttentionNotifyService extends BasePeriodicService {
     return path.join(this.ledgerDir, encodeURIComponent(key));
   }
 
-  private hasNotified(key: string): boolean {
-    return fs.existsSync(this.ledgerPath(key));
+  private async hasNotified(key: string): Promise<boolean> {
+    // fs/promises has no existsSync; a stat that rejects with ENOENT is the miss.
+    try {
+      await fs.promises.stat(this.ledgerPath(key));
+      return true;
+    } catch {
+      return false;
+    }
   }
 
-  private markNotified(key: string): void {
-    fs.mkdirSync(this.ledgerDir, { recursive: true });
-    atomicWriteFileSync(this.ledgerPath(key), JSON.stringify({ key, postedAt: new Date(this.now()).toISOString() }), 'utf-8');
+  private async markNotified(key: string): Promise<void> {
+    await fs.promises.mkdir(this.ledgerDir, { recursive: true });
+    await atomicWriteFile(this.ledgerPath(key), JSON.stringify({ key, postedAt: new Date(this.now()).toISOString() }), 'utf-8');
   }
 
-  private pruneLedger(): void {
+  private async pruneLedger(): Promise<void> {
     const nowMs = this.now();
     if (nowMs - this.lastPruneMs < LEDGER_PRUNE_EVERY_MS) return;
     this.lastPruneMs = nowMs;
     let names: string[];
     try {
-      names = fs.readdirSync(this.ledgerDir);
+      names = await fs.promises.readdir(this.ledgerDir);
     } catch {
       return; // No ledger dir yet — nothing to prune.
     }
     for (const name of names) {
       const filePath = path.join(this.ledgerDir, name);
       try {
-        const stat = fs.statSync(filePath);
-        if (nowMs - stat.mtimeMs > LEDGER_RETENTION_MS) fs.rmSync(filePath, { force: true });
+        const stat = await fs.promises.stat(filePath);
+        if (nowMs - stat.mtimeMs > LEDGER_RETENTION_MS) await fs.promises.rm(filePath, { force: true });
       } catch {
         // A file that vanished mid-walk is already gone; skip it.
       }
