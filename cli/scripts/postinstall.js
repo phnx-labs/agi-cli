@@ -362,10 +362,12 @@ function retargetManagedLinksToNativeBin() {
 /**
  * Self-heal long-running processes onto the just-installed code (darwin + linux).
  *
- * The root cause behind stale-behavior bugs is a daemon/broker that keeps
+ * The root cause behind stale-behavior bugs is a daemon that keeps
  * running pre-upgrade code for days. An in-place `npm i -g` swaps the files but
  * not the running processes — so we bounce them here, the one moment we know the
- * code just changed. Always start (or restart) the supervised daemon so a fresh
+ * code just changed. (The secrets broker is not one of them — the standalone
+ * `secrets` CLI owns its own broker lifecycle, PHNX-3989.) Always start (or
+ * restart) the supervised daemon so a fresh
  * install gets launchd/systemd KeepAlive without waiting for routines add.
  * Best-effort and non-fatal: a failure must never break the install. Skipped in
  * CI and when AGENTS_NO_HEAL=1. Windows is out of scope (detached-only, no KeepAlive).
@@ -373,18 +375,6 @@ function retargetManagedLinksToNativeBin() {
 async function healLongRunningProcesses() {
   if (process.platform !== 'darwin' && process.platform !== 'linux') return;
   if (process.env.CI || process.env.AGENTS_NO_HEAL === '1') return;
-
-  // Retire the legacy standalone secrets-agent service FIRST (#416 step 2) so
-  // that when the daemon (re)starts below its coexistence guard sees no
-  // standalone broker and hosts the broker socket itself. No-op if no legacy
-  // plist is present; never blocks. Darwin-only in practice (launchd service).
-  try {
-    const a = await import('../dist/lib/secrets/agent.js');
-    if (a.secretsAgentServiceInstalled?.()) {
-      a.retireLegacySecretsAgentService?.();
-      console.log('  Retired the standalone secrets-agent service — the daemon now hosts the broker.');
-    }
-  } catch { /* best effort */ }
 
   // Always (re)start so first install writes the LaunchAgent/systemd unit and
   // upgrades bounce onto the new binary — but honor daemon.enabled for cold

@@ -279,10 +279,11 @@ LINKED_VER=$("$LINKED_PATH" --version 2>/dev/null | head -1 || echo "?")
 # already running (never start one the user didn't want), best-effort and
 # non-fatal, skipped in CI and when AGENTS_NO_HEAL=1.
 #
-# OPT-IN (--bounce-daemon), because the daemon is SHARED. It hosts the secrets
-# broker, browser IPC, and the routines scheduler for the whole machine, and the
+# OPT-IN (--bounce-daemon), because the daemon is SHARED. It hosts browser IPC and
+# the routines scheduler for the whole machine (NOT the secrets broker — that is a
+# separate process the standalone `secrets` CLI owns, PHNX-3989), and the
 # restart pins it to whichever binary is passed. Doing that automatically would
-# leave every `agents secrets`, `agents browser`, and scheduled routine served by
+# leave every `agents browser` and scheduled routine served by
 # a working-tree build while `agents` itself still looks untouched -- an invisible
 # takeover, and the same class of problem the dev bin rename fixes. Earlier
 # revisions justified the automatic restart on the premise that the dev build IS
