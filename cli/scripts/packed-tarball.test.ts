@@ -36,10 +36,16 @@ function packedEntries(): string[] {
     );
     // Everything else the `files` allowlist admits, copied from the tree so the
     // pack sees the same allowlist against the same non-dist inputs a release does.
-    // `prepack` (`cp ../README.md README.md`) is what puts README.md in place; the
-    // pack below runs with --ignore-scripts, so do that copy here.
+    // `prepack` (`cp ../README.md README.md`) is what puts README.md in place, so
+    // do that copy here. The staged package.json carries NO `scripts` block: the
+    // allowlist alone decides tarball content, and `npm pack --ignore-scripts` is
+    // not honored for `prepare` on every npm (the GitHub runner's ran
+    // `prepare` -> `npm run build` -> a global tsc against a dir with no
+    // tsconfig and failed the pack) — the flag is a courtesy, the absent block is
+    // the guarantee.
     const pkg = JSON.parse(fs.readFileSync(path.join(CLI_ROOT, 'package.json'), 'utf-8')) as {
       files: string[];
+      scripts?: Record<string, string>;
     };
     for (const entry of pkg.files) {
       if (entry.startsWith('dist/')) continue;
@@ -48,7 +54,8 @@ function packedEntries(): string[] {
       fs.mkdirSync(path.dirname(path.join(stage, entry)), { recursive: true });
       fs.cpSync(src, path.join(stage, entry), { recursive: true });
     }
-    fs.copyFileSync(path.join(CLI_ROOT, 'package.json'), path.join(stage, 'package.json'));
+    const { scripts: _scripts, ...packable } = pkg;
+    fs.writeFileSync(path.join(stage, 'package.json'), JSON.stringify(packable, null, 2));
     fs.copyFileSync(path.join(CLI_ROOT, '..', 'README.md'), path.join(stage, 'README.md'));
 
     const pack = spawnSync('npm', ['pack', '--silent', '--ignore-scripts', '--pack-destination', stage], {
