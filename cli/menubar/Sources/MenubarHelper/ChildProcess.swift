@@ -58,13 +58,44 @@ enum ChildProcess {
 
     // MARK: - Spawn
 
+    /// A completed child's exit code and captured streams. Only `runResult`
+    /// returns it — the notification-response path needs the exit code AND the
+    /// stderr tail (to tell the operator why a reply did not land), which `run`
+    /// collapses away.
+    struct RunResult {
+        let code: Int32
+        let stdout: Data
+        let stderr: Data
+    }
+
     /// Run `argv` to completion and return its stdout, or nil if it failed,
     /// could not start, or blew the deadline.
     ///
-    /// stderr goes to /dev/null: callers here parse JSON and must never get
-    /// diagnostics interleaved into the payload.
+    /// stderr is captured but discarded here: callers parse JSON and must never
+    /// get diagnostics interleaved into the payload, and a non-zero exit is nil.
     static func run(_ argv: [String], timeout: TimeInterval = defaultTimeout,
                     registryFile: String = Registry.path()) -> Data? {
+        guard let result = execute(argv, timeout: timeout, registryFile: registryFile) else { return nil }
+        return result.code == 0 ? result.stdout : nil
+    }
+
+    /// Run `argv` to completion and return its exit code with both captured
+    /// streams, or nil only when the child could not start or had to be
+    /// abandoned past the deadline. Unlike `run`, a NON-ZERO exit is surfaced
+    /// (with its stderr) rather than flattened to nil — the notification
+    /// response handler reports the stderr tail on a failed `agents feed answer`.
+    static func runResult(_ argv: [String], timeout: TimeInterval = defaultTimeout,
+                          registryFile: String = Registry.path()) -> RunResult? {
+        execute(argv, timeout: timeout, registryFile: registryFile)
+    }
+
+    /// The shared spawn/drain/deadline core behind `run` and `runResult`. Always
+    /// captures stdout AND stderr and reports the child's real exit code; the two
+    /// public wrappers project what each caller needs. nil means the child never
+    /// started, its ownership could not be recorded, or it blew the deadline and
+    /// was abandoned — never a clean non-zero exit.
+    private static func execute(_ argv: [String], timeout: TimeInterval,
+                                registryFile: String) -> RunResult? {
         guard !argv.isEmpty else { return nil }
 
         let commandKind = argv.dropFirst().prefix(2).joined(separator: " ")
@@ -76,24 +107,31 @@ enum ChildProcess {
             return nil
         }
 
-        var fds: [Int32] = [-1, -1]
-        guard pipe(&fds) == 0 else {
+        var outFDs: [Int32] = [-1, -1]
+        var errFDs: [Int32] = [-1, -1]
+        guard pipe(&outFDs) == 0 else {
             removeRegistryEntry(token: launch.token, file: registryFile)
             return nil
         }
-        let readFD = fds[0]
-        let writeFD = fds[1]
+        guard pipe(&errFDs) == 0 else {
+            close(outFDs[0]); close(outFDs[1])
+            removeRegistryEntry(token: launch.token, file: registryFile)
+            return nil
+        }
+        let outRead = outFDs[0], outWrite = outFDs[1]
+        let errRead = errFDs[0], errWrite = errFDs[1]
 
-        guard let pid = spawn(argv, stdout: writeFD, closeInChild: readFD, provenance: launch.token) else {
-            close(readFD)
-            close(writeFD)
+        guard let pid = spawn(argv, stdout: outWrite, stderr: errWrite,
+                              closeInChild: [outRead, errRead], provenance: launch.token) else {
+            close(outRead); close(outWrite); close(errRead); close(errWrite)
             removeRegistryEntry(token: launch.token, file: registryFile)
             return nil
         }
 
-        // The parent MUST drop its copy of the write end, or the read below
-        // never sees EOF even after the child exits — the classic pipe hang.
-        close(writeFD)
+        // The parent MUST drop its copies of the write ends, or the reads below
+        // never see EOF even after the child exits — the classic pipe hang.
+        close(outWrite)
+        close(errWrite)
 
         do {
             try Registry.complete(token: launch.token, pid: pid, file: registryFile)
@@ -101,7 +139,7 @@ enum ChildProcess {
             // The child is already live. Kill it now rather than allow a process
             // whose durable ownership could not be completed to escape tracking.
             _ = terminateGroup(pid)
-            close(readFD)
+            close(outRead); close(errRead)
             var status: Int32 = 0
             while waitpid(pid, &status, 0) == -1 && errno == EINTR {}
             removeRegistryEntry(token: launch.token, file: registryFile)
@@ -112,33 +150,39 @@ enum ChildProcess {
             if removeOnReturn { removeRegistryEntry(token: launch.token, file: registryFile) }
         }
 
-        // Drain on a background thread so the deadline is enforceable. Draining
-        // WHILE the child runs also keeps a child that outputs more than the
-        // ~64 KiB pipe buffer from blocking on write forever.
-        //
-        // The reader OWNS readFD and closes it itself. That ownership is what
-        // lets the abandon path below be safe: closing a descriptor out from
-        // under a thread blocked in read(2) races that fd's reuse by any other
-        // thread, so the only correct way to walk away from a stuck reader is to
+        // Drain both pipes on background threads so the deadline is enforceable,
+        // and so a child that outruns the ~64 KiB pipe buffer on either stream
+        // never blocks on write forever. Each reader OWNS its fd and closes it
+        // itself — that ownership is what lets the abandon path be safe: closing
+        // a descriptor out from under a thread blocked in read(2) races that fd's
+        // reuse, so the only correct way to walk away from a stuck reader is to
         // leave the descriptor with it.
-        var output = Data()
-        let drained = DispatchSemaphore(value: 0)
+        var outData = Data()
+        var errData = Data()
+        let drained = DispatchGroup()
+        drained.enter()
         DispatchQueue.global(qos: .utility).async {
-            output = readToEnd(readFD)
-            close(readFD)
-            drained.signal()
+            outData = readToEnd(outRead)
+            close(outRead)
+            drained.leave()
+        }
+        drained.enter()
+        DispatchQueue.global(qos: .utility).async {
+            errData = readToEnd(errRead)
+            close(errRead)
+            drained.leave()
         }
 
         var timedOut = false
         if drained.wait(timeout: .now() + timeout) == .timedOut {
             timedOut = true
             // Kill the GROUP: the CLI plus every probe it forked. Every write end
-            // of the pipe closes as those processes die, which is what releases
-            // the reader.
+            // of both pipes closes as those processes die, which is what releases
+            // the readers.
             terminateGroup(pid)
             // Bounded, because this whole type exists to abolish unbounded waits
             // — including its own. SIGKILL cannot be caught, so EOF must follow;
-            // if it somehow does not, abandon the reader (it owns its fd) and
+            // if it somehow does not, abandon the readers (they own their fds) and
             // reap off-thread rather than hanging the caller's queue forever.
             if drained.wait(timeout: .now() + 5) == .timedOut {
                 removeOnReturn = false
@@ -154,9 +198,9 @@ enum ChildProcess {
 
         if timedOut { return nil }
         let exited = (status & 0x7F) == 0
+        guard exited else { return nil }
         let code = (status >> 8) & 0xFF
-        guard exited, code == 0 else { return nil }
-        return output
+        return RunResult(code: Int32(code), stdout: outData, stderr: errData)
     }
 
     /// Reap a child we have stopped waiting on, without blocking the caller.
@@ -174,7 +218,8 @@ enum ChildProcess {
     /// Foundation's `Process` exposes no way to set the child's process group,
     /// and without that a `kill` reaches only the CLI while its `node -e` probes
     /// survive as orphans — the exact leak this type exists to stop.
-    private static func spawn(_ argv: [String], stdout writeFD: Int32, closeInChild readFD: Int32, provenance: String) -> pid_t? {
+    private static func spawn(_ argv: [String], stdout writeFD: Int32, stderr errWriteFD: Int32,
+                              closeInChild readFDs: [Int32], provenance: String) -> pid_t? {
         var attr: posix_spawnattr_t?
         posix_spawnattr_init(&attr)
         defer { posix_spawnattr_destroy(&attr) }
@@ -191,9 +236,10 @@ enum ChildProcess {
         defer { posix_spawn_file_actions_destroy(&actions) }
         posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0)
         posix_spawn_file_actions_adddup2(&actions, writeFD, STDOUT_FILENO)
-        posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0)
-        posix_spawn_file_actions_addclose(&actions, readFD)
+        posix_spawn_file_actions_adddup2(&actions, errWriteFD, STDERR_FILENO)
+        for fd in readFDs { posix_spawn_file_actions_addclose(&actions, fd) }
         posix_spawn_file_actions_addclose(&actions, writeFD)
+        posix_spawn_file_actions_addclose(&actions, errWriteFD)
 
         // Keep a tiny group-leading supervisor alive around the real command.
         // macOS 26 exposes argv but not another process's environment through
@@ -658,14 +704,24 @@ extension ChildProcess {
         }
         let readFD = fds[0]
         let writeFD = fds[1]
-
-        guard let pid = spawn(argv, stdout: writeFD, closeInChild: readFD, provenance: launch.token) else {
+        // A streaming consumer parses stdout as NDJSON, so diagnostics on stderr
+        // must never interleave into it — send the child's stderr to /dev/null.
+        let errNull = open("/dev/null", O_WRONLY)
+        guard errNull >= 0 else {
             close(readFD); close(writeFD)
+            removeRegistryEntry(token: launch.token, file: registryFile)
+            return nil
+        }
+
+        guard let pid = spawn(argv, stdout: writeFD, stderr: errNull,
+                              closeInChild: [readFD], provenance: launch.token) else {
+            close(readFD); close(writeFD); close(errNull)
             removeRegistryEntry(token: launch.token, file: registryFile)
             return nil
         }
         // The parent MUST drop its write end, or the read below never sees EOF.
         close(writeFD)
+        close(errNull)
 
         do {
             try Registry.complete(token: launch.token, pid: pid, file: registryFile)

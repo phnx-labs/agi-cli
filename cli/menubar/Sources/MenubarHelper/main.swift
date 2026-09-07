@@ -13,11 +13,12 @@ import Carbon.HIToolbox
 //   "AGI Menu" --notify ...        # one-shot: post a desktop notification, exit
 //   AGENTS_BIN=/path/to/agents    # override the `agents` binary location
 
-// One-shot notification delivery for the daemon (RUSH-2030). Posts and exits
-// WITHOUT starting the status-bar UI, so the daemon can fire branded, actionable
-// notifications by spawning the installed .app in this mode. The notification is
-// attributed to this bundle, so it shows the app's AppIcon (the agents-cli mark)
-// instead of the generic osascript/Script Editor icon. See Notifier (PromptPanel.swift).
+// One-shot notification delivery for the daemon (RUSH-2030, PHNX-4004). Posts and
+// exits WITHOUT starting the status-bar UI, so the daemon can fire branded,
+// actionable UserNotifications by spawning the installed .app in this mode. The
+// notification is attributed to this bundle, so it shows the app's AppIcon (the
+// agents-cli mark) instead of the generic osascript/Script Editor icon, and its
+// action responses route to the persistent instance. See Notifier (Notifier.swift).
 if CommandLine.arguments.contains("--notify") {
     Notifier.runOneShot(CommandLine.arguments)
 }
@@ -129,6 +130,14 @@ if ProcessInfo.processInfo.environment["MENUBAR_ARTIFACT_TEST"] == "1" {
     ArtifactSelfTest.run()
 }
 
+// Notifier self-test (PHNX-4004): pin the pure argv → content mapping (category,
+// userInfo, time-sensitivity) and the response → `agents feed answer` argv for
+// each action, with a capturing runner in place of ChildProcess so the
+// notification center is never touched. No GUI, a build gate. See NotifierSelfTest.swift.
+if ProcessInfo.processInfo.environment["MENUBAR_NOTIFY_TEST"] == "1" {
+    NotifierSelfTest.run()
+}
+
 // Feed live smoke (PHNX-4002): run FeedStream against THIS machine for ~60s and
 // print row/attention/device counts + health, then exit cleanly. Spawns the real
 // `agents feed watch` child, so it is NOT part of the build gate — like
@@ -203,11 +212,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             name: SingleInstance.surfaceNotification, object: nil,
             suspensionBehavior: .deliverImmediately
         )
-        // Own notification click-through (RUSH-2030): the daemon posts branded
-        // notifications via one-shot `--notify` processes, but this persistent
-        // instance is the NSUserNotificationCenter delegate that opens their
-        // click URL (a run report/log, or the runs folder) when clicked.
-        Notifier.wireClickHandler()
+        // Own notification responses (PHNX-4004): the daemon posts actionable
+        // notifications via one-shot `--notify` processes, but THIS persistent
+        // instance is the UNUserNotificationCenter delegate that runs the command
+        // a tapped action maps to (`agents feed answer …`, open report/PR/session).
+        // configureForLaunch registers the action categories, installs the
+        // delegate, and requests authorization once.
+        Notifier.configureForLaunch()
         let mods = UInt32(cmdKey | shiftKey)
         hotkey.register([
             .init(id: HotkeyManager.clipID, keyCode: UInt32(kVK_ANSI_V), modifiers: mods,
