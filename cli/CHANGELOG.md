@@ -10,9 +10,13 @@
   the session id, and the answerable choices — Approve / Approve for session / Deny
   for a permission, the options plus a typed reply for a question, Approve / Send
   back for a plan review, Open terminal for a stall — which the macOS helper routes
-  back through `agents feed answer <key> --choice <id>`. `agents run --notify`
-  finish banners now carry `category: done|failure`, the session id, and
-  open-report / open-pr choices. Idempotency is a filesystem ledger under
+  back through `agents feed answer <key> --choice <id>`. A `deny`/`send-back`
+  choice delivers a real Escape keystroke (no trailing Enter) rather than the
+  letters "esc", so cancelling a permission or plan prompt never confirms it.
+  `agents run --notify` finish banners now carry `category: done|failure`; the
+  finish-notification shape also carries the session id and open-report / open-pr
+  choices when the caller supplies a session id, report path, or PR url.
+  Idempotency is a filesystem ledger under
   `~/.agents/.history/feed/notified/`, pruned at 14 days, so a daemon restart never
   re-posts a banner already sent. The `--notify` argv gains `--category`, `--key`,
   `--session`, and repeated `--choice <id>=<label>` (see `docs/menubar.md`

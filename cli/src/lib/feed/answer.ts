@@ -122,7 +122,7 @@ export async function claimAndRouteAttentionAnswer(input: {
       msgId = `resume-${Date.now()}`;
     } else {
       if (!route.inject || route.payload == null) throw new Error(`Incomplete ${route.kind} reply rail.`);
-      const delivered = await injectIntoTerminal(route.inject, route.payload, { enter: true, combined: false });
+      const delivered = await injectIntoTerminal(route.inject, route.payload, { enter: route.enter ?? true, combined: false });
       if (!delivered.ok) throw new Error(delivered.error ?? `Failed to deliver over ${route.kind}.`);
       msgId = `inject-${Date.now()}`;
     }

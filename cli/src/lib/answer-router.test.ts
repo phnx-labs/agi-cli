@@ -67,6 +67,21 @@ describe('matchOptionIndex / keystrokesForAnswer', () => {
       matched: 'free-text',
     });
   });
+
+  it('delivers a real Escape byte (no trailing Enter) for the esc cancel token', () => {
+    // A deny / send-back choice carries deliveryKey 'esc'. It must dismiss the
+    // prompt with an actual Escape keystroke, not type the letters e-s-c which a
+    // trailing Enter would then submit — potentially confirming the default.
+    expect(keystrokesForAnswer('esc')).toEqual({ payload: '\u001b', matched: 'other', enter: false });
+    expect(keystrokesForAnswer('Escape')).toEqual({ payload: '\u001b', matched: 'other', enter: false });
+  });
+
+  it('lets an option literally labelled "esc" win as a selection over the cancel token', () => {
+    expect(keystrokesForAnswer('esc', [{ label: 'esc' }, { label: 'other' }])).toEqual({
+      payload: '1',
+      matched: 'option',
+    });
+  });
 });
 
 describe('isParkedOnInput / isOpenQuestionBlock', () => {
@@ -125,6 +140,28 @@ describe('resolveAnswerRoute', () => {
     expect(r.kind).toBe('tmux');
     expect(r.payload).toBe('1');
     expect(r.inject).toEqual({ backend: 'tmux', pane: '%3', socket: '/tmp/tmux-1' });
+    // A normal selection keeps the default Enter (omitted).
+    expect(r.enter).toBeUndefined();
+  });
+
+  it('carries enter:false with a real Escape payload when the answer is the esc cancel token', () => {
+    const r = resolveAnswerRoute({
+      mailboxId: 's1',
+      answer: 'esc',
+      block: block(),
+      session: session({
+        activity: 'waiting_input',
+        awaitingReason: 'permission',
+        provenance: {
+          host: 'zion',
+          transport: 'local',
+          reply: { rail: 'tmux', target: '%3', socket: '/tmp/tmux-1' },
+        },
+      }),
+    });
+    expect(r.kind).toBe('tmux');
+    expect(r.payload).toBe('\u001b');
+    expect(r.enter).toBe(false);
   });
 
   it('drives pty when parked headless with session id', () => {

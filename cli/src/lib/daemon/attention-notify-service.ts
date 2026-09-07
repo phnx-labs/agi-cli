@@ -28,7 +28,7 @@ import { getFeedDir } from '../state.js';
 import { machineId } from '../machine-id.js';
 import { getActiveSessions, type ActiveSession } from '../session/active.js';
 import { blockIdForSession, readBlock, readResolution } from '../feed/feed.js';
-import { reconcileAttention, type AttentionItem, type AttentionKind } from '../feed/attention.js';
+import { reconcileAttention, harnessOf, type AttentionItem, type AttentionKind } from '../feed/attention.js';
 import { notifyDesktop, type DesktopNotification } from '../menubar/notify-desktop.js';
 import { BasePeriodicService, type DaemonContext } from './service.js';
 import type { DaemonServiceId } from '../daemon-services.js';
@@ -56,10 +56,6 @@ const BANNER_KINDS: Partial<Record<AttentionKind, { category: NonNullable<Deskto
 function shorten(text: string, max = BODY_MAX): string {
   const flat = text.replace(/\s+/g, ' ').trim();
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
-}
-
-function harnessOf(session: ActiveSession): string {
-  return session.harness ?? session.kind ?? '';
 }
 
 /**
