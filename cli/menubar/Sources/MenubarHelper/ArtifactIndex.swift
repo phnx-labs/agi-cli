@@ -303,6 +303,21 @@ final class ArtifactIndex {
         return index
     }
 
+    /// Test seam: run one rescan ON the private queue — the exact context every
+    /// real caller uses (`start()`/`scheduleRescan()` dispatch onto `queue`) —
+    /// with `changed == true` forced so `notify()` runs. Returns whether it
+    /// completed within `timeout`; false means `notify()` self-deadlocked on the
+    /// serial queue. Regression guard for the `queue.sync`-from-`queue` bug.
+    func forceRescanOnQueueForTest(timeout: TimeInterval = 3) -> Bool {
+        let done = DispatchSemaphore(value: 0)
+        queue.async {
+            self.lock.lock(); self.result = ArtifactScanResult(); self.lock.unlock()
+            self.rescan()
+            done.signal()
+        }
+        return done.wait(timeout: .now() + timeout) == .success
+    }
+
     // MARK: Query (thread-safe)
 
     /// Every artifact for a session, newest first. Matches a full id or an 8-char
@@ -362,13 +377,16 @@ final class ArtifactIndex {
         }
     }
 
+    /// Always invoked already running ON `queue` — `rescan()` (its only caller) is
+    /// dispatched onto `queue` by both `start()` and `scheduleRescan()`. So the
+    /// observer set is read directly here; a `queue.sync` would be a self-deadlock
+    /// on this serial queue. (FeedStream.notify uses `queue.sync` safely because
+    /// its callers run on the MAIN queue, not `queue` — the contexts differ.)
     private func notify() {
         var handlers: [() -> Void] = []
-        queue.sync {
-            for (key, observer) in observers {
-                if observer.owner == nil { observers[key] = nil }
-                else { handlers.append(observer.handler) }
-            }
+        for (key, observer) in observers {
+            if observer.owner == nil { observers[key] = nil }
+            else { handlers.append(observer.handler) }
         }
         DispatchQueue.main.async { for handler in handlers { handler() } }
     }

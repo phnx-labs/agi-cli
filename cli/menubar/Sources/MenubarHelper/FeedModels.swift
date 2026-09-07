@@ -438,10 +438,19 @@ struct FeedState {
         case let .reset(scope, _, _, _, agents, attns):
             awaitingReset = false
             resetCount += 1
+            let survivingSessions = Set(agents.compactMap { $0.sessionId })
             // Replace this scope's slice only.
             for (rowKey, s) in rowScope where s == scope {
+                let goneSession = rows[rowKey]?.sessionId
                 if rows.removeValue(forKey: rowKey) != nil { diff.removed.insert(rowKey) }
                 rowScope[rowKey] = nil
+                // Drop the retained activity line for a session that did NOT
+                // survive this reset, so latestActivity cannot grow without bound
+                // across a long-lived connection (a session kept in the new slice
+                // keeps its line).
+                if let goneSession, !survivingSessions.contains(goneSession) {
+                    latestActivity[goneSession] = nil
+                }
                 if let sid = attnRowToSession.removeValue(forKey: rowKey),
                    attention.removeValue(forKey: sid) != nil {
                     diff.attentionChanged.insert(sid)
@@ -471,8 +480,13 @@ struct FeedState {
 
         case let .agentRemove(_, _, _, rowKey):
             if awaitingReset { break }
+            let goneSession = rows[rowKey]?.sessionId
             if rows.removeValue(forKey: rowKey) != nil { diff.removed.insert(rowKey) }
             rowScope[rowKey] = nil
+            // The row is gone; drop its retained activity line too (one row per
+            // session under the feed's per-device ownership) so latestActivity
+            // does not leak an entry for every finished session.
+            if let goneSession { latestActivity[goneSession] = nil }
             if let sid = attnRowToSession.removeValue(forKey: rowKey),
                attention.removeValue(forKey: sid) != nil {
                 diff.attentionChanged.insert(sid)
