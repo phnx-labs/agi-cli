@@ -26,8 +26,8 @@
 #   --skip-tests      skip the test suite (forwarded to build)
 #   --prefix <dir>    install prefix (default: $HOME/.local/agents-cli-dev)
 #   --bounce-daemon   restart a running routines daemon onto this dev build.
-#                     Off by default: the daemon is shared (secrets broker,
-#                     browser IPC, routines), so pointing it at a dev build
+#                     Off by default: the daemon is shared (browser IPC,
+#                     routines, and more), so pointing it at a dev build
 #                     changes what your everyday `agents` talks to.
 
 set -euo pipefail
@@ -202,7 +202,7 @@ done
 # earlier revision of this script bounced the shared routines daemon onto the dev
 # build and recorded THAT path in the service manifest, so the daemon keeps
 # running from memory but dies on its next restart -- silently taking the
-# scheduler, secrets broker, and browser IPC with it. Name it and hand over the
+# scheduler and browser IPC with it. Name it and hand over the
 # one command that repoints the manifest; do not restart a shared service the
 # caller did not ask us to touch.
 #
@@ -264,24 +264,16 @@ LINKED_PATH="$LINK_DIR/agents$DEV_SUFFIX"
 [[ -e "$LINKED_PATH" ]] || die "agents$DEV_SUFFIX not installed at $LINKED_PATH"
 LINKED_VER=$("$LINKED_PATH" --version 2>/dev/null | head -1 || echo "?")
 
-# Install the signed macOS Keychain helper to its stable user path. The dev
-# install skips postinstall (see the package.json staging above), so this
-# needs to run explicitly. No-op on non-darwin and if the source .app is
-# missing (e.g. raw working tree without the bin/ asset).
-if [[ -f "$ROOT/scripts/install-helper.js" ]]; then
-  dim "  Installing Keychain helper"
-  node "$ROOT/scripts/install-helper.js" --force || true
-fi
-
 # Bounce a running routines daemon onto this build (RUSH-2442).
 #
 # The npm postinstall hook is the registry-install path that restarts the
-# daemon so the secrets broker (and every other subsystem the daemon hosts)
+# daemon so every subsystem it hosts (browser IPC, the scheduler, and more)
 # reloads the just-installed code. We strip that hook above so the PATH-nudge
 # and alias-shim flow don't fire for a side-by-side dev prefix — which also
-# skipped the restart, leaving a broker built from the PREVIOUS install
-# still holding sockets. A version skew between broker and on-disk CLI wipes
-# held bundles and re-arms Touch ID prompts on the next secrets read.
+# skipped the restart, leaving those subsystems built from the PREVIOUS
+# install still running. (The secrets broker is a separate process owned by
+# the standalone `secrets` CLI now, PHNX-3989 — this daemon restart never
+# touches it.)
 #
 # Match postinstall.js healLongRunningProcesses: only when a daemon is
 # already running (never start one the user didn't want), best-effort and
@@ -322,7 +314,7 @@ if [[ -z "${CI:-}" && "${AGENTS_NO_HEAL:-}" != "1" && "$BOUNCE_DAEMON" == true ]
     ' || true
   fi
 elif [[ -z "${CI:-}" ]]; then
-  dim "  Shared daemon left on production code (secrets broker, browser IPC, routines)."
+  dim "  Shared daemon left on production code (browser IPC, routines, and more)."
   dim "  Pass --bounce-daemon to point it at this dev build -- that changes what your"
   dim "  everyday 'agents' talks to, not just agents$DEV_SUFFIX."
 fi
