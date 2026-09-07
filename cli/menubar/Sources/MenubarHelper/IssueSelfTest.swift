@@ -14,7 +14,6 @@ enum IssueSelfTest {
     static func run() -> Never {
         print("menubar issue-capture self-test")
         testImageFilePick()
-        testRecentRepoDirs()
         testTicketIDParse()
         testPromptContract()
         testLinearBinaryResolution()
@@ -26,7 +25,6 @@ enum IssueSelfTest {
         testRoutineFailureReason()
         testRoutineGrouping()
         testRoutineGroupAccordion()
-        testLinearProjectResolution()
         testLinearTicketRanking()
         testLinearTicketFilter()
         testLinearTicketQuickFilterAndSort()
@@ -84,24 +82,6 @@ enum IssueSelfTest {
               detail: got.map { ($0 as NSString).lastPathComponent }.joined(separator: ","))
         check("limit is honored", AgentsCLI.imageFiles(inDirs: [dirA, dirB], limit: 1).count == 1)
         check("no dirs yields empty", AgentsCLI.imageFiles(inDirs: [], limit: 6).isEmpty)
-    }
-
-    // Repo choices must be derived from an already-fetched session snapshot. If
-    // this helper ever shells `agents sessions` itself again, Cmd-Shift-O regains
-    // the measured one-second blocking call that this regression test prevents.
-    private static func testRecentRepoDirs() {
-        func session(_ cwd: String?) -> RecentSession {
-            RecentSession(id: nil, shortId: nil, agent: "codex", timestamp: nil,
-                          project: nil, cwd: cwd, filePath: nil, gitBranch: nil,
-                          topic: nil, version: nil)
-        }
-        let home = NSHomeDirectory()
-        let got = AgentsCLI.recentRepoDirs(from: [
-            session("/work/first"), session(home), session("/work/first"),
-            session(nil), session("/work/second"), session("/work/third"),
-        ], limit: 2)
-        check("recent repo dirs use warm session order", got == ["/work/first", "/work/second"],
-              detail: got.joined(separator: ","))
     }
 
     // parseCreatedTicketID pulls the identifier from the linear CLI success line,
@@ -260,7 +240,12 @@ enum IssueSelfTest {
         let prompt = AgentsCLI.quickFixPrompt(note: "button is off-screen",
                                               screenshotPaths: ["/tmp/panel.png"])
         check("quick-fix prompt embeds the request", prompt.contains("button is off-screen"))
-        check("quick-fix prompt embeds the screenshot", prompt.contains("/tmp/panel.png"))
+        // The attachment travels as the SAME `<host>:<abs-path>` reference
+        // Cmd-Shift-V types into a terminal, so a run dispatched to another
+        // device can scp it. A bare path would only ever be readable here.
+        let ref = "\(Clip.localHostName()):/tmp/panel.png"
+        check("quick-fix prompt embeds the screenshot as a host-qualified ref",
+              prompt.contains(ref), detail: ref)
         check("quick-fix prompt requires repo discovery", prompt.contains("agents sessions --all --limit 20"))
         check("quick-fix prompt requires verification", prompt.contains("Verify with the focused tests"))
 
@@ -279,6 +264,35 @@ enum IssueSelfTest {
         check("run scopes to cwd + device when given",
               scoped == ["run", "codex", "<p>", "--mode", "auto", "--balanced", "--notify", "--name", "n", "--cwd", "/repo", "--device", "zion"],
               detail: scoped.joined(separator: " "))
+
+        // A NAMED project is the palette's primary scoping (PHNX-4001): the CLI
+        // resolves the project's base path and binds its sibling repos, which a
+        // bare --cwd cannot express.
+        let byProject = AgentsCLI.quickFixRunArgs(agent: "claude", prompt: "<p>", name: "n",
+                                                  project: "agi")
+        check("run scopes by project name when one is picked",
+              byProject == ["run", "claude", "<p>", "--mode", "auto", "--balanced", "--notify",
+                            "--name", "n", "--project", "agi"],
+              detail: byProject.joined(separator: " "))
+        // --project already sets the cwd, so passing both would be two answers to
+        // one question; the narrowed directory is the only thing --cwd is for.
+        let both = AgentsCLI.quickFixRunArgs(agent: "claude", prompt: "<p>", name: "n",
+                                             cwd: "/repo/.agents/worktrees/x", project: "agi")
+        check("--project wins over --cwd rather than emitting both",
+              both.contains("--project") && !both.contains("--cwd"),
+              detail: both.joined(separator: " "))
+
+        // The full dispatched argv for a pasted attachment — the shape the palette
+        // actually spawns, ref and all.
+        let attached = AgentsCLI.quickFixRunArgs(
+            agent: "claude",
+            prompt: AgentsCLI.quickFixPrompt(
+                note: "fix this",
+                screenshotPaths: ["\(NSHomeDirectory())/.agents/.history/attachments/20260907-101112-a1b2c3.png"]),
+            name: "fix-this", project: "agi")
+        check("dispatched argv carries the attachment as a host ref",
+              attached.contains { $0.contains("\(Clip.localHostName()):\(NSHomeDirectory())/.agents/.history/attachments/20260907-101112-a1b2c3.png") },
+              detail: attached.joined(separator: " "))
     }
 
     // The picker roster is configurable but remains pinned to supported agents.
@@ -477,31 +491,6 @@ enum IssueSelfTest {
               ordered.last == "release-train", detail: ordered.joined(separator: ","))
     }
 
-    // The repo picker drives the ticket scope, so `agents-cli` has to land on the
-    // "Agents CLI" project without any configured mapping — and a repo that matches
-    // nothing must resolve to nil rather than to someone else's project.
-    private static func testLinearProjectResolution() {
-        let projects = [
-            LinearProject(id: "p1", name: "Agents CLI"),
-            LinearProject(id: "p2", name: "Rush App"),
-            LinearProject(id: "p3", name: "Rush CLI"),
-        ]
-        check("repo name matches a project across case + punctuation",
-              LinearTickets.resolveProject(repoName: "agents-cli", projects: projects)?.id == "p1")
-        check("an ambiguous repo name matches nothing",
-              LinearTickets.resolveProject(repoName: "rush", projects: projects) == nil)
-        check("an explicit per-repo project wins over the derived match",
-              LinearTickets.resolveProject(repoName: "agents-cli", projects: projects,
-                                           override: "Rush CLI")?.id == "p3")
-        check("an override naming no live project falls through to the derived match",
-              LinearTickets.resolveProject(repoName: "agents-cli", projects: projects,
-                                           override: "Deleted Project")?.id == "p1")
-        check("no repo means no scope",
-              LinearTickets.resolveProject(repoName: nil, projects: projects) == nil)
-        check("no projects means no scope",
-              LinearTickets.resolveProject(repoName: "agents-cli", projects: []) == nil)
-    }
-
     // The ranking IS the suggestion: urgent leads, "no priority" sinks below low,
     // and within one priority overdue beats in-progress beats newest.
     private static func testLinearTicketRanking() {
@@ -649,6 +638,12 @@ enum IssueSelfTest {
         check("a plan dispatch is named apart from the implementation run",
               planArgs.contains("rush-2098-plan"), detail: planArgs.joined(separator: " "))
         check("no --cwd when there is no repo to scope to", !planArgs.contains("--cwd"))
+        let projectArgs = AgentsCLI.ticketWorkRunArgs(
+            agent: "claude", prompt: "p", ticket: t, action: .run, project: "agi")
+        check("a ticket dispatch scopes by project name when one is picked",
+              projectArgs.contains("--project") && projectArgs.contains("agi")
+                  && !projectArgs.contains("--cwd"),
+              detail: projectArgs.joined(separator: " "))
 
         let runPrompt = AgentsCLI.ticketWorkPrompt(ticket: t, action: .run)
         check("the run brief names the ticket and how to read it",

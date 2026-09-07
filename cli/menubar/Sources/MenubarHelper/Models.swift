@@ -324,3 +324,108 @@ struct ActiveSession: Decodable {
     let origin: String?
     let routineName: String?
 }
+
+// MARK: - Projects (`agents projects list --json`)
+
+// One bound repo of a project definition. `path` is stored home-relative (`~/…`)
+// by the CLI so the same definition resolves on every fleet box; `absPath`
+// expands it against THIS machine's home.
+struct ProjectRepoRef: Codable, Equatable {
+    let slug: String?
+    let path: String?
+
+    var absPath: String? { path.map(ProjectDef.expandTilde) }
+}
+
+// The project's Linear binding — the ONLY thing that scopes the palette's ticket
+// list. There is deliberately no name-matching fallback: an unbound project says
+// so instead of listing some other project's tickets (PHNX-4001).
+struct ProjectLinearBinding: Codable, Equatable {
+    let projectId: String?
+    let name: String?
+    let url: String?
+}
+
+// One entry of `agents projects list --json` (src/lib/projects.ts `ProjectDef`).
+// Only `name` is required; every other field is optional because the helper and
+// the on-PATH `agents` CLI release independently, so a definition written by a
+// newer CLI must still decode here.
+//
+// Two definitions may share one `root` — `prix` and `rush` both point at the
+// `muqsitnawaz/agents` monorepo and differ only by `defaultPath` — so the palette
+// keys projects by NAME, never by root.
+struct ProjectDef: Codable, Equatable {
+    let name: String
+    let description: String?
+    let root: String?
+    let defaultPath: String?
+    let repos: [ProjectRepoRef]?
+    let linear: ProjectLinearBinding?
+
+    // The CLI stores `root`/`defaultPath`/`repos[].path` home-relative. Expand
+    // against this machine's home; anything else passes through untouched.
+    static func expandTilde(_ p: String) -> String {
+        if p == "~" { return NSHomeDirectory() }
+        if p.hasPrefix("~/") { return NSHomeDirectory() + String(p.dropFirst(1)) }
+        return p
+    }
+
+    var rootAbs: String? { root.map(Self.expandTilde) }
+
+    /// Where an agent lands for this project: `defaultPath` when the definition
+    /// narrowed itself to a subproject, else the checkout root. Mirrors
+    /// `definedProjectBasePath` in src/lib/projects.ts.
+    var basePathAbs: String? { (defaultPath ?? root).map(Self.expandTilde) }
+
+    /// Every local directory this project binds — the base path plus each
+    /// `repos[].path`. Used to decide whether a recent session cwd belongs to
+    /// this project.
+    var boundDirsAbs: [String] {
+        var out: [String] = []
+        var seen = Set<String>()
+        for candidate in [basePathAbs, rootAbs].compactMap({ $0 })
+            + (repos ?? []).compactMap({ $0.absPath }) {
+            let norm = (candidate as NSString).standardizingPath
+            if seen.insert(norm).inserted { out.append(norm) }
+        }
+        return out
+    }
+}
+
+// Pure catalog helpers over the decoded project list. Kept free of AppKit and of
+// the CLI call so MENUBAR_PROJECTS_TEST can drive them over fixtures.
+enum ProjectCatalog {
+    /// Stable display order: alphabetical by name, case-insensitively. The CLI
+    /// already sorts, but the cache round-trips through JSON and the palette must
+    /// not reorder itself between a cached render and a fresh fetch.
+    static func ordered(_ defs: [ProjectDef]) -> [ProjectDef] {
+        defs.sorted { $0.name.lowercased() < $1.name.lowercased() }
+    }
+
+    /// Look a definition up by its NAME. Root is not an identity here: `prix` and
+    /// `rush` share one root and are two distinct projects.
+    static func named(_ name: String?, in defs: [ProjectDef]) -> ProjectDef? {
+        guard let name, !name.isEmpty else { return nil }
+        return defs.first { $0.name == name }
+    }
+
+    /// Type-ahead filter for the project popup: every whitespace-separated term
+    /// must appear in the name or the description. An empty query keeps the list.
+    static func filter(_ defs: [ProjectDef], query: String) -> [ProjectDef] {
+        let terms = query.lowercased().split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        guard !terms.isEmpty else { return defs }
+        return defs.filter { def in
+            let haystack = "\(def.name) \(def.description ?? "")".lowercased()
+            return terms.allSatisfy { haystack.contains($0) }
+        }
+    }
+
+    /// True when `dir` is the project's base path or sits inside one of its bound
+    /// directories (a worktree, a monorepo subdirectory, a sibling repo).
+    static func contains(_ def: ProjectDef, dir: String) -> Bool {
+        let norm = (dir as NSString).standardizingPath
+        return def.boundDirsAbs.contains { bound in
+            norm == bound || norm.hasPrefix(bound + "/")
+        }
+    }
+}

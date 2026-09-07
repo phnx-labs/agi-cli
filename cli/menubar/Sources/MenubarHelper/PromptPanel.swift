@@ -28,21 +28,65 @@ final class PromptPanel: NSPanel {
     // Cmd-1 … Cmd-9 dispatch the Nth listed ticket. Returns true when the index
     // matched a visible row, so an unhandled digit still reaches the field editor.
     var onTicketShortcut: ((Int) -> Bool)?
+    // Cmd-V with an image on the clipboard attaches it instead of pasting text.
+    // Returns true when it consumed the paste.
+    var onPasteImages: (() -> Bool)?
+    // Cmd-T folds the ticket list open/closed.
+    var onToggleTickets: (() -> Void)?
+    // Image files dropped on the panel; the drag's own pasteboard is handed over.
+    var onDropImages: ((NSPasteboard) -> Void)?
+
+    static let pinnedDefaultsKey = "menubar.quickDispatch.pinned"
+
+    /// Pinned means the palette survives focus loss: `resignKey` stops dismissing
+    /// it, so you can click into another app, copy something, and come back to the
+    /// note you were typing. Persisted, because a pin the user set is a standing
+    /// preference, not a per-summon toggle.
+    var isPinned = UserDefaults.standard.bool(forKey: PromptPanel.pinnedDefaultsKey) {
+        didSet {
+            UserDefaults.standard.set(isPinned, forKey: Self.pinnedDefaultsKey)
+            applyPinnedBehavior()
+        }
+    }
+
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
     override func resignKey() {
         super.resignKey()
-        onResignKey?()
+        if !isPinned { onResignKey?() }
     }
     override func becomeKey() {
         super.becomeKey()
         onBecomeKey?()
     }
 
+    /// A pinned panel keeps `.floating` and `canJoinAllSpaces` but drops
+    /// `.transient` — a transient window is hidden by Mission Control / another
+    /// space, which is exactly what a pin is asking it not to do. Pure so the
+    /// headless self-test pins the policy without a live window server.
+    static func collectionBehavior(pinned: Bool) -> NSWindow.CollectionBehavior {
+        pinned
+            ? [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+            : [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+    }
+
+    func applyPinnedBehavior() {
+        level = .floating
+        collectionBehavior = Self.collectionBehavior(pinned: isPinned)
+    }
+
     // A borderless .accessory app has NO main menu, so the standard clipboard key
     // equivalents (Cmd-V/C/X/A) are never dispatched to the field editor and paste
     // silently does nothing. Route them through the responder chain so the text
     // field's editor handles them.
+    //
+    // This is also the ONLY place a Cmd-V can be intercepted for image paste.
+    // Overriding `paste(_:)` on the NSTextField does not work: a focused
+    // NSTextField edits through the window's shared field EDITOR (an NSTextView),
+    // which responds to `paste:` itself and therefore wins the responder chain
+    // before the field is ever asked — so the override would never fire. Handling
+    // it here, ahead of `sendAction`, keeps one interception point for the one
+    // keystroke that can carry an image.
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
            let key = event.charactersIgnoringModifiers?.lowercased() {
@@ -50,6 +94,8 @@ final class PromptPanel: NSPanel {
                onTicketShortcut?(digit - 1) == true {
                 return true
             }
+            if key == "t" { onToggleTickets?(); return true }
+            if key == "v", onPasteImages?() == true { return true }
             let selector: Selector?
             switch key {
             case "v": selector = #selector(NSText.paste(_:))
@@ -61,6 +107,42 @@ final class PromptPanel: NSPanel {
             if let selector, NSApp.sendAction(selector, to: nil, from: self) { return true }
         }
         return super.performKeyEquivalent(with: event)
+    }
+}
+
+// The panel's background view doubles as the drag destination: dropping image
+// files anywhere on the palette attaches them. Registered on the content view
+// rather than the thumbnail strip, because the strip is hidden whenever there is
+// nothing to show — which is exactly when a drop is most useful.
+final class PromptDropView: NSVisualEffectView {
+    var onDropImages: ((NSPasteboard) -> Void)?
+
+    private func imageURLs(from sender: NSDraggingInfo) -> [URL] {
+        let options: [NSPasteboard.ReadingOptionKey: Any] = [
+            .urlReadingFileURLsOnly: true,
+            .urlReadingContentsConformToTypes: ["public.image"],
+        ]
+        let objects = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self],
+                                                            options: options) as? [URL]
+        return (objects ?? []).filter {
+            AgentsCLI.imageExtensions.contains($0.pathExtension.lowercased())
+        }
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        imageURLs(from: sender).isEmpty ? [] : .copy
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        imageURLs(from: sender).isEmpty ? [] : .copy
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard !imageURLs(from: sender).isEmpty else { return false }
+        // Hand the drag's OWN pasteboard over, so a drop and a Cmd-V run the very
+        // same reader (AgentsCLI.imageAttachments) rather than two near-copies.
+        onDropImages?(sender.draggingPasteboard)
+        return true
     }
 }
 
@@ -95,6 +177,7 @@ final class ClipThumbView: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
 
     override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
         if event.clickCount >= 2 {
             // Double-click: cancel the pending single-click toggle, open the preview.
             NSObject.cancelPreviousPerformRequests(withTarget: self, selector: #selector(fireToggle), object: nil)
@@ -107,10 +190,36 @@ final class ClipThumbView: NSView {
     }
     @objc private func fireToggle() { onToggle?(self) }
 
+    // A focused thumbnail takes the keyboard so Backspace can drop it from the
+    // attachment set — the obvious gesture for "not that one", and the only way to
+    // deselect without hunting for the same small square with the mouse.
+    override var acceptsFirstResponder: Bool { true }
+    override func becomeFirstResponder() -> Bool { focused = true; return true }
+    override func resignFirstResponder() -> Bool { focused = false; return true }
+
+    override func keyDown(with event: NSEvent) {
+        // 51 = delete/backspace, 117 = forward delete.
+        if event.keyCode == 51 || event.keyCode == 117 {
+            if isSelected { onToggle?(self) }
+            return
+        }
+        // Space toggles, matching the click. Anything else (typing the note,
+        // Escape, Return) belongs to the panel — pass it on.
+        if event.charactersIgnoringModifiers == " " {
+            onToggle?(self)
+            return
+        }
+        super.keyDown(with: event)
+    }
+
+    private var focused = false { didSet { updateChrome() } }
+
     private func updateChrome() {
-        layer?.borderWidth = isSelected ? 2.5 : 1
-        layer?.borderColor = (isSelected ? kAccent : NSColor.separatorColor).cgColor
-        animator().alphaValue = isSelected ? 1.0 : 0.55
+        layer?.borderWidth = isSelected ? 2.5 : (focused ? 2 : 1)
+        layer?.borderColor = (isSelected ? kAccent
+                              : focused ? NSColor.labelColor.withAlphaComponent(0.6)
+                              : NSColor.separatorColor).cgColor
+        animator().alphaValue = isSelected ? 1.0 : (focused ? 0.8 : 0.55)
     }
 }
 
@@ -265,19 +374,36 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
     private let agentStrip = NSStackView()
     private let hint = NSTextField(labelWithString: "")
     private let thumbStrip = NSStackView()
-    // Repo the agent runs in — sourced from recent-session cwds, never $HOME. The
-    // parallel `repoDirs` holds the full paths behind the shown basenames.
-    private let repoPicker = NSPopUpButton(frame: .zero, pullsDown: false)
-    private var repoDirs: [String] = []
-    private static let lastRepoKey = "menubar.quickDispatch.lastRepo"
-    // Ticket half: one compact row of popups (project · filter · sort) — no chip
-    // matrices or two-column blocks — then a scrollable flat list.
+    // Pin toggle: a pinned palette ignores focus loss (PromptPanel.isPinned).
+    private let pinButton = NSButton()
+    // WHERE the agent runs. `projectPicker` lists every `agents projects`
+    // definition BY NAME — two definitions may share a checkout (`prix` and `rush`
+    // both point at the `muqsitnawaz/agents` monorepo), so the name is the
+    // identity and the root is only a tooltip. `projectFilter` is the type-ahead
+    // over that list; `pathPicker` narrows to a worktree or subdirectory INSIDE
+    // the chosen project, sourced from recent session cwds.
     private let projectPicker = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let projectFilter = NSSearchField()
+    private let pathPicker = NSPopUpButton(frame: .zero, pullsDown: false)
+    private var projects: [ProjectDef] = []
+    private var visibleProjects: [ProjectDef] = []
+    private var recentSessions: [RecentSession] = []
+    /// Directories behind `pathPicker`'s rows after the first. Index 0 of the
+    /// popup is always the project itself (dispatched as `--project <name>`).
+    private var pathDirs: [String] = []
+    private var rebuildingProjectPicker = false
+    private var rebuildingPathPicker = false
+    private static let lastProjectKey = "menubar.quickDispatch.lastProject"
+    // Ticket half: one compact row of popups (Linear project · filter · sort) — no
+    // chip matrices or two-column blocks — then a scrollable flat list.
+    private let linearPicker = NSPopUpButton(frame: .zero, pullsDown: false)
     private let filterPicker = NSPopUpButton(frame: .zero, pullsDown: false)
     private let sortPicker = NSPopUpButton(frame: .zero, pullsDown: false)
     private let ticketStatus = NSTextField(labelWithString: "")
     private let ticketList = NSStackView()
     private let ticketScroll = NSScrollView()
+    /// The Tickets control row, hidden with the list when the section is folded.
+    private var ticketHeader: NSStackView?
     private var linearCache = LinearTickets.Cache()
     private var activeProject: LinearProject?
     private var visibleTickets: [LinearTicket] = []
@@ -286,18 +412,27 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
     // Bumped on every scope change so a slow `linear tasks` answering after the
     // user switched repo/project is dropped instead of overwriting the new list.
     private var ticketFetchToken = 0
-    private var repoNamesByDir: [String: String] = [:]
-    private var rebuildingProjectPicker = false
+    private var rebuildingLinearPicker = false
     private var rebuildingFilterPickers = false
     private static let projectOverrideKeyPrefix = "menubar.quickDispatch.project."
     private static let lastFilterKey = "menubar.quickDispatch.ticketFilter"
     private static let lastSortKey = "menubar.quickDispatch.ticketSort"
+    private static let ticketsExpandedKey = "menubar.quickDispatch.ticketsExpanded"
+    /// The ticket list is a reference surface, not the capture surface, so it
+    /// starts folded and Cmd-T opens it. The choice is remembered.
+    private var ticketsExpanded = UserDefaults.standard.bool(forKey: PromptPanelController.ticketsExpandedKey)
     private var selected: [String] = []   // newest-first order preserved
     private var recentImagePaths: [String] = []
     private var thumbnailCache: [String: CGImage] = [:]
-    private var hydrationInFlight = false
-    private var hydratedAt: Date?
+    private var scanInFlight = false
+    private var pendingRescan = false
+    private var linearCacheReadAt: Date?
     private var pendingRestoredSelection: [String]?
+    /// Live thumbnail strip: FSEvents on the screenshot dirs while the panel is
+    /// visible. See ScreenshotWatcher.swift.
+    private lazy var screenshotWatcher = ScreenshotWatcher { [weak self] in
+        self?.rescanAttachments()
+    }
     private static let hydrationQueue = DispatchQueue(label: "agents.quick-dispatch.hydration",
                                                        qos: .userInitiated)
     private var selectedAgents = Set<String>()
@@ -323,23 +458,54 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
     func prepare() {
         guard panel == nil else { return }
         panel = buildPanel()
-        hydrateContent()
+        projects = ProjectCatalog.ordered(AgentsCLI.cachedProjects())
+        rebuildProjectPicker()
+        rebuildPathPicker()
+        // Cold cache (first launch after install, or a cleared history dir): fetch
+        // now rather than waiting for the status controller's next snapshot tick,
+        // which is up to 3 minutes away. `projectsAsync` is memoized + singleflight,
+        // so this is the same fetch, not a second one.
+        if projects.isEmpty { refreshProjects() }
+        rescanAttachments()
+        loadLinearCache()
+    }
+
+    private func refreshProjects() {
+        AgentsCLI.projectsAsync { [weak self] defs in
+            guard let self else { return }
+            self.projects = defs
+            self.rebuildProjectPicker(selecting: self.selectedProject()?.name)
+            self.rebuildPathPicker()
+            self.updateHint()
+            if self.panel?.isVisible == true { self.refreshTicketScope() }
+        }
     }
 
     /// The status controller already refreshes recent sessions off-path for its
-    /// RECENT section. Reuse that warm result for the repo picker instead of
-    /// spawning a second `agents sessions` command from the hotkey path.
+    /// RECENT section, on the same tick that fetches the menubar snapshot. Reuse
+    /// that warm result — and take the same tick as the cue to refresh the project
+    /// list, which is memoized for 10 minutes, so a palette summon never waits on
+    /// `agents projects list`.
     func updateRecentSessions(_ sessions: [RecentSession]) {
-        let selectedBeforeRefresh = selectedRepo()
-        repoDirs = AgentsCLI.recentRepoDirs(from: sessions)
-        rebuildRepoPicker(selecting: selectedBeforeRefresh)
-        if panel?.isVisible == true { refreshTicketScope() }
+        recentSessions = sessions
+        rebuildPathPicker()
+        refreshProjects()
     }
 
     func summon() {
         let started = DispatchTime.now().uptimeNanoseconds
         prepare()
         guard let panel else { return }
+
+        // Summoning a palette that is already in front and focused is the user
+        // asking for it to STAY there — the same chord toggles the pin, so the
+        // gesture that opens it is also the gesture that makes it stick.
+        if panel.isVisible, panel.isKeyWindow {
+            panel.isPinned.toggle()
+            syncPinButton()
+            updateHint()
+            return
+        }
 
         // Restore an interrupted capture if another app stole focus last time.
         let restoredDraft = draft
@@ -353,6 +519,8 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         pendingRestoredSelection = restoredDraft?.selectedPaths
 
         dismissArmed = false
+        syncPinButton()
+        panel.applyPinnedBehavior()
         position(panel)
         NSApp.activate(ignoringOtherApps: true)
         panel.orderFrontRegardless()
@@ -377,7 +545,13 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
             }
             self.restoreTicketControls()
             self.refreshTicketScope()
-            self.hydrateContent()
+            self.rescanAttachments()
+            self.loadLinearCache()
+            // Live strip: watch the screenshot dirs for as long as the palette is
+            // on screen, so a shot taken WHILE it is open appears without a
+            // re-summon. Stopped in dismiss() — a closed palette watches nothing.
+            self.screenshotWatcher.start(
+                paths: AgentsCLI.screenshotSourceDirs().map(\.path))
         }
         // Arm click-outside dismissal once the activation race has settled. The
         // preview affordance leaves it disarmed: its whole point is to hold the
@@ -391,6 +565,7 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
 
     private func dismiss(preservingDraft: Bool = true) {
         dismissArmed = false
+        screenshotWatcher.stop()
         if preservingDraft {
             saveDraftForDismissal()
         } else {
@@ -427,15 +602,33 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         guard !note.isEmpty, !inFlight else { return }
         inFlight = true
         let agents = selectedAgentList()
-        let cwd = selectedRepo()
-        if let cwd { UserDefaults.standard.set(cwd, forKey: Self.lastRepoKey) }
+        let scope = dispatchScope()
+        rememberProjectPick()
         switch action {
         case .plan:
-            AgentsCLI.dispatchTicketAgent(note: note, screenshotPaths: selected, agent: agents.first, cwd: cwd)
+            AgentsCLI.dispatchTicketAgent(note: note, screenshotPaths: selected,
+                                          agent: agents.first, cwd: scope.cwd,
+                                          project: scope.project)
         case .run:
-            AgentsCLI.dispatchQuickFix(note: note, screenshotPaths: selected, agents: agents, cwd: cwd)
+            AgentsCLI.dispatchQuickFix(note: note, screenshotPaths: selected, agents: agents,
+                                       cwd: scope.cwd, project: scope.project)
         }
         dismiss(preservingDraft: false)
+    }
+
+    /// Where the dispatch runs. A project the user picked by name is passed as
+    /// `--project <name>` so the CLI resolves its base path and binds its sibling
+    /// repos; only a narrowed worktree/subdirectory — which no project name
+    /// addresses — falls back to `--cwd`.
+    private func dispatchScope() -> (project: String?, cwd: String?) {
+        guard let def = selectedProject() else { return (nil, nil) }
+        if let dir = selectedPathDir() { return (nil, dir) }
+        return (def.name, nil)
+    }
+
+    private func rememberProjectPick() {
+        guard let def = selectedProject() else { return }
+        UserDefaults.standard.set(def.name, forKey: Self.lastProjectKey)
     }
 
     // Return submits, Escape clears. A single-line NSTextField sends these as
@@ -527,89 +720,122 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         }
     }
 
-    @objc private func onRepoChanged(_ sender: NSPopUpButton) {
+    // MARK: Project picker
+
+    @objc private func onProjectChanged(_ sender: NSPopUpButton) {
+        guard !rebuildingProjectPicker else { return }
+        rememberProjectPick()
+        rebuildPathPicker()
         updateHint()
-        // The repo IS the ticket scope: switching it switches the Linear project.
+        // The project IS the ticket scope: switching it switches the Linear project.
         refreshTicketScope()
     }
 
-    // MARK: Repo picker
+    @objc private func onProjectFilterChanged(_ sender: NSSearchField) {
+        rebuildProjectPicker(selecting: selectedProject()?.name)
+        rebuildPathPicker()
+        updateHint()
+        refreshTicketScope()
+    }
 
-    // Render the warm recent-session cwds (never $HOME). The status controller
-    // owns the only CLI refresh; this method is deliberately in-memory only.
-    private func rebuildRepoPicker(selecting selectedBeforeRefresh: String? = nil) {
-        let selection = selectedBeforeRefresh ?? selectedRepo()
-        repoPicker.removeAllItems()
-        guard !repoDirs.isEmpty else {
-            repoPicker.addItem(withTitle: "This Mac (no recent repo)")
-            repoPicker.isEnabled = false
+    @objc private func onPathChanged(_ sender: NSPopUpButton) {
+        guard !rebuildingPathPicker else { return }
+        updateHint()
+    }
+
+    // Every defined project, BY NAME. The root is a tooltip, never the identity:
+    // `prix` and `rush` share one checkout and must stay two rows.
+    private func rebuildProjectPicker(selecting preferred: String? = nil) {
+        rebuildingProjectPicker = true
+        defer { rebuildingProjectPicker = false }
+
+        let query = projectFilter.stringValue
+        visibleProjects = ProjectCatalog.filter(projects, query: query)
+        projectPicker.removeAllItems()
+        guard !visibleProjects.isEmpty else {
+            projectPicker.addItem(withTitle: projects.isEmpty
+                ? "No projects (agents projects add …)"
+                : "No project matches \u{201C}\(query)\u{201D}")
+            projectPicker.isEnabled = false
             return
         }
-        repoPicker.isEnabled = true
-        for dir in repoDirs {
-            repoPicker.addItem(withTitle: "\u{1F4C1} \((dir as NSString).lastPathComponent)")
-            repoPicker.lastItem?.toolTip = dir
+        projectPicker.isEnabled = true
+        for def in visibleProjects {
+            projectPicker.addItem(withTitle: def.name)
+            var tip = def.rootAbs ?? def.basePathAbs ?? def.name
+            if let description = def.description, !description.isEmpty {
+                tip = "\(description)\n\(tip)"
+            }
+            projectPicker.lastItem?.toolTip = tip
         }
-        if let selection,
-           let idx = repoDirs.firstIndex(of: selection) {
-            repoPicker.selectItem(at: idx)
-        } else if let last = UserDefaults.standard.string(forKey: Self.lastRepoKey),
-           let idx = repoDirs.firstIndex(of: last) {
-            repoPicker.selectItem(at: idx)
+        let wanted = preferred ?? UserDefaults.standard.string(forKey: Self.lastProjectKey)
+        if let wanted, let idx = visibleProjects.firstIndex(where: { $0.name == wanted }) {
+            projectPicker.selectItem(at: idx)
         } else {
-            repoPicker.selectItem(at: 0)
+            projectPicker.selectItem(at: 0)
         }
     }
 
-    // The absolute path behind the selected repo item, or nil when there is no
-    // recent repo (the agent then falls back to This Mac / cwd inheritance).
-    private func selectedRepo() -> String? {
-        let idx = repoPicker.indexOfSelectedItem
-        guard idx >= 0, idx < repoDirs.count else { return nil }
-        return repoDirs[idx]
+    private func selectedProject() -> ProjectDef? {
+        let idx = projectPicker.indexOfSelectedItem
+        guard idx >= 0, idx < visibleProjects.count else { return nil }
+        return visibleProjects[idx]
+    }
+
+    // Recent session cwds INSIDE the chosen project — a worktree or a monorepo
+    // subdirectory. Row 0 is always the project itself.
+    private func rebuildPathPicker() {
+        rebuildingPathPicker = true
+        defer { rebuildingPathPicker = false }
+
+        let previous = selectedPathDir()
+        pathPicker.removeAllItems()
+        guard let def = selectedProject() else {
+            pathDirs = []
+            pathPicker.addItem(withTitle: "This Mac")
+            pathPicker.isEnabled = false
+            return
+        }
+        pathDirs = AgentsCLI.recentDirs(in: def, from: recentSessions)
+        pathPicker.isEnabled = true
+        pathPicker.addItem(withTitle: "\u{1F4C1} \(def.name)")
+        pathPicker.lastItem?.toolTip = def.basePathAbs ?? def.name
+        for dir in pathDirs {
+            pathPicker.addItem(withTitle: "\u{21B3} \((dir as NSString).lastPathComponent)")
+            pathPicker.lastItem?.toolTip = dir
+        }
+        if let previous, let idx = pathDirs.firstIndex(of: previous) {
+            pathPicker.selectItem(at: idx + 1)
+        } else {
+            pathPicker.selectItem(at: 0)
+        }
+    }
+
+    /// The narrowed directory inside the project, or nil when the project itself
+    /// is selected (row 0) — in which case dispatch uses `--project <name>`.
+    private func selectedPathDir() -> String? {
+        let idx = pathPicker.indexOfSelectedItem - 1
+        guard idx >= 0, idx < pathDirs.count else { return nil }
+        return pathDirs[idx]
     }
 
     // MARK: Linear tickets
 
-    // The repo name behind the picked directory — the key that maps to a Linear
-    // project. Resolving it shells out to git for the common dir (a worktree must
-    // answer with its parent repo), so it runs off the main thread and is memoized
-    // for the life of the helper: the first summon for a directory fills its ticket
-    // list one beat late, every later summon has the name before the panel is on
-    // screen. Deliberately NOT persisted — a directory that gets renamed or
-    // repurposed would otherwise keep answering with a name that no longer exists.
-    private func currentRepoName() -> String? {
-        guard let dir = selectedRepo() else { return nil }
-        if let known = repoNamesByDir[dir] { return known }
-        resolveRepoName(dir: dir)
-        return nil
+    private func projectOverride(for projectName: String) -> String? {
+        UserDefaults.standard.string(forKey: Self.projectOverrideKeyPrefix + projectName)
     }
 
-    private func resolveRepoName(dir: String) {
-        DispatchQueue.global(qos: .userInitiated).async {
-            let name = AgentsCLI.repoName(forDir: dir)
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                self.repoNamesByDir[dir] = name
-                if dir == self.selectedRepo() { self.refreshTicketScope() }
-            }
-        }
-    }
-
-    private func projectOverride(for repoName: String) -> String? {
-        UserDefaults.standard.string(forKey: Self.projectOverrideKeyPrefix + repoName)
-    }
-
-    @objc private func onProjectChanged(_ sender: NSPopUpButton) {
+    @objc private func onLinearProjectChanged(_ sender: NSPopUpButton) {
         // Populating the popup selects its first item, which arrives here as an
-        // action — persisting that would pin every repo to whatever project Linear
+        // action — persisting that would pin every project to whatever Linear
         // happens to list first.
-        guard !rebuildingProjectPicker else { return }
-        guard let name = sender.titleOfSelectedItem, let repoName = currentRepoName(),
+        guard !rebuildingLinearPicker else { return }
+        guard let name = sender.titleOfSelectedItem, let def = selectedProject(),
               name != activeProject?.name else { return }
-        // An explicit pick sticks to this repo, which is how a repo whose name
-        // matches no project (or matches the wrong one) gets scoped correctly.
-        UserDefaults.standard.set(name, forKey: Self.projectOverrideKeyPrefix + repoName)
+        // An explicit pick sticks to this project, which is how a project whose
+        // binding is missing or points at the wrong Linear project gets corrected
+        // without editing the definition.
+        UserDefaults.standard.set(name, forKey: Self.projectOverrideKeyPrefix + def.name)
         refreshTicketScope()
     }
 
@@ -677,28 +903,28 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         renderTickets()
     }
 
-    // Point the ticket list at the project behind the picked repo: rebuild the
-    // project popup, render whatever is cached, and fetch when the cache is stale.
+    // Point the ticket list at the Linear project BOUND to the picked project:
+    // rebuild the Linear popup, render whatever is cached, and fetch when the
+    // cache is stale.
     private func refreshTicketScope() {
         ticketFetchToken += 1
-        let repoName = currentRepoName()
-        activeProject = LinearTickets.resolveProject(
-            repoName: repoName,
+        let def = selectedProject()
+        activeProject = LinearTickets.linearProject(
+            for: def,
             projects: linearCache.projects,
-            override: repoName.flatMap { projectOverride(for: $0) })
-        rebuildProjectPicker()
+            override: def.flatMap { projectOverride(for: $0.name) })
+        rebuildLinearPicker()
 
         if linearCache.projects.isEmpty { fetchProjects() }
 
         guard let project = activeProject else {
             visibleTickets = []
-            if selectedRepo() == nil {
-                renderTickets(status: "pick a repo to see its tickets")
-            } else if let repoName {
-                renderTickets(status: "no Linear project matches \(repoName) — pick one")
+            if let def {
+                // Not an empty list — an unbound project, plus the command that
+                // binds it. An empty list would read as "no open tickets".
+                renderTickets(status: LinearTickets.unboundProjectHint(def.name))
             } else {
-                // The repo name is still being resolved (first summon for this dir).
-                renderTickets(status: "loading…")
+                renderTickets(status: "pick a project to see its tickets")
             }
             return
         }
@@ -763,8 +989,7 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
             ticketList.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: ticketList.widthAnchor).isActive = true
         }
-        let empty = visibleTickets.isEmpty
-        ticketScroll.isHidden = empty
+        applyTicketVisibility()
         ticketStatus.stringValue = status ?? ticketCountText()
         // Document height grows with rows; the scroll viewport stays fixed so the
         // user can scroll through the full filtered set.
@@ -790,23 +1015,23 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         return "\(total) open · \(sortBit) · click or \u{2318}N"
     }
 
-    private func rebuildProjectPicker() {
-        rebuildingProjectPicker = true
-        defer { rebuildingProjectPicker = false }
-        projectPicker.removeAllItems()
+    private func rebuildLinearPicker() {
+        rebuildingLinearPicker = true
+        defer { rebuildingLinearPicker = false }
+        linearPicker.removeAllItems()
         let names = linearCache.projects.map(\.name)
         guard !names.isEmpty else {
-            projectPicker.addItem(withTitle: activeProject?.name ?? "Linear project")
-            projectPicker.isEnabled = false
+            linearPicker.addItem(withTitle: activeProject?.name ?? "Linear project")
+            linearPicker.isEnabled = false
             return
         }
-        projectPicker.isEnabled = true
+        linearPicker.isEnabled = true
         for name in names {
-            projectPicker.addItem(withTitle: name)
-            projectPicker.lastItem?.toolTip = "Scope the ticket list to \(name)"
+            linearPicker.addItem(withTitle: name)
+            linearPicker.lastItem?.toolTip = "Scope the ticket list to \(name)"
         }
         if let active = activeProject, let idx = names.firstIndex(of: active.name) {
-            projectPicker.selectItem(at: idx)
+            linearPicker.selectItem(at: idx)
         }
     }
 
@@ -826,10 +1051,10 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
     private func dispatchTicket(_ ticket: LinearTicket) {
         guard !inFlight else { return }
         inFlight = true
-        let cwd = selectedRepo()
-        if let cwd { UserDefaults.standard.set(cwd, forKey: Self.lastRepoKey) }
+        let scope = dispatchScope()
+        rememberProjectPick()
         AgentsCLI.dispatchTicketWork(ticket: ticket, agents: selectedAgentList(),
-                                     action: action, cwd: cwd)
+                                     action: action, cwd: scope.cwd, project: scope.project)
         dismiss(preservingDraft: false)
     }
 
@@ -897,32 +1122,60 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         updateHint()
     }
 
-    /// Scan attachment directories, decode bounded thumbnails, and parse the
-    /// Linear cache away from AppKit's main thread. No part of this work gates
-    /// the panel becoming visible or the text field accepting the first key.
-    private func hydrateContent() {
-        if hydrationInFlight { return }
-        if let hydratedAt, Date().timeIntervalSince(hydratedAt) < 30 { return }
-        hydrationInFlight = true
+    /// Rescan the screenshot directories, decode bounded thumbnails off the main
+    /// thread, and rebuild the strip — the ONE path that fills the thumbnails,
+    /// driven by summon AND by ScreenshotWatcher's FSEvents callback.
+    ///
+    /// Deliberately NOT time-gated. The old `hydrateContent` refused to re-run
+    /// inside 30 seconds and also owned the Linear cache read, so the one guard
+    /// that made sense for a `linear-cache.json` parse silently froze the
+    /// screenshot strip for half a minute at a time (PHNX-4001). The guard now
+    /// lives on the Linear read alone (`loadLinearCache`), and this coalesces
+    /// instead: a scan already in flight sets `pendingRescan` and runs once more
+    /// when it lands, so an FSEvents burst is one extra scan, never a queue.
+    private func rescanAttachments() {
+        if scanInFlight { pendingRescan = true; return }
+        scanInFlight = true
         Self.hydrationQueue.async { [weak self] in
             let paths = AgentsCLI.recentImageAttachments()
             var thumbnails: [String: CGImage] = [:]
             for path in paths {
                 if let image = Self.thumbnail(at: path) { thumbnails[path] = image }
             }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.scanInFlight = false
+                let unchanged = paths == self.recentImagePaths
+                self.recentImagePaths = paths
+                self.thumbnailCache = thumbnails
+                // Rebuilding an unchanged strip would throw away the current
+                // selection chrome and refocus nothing; skip it.
+                if !unchanged || self.pendingRestoredSelection != nil {
+                    let selectionToRestore = self.pendingRestoredSelection
+                        ?? (self.panel?.isVisible == true ? self.selected : nil)
+                    self.rebuildThumbs(paths: paths, thumbnails: thumbnails,
+                                       restoring: selectionToRestore)
+                    self.pendingRestoredSelection = nil
+                }
+                if self.pendingRescan {
+                    self.pendingRescan = false
+                    self.rescanAttachments()
+                }
+            }
+        }
+    }
+
+    /// Parse `linear-cache.json` off the main thread. This is the read the 30s
+    /// freshness guard was written for — a JSON parse of every cached ticket,
+    /// whose content only changes when a `linear tasks` fetch lands.
+    private func loadLinearCache() {
+        if let linearCacheReadAt, Date().timeIntervalSince(linearCacheReadAt) < 30 { return }
+        linearCacheReadAt = Date()
+        Self.hydrationQueue.async { [weak self] in
             let cache = LinearTickets.loadCache()
             DispatchQueue.main.async {
                 guard let self else { return }
-                self.recentImagePaths = paths
-                self.thumbnailCache = thumbnails
                 self.linearCache = cache
-                self.hydratedAt = Date()
-                self.hydrationInFlight = false
-                let selectionToRestore = self.pendingRestoredSelection
-                    ?? (self.panel?.isVisible == true ? self.selected : nil)
-                self.rebuildThumbs(paths: paths, thumbnails: thumbnails,
-                                   restoring: selectionToRestore)
-                self.pendingRestoredSelection = nil
                 self.restoreTicketControls()
                 if self.panel?.isVisible == true { self.refreshTicketScope() }
             }
@@ -941,6 +1194,49 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
     }
 
+    // MARK: Paste / drop
+
+    /// Cmd-V with an image on the clipboard. Returns false when the clipboard
+    /// holds no image, so the keystroke falls through to a normal text paste.
+    /// The pasteboard→attachment decision itself lives in
+    /// `AgentsCLI.imageAttachments(from:)` so it is driven by a real
+    /// `NSPasteboard` in the headless self-test.
+    private func pasteImagesFromPasteboard() -> Bool {
+        let written = AgentsCLI.imageAttachments(from: .general)
+        guard !written.isEmpty else { return false }
+        attachNewly(written)
+        return true
+    }
+
+    /// Show freshly written attachments in the strip and select them, without
+    /// waiting for the FSEvents round trip (the attachments dir is watched, but a
+    /// paste should be visible on the very next frame).
+    private func attachNewly(_ paths: [String]) {
+        let keep = Set(selected).union(paths)
+        recentImagePaths = paths + recentImagePaths.filter { !paths.contains($0) }
+        for path in paths where thumbnailCache[path] == nil {
+            if let image = Self.thumbnail(at: path) { thumbnailCache[path] = image }
+        }
+        rebuildThumbs(paths: recentImagePaths, thumbnails: thumbnailCache,
+                      restoring: recentImagePaths.filter { keep.contains($0) })
+    }
+
+    // MARK: Tickets fold
+
+    @objc private func toggleTickets() {
+        ticketsExpanded.toggle()
+        UserDefaults.standard.set(ticketsExpanded, forKey: Self.ticketsExpandedKey)
+        applyTicketVisibility()
+        if ticketsExpanded { refreshTicketScope() }
+        applyContentHeight()
+        updateHint()
+    }
+
+    private func applyTicketVisibility() {
+        ticketHeader?.isHidden = !ticketsExpanded
+        ticketScroll.isHidden = !ticketsExpanded || visibleTickets.isEmpty
+    }
+
     private func isRecent(_ path: String) -> Bool {
         guard let mtime = (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date
         else { return false }
@@ -951,16 +1247,21 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         let count = selected.count
         let attach = count == 0 ? "no image attached"
             : count == 1 ? "1 image attached" : "\(count) images attached"
-        let pickable = thumbStrip.arrangedSubviews.isEmpty ? "" : " · click attaches · dbl-click previews"
+        let pickable = thumbStrip.arrangedSubviews.isEmpty
+            ? " · ⌘V or drop to attach"
+            : " · click attaches · ⌫ removes · dbl-click previews"
         let agents = selectedAgentList().map(LocalState.agentLabel).joined(separator: ", ")
-        let repoName = selectedRepo().map { " in \(($0 as NSString).lastPathComponent)" } ?? ""
+        let scope = selectedPathDir().map { " in \(($0 as NSString).lastPathComponent)" }
+            ?? selectedProject().map { " in \($0.name)" } ?? ""
         let actionText = action == .plan
-            ? "file ticket + plan with \(agents)\(repoName)"
-            : "run \(agents)\(repoName) · balanced"
+            ? "file ticket + plan with \(agents)\(scope)"
+            : "run \(agents)\(scope) · balanced"
+        let tickets = ticketsExpanded ? "⌘T hides tickets" : "⌘T tickets"
+        let pinned = panel?.isPinned == true ? " · pinned" : ""
         // Deliberately unchanged in length by the ticket list: this label's
         // intrinsic width is what sizes the panel, and the rows carry their own
         // `⌘N` chips plus a click/⌘click tooltip, so nothing needs saying here.
-        hint.stringValue = "\(attach)\(pickable)    ↩ \(actionText) · esc clear"
+        hint.stringValue = "\(attach)\(pickable)    ↩ \(actionText) · \(tickets) · esc clear\(pinned)"
     }
 
     // Typing is also a ticket search: narrow the list so an existing ticket shows
@@ -981,9 +1282,10 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
     // text field out from under the cursor.
     private func applyContentHeight() {
         guard let panel else { return }
-        var height = Self.baseHeight + Self.ticketSectionChrome
-        if !ticketScroll.isHidden {
-            height += Self.ticketViewportHeight
+        var height = Self.baseHeight
+        if ticketsExpanded {
+            height += Self.ticketSectionChrome
+            if !ticketScroll.isHidden { height += Self.ticketViewportHeight }
         }
         if !thumbStrip.isHidden { height += Self.thumbStripHeight }
         guard abs(panel.frame.height - height) > 0.5 else { return }
@@ -1007,7 +1309,7 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         panel.isMovableByWindowBackground = true
         panel.backgroundColor = .clear
         panel.hasShadow = true
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+        panel.applyPinnedBehavior()
         panel.onResignKey = { [weak self] in
             guard let self, self.dismissArmed, !self.suppressDismiss else { return }
             self.dismiss()
@@ -1015,8 +1317,10 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         // Returning to the bar after a preview re-arms click-outside dismissal.
         panel.onBecomeKey = { [weak self] in self?.suppressDismiss = false }
         panel.onTicketShortcut = { [weak self] index in self?.dispatchTicket(at: index) ?? false }
+        panel.onPasteImages = { [weak self] in self?.pasteImagesFromPasteboard() ?? false }
+        panel.onToggleTickets = { [weak self] in self?.toggleTickets() }
 
-        let bg = NSVisualEffectView()
+        let bg = PromptDropView()
         bg.material = .hudWindow
         bg.blendingMode = .behindWindow
         bg.state = .active
@@ -1025,6 +1329,13 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         bg.layer?.masksToBounds = true
         bg.layer?.borderWidth = 1
         bg.layer?.borderColor = kAccent.withAlphaComponent(0.35).cgColor
+        // Drop image files anywhere on the palette — same handler as Cmd-V.
+        bg.registerForDraggedTypes([.fileURL])
+        bg.onDropImages = { [weak self] pasteboard in
+            guard let self else { return }
+            let written = AgentsCLI.imageAttachments(from: pasteboard)
+            if !written.isEmpty { self.attachNewly(written) }
+        }
         panel.contentView = bg
 
         field.placeholderString = "Describe the task…"
@@ -1053,21 +1364,48 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         agentStrip.spacing = 10
         rebuildAgents()
 
-        repoPicker.translatesAutoresizingMaskIntoConstraints = false
-        repoPicker.controlSize = .small
-        repoPicker.font = .systemFont(ofSize: 12)
-        repoPicker.target = self
-        repoPicker.action = #selector(onRepoChanged(_:))
-        rebuildRepoPicker()
+        for picker in [projectPicker, pathPicker] {
+            picker.translatesAutoresizingMaskIntoConstraints = false
+            picker.controlSize = .small
+            picker.font = .systemFont(ofSize: 12)
+            picker.target = self
+        }
+        projectPicker.action = #selector(onProjectChanged(_:))
+        pathPicker.action = #selector(onPathChanged(_:))
+
+        // Type-ahead over the project list. Small and beside the popup rather than
+        // a second row: the palette is a one-line capture bar, and filtering is a
+        // refinement of the popup next to it, not a mode of its own.
+        projectFilter.translatesAutoresizingMaskIntoConstraints = false
+        projectFilter.controlSize = .small
+        projectFilter.font = .systemFont(ofSize: 12)
+        projectFilter.placeholderString = "filter"
+        projectFilter.sendsSearchStringImmediately = true
+        projectFilter.sendsWholeSearchString = false
+        projectFilter.target = self
+        projectFilter.action = #selector(onProjectFilterChanged(_:))
+        projectFilter.toolTip = "Filter the project list — type part of a name"
+
+        // Pin: keep the palette on screen when another app takes focus. Same
+        // toggle as pressing the summon chord while it is already focused.
+        pinButton.translatesAutoresizingMaskIntoConstraints = false
+        pinButton.bezelStyle = .texturedRounded
+        pinButton.setButtonType(.pushOnPushOff)
+        pinButton.controlSize = .small
+        pinButton.image = NSImage(systemSymbolName: "pin", accessibilityDescription: "Pin")
+        pinButton.alternateImage = NSImage(systemSymbolName: "pin.fill", accessibilityDescription: "Unpin")
+        pinButton.imagePosition = .imageOnly
+        pinButton.target = self
+        pinButton.action = #selector(onPinToggled(_:))
 
         hint.font = .monospacedSystemFont(ofSize: 11.5, weight: .regular)
         hint.textColor = .secondaryLabelColor
 
-        projectPicker.translatesAutoresizingMaskIntoConstraints = false
-        projectPicker.controlSize = .small
-        projectPicker.font = .systemFont(ofSize: 12)
-        projectPicker.target = self
-        projectPicker.action = #selector(onProjectChanged(_:))
+        linearPicker.translatesAutoresizingMaskIntoConstraints = false
+        linearPicker.controlSize = .small
+        linearPicker.font = .systemFont(ofSize: 12)
+        linearPicker.target = self
+        linearPicker.action = #selector(onLinearProjectChanged(_:))
 
         // Same control size as the project popup — one compact row of dropdowns,
         // not a two-column chip matrix.
@@ -1109,24 +1447,26 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         ticketScroll.documentView = ticketList
         clip.postsBoundsChangedNotifications = true
 
-        let controlRow = NSStackView(views: [modeControl, repoPicker])
+        let controlRow = NSStackView(views: [modeControl, projectFilter, projectPicker,
+                                            pathPicker, pinButton])
         controlRow.orientation = .horizontal
         controlRow.alignment = .centerY
-        controlRow.spacing = 12
+        controlRow.spacing = 8
 
-        // One row: project (1:1 Linear scope) · quick filter · quick sort · count.
-        // No block cards — same popup language as the repo picker above.
+        // One row: Linear project (1:1 ticket scope) · quick filter · quick sort ·
+        // count. No block cards — same popup language as the project row above.
         let ticketTitle = NSTextField(labelWithString: "Tickets")
         ticketTitle.font = .monospacedSystemFont(ofSize: 11, weight: .medium)
         ticketTitle.textColor = .secondaryLabelColor
-        let ticketHeader = NSStackView(views: [ticketTitle, projectPicker, filterPicker,
-                                               sortPicker, ticketStatus])
-        ticketHeader.orientation = .horizontal
-        ticketHeader.alignment = .centerY
-        ticketHeader.spacing = 8
+        let header = NSStackView(views: [ticketTitle, linearPicker, filterPicker,
+                                         sortPicker, ticketStatus])
+        header.orientation = .horizontal
+        header.alignment = .centerY
+        header.spacing = 8
+        ticketHeader = header
 
         let stack = NSStackView(views: [field, controlRow, agentStrip, thumbStrip,
-                                        ticketHeader, ticketScroll, hint])
+                                        header, ticketScroll, hint])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 10
@@ -1142,17 +1482,45 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
             ticketScroll.heightAnchor.constraint(equalToConstant: Self.ticketViewportHeight),
             // The panel is a fixed-width bar: cap the popups so long names truncate
             // inside them instead of stretching the window past panelWidth.
-            repoPicker.widthAnchor.constraint(lessThanOrEqualToConstant: 200),
-            projectPicker.widthAnchor.constraint(lessThanOrEqualToConstant: 160),
+            projectFilter.widthAnchor.constraint(equalToConstant: 96),
+            projectPicker.widthAnchor.constraint(lessThanOrEqualToConstant: 170),
+            pathPicker.widthAnchor.constraint(lessThanOrEqualToConstant: 170),
+            pinButton.widthAnchor.constraint(equalToConstant: 28),
+            linearPicker.widthAnchor.constraint(lessThanOrEqualToConstant: 160),
             filterPicker.widthAnchor.constraint(lessThanOrEqualToConstant: 110),
             sortPicker.widthAnchor.constraint(lessThanOrEqualToConstant: 120),
         ])
+        rebuildProjectPicker()
+        rebuildPathPicker()
+        syncPinButton()
+        applyTicketVisibility()
         return panel
+    }
+
+    @objc private func onPinToggled(_ sender: NSButton) {
+        panel?.isPinned = sender.state == .on
+        syncPinButton()
+        updateHint()
+    }
+
+    private func syncPinButton() {
+        let pinned = panel?.isPinned ?? false
+        pinButton.state = pinned ? .on : .off
+        pinButton.toolTip = pinned
+            ? "Pinned — stays open when another app takes focus (⌘⇧O toggles)"
+            : "Pin — keep the palette open when another app takes focus (⌘⇧O toggles)"
     }
 
     // Center horizontally, sit ~20% above vertical center (where Spotlight lives).
     private func position(_ panel: PromptPanel) {
-        guard let screen = NSScreen.main else { panel.center(); return }
+        // In the QA preview affordance, pin to the PRIMARY screen. An unbundled
+        // dev build does not keep app activation, so `NSScreen.main` can resolve
+        // to whichever display last had a key window — on a multi-display desk
+        // that put the panel on a screen a window capture could not reach, which
+        // is the whole point of the preview mode. Never taken by a real summon.
+        let previewing = ProcessInfo.processInfo.environment["MENUBAR_PROMPT_PREVIEW"] == "1"
+        let target = previewing ? NSScreen.screens.first : NSScreen.main
+        guard let screen = target else { panel.center(); return }
         let vf = screen.visibleFrame
         let size = panel.frame.size
         let x = vf.minX + (vf.width - size.width) / 2

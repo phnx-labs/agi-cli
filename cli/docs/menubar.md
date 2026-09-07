@@ -107,12 +107,12 @@ process with its pid; end it and re-run `agents menubar enable`.
 ## Quick dispatch
 
 `Cmd-Shift-O` opens the Spotlight-style capture panel. Type a short request,
-optionally attach recent screenshots from the thumbnail strip, pick the repo to
-work in, then pick one agent for **Plan** or one or more agents for **Run**.
-The helper constructs this panel at startup and orders it front with the text
-field focused before refreshing recent repos, decoding thumbnails, or reading
-the Linear cache. Those rows hydrate after the panel accepts typing; the hotkey
-never waits for `agents sessions`, attachment-directory scans, or image decode.
+optionally attach screenshots (from the strip, `Cmd-V`, or a drop), pick the
+project to work in, then pick one agent for **Plan** or one or more agents for
+**Run**. The helper constructs this panel at startup and orders it front with the
+text field focused before loading projects, decoding thumbnails, or reading the
+Linear cache. Those rows hydrate after the panel accepts typing; the hotkey never
+waits for `agents projects list`, attachment-directory scans, or image decode.
 
 - **Plan** sends the note and selected screenshots to the selected ticket agent,
   which investigates and returns ticket fields as JSON. The helper then runs
@@ -130,9 +130,67 @@ never waits for `agents sessions`, attachment-directory scans, or image decode.
   appear in normal `agents sessions` and menu-bar surfaces instead of as opaque
   background work.
 
-The repo dropdown comes from recent session working directories, never `$HOME`
-(running an agent straight in the home directory is too broad a permission
-surface), and passes `--cwd` to the dispatch. The last pick is remembered.
+### Picking where it runs
+
+The **project** dropdown lists every `agents projects` definition, by name, with a
+type-ahead **filter** beside it and the checkout root as each row's tooltip. Name
+is the identity, not root: `prix` and `rush` both point at the same monorepo and
+differ only by `defaultPath`, so a root-keyed list would silently collapse them
+into one row. Dispatch passes `--project <name>`, which lets the CLI resolve the
+project's own base path and bind its sibling repos
+(`resolveProjectDirs`, `src/lib/project-root.ts`) — something a bare `--cwd`
+cannot express. The last pick is remembered
+(`menubar.quickDispatch.lastProject`).
+
+Recent session working directories are still read, but only to **narrow** the
+chosen project: the second dropdown offers the worktrees and subdirectories inside
+it that you have actually been in, and picking one dispatches with `--cwd <dir>`
+instead (no project name addresses a worktree). `$HOME` is never offered —
+running an agent straight in the home directory is too broad a permission surface.
+
+The list comes from `agents projects list --json`, memoized for 10 minutes and
+persisted at `~/.agents/.history/menubar/projects.json`, refreshed on the same
+tick as the menu-bar snapshot. A cold cache fetches on the first summon rather
+than waiting up to three minutes for that tick.
+
+This replaced a dropdown of the last eight session cwds (PHNX-4001), which could
+not name a project you had not worked in recently, listed worktrees as if they
+were projects, and carried no Linear binding to scope tickets by.
+
+### Pin
+
+The palette dismisses itself when another app takes focus. **Pin** it — the header
+button, or press `Cmd-Shift-O` again while it is already focused — and it stays
+put, keeping `.floating` level and joining all Spaces, so you can go copy
+something and come back to the note you were typing. The pin is persisted
+(`menubar.quickDispatch.pinned`). `Esc` still dismisses and keeps the draft.
+
+### Screenshots: live, pasted, dropped
+
+The thumbnail strip is **live**. FSEvents watches the real screenshot
+directories — the system `screencapture` location, CleanShot X's export path, and
+the clip attachments dir (`AgentsCLI.screenshotSourceDirs()`) — for as long as the
+palette is visible, so a shot taken *while* the palette is open appears in about a
+second with no re-summon. A closed palette watches nothing. This was a 30-second
+freshness guard shared with the Linear cache parse, which meant the shot you had
+just taken to describe a bug was not there when you looked (PHNX-4001); the guard
+now applies to the Linear read alone.
+
+`Cmd-V` with an image on the clipboard attaches it instead of pasting text, and
+image files dropped anywhere on the panel do the same. Both go through one reader
+(`AgentsCLI.imageAttachments(from:)`), which writes PNG bytes into the durable
+attachments dir as `<yyyyMMdd-HHmmss>-<6hex>.png` — copied, never referenced in
+place, because a shot on the Desktop can be swept away before the agent reads it.
+A pasteboard with no image falls through to an ordinary text paste.
+
+Clicking a thumbnail attaches or detaches it; `Backspace` on a focused one removes
+it; double-click opens the full image. The newest shot is pre-selected when it is
+under ten minutes old, and the hint line reports the attached count.
+
+Attachments reach the agent as `<host>:<abs-path>` references — the same token
+`Cmd-Shift-V` types into a terminal — so an agent on this box reads the path and
+one dispatched to another device `scp`s it. A bare absolute path could only ever
+be read locally.
 
 `--notify` is what makes a dispatch report back. The run is launched **detached**
 and posts its own "finished"/"failed" notification when it ends (see
@@ -156,8 +214,9 @@ without dispatching.
 ### The ticket list
 
 The panel captures new work; the rows under it are the work that already exists —
-the open Linear tickets of the project scoped to the repo you picked, so you can
-pick one up instead of filing a duplicate.
+the open Linear tickets of the project you picked, so you can pick one up instead
+of filing a duplicate. The section starts **folded**; `Cmd-T` toggles it and the
+choice is remembered (`menubar.quickDispatch.ticketsExpanded`).
 
 Controls sit on **one compact row** of popups (same language as the repo picker —
 not a chip grid or two-column block):
@@ -168,13 +227,18 @@ Tickets  [Agents CLI ▾]  [All open ▾]  [Urgent first ▾]  12/58 · urgent f
  ⌘2  …                                    ← scroll when there are more rows
 ```
 
-- **Project is 1:1 with Linear.** The project popup is the ticket scope. Switching
-  the repo dropdown auto-selects the matching Linear project (the repo name is
-  matched against `linear projects` after both are reduced to lowercase
-  alphanumerics, so `agents-cli` finds **Agents CLI** with nothing to configure).
-  A repo whose name matches no project says so — pick the project once and that
-  choice is remembered for that repo. A worktree resolves to its parent repo
-  (via git's common dir), not to the worktree's own directory name.
+- **The scope comes from the project's Linear BINDING.** Switching the project
+  dropdown selects the Linear project that project is bound to — the `linear:`
+  block in its `agents projects` definition, which `agents projects link <name>
+  --linear` writes. There is no folder-name matching: the previous version reduced
+  a repo directory name and a Linear project name to lowercase alphanumerics and
+  compared them, so `agents-cli` found "Agents CLI" by luck of spelling while `agi`
+  (bound to Linear **AGI**) found nothing, and `prix` vs `rush` could not be told
+  apart at all (PHNX-4001). A project with **no** binding reads
+  `No Linear project bound · agents projects link <name> --linear` rather than
+  showing an empty list that looks like "no open tickets". An explicit pick in the
+  Linear popup still overrides the binding and is remembered per project
+  (`menubar.quickDispatch.project.<name>`).
 - **Quick filter (dropdown).** One popup, not chips: All open · Todo · Doing ·
   Backlog · P1 only · P2 only · Overdue. The last pick is remembered.
 - **Quick sort (dropdown).** Flat list only — no status group headers. Options:
@@ -186,7 +250,7 @@ Tickets  [Agents CLI ▾]  [All open ▾]  [Urgent first ▾]  12/58 · urgent f
 - **Typing also filters.** Every word you type has to appear in a row's
   identifier or title (AND with the filter), so an existing ticket surfaces
   before Return files a new one.
-- **Click a row to dispatch it** to the selected agents in the picked repo
+- **Click a row to dispatch it** to the selected agents in the picked project
   (`⌘1` … `⌘9` for the first nine listed). **Plan** posts an implementation plan
   as a comment on the ticket and changes no code; **Run** claims the ticket
   (moving it to whichever state `linear states` reports as `started`), implements
@@ -435,7 +499,8 @@ command every three minutes; the 10-second badge/liveness checks stay local:
 | Cloud | `~/.agents/.cache/cloud/tasks.db` (SQLite) | cloud tasks, incl. `input_required` or `needs_review` → "awaiting input" |
 | Attention sentinels | `~/.agents/.cache/state/attention/<sessionId>` | terminal sessions awaiting input — mtime = wait start, content = the awaiting message (written by the Notification hook). On read, sentinels whose sessionId is not in the current live-terminals set are unlinked as orphans (defense against sessions killed hard, hookless Claude versions, or sessionId mismatches). |
 | Installed agents | `~/.agents/.history/versions/<agent>/` | the agent roster |
-| Linear tickets | `linear projects` / `linear tasks --all --project <p> --status open --cycle all` (warm cache, 90s TTL) | the quick-dispatch ticket list, scoped to the picked repo's project |
+| Projects | `agents projects list --json` (memoized 10 min, persisted) | the palette's project dropdown, its Linear binding, and `--project <name>` on dispatch |
+| Linear tickets | `linear projects` / `linear tasks --all --project <p> --status open --cycle all` (warm cache, 90s TTL) | the quick-dispatch ticket list, scoped by the picked project's Linear binding |
 
 Liveness is a `kill(pid, 0)` check; running-vs-idle is the transcript file's
 mtime. The teams directory accumulates history, so the periodic badge refresh
@@ -610,5 +675,6 @@ the current bundle on any version bump.
 | `~/Library/Application Support/agents-cli/.menubar-tcc-migrated` | marks the one-time ad-hoc -> Developer ID `tccutil reset Accessibility` as done |
 | `~/.agents/.cache/state/menubar.disabled` | sticky opt-out marker |
 | `~/.agents/.cache/helpers/menubar/menubar.log` | helper stdout / stderr |
+| `~/.agents/.history/menubar/projects.json` | last `agents projects list --json` result, so the palette's project dropdown fills on the first summon after a launch |
 | `~/.agents/.history/menubar/recent-tickets.json` | tickets filed from the quick-dispatch panel (RECENT TICKETS) |
 | `~/.agents/.history/menubar/linear-cache.json` | warm cache of Linear projects + each project's open tickets |

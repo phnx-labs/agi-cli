@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 struct TicketDraft: Codable {
@@ -426,16 +427,19 @@ enum AgentsCLI {
     // — but named after the ticket so the session reads as `rush-2098` in
     // `agents sessions` instead of a slug of a note nobody typed.
     static func ticketWorkRunArgs(agent: String, prompt: String, ticket: LinearTicket,
-                                  action: QuickDispatchAction, cwd: String? = nil) -> [String] {
+                                  action: QuickDispatchAction, cwd: String? = nil,
+                                  project: String? = nil) -> [String] {
         let suffix = action == .plan ? "-plan" : ""
         return quickFixRunArgs(agent: agent, prompt: prompt,
-                               name: "\(ticket.identifier.lowercased())\(suffix)", cwd: cwd)
+                               name: "\(ticket.identifier.lowercased())\(suffix)",
+                               cwd: cwd, project: project)
     }
 
     // Fan the selected agents out onto one existing ticket. Detached + `--notify`
     // for the same reason as dispatchQuickFix: the run must outlive this helper.
     static func dispatchTicketWork(ticket: LinearTicket, agents: [String],
-                                  action: QuickDispatchAction, cwd: String? = nil) {
+                                  action: QuickDispatchAction, cwd: String? = nil,
+                                  project: String? = nil) {
         let selected = agents.isEmpty ? ["claude"] : agents
         let prompt = ticketWorkPrompt(ticket: ticket, action: action)
         Notifier.post(title: action == .plan
@@ -446,7 +450,7 @@ enum AgentsCLI {
                       agent: selected.count == 1 ? selected[0] : nil)
         for agent in selected {
             runDetached(argv(ticketWorkRunArgs(agent: agent, prompt: prompt, ticket: ticket,
-                                               action: action, cwd: cwd)))
+                                               action: action, cwd: cwd, project: project)))
         }
     }
 
@@ -458,14 +462,17 @@ enum AgentsCLI {
     // description. Project detection + investigation remain agent-owned (Swift
     // pre-computes nothing).
     static func ticketAgentPrompt(note: String, screenshotPaths: [String]) -> String {
+        // Host-qualified refs, not bare paths (attachmentRefs): the agent may be
+        // running on another device, where a bare `/Users/…` path is unreadable.
+        let refs = attachmentRefs(screenshotPaths)
         let shots: String
-        if screenshotPaths.isEmpty {
+        if refs.isEmpty {
             shots = "No screenshots were attached; work from the note alone."
-        } else if screenshotPaths.count == 1 {
-            shots = "The user attached this screenshot for the ticket: \(screenshotPaths[0]) — read it first with your image tools."
+        } else if refs.count == 1 {
+            shots = "The user attached this screenshot for the ticket: \(refs[0]) — read it first with your image tools."
         } else {
-            let list = screenshotPaths.map { "  - \($0)" }.joined(separator: "\n")
-            shots = "The user attached \(screenshotPaths.count) screenshots for the ticket — read each with your image tools:\n\(list)"
+            let list = refs.map { "  - \($0)" }.joined(separator: "\n")
+            shots = "The user attached \(refs.count) screenshots for the ticket — read each with your image tools:\n\(list)"
         }
         return """
         You are filing exactly ONE Linear ticket from a quick capture bar. Do not ask \
@@ -509,14 +516,16 @@ enum AgentsCLI {
     }
 
     static func quickFixPrompt(note: String, screenshotPaths: [String]) -> String {
+        // Host-qualified refs, not bare paths — see ticketAgentPrompt.
+        let refs = attachmentRefs(screenshotPaths)
         let shots: String
-        if screenshotPaths.isEmpty {
+        if refs.isEmpty {
             shots = "No screenshots were attached; work from the note alone."
-        } else if screenshotPaths.count == 1 {
-            shots = "A screenshot is attached at: \(screenshotPaths[0]) — read it first with your image tools."
+        } else if refs.count == 1 {
+            shots = "A screenshot is attached at: \(refs[0]) — read it first with your image tools."
         } else {
-            let list = screenshotPaths.map { "  - \($0)" }.joined(separator: "\n")
-            shots = "\(screenshotPaths.count) screenshots are attached — read each with your image tools:\n\(list)"
+            let list = refs.map { "  - \($0)" }.joined(separator: "\n")
+            shots = "\(refs.count) screenshots are attached — read each with your image tools:\n\(list)"
         }
         return """
         You are an autonomous quick-dispatch agent launched from the agents menu-bar \
@@ -557,6 +566,189 @@ enum AgentsCLI {
         return args
     }
 
+    // MARK: Projects
+
+    // `agents projects list --json` — the palette's project list. This replaced
+    // `recentRepoDirs`, which offered the last eight session cwds and so could
+    // not name a project the user had not recently worked in, listed worktrees
+    // and subdirectories as if they were projects, and had no Linear binding to
+    // scope tickets by (PHNX-4001).
+    //
+    // A pure argv builder so the headless self-test can pin the exact request.
+    static func projectsArgs() -> [String] { ["projects", "list", "--json"] }
+
+    static let projectsCacheTTL: TimeInterval = 10 * 60
+
+    private static var projectsCacheURL: URL {
+        URL(fileURLWithPath: home)
+            .appendingPathComponent(".agents/.history/menubar/projects.json")
+    }
+
+    /// Last decoded list plus when it was fetched, so a summon inside the TTL
+    /// spawns no child at all. Main-queue only (set from `projectsAsync`'s
+    /// completion, read from the panel), so no lock is needed.
+    private static var projectsMemo: [ProjectDef] = []
+    private static var projectsFetchedAt: Date?
+    private static var projectsInFlight = false
+
+    /// The persisted list, for the first summon after a helper launch. Returns an
+    /// empty array when the cache is absent or unreadable — a cold cache renders
+    /// "loading…" and the CLI call fills it.
+    static func cachedProjects() -> [ProjectDef] {
+        if !projectsMemo.isEmpty { return projectsMemo }
+        guard let data = try? Data(contentsOf: projectsCacheURL),
+              let defs = try? JSONDecoder().decode([ProjectDef].self, from: data) else { return [] }
+        projectsMemo = ProjectCatalog.ordered(defs)
+        return projectsMemo
+    }
+
+    private static func persistProjects(_ defs: [ProjectDef]) {
+        try? FileManager.default.createDirectory(
+            at: projectsCacheURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if let out = try? JSONEncoder().encode(defs) { try? out.write(to: projectsCacheURL) }
+    }
+
+    /// Fetch the project list, honoring the 10-minute memo. `completion` runs on
+    /// the main queue with the list to render — the cached one when it is still
+    /// fresh (no child spawned), else the freshly decoded one. A failed or
+    /// undecodable call keeps the previous list rather than emptying the popup.
+    ///
+    /// Bounded through `ChildProcess` because the panel refreshes this alongside
+    /// the menubar snapshot, which is timer-driven — the one caller shape that
+    /// can stack copies of itself (see ChildProcess.swift).
+    static func projectsAsync(force: Bool = false,
+                              completion: @escaping ([ProjectDef]) -> Void) {
+        let warm = cachedProjects()
+        if !force, let at = projectsFetchedAt, Date().timeIntervalSince(at) < projectsCacheTTL {
+            DispatchQueue.main.async { completion(warm) }
+            return
+        }
+        if projectsInFlight {
+            DispatchQueue.main.async { completion(warm) }
+            return
+        }
+        projectsInFlight = true
+        DispatchQueue.global(qos: .utility).async {
+            let data = capture(argv(projectsArgs()))
+            let decoded = data.flatMap { try? JSONDecoder().decode([ProjectDef].self, from: $0) }
+            DispatchQueue.main.async {
+                projectsInFlight = false
+                guard let decoded, !decoded.isEmpty else { completion(warm); return }
+                let ordered = ProjectCatalog.ordered(decoded)
+                projectsMemo = ordered
+                projectsFetchedAt = Date()
+                persistProjects(ordered)
+                completion(ordered)
+            }
+        }
+    }
+
+    /// Recent session working directories INSIDE one project — the worktrees and
+    /// subdirectories the user has actually been in. Never the project list
+    /// itself: the project is chosen by name, and this only narrows where inside
+    /// it the agent lands. The project's own base path is excluded (the popup
+    /// carries it as its first, default entry) and `$HOME` is always dropped —
+    /// running an agent straight in the home dir is too broad a permission
+    /// surface.
+    static func recentDirs(in def: ProjectDef, from sessions: [RecentSession],
+                           limit: Int = 8) -> [String] {
+        let home = (NSHomeDirectory() as NSString).standardizingPath
+        let base = def.basePathAbs.map { ($0 as NSString).standardizingPath }
+        var seen = Set<String>()
+        var dirs: [String] = []
+        for s in sessions {
+            guard let cwd = s.cwd, !cwd.isEmpty else { continue }
+            let norm = (cwd as NSString).standardizingPath
+            if norm == home || norm == base { continue }
+            guard ProjectCatalog.contains(def, dir: norm) else { continue }
+            if seen.insert(norm).inserted { dirs.append(norm) }
+            if dirs.count >= limit { break }
+        }
+        return dirs
+    }
+
+    // MARK: Attachments
+
+    // How a pasted/dropped image is named in the attachments dir. Timestamped so
+    // the strip's newest-first ordering is stable, plus 6 hex chars so two pastes
+    // inside one second cannot collide.
+    static func attachmentFileName(at date: Date = Date(),
+                                   suffix: String = String(format: "%06x", Int.random(in: 0..<0xFFFFFF)))
+        -> String {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .iso8601)
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyyMMdd-HHmmss"
+        return "\(f.string(from: date))-\(suffix).png"
+    }
+
+    /// Write PNG bytes into the durable attachments dir and return the path, or
+    /// nil when the write failed. The strip picks it up on the next rescan, and
+    /// the caller selects it immediately.
+    static func writeAttachment(png: Data, at date: Date = Date()) -> String? {
+        let dir = Clip.attachmentsDir
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent(attachmentFileName(at: date))
+        guard (try? png.write(to: url)) != nil else { return nil }
+        return url.path
+    }
+
+    /// Turn whatever images are on a pasteboard into attachments on disk, newest
+    /// first. Empty when the pasteboard carries no image, which is the signal for
+    /// the caller to fall through to an ordinary text paste.
+    ///
+    /// File URLs are read BEFORE the bitmap types on purpose: copying a PNG in
+    /// Finder puts a file URL AND image data on the pasteboard, and reading the
+    /// bitmap first would re-encode a file that is already on disk. Non-PNG images
+    /// are re-encoded so the `.png` in the attachment name is honest about the
+    /// bytes behind it.
+    ///
+    /// Copied, never referenced in place: a shot on the Desktop can be swept away
+    /// between the paste and the agent reading it, while the attachments dir is
+    /// durable (`~/.agents/.history`, gitignored, not a cache).
+    ///
+    /// Takes the pasteboard as an argument so the self-test drives it with a real
+    /// `NSPasteboard`, not a mock.
+    static func imageAttachments(from pb: NSPasteboard, at date: Date = Date()) -> [String] {
+        let options: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
+        let urls = (pb.readObjects(forClasses: [NSURL.self], options: options) as? [URL] ?? [])
+            .filter { imageExtensions.contains($0.pathExtension.lowercased()) }
+        if !urls.isEmpty {
+            return urls.compactMap { url in
+                guard let data = try? Data(contentsOf: url) else { return nil }
+                guard let png = pngBytes(of: data, isAlreadyPNG: url.pathExtension.lowercased() == "png")
+                else { return nil }
+                return writeAttachment(png: png, at: date)
+            }
+        }
+        guard let png = pasteboardBitmapAsPNG(pb), let path = writeAttachment(png: png, at: date)
+        else { return [] }
+        return [path]
+    }
+
+    /// PNG bytes for whatever bitmap a pasteboard carries — a `.png` directly, or
+    /// a `.tiff`/NSImage re-encoded (a screenshot taken with Ctrl held never
+    /// touches disk and arrives as TIFF).
+    static func pasteboardBitmapAsPNG(_ pb: NSPasteboard) -> Data? {
+        if let png = pb.data(forType: .png) { return png }
+        let tiff = pb.data(forType: .tiff) ?? NSImage(pasteboard: pb)?.tiffRepresentation
+        return tiff.flatMap { pngBytes(of: $0, isAlreadyPNG: false) }
+    }
+
+    private static func pngBytes(of data: Data, isAlreadyPNG: Bool) -> Data? {
+        if isAlreadyPNG { return data }
+        guard let rep = NSBitmapImageRep(data: data) else { return nil }
+        return rep.representation(using: .png, properties: [:])
+    }
+
+    /// How an attachment travels to the agent: the same `<host>:<abs-path>`
+    /// reference `Cmd-Shift-V` types into a terminal (Clip.referenceToken). An
+    /// agent on this box Reads the path; one dispatched to another device `scp`s
+    /// it. A bare absolute path could only ever be read locally.
+    static func attachmentRefs(_ paths: [String]) -> [String] {
+        paths.map { Clip.referenceToken(for: URL(fileURLWithPath: $0)) }
+    }
+
     // Dispatch the ticket agent for a captured note (+ optional screenshot). This
     // is the SINGLE isolation point: swapping to a cloud pod later (uploading the
     // screenshot, serializing session context) changes only this function. The
@@ -565,24 +757,8 @@ enum AgentsCLI {
     // paths never pass through an LLM shell string. It runs as a MONITORED async
     // process (not fully detached) so completion drives a real notification
     // without blocking the panel/UI.
-    // Distinct recent working directories from local session history, most-recent
-    // first, with the home dir dropped — running an agent straight in $HOME is too
-    // broad a permission surface, so the panel offers real repos to scope into.
-    static func recentRepoDirs(from sessions: [RecentSession], limit: Int = 8) -> [String] {
-        let home = (NSHomeDirectory() as NSString).standardizingPath
-        var seen = Set<String>()
-        var dirs: [String] = []
-        for s in sessions {
-            guard let cwd = s.cwd, !cwd.isEmpty else { continue }
-            let norm = (cwd as NSString).standardizingPath
-            if norm == home { continue }
-            if seen.insert(norm).inserted { dirs.append(norm) }
-            if dirs.count >= limit { break }
-        }
-        return dirs
-    }
-
-    static func dispatchTicketAgent(note: String, screenshotPaths: [String], agent: String? = nil, cwd: String? = nil) {
+    static func dispatchTicketAgent(note: String, screenshotPaths: [String], agent: String? = nil,
+                                    cwd: String? = nil, project: String? = nil) {
         guard let linear = linearBinary() else {
             Notifier.post(title: "Cannot create ticket", body: linearNotFoundMessage)
             return
@@ -591,7 +767,11 @@ enum AgentsCLI {
         let agent = agent ?? env["AGENTS_ISSUE_AGENT"] ?? "claude"
         Notifier.post(title: "Filing ticket…", body: shortenForNotice(note), agent: agent)
         var planArgs = ["run", agent, prompt, "--mode", "auto"]
-        if let cwd, !cwd.isEmpty { planArgs += ["--cwd", cwd] }
+        if let project, !project.isEmpty {
+            planArgs += ["--project", project]
+        } else if let cwd, !cwd.isEmpty {
+            planArgs += ["--cwd", cwd]
+        }
         runMonitored(argv(planArgs)) { output, ok in
             guard ok, let draft = parseTicketDraft(output) else {
                 Notifier.post(title: "Ticket agent finished",
@@ -633,7 +813,8 @@ enum AgentsCLI {
     // launchd. A dispatch could then never report back. The run process owns the
     // notice now, so nothing that happens to the menu bar can lose it.
     static func dispatchQuickFix(note: String, screenshotPaths: [String], agents: [String],
-                                 cwd: String? = nil, device: String? = nil) {
+                                 cwd: String? = nil, project: String? = nil,
+                                 device: String? = nil) {
         let selected = agents.isEmpty ? ["claude"] : agents
         let prompt = quickFixPrompt(note: note, screenshotPaths: screenshotPaths)
         let name = quickDispatchName(note: note)
@@ -644,7 +825,7 @@ enum AgentsCLI {
                       agent: selected.count == 1 ? selected[0] : nil)
         for agent in selected {
             runDetached(argv(quickFixRunArgs(agent: agent, prompt: prompt, name: name,
-                                             cwd: cwd, device: device)))
+                                             cwd: cwd, project: project, device: device)))
         }
     }
 
@@ -724,10 +905,22 @@ enum AgentsCLI {
     // the home dir); an explicit --device offloads onto the chosen box (nil = this
     // Mac / affinity-auto is handled by the caller passing "auto"). `--notify` makes
     // the run itself post the completion notification, so it outlives this helper.
+    //
+    // `project` is the palette's primary scoping: a NAMED `agents projects`
+    // definition, passed as `--project <name>` so the CLI resolves the project's
+    // own base path and binds its sibling repos (resolveProjectDirs,
+    // src/lib/project-root.ts). `--cwd` is used only when the user narrowed to a
+    // worktree or subdirectory inside that project, which no project name
+    // addresses. The two are mutually exclusive — `--project` sets the cwd
+    // itself, so passing both would be two answers to one question.
     static func quickFixRunArgs(agent: String, prompt: String, name: String,
-                                cwd: String? = nil, device: String? = nil) -> [String] {
+                                cwd: String? = nil, project: String? = nil,
+                                device: String? = nil) -> [String] {
         var args = ["run", agent, prompt, "--mode", "auto", "--balanced", "--notify", "--name", name]
-        if let cwd, !cwd.isEmpty {
+        if let project, !project.isEmpty {
+            args.append("--project")
+            args.append(project)
+        } else if let cwd, !cwd.isEmpty {
             args.append("--cwd")
             args.append(cwd)
         }

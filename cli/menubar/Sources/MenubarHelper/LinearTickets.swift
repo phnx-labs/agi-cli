@@ -2,13 +2,14 @@ import Foundation
 
 // The quick-dispatch panel's ticket half (Cmd-Shift-O). The panel captures NEW
 // work, and this is what it shows about work that ALREADY exists: the open Linear
-// tickets of the repo the picker is pointed at, ranked so the ones that should be
-// picked up next lead.
+// tickets of the project the picker is pointed at, ranked so the ones that should
+// be picked up next lead.
 //
 // Everything here is pure or file-local — no network, no AppKit — so the ordering,
-// the repo→project mapping, and the cache are exercised by the MENUBAR_ISSUE_TEST
-// self-test (IssueSelfTest.swift). The actual fetch lives in AgentsCLI, which
-// shells the `linear` skill CLI the same way the ticket-create path does.
+// the project→Linear binding, and the cache are exercised by the headless
+// self-tests (IssueSelfTest.swift, ProjectSelfTest.swift). The actual fetch lives
+// in AgentsCLI, which shells the `linear` skill CLI the same way the
+// ticket-create path does.
 enum LinearTickets {
     // How many rows fit in the ticket scroll viewport before the user scrolls.
     // The list itself can be longer (see `viewportLimit` vs full filtered set).
@@ -142,33 +143,46 @@ enum LinearTickets {
         }
     }
 
-    // MARK: Repo -> Linear project
+    // MARK: Project -> Linear project
 
-    // Collapse a repo directory name or a Linear project name to one comparable
-    // key: lowercase, alphanumerics only. `agents-cli` and "Agents CLI" both
-    // become "agentscli", which is what makes the repo picker able to drive the
-    // project scope without the user configuring a mapping.
-    static func projectKey(_ s: String) -> String {
-        s.lowercased().filter { $0.isLetter || $0.isNumber }
+    // The Linear project whose tickets belong to a chosen `agents projects`
+    // definition. The binding is the DEFINITION's own `linear:` block — never the
+    // folder name.
+    //
+    // Folder-name matching is what this replaced (PHNX-4001): it reduced a repo
+    // directory name and a Linear project name to lowercase alphanumerics and
+    // compared them, so `agents-cli` found "Agents CLI" by luck of spelling while
+    // `agi` (bound to Linear "AGI") found nothing, and two definitions sharing a
+    // checkout — `prix` and `rush` both live in the `muqsitnawaz/agents` monorepo
+    // — could not be told apart at all. `agents projects link <name> --linear`
+    // records the answer; this reads it.
+    //
+    // `override` is a project NAME the user pinned for this project definition
+    // (remembered per project by the palette) and always wins. Resolution against
+    // the live `linear projects` list is preferred so the id is exact, but a
+    // binding that names a project the list does not carry (an empty/failed
+    // `linear projects` call) still yields a usable scope from the binding
+    // itself — `linear tasks --project <name>` needs the name, not the id.
+    static func linearProject(for def: ProjectDef?,
+                              projects: [LinearProject] = [],
+                              override: String? = nil) -> LinearProject? {
+        if let override, !override.isEmpty {
+            return projects.first { $0.name == override } ?? LinearProject(id: "", name: override)
+        }
+        guard let binding = def?.linear else { return nil }
+        if let id = binding.projectId, !id.isEmpty,
+           let byId = projects.first(where: { $0.id == id }) {
+            return byId
+        }
+        guard let name = binding.name, !name.isEmpty else { return nil }
+        return projects.first { $0.name == name } ?? LinearProject(id: binding.projectId ?? "", name: name)
     }
 
-    // The Linear project a repo's tickets live in. `override` is a project name
-    // the user picked explicitly for this repo (remembered per repo by the panel)
-    // and always wins; otherwise the repo name must match a project name under
-    // `projectKey`. No near-match guessing: a repo whose name matches nothing
-    // resolves to nil and the panel says so, rather than silently listing some
-    // other project's tickets.
-    static func resolveProject(repoName: String?,
-                               projects: [LinearProject],
-                               override: String? = nil) -> LinearProject? {
-        if let override, !override.isEmpty,
-           let pinned = projects.first(where: { $0.name == override }) {
-            return pinned
-        }
-        guard let repoName, !repoName.isEmpty else { return nil }
-        let key = projectKey(repoName)
-        guard !key.isEmpty else { return nil }
-        return projects.first { projectKey($0.name) == key }
+    // What the ticket area says when the chosen project has no Linear binding —
+    // the exact command that creates one, rather than an empty list that reads
+    // like "no tickets".
+    static func unboundProjectHint(_ name: String) -> String {
+        "No Linear project bound · agents projects link \(name) --linear"
     }
 
     // MARK: Ranking — "what should I pick up next?"
