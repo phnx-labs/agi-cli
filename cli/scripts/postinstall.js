@@ -50,9 +50,37 @@ function shellQuote(value) {
 }
 
 // Shorthands that delegate to the installed agents-cli entrypoint.
-const ALIASES = ['sessions', 'secrets', 'browser', 'pty', 'teams'];
+const ALIASES = ['sessions', 'browser', 'pty', 'teams'];
+
+// Aliases this script USED to write and must now remove on every install.
+// `secrets`: the name belongs to the standalone `@phnx-labs/secrets-cli` binary
+// (PHNX-3989); `agents secrets` is a passthrough to it, so an alias shim that
+// `exec`s `agents secrets` can only re-enter the passthrough, and it shadows the
+// real `secrets` bin because the shims dir sits first on PATH. The self-heal
+// shim pass prunes it too, but that only runs from a daemon or a TTY session —
+// postinstall is what every upgrade path actually executes, so it cleans up here.
+const RETIRED_ALIASES = ['secrets'];
+
+function removeRetiredAliasShims() {
+  for (const name of RETIRED_ALIASES) {
+    for (const file of [path.join(SHIMS_DIR, name), path.join(SHIMS_DIR, name + '.cmd')]) {
+      let content;
+      try {
+        content = fs.readFileSync(file, 'utf8');
+      } catch {
+        continue;
+      }
+      // Only ever remove OUR alias — the POSIX shim ends in `<name> "$@"`, the
+      // Windows companion in `<name> %*` — never an unrelated file someone placed
+      // under that name.
+      if (!content.includes(`${name} "$@"`) && !content.includes(`${name} %*`)) continue;
+      fs.rmSync(file, { force: true });
+    }
+  }
+}
 
 function writeAliasShims() {
+  removeRetiredAliasShims();
   const written = [];
   for (const name of ALIASES) {
     const target = path.join(SHIMS_DIR, name);

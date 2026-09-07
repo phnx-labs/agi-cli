@@ -2259,11 +2259,12 @@ const LEGACY_SHIMS_ALWAYS_PRUNED: ReadonlySet<string> = new Set(['secrets']);
 /**
  * Prune a stale, orphaned shim: one that is NOT a managed agent shim and NOT a user
  * alias, whose baked `AGENTS_BIN` points at an install that no longer exists. These
- * are legacy `exec "$AGENTS_BIN" <cmd>` command shims (browser/secrets/sessions/…)
- * left behind by a removed install — the current source never generates them, and
- * they either die with `exit 127` or shadow the real package bin on PATH. Only
- * removed when the baked target is gone, so a working shim is never touched —
- * except the `LEGACY_SHIMS_ALWAYS_PRUNED` set, which cannot work at all.
+ * are `exec "$AGENTS_BIN" <cmd>` command shims (browser/sessions/pty/teams) that
+ * `scripts/postinstall.js` writes for the LIVE install; one baked at a removed
+ * install either dies with `exit 127` or shadows the real package bin on PATH.
+ * Only removed when the baked target is gone, so a working shim is never touched —
+ * except the `LEGACY_SHIMS_ALWAYS_PRUNED` set, which cannot work at all (and which
+ * postinstall no longer writes).
  * Returns true if removed.
  */
 export function pruneOrphanedCommandShim(fileName: string): boolean {
