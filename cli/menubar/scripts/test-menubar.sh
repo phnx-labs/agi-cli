@@ -36,8 +36,13 @@ if [ ! -x "$BIN" ]; then
   exit 1
 fi
 
+# Absolute fixture paths for the data-layer self-tests (PHNX-4002), so they
+# resolve regardless of the invoking CWD. $PWD is the menubar dir (cd above).
+export MENUBAR_FEED_FIXTURE="$PWD/Tests/fixtures/feed-sample.ndjson"
+export MENUBAR_ARTIFACT_ROOT="$PWD/Tests/fixtures/artifacts-tree"
+
 fail=0
-for mode in MENUBAR_GUARD_TEST MENUBAR_ISSUE_TEST MENUBAR_PROJECTS_TEST MENUBAR_SINGLE_TEST MENUBAR_CHILD_TEST MENUBAR_ACTIVE_TEST MENUBAR_ROUTINE_TEST MENUBAR_DOCTOR_TEST MENUBAR_DEVICE_TEST; do
+for mode in MENUBAR_GUARD_TEST MENUBAR_ISSUE_TEST MENUBAR_PROJECTS_TEST MENUBAR_SINGLE_TEST MENUBAR_CHILD_TEST MENUBAR_ACTIVE_TEST MENUBAR_ROUTINE_TEST MENUBAR_DOCTOR_TEST MENUBAR_DEVICE_TEST MENUBAR_FEED_TEST MENUBAR_ARTIFACT_TEST; do
   echo "=== $mode ==="
   if ! env "$mode=1" "$BIN"; then
     echo "  $mode FAILED" >&2

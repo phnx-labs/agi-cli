@@ -588,3 +588,136 @@ enum ChildProcess {
         }
     }
 }
+
+// MARK: - Long-lived streaming child (PHNX-4002)
+
+extension ChildProcess {
+    /// A handle to a long-lived streaming child (e.g. `agents feed watch --json`).
+    /// `stop()` group-kills the child; the reader thread performs the single
+    /// reap + registry cleanup on EOF, whether the child exited on its own or was
+    /// killed. If the helper dies without calling `stop()`, the NEXT launch reaps
+    /// it via `reapOrphansFromPreviousLaunch` exactly like a bounded `run` child.
+    final class StreamHandle {
+        private let pid: pid_t
+        private let stateLock = NSLock()
+        private var finished = false
+
+        fileprivate init(pid: pid_t) { self.pid = pid }
+
+        /// Idempotent. Signals the whole process group; the group's write ends
+        /// close as those processes die, which forces the reader to EOF and run
+        /// the reap. Never reaps here — the reader is the single owner of that.
+        func stop() {
+            stateLock.lock()
+            let alreadyDone = finished
+            stateLock.unlock()
+            if alreadyDone { return }
+            ChildProcess.terminateGroup(pid)
+        }
+
+        /// Called by the reader once, on EOF, to claim ownership of the reap.
+        fileprivate func markFinished() -> Bool {
+            stateLock.lock(); defer { stateLock.unlock() }
+            if finished { return false }
+            finished = true
+            return true
+        }
+    }
+
+    /// Spawn `argv` as a long-lived child and deliver each stdout LINE to `onLine`
+    /// as it arrives, running until the child exits or `StreamHandle.stop()` is
+    /// called; `onExit` fires exactly once when the child is gone. Returns nil if
+    /// the child could not be started.
+    ///
+    /// This shares the SAME durable registry + provenance token + process-group
+    /// kill + next-launch reaping as `run` (see the file docblock) — the streaming
+    /// case is exactly the one launchd KeepAlive would orphan on a helper crash,
+    /// so it MUST be tracked identically. Unlike `run`, it does not drain to EOF
+    /// and return; it streams line-by-line, so a caller never buffers an unbounded
+    /// stream in memory. `onLine`/`onExit` run on a private utility queue — the
+    /// caller hops to its own queue.
+    static func stream(_ argv: [String],
+                       onLine: @escaping (String) -> Void,
+                       onExit: @escaping () -> Void,
+                       registryFile: String = Registry.path()) -> StreamHandle? {
+        guard !argv.isEmpty else { return nil }
+
+        let commandKind = argv.dropFirst().prefix(2).joined(separator: " ")
+        let launch: Registry.Entry
+        do {
+            launch = try Registry.begin(argv: argv, commandKind: commandKind, file: registryFile)
+        } catch {
+            fputs("menubar: cannot persist stream launch intent: \(error)\n", stderr)
+            return nil
+        }
+
+        var fds: [Int32] = [-1, -1]
+        guard pipe(&fds) == 0 else {
+            removeRegistryEntry(token: launch.token, file: registryFile)
+            return nil
+        }
+        let readFD = fds[0]
+        let writeFD = fds[1]
+
+        guard let pid = spawn(argv, stdout: writeFD, closeInChild: readFD, provenance: launch.token) else {
+            close(readFD); close(writeFD)
+            removeRegistryEntry(token: launch.token, file: registryFile)
+            return nil
+        }
+        // The parent MUST drop its write end, or the read below never sees EOF.
+        close(writeFD)
+
+        do {
+            try Registry.complete(token: launch.token, pid: pid, file: registryFile)
+        } catch {
+            _ = terminateGroup(pid)
+            close(readFD)
+            var status: Int32 = 0
+            while waitpid(pid, &status, 0) == -1 && errno == EINTR {}
+            removeRegistryEntry(token: launch.token, file: registryFile)
+            return nil
+        }
+
+        let handle = StreamHandle(pid: pid)
+        DispatchQueue.global(qos: .utility).async {
+            var pending = [UInt8]()
+            var chunk = [UInt8](repeating: 0, count: 64 * 1024)
+            func flush() {
+                var start = 0
+                var index = 0
+                while index < pending.count {
+                    if pending[index] == 0x0A {
+                        if index > start, let line = String(bytes: pending[start..<index], encoding: .utf8) {
+                            onLine(line)
+                        }
+                        start = index + 1
+                    }
+                    index += 1
+                }
+                if start > 0 { pending.removeFirst(start) }
+            }
+            while true {
+                let n = chunk.withUnsafeMutableBytes { read(readFD, $0.baseAddress, $0.count) }
+                if n > 0 {
+                    pending.append(contentsOf: chunk[0..<n])
+                    flush()
+                } else if n == 0 {
+                    break
+                } else if errno == EINTR {
+                    continue
+                } else {
+                    break
+                }
+            }
+            close(readFD)
+            // The reader OWNS the reap: whether the child EOF'd on its own or
+            // stop() killed it, exactly one waitpid + registry removal happens.
+            _ = handle.markFinished()
+            var status: Int32 = 0
+            while waitpid(pid, &status, 0) == -1 && errno == EINTR {}
+            removeRegistryEntry(token: launch.token, file: registryFile)
+            onExit()
+        }
+        return handle
+    }
+}

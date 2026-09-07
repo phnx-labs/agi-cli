@@ -35,6 +35,26 @@ enum Bench {
         measure("AgentsCLI.routines()  [now BACKGROUND, \(rIters)x]", rIters) {
             _ = AgentsCLI.routines()
         }
+
+        // FeedStream parse throughput (PHNX-4002): decode + fold every fixture
+        // line through the pure reducer. This is the hot path the streaming child
+        // drives off the main thread, so its per-line cost bounds how large a
+        // fleet the feed can project without falling behind.
+        let fixture = ProcessInfo.processInfo.environment["MENUBAR_FEED_FIXTURE"]
+            ?? "Tests/fixtures/feed-sample.ndjson"
+        if let text = try? String(contentsOfFile: fixture, encoding: .utf8) {
+            let lines = text.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
+            emit("")
+            emit("feed fixture: \(lines.count) NDJSON lines")
+            measure("FeedEnvelope.decode + FeedState.apply  [\(lines.count) lines/iter]", iters) {
+                var state = FeedState()
+                for line in lines {
+                    if let env = FeedEnvelope.decode(line) { _ = state.apply(env) }
+                }
+            }
+        } else {
+            emit("feed fixture not found at \(fixture) — skipping feed parse bench")
+        }
     }
 
     private static func measure(_ label: String, _ iters: Int, _ body: () -> Void) {

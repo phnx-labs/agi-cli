@@ -113,6 +113,30 @@ if ProcessInfo.processInfo.environment["MENUBAR_DAEMON_LIVENESS_TEST"] == "1" {
     DaemonLivenessSelfTest.run()
 }
 
+// Feed data-layer self-test (PHNX-4002): replay a fixture NDJSON through the
+// pure FeedState reducer and assert row counts, attention keys, reset-on-gap,
+// backoff schedule, and the circuit breaker. No process, no network — a build
+// gate. See FeedSelfTest.swift.
+if ProcessInfo.processInfo.environment["MENUBAR_FEED_TEST"] == "1" {
+    FeedSelfTest.run()
+}
+
+// Artifact-index self-test (PHNX-4002): scan a fixture tree (three sidecars, two
+// ledger manifests) and assert the session map, revision counts, HTML
+// resolution, and full-vs-prefix matching. Pure filesystem read — a build gate.
+// See ArtifactSelfTest.swift.
+if ProcessInfo.processInfo.environment["MENUBAR_ARTIFACT_TEST"] == "1" {
+    ArtifactSelfTest.run()
+}
+
+// Feed live smoke (PHNX-4002): run FeedStream against THIS machine for ~60s and
+// print row/attention/device counts + health, then exit cleanly. Spawns the real
+// `agents feed watch` child, so it is NOT part of the build gate — like
+// MENUBAR_DUMP it needs the live fleet. See FeedSmoke (FeedSelfTest.swift).
+if ProcessInfo.processInfo.environment["MENUBAR_FEED_SMOKE"] == "1" {
+    FeedSmoke.run()
+}
+
 // Everything past here installs the status item and registers the global
 // chords, so it must only run where those chords can actually be serviced.
 // Refuses an ssh-started launch or an unrecognized flag — the two ways a helper
