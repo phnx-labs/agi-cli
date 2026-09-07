@@ -16,10 +16,12 @@ import * as path from 'node:path';
 const CLI_ROOT = path.resolve(__dirname, '..');
 
 function packedEntries(): string[] {
-  const distEntry = path.join(CLI_ROOT, 'dist', 'index.js');
-  if (!fs.existsSync(distEntry)) {
-    execFileSync('bun', ['run', 'build'], { cwd: CLI_ROOT, stdio: 'inherit' });
-  }
+  // Always rebuild — never trust a pre-existing dist/. `dist/` is gitignored, so on a
+  // shared/reused worktree (a fleet test-runner's cached tree, in particular) a stale
+  // build from a prior commit can still be sitting there; skipping the rebuild let this
+  // test pass against yesterday's artifact instead of proving anything about the tree
+  // it just checked out.
+  execFileSync('bun', ['run', 'build'], { cwd: CLI_ROOT, stdio: 'inherit' });
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-pack-'));
   try {
     const pack = spawnSync('npm', ['pack', '--silent', '--pack-destination', tmp], {
