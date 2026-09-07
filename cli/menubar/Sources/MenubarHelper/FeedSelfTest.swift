@@ -4,7 +4,11 @@ import Foundation
 //
 //   MENUBAR_FEED_TEST=1   — pure: replay a fixture NDJSON through FeedState and
 //                           assert row counts, attention keys, reset-on-gap /
-//                           new-streamId, the backoff schedule, and the breaker.
+//                           new-streamId, the backoff schedule, the breaker, and
+//                           the dispatch-placeholder registry (PHNX-4005) —
+//                           registration, resolution by a fixture row, expiry —
+//                           plus FeedStream's own published `rows` after a
+//                           registerPlaceholder (no child is spawned).
 //                           No process, no network. A build gate (test-menubar.sh).
 //   MENUBAR_FEED_SMOKE=1   — live: run FeedStream against this machine for N
 //                           seconds and print row/attention counts + health. NOT a
@@ -104,6 +108,72 @@ enum FeedSelfTest {
         check("breaker trips at ten consecutive failures", breaker.isTripped)
         breaker.recordHealthy()
         check("a healthy connection clears the breaker", !breaker.isTripped)
+
+        // MARK: dispatch placeholders (PHNX-4005) — the registry FeedStream wraps,
+        // driven with the same fixture: a uuid placeholder for a session the
+        // fixture later upserts resolves on that line; a name-keyed one for a run
+        // that never surfaces expires at the ttl.
+        let t0: Double = 1_788_780_000_000
+        var placeholders = LaunchPlaceholders()
+        var replay = FeedState()
+        let willArrive = PendingLaunch(key: "s-cccccccc", byUuid: true, agent: "claude",
+                                       name: "gamma-task", project: "agi", cwd: nil,
+                                       launchedAtMs: t0, stderrTail: nil)
+        let neverArrives = PendingLaunch(key: "never-run", byUuid: false, agent: "codex",
+                                         name: "never-run", project: "agi", cwd: nil,
+                                         launchedAtMs: t0, stderrTail: nil)
+        let reg1 = placeholders.register(willArrive)
+        _ = placeholders.register(neverArrives)
+        check("registering a placeholder upserts its namespaced rowKey",
+              reg1.upserted == ["launching/s-cccccccc"])
+        var merged = replay.rows.merging(placeholders.rows) { _, p in p }
+        check("published rows carry the placeholder with phase launching",
+              merged["launching/s-cccccccc"]?.phase == "launching"
+                && merged["launching/s-cccccccc"]?.sessionId == "s-cccccccc")
+        var resolvedAtLine: Int? = nil
+        var lineNo = 0
+        for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
+            guard let env = FeedEnvelope.decode(String(line)) else { continue }
+            lineNo += 1
+            _ = replay.apply(env, now: Date())
+            let (diff, expired) = placeholders.reconcile(realRows: Array(replay.rows.values),
+                                                         now: t0 + 1_000)
+            if diff.removed.contains("launching/s-cccccccc"), resolvedAtLine == nil {
+                resolvedAtLine = lineNo
+                check("resolution is a removal, not an expiry", expired.isEmpty)
+            }
+        }
+        // host-b's reset (fixture line 3) is what carries s-cccccccc.
+        check("uuid placeholder resolves on the fixture line that carries its row",
+              resolvedAtLine == 3)
+        check("name-keyed placeholder for a run that never surfaces is still pending",
+              placeholders.pending.map(\.key) == ["never-run"])
+        merged = replay.rows.merging(placeholders.rows) { _, p in p }
+        check("merged rows = real fixture rows + the surviving placeholder",
+              Set(merged.keys) == ["rk-zB", "rk-zC", "rk-yA", "launching/never-run"])
+        let (expiryDiff, expired) = placeholders.reconcile(
+            realRows: Array(replay.rows.values), now: t0 + PendingLaunches.defaultTTLMs)
+        check("placeholder expires at the 60 s ttl with a removal diff",
+              expiryDiff.removed == ["launching/never-run"] && expired.map(\.key) == ["never-run"])
+        check("expired message reads did not start",
+              PendingLaunches.expiredMessage(expired[0]).hasSuffix("did not start"))
+        check("registry is empty after expiry", placeholders.pending.isEmpty)
+
+        // MARK: FeedStream publishes a registered placeholder through its real
+        // queue → main-queue path. The stream is never started (no child); the
+        // main run loop is pumped so the publish lands.
+        let live = PendingLaunch(key: "live-uuid", byUuid: true, agent: "claude",
+                                 name: "live-task", project: "agi", cwd: nil,
+                                 launchedAtMs: Date().timeIntervalSince1970 * 1000, stderrTail: nil)
+        FeedStream.shared.registerPlaceholder(live)
+        let deadline = Date().addingTimeInterval(2)
+        while FeedStream.shared.rows["launching/live-uuid"] == nil, Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        }
+        check("FeedStream.rows includes the registered placeholder",
+              FeedStream.shared.rows["launching/live-uuid"]?.phase == "launching")
+        check("FeedStream.placeholders lists it", FeedStream.shared.placeholders.map(\.key) == ["live-uuid"])
+        check("FeedStream never spawned a child for it", FeedStream.shared.health == .stopped)
 
         // MARK: argv — the child is `feed watch --json`, never --local.
         let argv = FeedStream.feedWatchArgv()

@@ -84,6 +84,33 @@ struct SessionRow: Decodable, Equatable {
     let resumable: Bool?
 
     var isPrevious: Bool { previous ?? false }
+
+    /// Explicit initializer (every field defaults to nil) so a synthetic row —
+    /// the dispatch placeholder — and a crafted test row can be built without
+    /// round-tripping JSON. Decoding still uses the synthesized `init(from:)`.
+    init(rowKey: String? = nil, sourceDevice: String? = nil, sessionId: String? = nil,
+         label: String? = nil, name: String? = nil, title: String? = nil, topic: String? = nil,
+         project: String? = nil, cwd: String? = nil, host: String? = nil, machine: String? = nil,
+         kind: String? = nil, harness: String? = nil, phase: String? = nil, status: String? = nil,
+         activity: String? = nil, awaitingReason: String? = nil, question: SessionQuestion? = nil,
+         todos: TodoProgress? = nil, timeline: TimelineSummary? = nil, lastAgentLine: String? = nil,
+         preview: String? = nil, files: SessionFilesRef? = nil, request: SessionRequestRef? = nil,
+         pr: PullRequestRef? = nil, ticket: TicketRef? = nil, subAgentCount: Int? = nil,
+         pidCount: Int? = nil, spawnedTeam: String? = nil, startedAtMs: Double? = nil,
+         lastActivityMs: Double? = nil, tokPerSec: Double? = nil, version: String? = nil,
+         account: String? = nil, previous: Bool? = nil, resumable: Bool? = nil) {
+        self.rowKey = rowKey; self.sourceDevice = sourceDevice; self.sessionId = sessionId
+        self.label = label; self.name = name; self.title = title; self.topic = topic
+        self.project = project; self.cwd = cwd; self.host = host; self.machine = machine
+        self.kind = kind; self.harness = harness; self.phase = phase; self.status = status
+        self.activity = activity; self.awaitingReason = awaitingReason; self.question = question
+        self.todos = todos; self.timeline = timeline; self.lastAgentLine = lastAgentLine
+        self.preview = preview; self.files = files; self.request = request
+        self.pr = pr; self.ticket = ticket; self.subAgentCount = subAgentCount
+        self.pidCount = pidCount; self.spawnedTeam = spawnedTeam; self.startedAtMs = startedAtMs
+        self.lastActivityMs = lastActivityMs; self.tokPerSec = tokPerSec; self.version = version
+        self.account = account; self.previous = previous; self.resumable = resumable
+    }
 }
 
 /// The structured decision an agent is waiting on. Mirrors the feed's

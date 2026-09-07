@@ -384,10 +384,6 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
     // collapsed summary) and the project pulse strip embedded below the field.
     private let dispatchForm = DispatchFormView()
     private let pulseView = ProjectPulseView()
-    /// Launches fired this session that the feed has not reported yet — shown as
-    /// `launching` placeholders and resolved/expired against FeedStream.rows on
-    /// each diff (never a timer that acts). See DispatchDefaults.swift.
-    private var pendingLaunches: [PendingLaunch] = []
     /// Per-harness caption (version + sign-in) from `agents view --json`, a
     /// best-effort adornment cached on summon and folded into the summary line.
     private var agentCaptions: [String: AgentCaption] = [:]
@@ -569,7 +565,7 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
             setFormMode(fromAction: restoredDraft.action)
             selectedAgents = restoredDraft.selectedAgents
         }
-        action = dispatchForm.mode.isRun ? .run : .plan
+        action = dispatchForm.effectiveMode.isRun ? .run : .plan
         normalizeSelectionForAction()
         updateAgentButtons()
         dispatchForm.refreshSummary()
@@ -608,7 +604,6 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
             self.restoreTicketControls()
             self.refreshTicketScope()
             self.refreshPulse()
-            self.reconcilePending()
             self.rescanAttachments()
             self.loadLinearCache()
             // Live strip: watch the screenshot dirs for as long as the palette is
@@ -674,7 +669,9 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         }
         rememberProjectPick()
         rememberDispatchDefaults(agents: agents)
-        switch dispatchForm.mode {
+        // The mode this dispatch runs under: the remembered mode, or Plan when
+        // Cmd-P forced it for this one dispatch (never what was just persisted).
+        switch dispatchForm.effectiveMode {
         case .plan:
             // Plan keeps the ticket-agent flow: investigate + file a ticket / post
             // a plan (it runs --mode auto internally to read the repo + comment).
@@ -683,14 +680,15 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
                                           project: scope.project)
         case .auto, .edit:
             // Auto / Edit run headless-or-interactive with the form's dimensions,
-            // minting a Claude session id so the launch can register a placeholder
-            // and carry a non-default watchdog policy.
-            let pendings = AgentsCLI.dispatchRun(
+            // minting a Claude session id so the launch registers a `launching`
+            // placeholder with FeedStream (the pulse strip renders it) and can
+            // carry a non-default watchdog policy.
+            AgentsCLI.dispatchRun(
                 note: note, screenshotPaths: selected, agents: agents,
-                mode: dispatchForm.mode, surface: dispatchForm.surface,
+                mode: dispatchForm.effectiveMode, surface: dispatchForm.surface,
                 watchdog: dispatchForm.watchdog, runOn: dispatchForm.runOn,
-                cwd: scope.cwd, project: scope.project)
-            registerPending(pendings)
+                cwd: scope.cwd, project: scope.project,
+                attributedProject: selectedProject()?.name)
         }
         dismiss(preservingDraft: false)
     }
@@ -743,7 +741,7 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
     /// the form's mode, refresh the dependent UI, and persist the defaults so the
     /// next summon on this project starts where the owner left it.
     private func formDidChange() {
-        action = dispatchForm.mode.isRun ? .run : .plan
+        action = dispatchForm.effectiveMode.isRun ? .run : .plan
         normalizeSelectionForAction()
         updateAgentButtons()
         dispatchForm.refreshSummary()
@@ -757,7 +755,7 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
     /// `Claude 2.1.263 · this-mac · agi · Auto · Interactive · Keep moving`.
     private func dispatchSummaryLine() -> String {
         let agents = selectedAgentList()
-        let defaults = dispatchForm.defaults(agents: agents)
+        let defaults = dispatchForm.dispatchDefaults(agents: agents)
         let version = agents.count == 1 ? agentCaptions[agents[0]]?.version : nil
         return defaults.summaryLine(project: selectedProject()?.name, primaryVersion: version)
     }
@@ -772,25 +770,26 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         let visible = Set(roster.map(\.id))
         let restored = defaults.agents.filter { visible.contains($0) }
         selectedAgents = Set(restored.isEmpty ? [fallback] : restored)
-        action = dispatchForm.mode.isRun ? .run : .plan
+        action = dispatchForm.effectiveMode.isRun ? .run : .plan
         normalizeSelectionForAction()
         updateAgentButtons()
     }
 
-    /// Persist the current form + agents as this project's remembered defaults.
+    /// Persist the current form + agents as this project's remembered defaults —
+    /// the remembered mode, never a Cmd-P override (DispatchFormView.setMode).
     private func rememberDispatchDefaults(agents: [String]) {
         guard let project = selectedProject()?.name else { return }
-        dispatchForm.defaults(agents: agents).save(project: project)
+        dispatchForm.rememberedDefaults(agents: agents).save(project: project)
     }
 
     /// Map a restored draft's coarse action onto the form's mode: Plan is exact,
     /// Run keeps the form's current run mode (auto/edit) or defaults to Auto.
     private func setFormMode(fromAction restored: QuickDispatchAction) {
         if restored == .plan {
-            dispatchForm.apply(dispatchForm.defaults(agents: selectedAgentList())
+            dispatchForm.apply(dispatchForm.rememberedDefaults(agents: selectedAgentList())
                 .with(mode: .plan))
         } else if dispatchForm.mode == .plan {
-            dispatchForm.apply(dispatchForm.defaults(agents: selectedAgentList())
+            dispatchForm.apply(dispatchForm.rememberedDefaults(agents: selectedAgentList())
                 .with(mode: .auto))
         }
     }
@@ -808,44 +807,24 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         }
     }
 
-    // MARK: Pending launches + pulse (Track E)
+    // MARK: Pulse (Track E)
 
-    /// Record placeholders for a fresh dispatch and reconcile immediately.
-    private func registerPending(_ pendings: [PendingLaunch]) {
-        pendingLaunches.append(contentsOf: pendings)
-        reconcilePending()
-    }
-
-    /// Start observing the feed once, so the pulse counts and pending-launch
-    /// placeholders update as rows arrive. FeedStream.start()/addObserver are the
-    /// documented seam (a projection, never a second scheduler).
+    /// Start observing the feed once, so the pulse counts — including the
+    /// `launching` placeholder rows FeedStream publishes for a fresh dispatch —
+    /// update as rows arrive. FeedStream.start()/addObserver are the documented
+    /// seam (a projection, never a second scheduler).
     private func startFeedObservingIfNeeded() {
         guard !feedObserving else { return }
         feedObserving = true
         FeedStream.shared.start()
         FeedStream.shared.addObserver(self) { [weak self] _ in
-            self?.reconcilePending()
             self?.refreshPulse()
         }
     }
 
-    /// Resolve placeholders whose feed row arrived and expire the ones that never
-    /// started. Runs on feed diffs (never a timer that acts).
-    private func reconcilePending() {
-        guard !pendingLaunches.isEmpty else { return }
-        let rows = Array(FeedStream.shared.rows.values)
-        let now = Date().timeIntervalSince1970 * 1000
-        let resolved = PendingLaunches.resolvedKeys(pendingLaunches, rows: rows)
-        let expired = PendingLaunches.expiredKeys(pendingLaunches, rows: rows, now: now)
-        for p in pendingLaunches where expired.contains(p.key) {
-            Notifier.post(title: "Dispatch did not start", body: PendingLaunches.expiredMessage(p),
-                          agent: p.agent)
-        }
-        pendingLaunches.removeAll { resolved.contains($0.key) || expired.contains($0.key) }
-    }
-
     /// Recompute + render the pulse strip for the selected project from the feed
-    /// rows and the ranked ticket list the panel already holds.
+    /// rows (real rows plus `launching` placeholders) and the ranked ticket list
+    /// the panel already holds.
     private func refreshPulse() {
         guard let def = selectedProject() else {
             pulseView.render(project: nil, pulse: nil, live: ProjectLiveRollup(), nextUp: nil)
@@ -877,7 +856,10 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         }
     }
 
-    /// Cmd-P: switch to Plan for THIS dispatch only (not persisted).
+    /// Cmd-P: switch to Plan for THIS dispatch only. The form's non-persisting
+    /// path does not fire `onChange`, so `formDidChange` — and with it
+    /// `rememberDispatchDefaults` — never runs for it; the dependent UI is
+    /// refreshed here instead.
     func forcePlanForThisDispatch() {
         dispatchForm.forcePlanForThisDispatch()
         action = .plan

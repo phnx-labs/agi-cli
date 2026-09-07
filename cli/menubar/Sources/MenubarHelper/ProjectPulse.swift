@@ -150,7 +150,12 @@ struct ProjectLiveRollup: Equatable {
     var running = 0
     var needYou = 0
     var idle = 0
-    /// Up to three rows to show as NOW chips, not-progressing first.
+    /// Dispatches fired from the palette that the feed has not reported yet —
+    /// the `launching` placeholder rows FeedStream publishes (PHNX-4005).
+    var launching = 0
+    /// Up to three rows to show as NOW chips: a fresh launch first (it is the
+    /// feedback for what the operator just did, and lives at most 60 s), then
+    /// not-progressing (need-you, idle), then running.
     var nowRows: [SessionRow] = []
 
     /// True when a row belongs to `project` — matched on the row's `project`
@@ -161,24 +166,28 @@ struct ProjectLiveRollup: Equatable {
     }
 
     /// A row needs a human when it is waiting on input or has failed; it is
-    /// running when working; otherwise idle. Mirrors the feed's own buckets
-    /// (SessionRow.phase / activity), kept coarse.
+    /// running when working; a dispatch placeholder is launching; otherwise
+    /// idle. Mirrors the feed's own buckets (SessionRow.phase / activity), kept
+    /// coarse.
     static func bucket(_ row: SessionRow) -> String {
         let phase = row.phase?.lowercased() ?? ""
         let activity = row.activity?.lowercased() ?? ""
+        if phase == PendingLaunches.launchingPhase { return "launching" }
         if phase == "waiting" || phase == "failed" || activity == "waiting_input" { return "need-you" }
         if phase == "running" || activity == "working" { return "running" }
         return "idle"
     }
 
-    /// Rank for NOW ordering: not-progressing first (need-you, then idle), then
-    /// running last — the design rule that idle-but-unfinished is the highest-risk
-    /// state, never buried below running (root AGENTS.md).
+    /// Rank for NOW ordering: a launching placeholder first (the operator's own
+    /// dispatch, gone within 60 s either way), then not-progressing (need-you,
+    /// then idle), then running last — the design rule that idle-but-unfinished
+    /// is the highest-risk state, never buried below running (root AGENTS.md).
     private static func nowOrder(_ bucket: String) -> Int {
         switch bucket {
-        case "need-you": return 0
-        case "idle": return 1
-        default: return 2
+        case "launching": return 0
+        case "need-you": return 1
+        case "idle": return 2
+        default: return 3
         }
     }
 
@@ -187,6 +196,7 @@ struct ProjectLiveRollup: Equatable {
         var r = ProjectLiveRollup()
         for row in mine {
             switch bucket(row) {
+            case "launching": r.launching += 1
             case "need-you": r.needYou += 1
             case "running": r.running += 1
             default: r.idle += 1
@@ -306,6 +316,7 @@ final class ProjectPulseView: NSView {
         }
         if let prs = pulse?.openPrCount, prs > 0 { parts.append("\(prs) PR\(prs == 1 ? "" : "s")") }
         var liveBits: [String] = []
+        if live.launching > 0 { liveBits.append("\u{25CC}\(live.launching)") }
         if live.running > 0 { liveBits.append("\u{25B6}\(live.running)") }
         if live.needYou > 0 { liveBits.append("\u{26A0}\(live.needYou)") }
         if live.idle > 0 { liveBits.append("\u{23F8}\(live.idle)") }
@@ -330,11 +341,16 @@ final class ProjectPulseView: NSView {
     }
     private var nowChips: [SessionRow] = []
 
+    /// `◌ launching · <name>` for a placeholder; otherwise the bucket dot + the
+    /// row's title ladder + its PR number.
     static func chipTitle(_ row: SessionRow) -> String {
-        let dot = ProjectLiveRollup.bucket(row) == "need-you" ? "\u{26A0}"
-            : ProjectLiveRollup.bucket(row) == "running" ? "\u{25B6}" : "\u{23F8}"
+        let bucket = ProjectLiveRollup.bucket(row)
+        let dot = bucket == "launching" ? "\u{25CC}"
+            : bucket == "need-you" ? "\u{26A0}"
+            : bucket == "running" ? "\u{25B6}" : "\u{23F8}"
         let name = row.topic ?? row.label ?? row.title ?? row.name ?? "session"
         let short = name.count > 22 ? String(name.prefix(21)) + "\u{2026}" : name
+        if bucket == "launching" { return "\(dot) launching \u{00B7} \(short)" }
         let pr = (row.pr?.number).map { " #\($0)" } ?? ""
         return "\(dot) \(short)\(pr)"
     }
@@ -343,6 +359,7 @@ final class ProjectPulseView: NSView {
         switch ProjectLiveRollup.bucket(row) {
         case "need-you": return .systemOrange
         case "running": return kAccentPulse
+        case "launching": return .tertiaryLabelColor
         default: return .secondaryLabelColor
         }
     }

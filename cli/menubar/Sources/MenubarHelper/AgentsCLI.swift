@@ -977,15 +977,22 @@ enum AgentsCLI {
 
     // Fan a dispatch-form Run out across the selected agents. Mirrors
     // dispatchQuickFix (detached + `--notify` so the run outlives this helper), but
-    // carries the new dimensions and mints a Claude session id so it can (a) return
-    // a placeholder to register with the feed and (b) set a non-default watchdog
-    // policy on it at dispatch. Returns the placeholders for the caller to register
-    // — the launch is fire-and-forget, but the palette shows it took.
+    // carries the new dimensions and mints a Claude session id so it can (a)
+    // register a `launching` placeholder with FeedStream, keyed by that id, and
+    // (b) set a non-default watchdog policy on it at dispatch. The launch is
+    // fire-and-forget, but the placeholder is what shows the operator it took —
+    // and a child that exits non-zero before its row arrives fails the
+    // placeholder immediately with its stderr tail ("did not start: …").
+    // `attributedProject` is the palette's selected project, recorded on the
+    // placeholder so the pulse strip counts it even when the argv scoped by
+    // `--cwd` (a worktree inside the project). Returns the placeholders it
+    // registered.
     @discardableResult
     static func dispatchRun(note: String, screenshotPaths: [String], agents: [String],
                             mode: DispatchMode, surface: DispatchSurface,
                             watchdog: WatchdogPolicy, runOn: String,
-                            cwd: String? = nil, project: String? = nil) -> [PendingLaunch] {
+                            cwd: String? = nil, project: String? = nil,
+                            attributedProject: String? = nil) -> [PendingLaunch] {
         let selected = agents.isEmpty ? ["claude"] : agents
         let prompt = quickFixPrompt(note: note, screenshotPaths: screenshotPaths)
         let name = quickDispatchName(note: note)
@@ -999,7 +1006,21 @@ enum AgentsCLI {
             let runArgv = dispatchArgs(agent: agent, prompt: prompt, name: name,
                                        mode: mode, surface: surface, runOn: runOn,
                                        project: project, cwd: cwd, sessionId: sessionId)
-            runDetached(argv(runArgv))
+            let pending = PendingLaunch(key: sessionId ?? name,
+                                        byUuid: sessionId != nil,
+                                        agent: agent, name: name,
+                                        project: attributedProject ?? project, cwd: cwd,
+                                        launchedAtMs: nowMs, stderrTail: nil)
+            FeedStream.shared.registerPlaceholder(pending)
+            runDetachedWithStderrTail(argv(runArgv)) { status, tail in
+                // Exit 0 says nothing about the session (an interactive launch
+                // returns once the terminal is up; a headless one returns when
+                // the agent finishes, long after the row resolved the
+                // placeholder). Non-zero before the row arrived is "did not
+                // start" — fail the placeholder now, with the CLI's own words.
+                guard status != 0 else { return }
+                FeedStream.shared.failPlaceholder(key: pending.key, stderrTail: tail)
+            }
             // A non-default watchdog policy is a one-shot command on the minted id.
             // It can only run when the id is known at dispatch, which the CLI mints
             // only for Claude (--session-id is Claude-only, exec.ts:1181); other
@@ -1008,10 +1029,7 @@ enum AgentsCLI {
             if let sessionId, watchdog.needsPolicyCommand {
                 runDetached(argv(watchdogArgs(sessionId: sessionId, policy: watchdog)))
             }
-            pendings.append(PendingLaunch(key: sessionId ?? name,
-                                          byUuid: sessionId != nil,
-                                          agent: agent, name: name,
-                                          launchedAtMs: nowMs, stderrTail: nil))
+            pendings.append(pending)
         }
         return pendings
     }
@@ -1154,6 +1172,80 @@ enum AgentsCLI {
         p.standardOutput = FileHandle.nullDevice
         p.standardError = FileHandle.nullDevice
         try? p.run()
+    }
+
+    /// Bytes of a child's stderr kept for a "did not start" report.
+    static let stderrTailBytes = 2048
+
+    /// The same detached, unbounded lifetime as `runDetached` (no deadline, no
+    /// reap — see the note above), but the child's stderr is drained into a
+    /// bounded tail and `onExit` receives its status plus that tail on the main
+    /// queue. Draining uses a readability handler, so a run that lives for hours
+    /// costs no blocked thread; the process object is retained until exit so the
+    /// termination handler can fire. A child that could not even be spawned
+    /// reports status 127 with the spawn error as its tail. Internal (not
+    /// private) so the dispatch self-test can drive it against a real child.
+    private static var tailed: [Process] = []
+    static func runDetachedWithStderrTail(_ argv: [String],
+                                          onExit: @escaping (Int32, String) -> Void) {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: argv[0])
+        p.arguments = Array(argv.dropFirst())
+        p.standardOutput = FileHandle.nullDevice
+        let err = Pipe()
+        p.standardError = err
+        let tail = StderrTail(limit: stderrTailBytes)
+        err.fileHandleForReading.readabilityHandler = { handle in
+            let chunk = handle.availableData
+            if chunk.isEmpty {
+                handle.readabilityHandler = nil
+            } else {
+                tail.append(chunk)
+            }
+        }
+        p.terminationHandler = { proc in
+            err.fileHandleForReading.readabilityHandler = nil
+            // Anything still buffered after EOF.
+            tail.append(err.fileHandleForReading.readDataToEndOfFile())
+            let status = proc.terminationStatus
+            let text = tail.text
+            DispatchQueue.main.async {
+                tailed.removeAll { $0 === proc }
+                onExit(status, text)
+            }
+        }
+        do {
+            try p.run()
+            tailed.append(p)
+        } catch {
+            err.fileHandleForReading.readabilityHandler = nil
+            let message = error.localizedDescription
+            DispatchQueue.main.async { onExit(127, message) }
+        }
+    }
+
+    /// A bounded byte ring for the last `limit` bytes of a stream, appended from
+    /// the pipe's reader and read once at exit. Serialized on its own lock since
+    /// the readability handler and the termination handler run on different
+    /// threads.
+    final class StderrTail {
+        private let limit: Int
+        private var bytes = Data()
+        private let lock = NSLock()
+        init(limit: Int) { self.limit = limit }
+        func append(_ chunk: Data) {
+            guard !chunk.isEmpty else { return }
+            lock.lock(); defer { lock.unlock() }
+            bytes.append(chunk)
+            if bytes.count > limit { bytes = bytes.suffix(limit) }
+        }
+        /// The tail decoded as UTF-8 (lossy at a cut multibyte boundary) and
+        /// trimmed.
+        var text: String {
+            lock.lock(); defer { lock.unlock() }
+            return String(decoding: bytes, as: UTF8.self)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
     }
 
     // Async, non-blocking process whose stdout is captured and handed to `onFinish`
