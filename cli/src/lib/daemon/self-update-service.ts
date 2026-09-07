@@ -47,6 +47,7 @@ import {
   downloadVerifiedTarball,
   ensureGlobalBinLinks,
   installPackageIntoPrefix,
+  installLooksSettled,
   installPackageWithBun,
   refreshAliasShims,
   resolveRunningPackageRoot,
@@ -107,6 +108,8 @@ export interface SelfUpdateDeps {
   currentVersion(): string;
   /** The version of the install on disk right now — differs from `currentVersion` once another process upgraded it. */
   installedVersion(): string;
+  /** True when the install on disk looks complete (see `installLooksSettled`) — the gate before relaunching onto a version another process wrote. */
+  installedIsSettled(): boolean;
   isDevBuild(): boolean;
   detectShadow(): boolean;
   packageRoot(): string;
@@ -212,6 +215,7 @@ export function defaultSelfUpdateDeps(): SelfUpdateDeps {
   return {
     currentVersion: () => getCliVersion(),
     installedVersion: () => getCliVersionFresh(),
+    installedIsSettled: () => installLooksSettled(resolveRunningPackageRoot(__dirname)),
     isDevBuild: () => isDevVersionStamp(getCliVersion()),
     detectShadow: () => detectAgentsBinaryShadows().length > 0,
     packageRoot: () => resolveRunningPackageRoot(__dirname),
@@ -283,19 +287,29 @@ async function runSelfUpdateAttempt(
   signal: AbortSignal,
   deps: SelfUpdateDeps,
 ): Promise<SelfUpdateOutcome> {
-  if (deps.isDevBuild()) return { updated: false, reason: DEV_BUILD_DECLINE };
+  // One decline source for the periodic tick and the on-demand IPC path
+  // (`selfUpdateSyncDeclineReason`): dev build; shadowed install — except when
+  // the install on disk is already newer than the running code, because a
+  // relaunch installs nothing and a second `agents` on the box is irrelevant to
+  // it (otherwise a shadowed worker never leaves the release it booted on).
+  const syncDecline = selfUpdateSyncDeclineReason(deps);
+  if (syncDecline) return { updated: false, reason: syncDecline };
 
   // Another agents process (an operator's `agents` command auto-updating, an
   // `agents upgrade`, the installer) may already have replaced the install
   // under this daemon. The code on disk is then newer than the code in memory
-  // and there is nothing to download or verify — that path byte-verified its
-  // install before it returned. Exit for the OS-supervisor relaunch. This runs
-  // BEFORE the shadow decline on purpose: a relaunch installs nothing, so a
-  // second copy of `agents` elsewhere on the box is irrelevant to it, and
-  // otherwise a shadowed worker never leaves the release it booted on.
+  // and there is nothing to download — that path verified its install before
+  // it returned. Exit for the OS-supervisor relaunch, once the install has
+  // settled: npm's reify is atomic but bun's is not, so a version bump alone
+  // could be bun mid-extraction (`installLooksSettled`). Waiting one tick is
+  // cheap; relaunching into a half-written tree is a supervisor crash-loop.
   const current = deps.currentVersion();
   const installed = deps.installedVersion();
   if (installedIsNewerThanRunning(installed, current)) {
+    if (!deps.installedIsSettled()) {
+      ctx.log('INFO', `self-update: the install on disk is ${installed} (this daemon is running ${current}) but it is still settling; relaunch deferred to the next tick`);
+      return { updated: false, reason: 'installed version still settling' };
+    }
     ctx.log(
       'INFO',
       `self-update: the install on disk is ${installed} but this daemon is still running ${current}; ` +
@@ -303,8 +317,6 @@ async function runSelfUpdateAttempt(
     );
     return { updated: true };
   }
-
-  if (deps.detectShadow()) return { updated: false, reason: SHADOW_DECLINE };
 
   let metadata: NpmLatestMetadata;
   try {
@@ -424,6 +436,7 @@ export function triggerSelfUpdateInBackground(
 export function selfUpdateSyncDeclineReason(deps: SelfUpdateDeps = defaultSelfUpdateDeps()): string | null {
   if (deps.isDevBuild()) return DEV_BUILD_DECLINE;
   // A stale install is never declined by a shadow: the relaunch installs nothing.
+  // (Whether that install has SETTLED is the attempt's call, not a decline.)
   if (deps.detectShadow() && !installedIsNewerThanRunning(deps.installedVersion(), deps.currentVersion())) {
     return SHADOW_DECLINE;
   }

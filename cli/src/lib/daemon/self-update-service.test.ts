@@ -97,6 +97,7 @@ function baseDeps(overrides: Partial<SelfUpdateDeps>): SelfUpdateDeps {
   return {
     currentVersion: () => '1.0.0',
     installedVersion: () => '1.0.0',
+    installedIsSettled: () => true,
     isDevBuild: () => false,
     detectShadow: () => false,
     packageRoot: () => { throw new Error('packageRoot not stubbed'); },
@@ -226,6 +227,24 @@ describe('attemptSelfUpdateAndExit', () => {
     expect(outcome).toEqual({ updated: true });
     expect(fetchLatestMetadata).not.toHaveBeenCalled();
     expect(selfUpdateSyncDeclineReason(baseDeps({ detectShadow: () => true, currentVersion: () => '1.0.0', installedVersion: () => '1.0.1' }))).toBeNull();
+  });
+
+  it('a newer install that has not settled defers the relaunch instead of exiting into a half-written tree', async () => {
+    // bun's write into the package dir is not atomic (self-update.ts,
+    // installPackageWithBun): package.json can be on disk before dist/ has
+    // finished landing. Trusting the version alone would relaunch into that.
+    const { ctx, logs } = makeCtx();
+    const fetchLatestMetadata = vi.fn();
+
+    const outcome = await attemptSelfUpdateAndExit(
+      ctx,
+      new AbortController().signal,
+      baseDeps({ currentVersion: () => '1.0.0', installedVersion: () => '1.1.0', installedIsSettled: () => false, fetchLatestMetadata }),
+    );
+
+    expect(outcome).toEqual({ updated: false, reason: 'installed version still settling' });
+    expect(fetchLatestMetadata).not.toHaveBeenCalled();
+    expect(logs.some((l) => l.level === 'INFO' && /still settling; relaunch deferred/.test(l.message))).toBe(true);
   });
 
   it('an unknown on-disk version never triggers a relaunch', async () => {

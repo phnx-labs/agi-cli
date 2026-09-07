@@ -69,7 +69,9 @@ record of `null` for it.
   tick compares the on-disk `package.json` version (`getCliVersionFresh`) with
   the version the process booted with; when another `agents` process has
   already upgraded the install underneath the daemon, it exits for the relaunch
-  without downloading anything — the writer of that install byte-verified it.
+  without downloading anything — the writer of that install byte-verified it —
+  once that install has settled (`installLooksSettled`: package.json at rest for
+  a minute and every `bin` entry present; bun's write is not atomic).
   No-ops on a dev build, and on a shadowed install unless the disk is already
   newer (a relaunch installs nothing, so a shadow copy cannot make it unsafe);
   the shadow no-op is logged once per process. Also reachable on demand via the `request-self-update`
