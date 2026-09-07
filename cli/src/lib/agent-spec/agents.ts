@@ -160,6 +160,11 @@ export function findInPath(command: string, options: NativeBinaryResolutionOptio
       try {
         const stat = fs.statSync(full);
         if (!stat.isFile()) continue;
+        // A shell only runs an executable file; `which` skips a mode-644 namesake and
+        // so must this, or a stray non-executable `secrets`/`claude` file earlier on
+        // PATH would shadow the real binary further down. On win32 the mode bit is
+        // meaningless (PATHEXT decides), so the check is POSIX-only.
+        if (process.platform !== 'win32') fs.accessSync(full, fs.constants.X_OK);
         const native = resolveNativeBinaryPath(command, full, options);
         if (native) return native;
       } catch {
