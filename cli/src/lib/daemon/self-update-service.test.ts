@@ -26,6 +26,7 @@ import {
   installAndVerifyDefault,
   triggerSelfUpdateInBackground,
   type SelfUpdateDeps,
+  selfUpdateSyncDeclineReason,
 } from './self-update-service.js';
 
 const tempDirs: string[] = [];
@@ -95,6 +96,7 @@ function makeCtx(): { ctx: DaemonContext; logs: Array<{ level: string; message: 
 function baseDeps(overrides: Partial<SelfUpdateDeps>): SelfUpdateDeps {
   return {
     currentVersion: () => '1.0.0',
+    installedVersion: () => '1.0.0',
     isDevBuild: () => false,
     detectShadow: () => false,
     packageRoot: () => { throw new Error('packageRoot not stubbed'); },
@@ -186,6 +188,57 @@ describe('attemptSelfUpdateAndExit', () => {
 
     expect(outcome).toEqual({ updated: false, reason: 'dev build — self-update is a no-op' });
     expect(fetchLatestMetadata).not.toHaveBeenCalled();
+  });
+
+  it('an install another process already upgraded on disk relaunches without touching the registry or installing', async () => {
+    // The fleet case (2026-09-07): every operator-typed `agents` command on a
+    // worker auto-updates the install, so the disk moved 1.22.79 -> 1.22.88
+    // while the daemon kept running the code it booted with. Nothing to
+    // download or verify — exit for the OS-supervisor relaunch.
+    const { ctx, logs } = makeCtx();
+    const fetchLatestMetadata = vi.fn();
+    const installAndVerify = vi.fn();
+
+    const outcome = await attemptSelfUpdateAndExit(
+      ctx,
+      new AbortController().signal,
+      baseDeps({ currentVersion: () => '1.0.0', installedVersion: () => '1.1.0', fetchLatestMetadata, installAndVerify }),
+    );
+
+    expect(outcome).toEqual({ updated: true });
+    expect(fetchLatestMetadata).not.toHaveBeenCalled();
+    expect(installAndVerify).not.toHaveBeenCalled();
+    expect(logs.some((l) => l.level === 'INFO' && /on disk is 1\.1\.0 but this daemon is still running 1\.0\.0/.test(l.message))).toBe(true);
+  });
+
+  it('a stale install relaunches even when a shadow copy would otherwise decline the tick', async () => {
+    // A relaunch installs nothing, so a second `agents` on PATH cannot make it
+    // unsafe; without this a shadowed worker never leaves the release it booted on.
+    const { ctx } = makeCtx();
+    const fetchLatestMetadata = vi.fn();
+
+    const outcome = await attemptSelfUpdateAndExit(
+      ctx,
+      new AbortController().signal,
+      baseDeps({ detectShadow: () => true, currentVersion: () => '1.0.0', installedVersion: () => '1.0.1', fetchLatestMetadata }),
+    );
+
+    expect(outcome).toEqual({ updated: true });
+    expect(fetchLatestMetadata).not.toHaveBeenCalled();
+    expect(selfUpdateSyncDeclineReason(baseDeps({ detectShadow: () => true, currentVersion: () => '1.0.0', installedVersion: () => '1.0.1' }))).toBeNull();
+  });
+
+  it('an unknown on-disk version never triggers a relaunch', async () => {
+    const { ctx } = makeCtx();
+    const outcome = await attemptSelfUpdateAndExit(
+      ctx,
+      new AbortController().signal,
+      baseDeps({
+        installedVersion: () => 'unknown',
+        fetchLatestMetadata: async () => ({ version: '1.0.0', integrity: 'sha512-x', tarball: 'http://x' }),
+      }),
+    );
+    expect(outcome).toEqual({ updated: false, reason: 'already current (1.0.0)' });
   });
 
   it('a shadowed install no-ops immediately without checking the registry', async () => {

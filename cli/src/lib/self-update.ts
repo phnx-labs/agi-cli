@@ -310,27 +310,46 @@ export function resolveRunningPackageRoot(
   dirname: string,
   execPath: string = process.execPath,
 ): string {
-  const fromDirname = path.resolve(dirname, '..');
-  if (!isBunVirtualPath(fromDirname)) return fromDirname;
+  if (!isBunVirtualPath(dirname)) {
+    // Walk up from the CALLING module's directory to the package.json that
+    // names this package. The previous `path.resolve(dirname, '..')` was only
+    // right for a module one level below the root (dist/bootstrap.js); from
+    // dist/lib/daemon/self-update-service.js it answered `dist/lib`, so
+    // `deriveGlobalPrefix` threw "not an npm-managed install" on every daemon
+    // self-update tick, fleet-wide, and no daemon ever relaunched onto a
+    // release (2026-09-07: eight workers still running 1.22.79 code four
+    // releases later).
+    const found = findPackageRootAbove(dirname);
+    if (found) return found;
+    throw new Error(
+      `Cannot locate the running agents-cli install: no ${NPM_PACKAGE_NAME} package.json above ` +
+        `${dirname}. Reinstall with: npm install -g ${NPM_PACKAGE_NAME}`,
+    );
+  }
 
   if (!execPath || isBunVirtualPath(execPath)) {
     throw new Error(
-      `Cannot locate the running agents-cli install: __dirname is the Bun virtual path ${fromDirname} ` +
+      `Cannot locate the running agents-cli install: __dirname is the Bun virtual path ${dirname} ` +
         `and process.execPath (${execPath || '(empty)'}) is not a real file. ` +
         `Reinstall with: npm install -g ${NPM_PACKAGE_NAME}`,
     );
   }
 
-  let dir = path.dirname(path.resolve(execPath));
+  const found = findPackageRootAbove(path.dirname(path.resolve(execPath)));
+  if (found) return found;
+  throw new Error(
+    `Cannot locate the running agents-cli install: no ${NPM_PACKAGE_NAME} package.json above ` +
+      `${execPath}. Reinstall with: npm install -g ${NPM_PACKAGE_NAME}`,
+  );
+}
+
+/** Nearest ancestor of `start` (inclusive) whose package.json names this package, or null. */
+function findPackageRootAbove(start: string): string | null {
+  let dir = path.resolve(start);
   for (;;) {
     if (isPackageRoot(dir)) return dir;
     const parent = path.dirname(dir);
-    if (parent === dir) {
-      throw new Error(
-        `Cannot locate the running agents-cli install: no ${NPM_PACKAGE_NAME} package.json above ` +
-          `${execPath}. Reinstall with: npm install -g ${NPM_PACKAGE_NAME}`,
-      );
-    }
+    if (parent === dir) return null;
     dir = parent;
   }
 }
