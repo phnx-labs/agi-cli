@@ -1,13 +1,12 @@
 /**
  * runDaemon() migration wiring (RUSH-3193 P1/P3): the session-index warm
- * service (P1) and watchdog/device-probe/self-heal/keychain-reap/
- * state-dir-check (P3) are all registered on `ServiceSupervisor` (each gated
- * by its own `isEnabled()` toggle) instead of a bare `setInterval`, and the
- * supervisor is torn down on shutdown. Drives the REAL compiled daemon as a
- * subprocess, like the other `daemon.*.test.ts` integration slices — the
- * wiring lives inside `runDaemon()`, which cannot be unit-tested in isolation
- * (single-instance guard, subsystem boot order, an infinite `await new
- * Promise(() => {})`).
+ * service (P1) and watchdog/device-probe/self-heal/state-dir-check (P3) are
+ * all registered on `ServiceSupervisor` (each gated by its own `isEnabled()`
+ * toggle) instead of a bare `setInterval`, and the supervisor is torn down on
+ * shutdown. Drives the REAL compiled daemon as a subprocess, like the other
+ * `daemon.*.test.ts` integration slices — the wiring lives inside
+ * `runDaemon()`, which cannot be unit-tested in isolation (single-instance
+ * guard, subsystem boot order, an infinite `await new Promise(() => {})`).
  */
 
 import { describe, it, expect } from 'vitest';
@@ -122,7 +121,7 @@ describe('runDaemon() supervisor wiring (integration: real daemon subprocess)', 
   // migrated out of runDaemon() and onto the same supervisor. One real boot
   // checks the composed set rather than isolated wrapper stand-ins.
   const PERIODIC_SERVICE_IDS = [
-    'watchdog', 'device-probe', 'self-heal', 'keychain-reap', 'state-dir-check',
+    'watchdog', 'device-probe', 'self-heal', 'state-dir-check',
     'session-state', 'daemon-heartbeat', 'tmux-reap', 'browser-task-reap',
     // PHNX-3608: catch-up recovery is a supervised service now. Its first tick
     // fires during startAll and reads `scheduler`; a real boot here is what
@@ -136,9 +135,9 @@ describe('runDaemon() supervisor wiring (integration: real daemon subprocess)', 
   // enabled service must still publish a supervisor-owned health record on a
   // real daemon boot.
   const ALL_SUPERVISED_SERVICE_IDS = [
-    'session-state', 'secrets-broker', 'monitors', 'account-state',
+    'session-state', 'monitors', 'account-state',
     'account-auth', 'catchup', 'browser-ipc', 'session-index', 'watchdog',
-    'device-probe', 'self-heal', 'self-update', 'keychain-reap', 'auth-sync',
+    'device-probe', 'self-heal', 'self-update', 'auth-sync',
     'usage-sync', 'webhook-receiver', 'daemon-heartbeat', 'tmux-reap',
     'browser-task-reap', 'state-dir-check',
   ] as const;
@@ -232,7 +231,6 @@ describe('runDaemon() supervisor wiring (integration: real daemon subprocess)', 
         'Watchdog service disabled',
         'Device-probe service disabled',
         'Self-heal service disabled',
-        'Keychain-reap service disabled',
         'State-dir self-check disabled',
         'Live session-state service disabled',
         'Daemon heartbeat service disabled',

@@ -151,7 +151,7 @@ leaves the device that minted it.
 
 Durable worker credentials live in one reserved store per harness, named
 `__<harness>__` from a hard-coded table (`RESERVED_STORES`, derived from
-`AGENT_IDS`; `lib/secrets/reserved-stores.ts`). A user-created bundle whose name
+`AGENT_IDS`; `lib/reserved-stores.ts`). A user-created bundle whose name
 starts with `__` — or the reserved `auth` alias — is refused (`isReservedStoreName`).
 The store accepts only a **setup-token** or an **API key** at write time; a
 rotating OAuth/session file is rejected with a harness-specific reason (the
@@ -216,7 +216,7 @@ from the single legacy `auth` bundle to every portable account:
   publisher pushes a reserved store to a peer whenever that peer is missing **any**
   of its keys — so a newly-added account propagates within one tick, instead of
   being hidden behind a bundle-coarse "already has the bundle" verdict.
-  (`planReservedStoreSync` / `reservedSyncTargets`, `lib/secrets/reserved-sync.ts`.)
+  (`planReservedStoreSync` / `reservedSyncTargets`, `lib/secrets-policy.ts`.)
 - **Pushes target `role=worker` devices only.** A headed (`personal`/`desktop`)
   peer receives the account **row** through the normal repo sync, but **never a
   durable key** — it authenticates from its own native login (invariant 7). The
@@ -231,7 +231,8 @@ from the single legacy `auth` bundle to every portable account:
   `per-device` slot and no push. Slot reconciliation runs only on a non-headed
   device.
 - **Invariant 1 (transport, retain nothing).** The daemon moves a durable key over
-  the existing encrypted SSH bundle push (`lib/secrets/push.ts`) and retains
+  the existing encrypted SSH bundle push (the process client's
+  `pushBundleToHostAsync`, `lib/secrets-client.ts`) and retains
   nothing beyond its own store; slot materialization writes only locally on the box
   where the key landed. A native OAuth/session file is never transported
   (`fleet/auth-sync.ts` `isCredentialSafeToPropagate` stays `false`).

@@ -1004,7 +1004,7 @@ never enter Git. **The credential push is per KEY and per ROLE, not bundle-coars
 (PHNX-3940 T6).** Each portable account resolves to one reserved-store key
 `<ENV>_<accountId>` in `__<harness>__` (a claude row predating T1 falls back to the
 legacy `auth` alias keyed by email); the elected single publisher (`syncReservedStores`,
-[`reserved-sync.ts`](src/lib/secrets/reserved-sync.ts)) pushes a reserved store to a
+[`secrets-policy.ts`](src/lib/secrets-policy.ts)) pushes a reserved store to a
 peer whenever that peer is missing **any** of its keys — so a newly-added account
 propagates within one tick instead of hiding behind a coarse "already has the bundle"
 verdict. Pushes target `role=worker` peers only: a headed (`personal`/`desktop`) peer
@@ -1364,7 +1364,7 @@ muse is **conditional** (email-only), the device-scoped opaque harnesses
 exists, and the rest are discovery-only/unsupported. The worker credential kind lives in
 [`harness-auth-capabilities.ts`](src/lib/harness-auth-capabilities.ts)
 (`HARNESS_AUTH`); the reserved store that holds it is
-[`reserved-stores.ts`](src/lib/secrets/reserved-stores.ts) (see
+[`reserved-stores.ts`](src/lib/reserved-stores.ts) (see
 [`docs/credential-management.md` §Slots and reserved stores](docs/credential-management.md#slots-and-reserved-stores-phnx-3940)):
 claude mints a `setup-token`; codex/grok/cursor/opencode/droid carry a provider
 API key; kimi and antigravity have no portable credential and log in per box
@@ -1549,9 +1549,14 @@ is a signed + notarized GitHub release asset on its OWN tag, downloaded and veri
 demand — see `src/lib/helper-versions.ts` for the per-helper version floors. That is what
 lets an ordinary CLI release be produced without a signing Mac.
 
+A third helper used to live in this table — the keychain broker
+(`Agents CLI.app`) behind the old in-repo secrets engine. It moved out of this
+repo entirely with the standalone `secrets` engine (PHNX-3989): the standalone
+downloads, verifies, and manages its own signed helper release now, off
+`helper-versions.ts` and off this CLI's tarball/release path completely.
+
 | Helper | Source | Ships in tarball? | Resolver |
 |---|---|---|---|
-| Keychain broker | `src/lib/secrets/keychain-helper.swift` → `bin/Agents CLI.app` | **No** (RUSH-3100) — signed + notarized `Agents_CLI.app.zip` GitHub **release asset** on the helper's own `keychain/v<x.y.z>` tag, downloaded on demand. The asset name is **underscored, not spaced**: GitHub rewrites a space to a dot at upload, so `Agents CLI.app.zip` was served as `Agents.CLI.app.zip` and every client 404'd. No DR pin (Team + notarization only, unlike the menu-bar helper): keychain items are gated by the access-group entitlement + biometry, not a DR-keyed grant. | `src/lib/secrets/install-helper.ts`, `src/lib/secrets/download-keychain.ts` (shared machinery in `src/lib/helper-download.ts`) |
 | Menu-bar helper | [`menubar/`](menubar) (SwiftPM) → `bin/MenubarHelper.app` | **No** (RUSH-3100) — signed + notarized `MenubarHelper.app.zip` GitHub **release asset** on the helper's own `menubar/v<x.y.z>` tag, downloaded on demand | `src/lib/menubar/install-menubar.ts`, `src/lib/menubar/download-menubar.ts` (shared machinery in `src/lib/helper-download.ts`) |
 | Standalone CLI binary | `src/` → `bun build --compile` → `bin/agents-macos` | **No** — dropped from the tarball (RUSH-3026); macOS installs fall back to the JS entrypoint until it returns as a per-release GitHub asset | `scripts/postinstall.js` |
 | computer-mac | [`../../native/computer-mac`](../../native/computer-mac) | No — signed + notarized GitHub **release asset** on its own `computer-mac/v<x.y.z>` tag, downloaded on demand | `src/lib/computer/computer-rpc.ts`, `src/lib/computer/download.ts` (shared machinery in `src/lib/helper-download.ts`) |
@@ -1912,13 +1917,15 @@ commands. See [`docs/secrets.md`](docs/secrets.md) → *Pushing to a headless si
 
 **Why the tarball no longer needs a Mac (RUSH-3100).** It used to bundle
 `dist/lib/secrets/Agents CLI.app` — a `swiftc`-compiled keychain helper, Developer-ID
-codesigned and notarized — and `prepack`
-([`scripts/verify-keychain-helper.sh`](scripts/verify-keychain-helper.sh)) refused to pack
-unless that signed binary matched a pinned sha. Since CI runners are Linux and cannot
-produce it, **that gate, not the code, is what chained an ordinary release to a signing
-Mac.** The bundles are gone from the tarball; the helper is a release asset on its own
-tag, downloaded and verified on demand. Both `verify-*-helper.sh` scripts are retained —
-they are still the right gate for a *helper* release — they just no longer block the CLI
+codesigned and notarized — and `prepack` (`scripts/verify-keychain-helper.sh`,
+since deleted with the engine — PHNX-3989) refused to pack unless that signed
+binary matched a pinned sha. Since CI runners are Linux and cannot produce it,
+**that gate, not the code, is what chained an ordinary release to a signing
+Mac.** The bundle is gone from the tarball, and the keychain helper itself
+moved out of this repo entirely with the standalone `secrets` engine — it is
+no longer built, signed, or verified anywhere here.
+[`scripts/verify-menubar-helper.sh`](scripts/verify-menubar-helper.sh) remains
+the right gate for that helper's own release; it never blocked the CLI
 tarball. Rebuild a helper only when its own sources change; the input digest in
 [`scripts/release-manifest.sh`](scripts/release-manifest.sh) is what decides that.
 
@@ -2052,7 +2059,7 @@ either). Any digest gate reports "changed" for precisely the skew case it was
 meant to exempt. Ownership is the only signal here that is stable across
 independently-signed builds. Related: the secrets broker hit the same
 multi-install failure and answered it differently, by keeping a *hot* broker alive
-across version skew (`shouldTeardownVersionSkewedBroker`, `src/lib/secrets/agent.ts`;
+across version skew (`shouldTeardownVersionSkewedBroker`, the standalone `secrets` engine's own agent.ts;
 #435, PR #909) — same disease, and a third `KeepAlive` helper will need one of
 these two answers rather than a fresh rediscovery.
 

@@ -2,10 +2,11 @@
  * Benchmark for the CLI entry hot path: `checkForUpdates()` (index.ts:755) and
  * `spawnDetachedSync()` (index.ts:1330), both of which run on EVERY ordinary
  * `agents` invocation except pure `--help`/`--version` (index.ts:1319-1331 guards
- * them behind `!helpOrVersionRequested`). The comment at index.ts:51 flags this
- * same pair as the reason the secrets-broker sync commands are intercepted
- * above commander registration, before `checkForUpdates()`/`spawnDetachedSync()`
- * would otherwise fire on every cache-hit read.
+ * them behind `!helpOrVersionRequested`). This pair used to be the reason the
+ * secrets-broker sync commands were intercepted above commander registration,
+ * before `checkForUpdates()`/`spawnDetachedSync()` would otherwise fire on
+ * every cache-hit read — that interception moved out entirely with the
+ * standalone `secrets` engine (PHNX-3989).
  *
  * `checkForUpdates` (index.ts:755-779) and its helper `maybeWarnMultiInstall`
  * (index.ts:535-575) are NOT exported -- they are private to index.ts, and
@@ -82,7 +83,6 @@ import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { Command } from 'commander';
 import { detectDevBuild } from './startup/dev-build.js';
-import { SYNC_PING_CMD } from './secrets/sync-commands.js';
 import {
   readUpdateCache,
   shouldPromptUpgrade,
@@ -242,10 +242,9 @@ function runCli(args: string[]): number | null {
  * print "unknown command" and exit 1, and the row would keep posting a
  * plausible number for entirely different work. Same reason coldEval throws.
  *
- * Takes a SET of acceptable codes, not one: the intercepted token's exit code
- * legitimately differs by machine (see the `__secrets-ping` row), and the
- * property being defended is "the intercept answered", not "it answered with
- * this specific number".
+ * Takes a SET of acceptable codes, not one: an intercepted token's exit code
+ * can legitimately differ by machine, and the property being defended is
+ * "the intercept answered", not "it answered with this specific number".
  */
 function expectExit(status: number | null, allowed: readonly number[], label: string): void {
   if (status === null || !allowed.includes(status)) {
@@ -296,12 +295,13 @@ describe('command-registry.ts loaders — warm in-process registration only (mod
 /**
  * ============================================================================
  * The core bootstrap block: everything index.ts evaluates and RUNS before the
- * first argv fast path can return — `detectDevBuild()` (index.ts:113), the
- * secrets-broker token dispatch (index.ts:71-84), and the root commander
- * program (index.ts:262-270) with its audit hooks (index.ts:305-371). Paid by
- * `--version` and `--help` too: the `!helpOrVersionRequested` guard is at
- * index.ts:1322, ~1200 lines below all of it, and it only gates
- * `checkForUpdates()` + `spawnDetachedSync()`.
+ * first argv fast path can return — `detectDevBuild()` (index.ts:113) and the
+ * root commander program (index.ts:262-270) with its audit hooks
+ * (index.ts:305-371). Paid by `--version` and `--help` too: the
+ * `!helpOrVersionRequested` guard is at index.ts:1322, ~1200 lines below all of
+ * it, and it only gates `checkForUpdates()` + `spawnDetachedSync()`. The
+ * secrets-broker token dispatch this block used to also cover moved out of
+ * this CLI entirely with the standalone `secrets` engine (PHNX-3989).
  *
  * The groups below measure the WORK these lines do, not the cost of loading
  * their modules. The module-graph question was previously deferred here to a
@@ -311,13 +311,8 @@ describe('command-registry.ts loaders — warm in-process registration only (mod
  * remains unmeasured. Where a number here needs the import cost to be
  * interpretable it uses the whole-invocation anchor at the bottom instead.
  *
- * Two of these ARE in scope here and are not in that PR, because they are
- * counterfactuals rather than inventory:
- *   - lib/secrets/agent.js, the graph the leaf lib/secrets/sync-commands.js
- *     (index.ts:36) exists to keep OFF the eager path. index.ts:58-61 asserts
- *     that binding the tokens from agent.js "would pull the whole secrets graph
- *     into every invocation". That is an unmeasured claim in the source; the
- *     group below measures both sides of it.
+ * One of these IS in scope here and is not in that PR, because it is
+ * inventory rather than a counterfactual:
  *   - the real cold `node dist/index.js --version`, the denominator every
  *     other row in this file is a fraction of.
  *
@@ -470,8 +465,6 @@ function coldEval(specs: string[], extraEnv?: NodeJS.ProcessEnv): void {
 const distUrl = (rel: string): string => pathToFileURL(path.join(DIST_ROOT, rel)).href;
 const COLD_OPTS = { time: 3000, iterations: 12 } as const;
 
-const SYNC_COMMANDS_SPEC = distUrl('lib/secrets/sync-commands.js');
-const SECRETS_AGENT_SPEC = distUrl('lib/secrets/agent.js');
 const DEV_BUILD_SPEC = distUrl('lib/startup/dev-build.js');
 const SELF_UPDATE_SPEC = distUrl('lib/self-update.js');
 const COMMAND_REGISTRY_SPEC = distUrl('lib/startup/command-registry.js');
@@ -533,15 +526,17 @@ afterAll(() => {
 
 /**
  * index.ts's own eager local-module imports, EXCLUDING brand.js — by line:
- * dev-build (16), sync-commands (36), self-update (86), command-registry
+ * dev-build (16), self-update (86), command-registry
  * (124), help (208), whats-new (209), platform/index (211), cli-entry (212),
  * events (213), event-provenance (214), format (215), state (513). types.js
  * (210) is type-only and erased at compile, so it is not a runtime edge and
- * is excluded here (it gets its own row in the group above instead).
+ * is excluded here (it gets its own row in the group above instead). The
+ * secrets-broker sync-commands leaf that used to sit here moved out entirely
+ * with the standalone `secrets` engine (PHNX-3989) — index.ts now has no
+ * static imports at all.
  */
 const EAGER_MINUS_BRAND = [
   DEV_BUILD_SPEC,
-  SYNC_COMMANDS_SPEC,
   SELF_UPDATE_SPEC,
   COMMAND_REGISTRY_SPEC,
   HELP_SPEC,
@@ -556,15 +551,6 @@ const EAGER_MINUS_BRAND = [
 const EAGER_WITH_BRAND = [...EAGER_MINUS_BRAND, BRAND_SPEC];
 
 /**
- * The two exit codes that mean `__secrets-ping` reached the intercept at
- * index.ts:71-84 and answered: 0 = a live broker replied (darwin, unlocked),
- * 3 = nothing was listening (agent.ts:1094-1097 returns one or the other).
- * Anything else — notably commander's unknown-command exit — means the
- * intercept was missed and the row is timing the wrong path.
- */
-const PING_EXIT_CODES = [0, 3] as const;
-
-/**
  * Prove every cold-import spec resolves, and that the token intercept still
  * answers, BEFORE any row is timed. Module scope, not a bench callback, so a
  * bad or moved specifier throws where vitest actually reports it — the file
@@ -574,8 +560,6 @@ const PING_EXIT_CODES = [0, 3] as const;
  */
 (function preflightColdImports(): void {
   for (const spec of [
-    SYNC_COMMANDS_SPEC,
-    SECRETS_AGENT_SPEC,
     DEV_BUILD_SPEC,
     SELF_UPDATE_SPEC,
     COMMAND_REGISTRY_SPEC,
@@ -612,29 +596,14 @@ const PING_EXIT_CODES = [0, 3] as const;
   coldEval([COMMANDER_SPEC], COMPILE_CACHE_ENV);
   coldEval([COMMANDER_SPEC], COMPILE_CACHE_ENV);
   coldEval([], COMPILE_CACHE_ENV);
-  // Same reasoning for the one runCli row whose number is only meaningful if
-  // the index.ts:71-84 intercept was actually reached.
-  expectExit(runCli([SYNC_PING_CMD]), PING_EXIT_CODES, '__secrets-ping preflight');
   expectExit(runCli(['--version']), [0], '--version preflight');
 })();
 
-describe('the secrets-broker intercept (index.ts slim shell + sync-commands leaf) — what the leaf module buys, measured on both sides', () => {
-  bench('FLOOR: bare `node --input-type=module -e ""` — the spawn cost every row below also pays; subtract it', () => {
-    coldEval([]);
-  }, COLD_OPTS);
-
-  bench('lib/secrets/sync-commands.js — the leaf actually imported by the slim index.ts shell. Three exported string constants, zero imports (sync-commands.ts:19-21)', () => {
-    coldEval([SYNC_COMMANDS_SPEC]);
-  }, COLD_OPTS);
-
-  bench('lib/secrets/agent.js — the graph index.ts:58-61 says binding the tokens from agent.ts would drag in on EVERY invocation. agent.ts:27-44 declares 18 static imports; 17 survive into dist/lib/secrets/agent.js:26-42 (the type-only one at agent.ts:38 is elided), reaching ../state.js, ./install-helper.js, ./session-store.js, ../version.js, ../cli-entry.js, ./lease.js and ./audit.js. NOT on the eager path today; this row is the counterfactual that prices that decision', () => {
-    coldEval([SECRETS_AGENT_SPEC]);
-  }, COLD_OPTS);
-
-  bench('the dispatch itself: real cold `node dist/index.js __secrets-ping` (index.ts secrets intercept, pre-bootstrap). index.ts:44-47 calls this "the hot read path" — readAndResolveBundleEnv is synchronous all the way down, so it cannot await a socket and spawns one of these per read instead, reading the exit code. What this row measures is MACHINE-DEPENDENT past the bootstrap: runAgentPingSync (agent.ts:1094-1097) has no darwin gate (the onDarwin check at agent.ts:937-939 is a different function), it just connects — so with no broker listening the connect fails ENOENT, request() resolves null (agent.ts:906-911) and it exits 3 having done no broker work, which is the pure-bootstrap case reported here; on darwin with a live broker the same row exits 0 and additionally carries a real socket round-trip, bounded by SOCKET_PING_TIMEOUT_MS = 700 (agent.ts:113)', () => {
-    expectExit(runCli([SYNC_PING_CMD]), PING_EXIT_CODES, '__secrets-ping');
-  }, { time: 4000, iterations: 15 });
-});
+// The secrets-broker sync-commands intercept this file used to benchmark
+// (index.ts slim shell + `lib/secrets/sync-commands.js` leaf, and the
+// `__secrets-ping` dispatch itself) moved out of this CLI entirely with the
+// standalone `secrets` engine (PHNX-3989) — index.ts has no static imports
+// and no synchronous broker fast path left to measure.
 
 /**
  * `import { Command } from 'commander'` (index.ts:10) — the module load itself,
@@ -852,9 +821,8 @@ function registerBenchCommands(program: Command): Command {
  * COUNTERFACTUAL, not the shipped path: the preAction `emit('command.start', …)`
  * (index.ts:311-319) is FOLDED INTO the postAction record rather than deleted,
  * so one record is appended per invocation instead of two and no audited field
- * is lost. It prices the single change the measured numbers point at.
- * Same role as the `lib/secrets/agent.js` row above: a row that prices a
- * decision the source has not taken.
+ * is lost. It prices the single change the measured numbers point at — a row
+ * that prices a decision the source has not taken.
  *
  * Exactly two differences from `attachAuditHooks`, and no others — the wiring,
  * the path walk, the exempt gate, the WeakMap stamp, the spool branch and the
@@ -1345,8 +1313,8 @@ describe('resolveBrandName() / disabledCommandsForActiveBrand() — warm in-proc
 /**
  * Startup package metadata (index.ts:30-34). These top-level statements run
  * before either argv intercept can exit. The in-process rows decompose the real
- * read and parse; the existing cold `__secrets-ping` and `--version` rows above
- * are the end-to-end process anchors, and both assert their child exit status.
+ * read and parse; the existing cold `--version` row above is the end-to-end
+ * process anchor, and asserts its child exit status.
  */
 const PACKAGE_JSON_PATH = path.join(CLI_ROOT, 'package.json');
 const PACKAGE_JSON_RAW = fs.readFileSync(PACKAGE_JSON_PATH, 'utf-8');

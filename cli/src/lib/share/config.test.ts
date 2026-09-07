@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach, afterEach, afterAll } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import type { SecretsBundle } from '../secrets/bundles.js';
+import type { SecretsBundle } from '../secrets-types.js';
 
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-share-config-test-'));
 const prevHome = process.env.HOME;

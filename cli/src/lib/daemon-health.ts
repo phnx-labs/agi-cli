@@ -4,17 +4,19 @@
  * Today a subsystem failure inside `runDaemon()` (daemon.ts) is a single
  * `log('ERROR', ...)` line that scrolls out of the log file and is never
  * surfaced anywhere else — `agents daemon status` has no way to answer "is the
- * secrets broker actually healthy right now?" beyond "the daemon process is
- * alive". This module gives every subsystem a small persisted record —
+ * browser IPC server actually healthy right now?" beyond "the daemon process
+ * is alive". This module gives every subsystem a small persisted record —
  * {@link SubsystemHealth} — so `agents daemon status` / `agents daemon
  * services` can report health, not just liveness (RUSH-2354).
  *
  * Scheduled routines get this for free once migrated onto `agents routines`
  * (their run history already carries success/failure — `agents routines
  * stats`). This module exists for the subsystems that predate routines and have
- * no run history of their own: the secrets broker and the browser IPC server,
- * plus the daemon's own startup (`SUBSYSTEM_DAEMON_START`, RUSH-2418) — which
- * is the one record that also GATES behaviour rather than only reporting it.
+ * no run history of their own: the browser IPC server, plus the daemon's own
+ * startup (`SUBSYSTEM_DAEMON_START`, RUSH-2418) — which is the one record that
+ * also GATES behaviour rather than only reporting it. The secrets broker moved
+ * with the standalone `secrets` engine (PHNX-3989 OWN-1) — this daemon no
+ * longer hosts or supervises it, so it carries no health record here.
  *
  * File-backed (one JSON object keyed by subsystem name) rather than in-memory
  * because `agents daemon status` runs as a SEPARATE process from the daemon —
@@ -28,7 +30,6 @@ import { atomicWriteFileSync, ensureLockTarget, withFileLock } from './fs-atomic
 const HEALTH_FILE = 'health.json';
 
 /** Stable subsystem identifiers shared by the daemon (writer) and `agents daemon` (reader). */
-export const SUBSYSTEM_SECRETS_BROKER = 'secrets-broker';
 export const SUBSYSTEM_BROWSER_IPC = 'browser-ipc';
 /**
  * Daemon startup itself (RUSH-2418). Unlike the two above, this record is
@@ -42,7 +43,7 @@ export const SUBSYSTEM_DAEMON_START = 'daemon-start';
 
 /** One subsystem's health as of the last time it reported in. */
 export interface SubsystemHealth {
-  /** Stable identifier, e.g. 'secrets-broker', 'browser-ipc'. */
+  /** Stable identifier, e.g. 'browser-ipc', 'monitors'. */
   subsystem: string;
   /** Most recent error message, or null if it has never failed. */
   lastError: string | null;

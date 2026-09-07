@@ -27,10 +27,9 @@
  * module is the single place both rules live, so a new manifest has one obvious
  * thing to call.
  *
- * It is not yet the only consumer of the identifier rule: `lib/secrets/agent.ts`
- * keeps a literal `SERVICE_LABEL` for its `bootout`. That path is retire-only —
- * it detects and removes a plist an older version installed and generates none
- * of its own — so it has no HOME to bake and was deliberately left alone.
+ * A third consumer that used to keep its own literal `SERVICE_LABEL` for a
+ * retire-only `bootout` — the in-repo secrets broker's launchd cleanup — moved
+ * out of this repo entirely with the standalone `secrets` engine (PHNX-3989).
  */
 import * as crypto from 'crypto';
 import * as os from 'os';

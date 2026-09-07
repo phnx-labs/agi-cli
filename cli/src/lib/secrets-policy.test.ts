@@ -3,8 +3,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { updateFleetSharedDeviceState } from '../fleet-shared-state.js';
-import type { DeviceProfile } from '../devices/registry.js';
+import { updateFleetSharedDeviceState } from './fleet-shared-state.js';
+import type { DeviceProfile } from './devices/registry.js';
 import {
   peerPresentKeys,
   planAuthBundlePush,
@@ -15,8 +15,8 @@ import {
   type AuthSyncDevice,
   type ReservedSyncAccount,
   type ReservedSyncPeer,
-} from './reserved-sync.js';
-import type { Meta, NativeAccountRecord } from '../types.js';
+} from './secrets-policy.js';
+import type { Meta, NativeAccountRecord } from './types.js';
 
 const dirs: string[] = [];
 function tempStore(): string {

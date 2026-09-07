@@ -28,7 +28,7 @@ export class AuthSyncService extends BasePeriodicService {
   }
 
   protected async onTick(ctx: DaemonContext): Promise<void> {
-    const { publishReservedAuthVerdict, syncReservedAuthBundle } = await import('../secrets/reserved-sync.js');
+    const { publishReservedAuthVerdict, syncReservedAuthBundle } = await import('../secrets-policy.js');
     const published = await publishReservedAuthVerdict();
     if (published.error) ctx.log('WARN', `auth-sync: verdict: ${published.error}`);
     const { syncFleetSharedStateRepo } = await import('../fleet-shared-repo-sync.js');
@@ -53,7 +53,7 @@ export class AuthSyncService extends BasePeriodicService {
     // it materializes a slot for each account whose durable key has landed. Each
     // self-gates on device role, so exactly one arm acts per box. The push is the
     // only transport — provisioning writes only locally (invariant 1).
-    const { syncReservedStores, reconcileLocalWorkerSlots } = await import('../secrets/reserved-sync.js');
+    const { syncReservedStores, reconcileLocalWorkerSlots } = await import('../secrets-policy.js');
     try {
       const stores = await syncReservedStores();
       for (const p of stores.pushed) ctx.log('INFO', `auth-sync: pushed ${p.bundle} (${p.keys.length} key(s)) to ${p.device}`);

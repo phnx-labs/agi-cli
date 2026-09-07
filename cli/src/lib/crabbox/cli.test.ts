@@ -20,7 +20,7 @@ import {
   resetCrabboxSecretsMemosForTest,
   type CrabboxBox,
 } from './cli.js';
-import type { SecretsBundle } from '../secrets/bundles.js';
+import type { SecretsBundle } from '../secrets-types.js';
 
 // Suites that stand up a fake `crabbox` on PATH are POSIX-only: the fake is a
 // `#!/bin/sh` script with no .cmd/.exe extension, which Windows can neither

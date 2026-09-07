@@ -25,7 +25,6 @@ import { notifyRoutineStart, notifyRoutineFinish, notifyRoutineStartFailed } fro
 import { notifyOwnerRoutineFinish, notifyOwnerRoutineStartFailed } from '../routine-notify-owner.js';
 import { BrowserService } from '../browser/service.js';
 import { getSocketPath as getBrowserIpcSocketPath } from '../browser/ipc.js';
-import { secretsBrokerSocketPath, brokerPidAlive } from '../secrets/agent.js';
 import { redactSecrets } from '../redact.js';
 import { getAgentsBinPath, getCliLaunch, BUN_VIRTUAL_ROOT } from '../cli-entry.js';
 import { localBinDir } from '../platform/posixpath.js';
@@ -34,7 +33,6 @@ import { recordSubsystemOk, recordSubsystemError, recordSubsystemErrorReason, re
 import { ServiceSupervisor } from './supervisor.js';
 import { SessionIndexService } from './session-index-service.js';
 import { SessionSummarizerService } from './session-summarizer-service.js';
-import { SecretsBrokerService } from './secrets-broker-service.js';
 import { MonitorEngineService } from './monitor-engine-service.js';
 import { AccountUsageService, AccountAuthService } from './account-state-daemon-service.js';
 import { CatchupService } from './catchup-service.js';
@@ -44,7 +42,6 @@ import { DeviceProbeService } from './device-probe-service.js';
 import { SelfHealService } from './self-heal-service.js';
 import { SelfUpdateService } from './self-update-service.js';
 import { HarnessUpdateService } from './harness-update-service.js';
-import { KeychainReapService } from './keychain-reap-service.js';
 import { AuthSyncService } from './auth-sync-service.js';
 import { UsageSyncService } from './usage-sync-service.js';
 import { StateDirCheckService } from './state-dir-check-service.js';
@@ -135,18 +132,15 @@ export function daemonSystemdUnitName(): string {
 /**
  * Cadences for the in-process background ticks, named here beside the other
  * tick constants rather than left as inline literals at their `setInterval`
- * (RUSH-2423). Self-heal, keychain-reap, state-dir-check, watchdog, and
- * device-probe cadences moved to their own `*-service.ts` files (RUSH-3193
- * P3, alongside session-index/account-state/etc.) — see those files for the
- * per-service trade-offs (self-heal's 6h/cheap-to-be-late repair cadence,
- * keychain-reap's 5min `ps`-shell cost bound, state-dir-check's env override
- * for tests, watchdog/device-probe's shared 3min in-process housekeeping
- * cadence, NOT a routine — RUSH-2495).
- *
- * - **Broker self-heal** is a bare `agentPing`, and the failure it recovers
- *   from wedges every keychain-backed secret on the box, so it runs minutely.
+ * (RUSH-2423). Self-heal, state-dir-check, watchdog, and device-probe
+ * cadences moved to their own `*-service.ts` files (RUSH-3193 P3, alongside
+ * session-index/account-state/etc.) — see those files for the per-service
+ * trade-offs (self-heal's 6h/cheap-to-be-late repair cadence, state-dir-check's
+ * env override for tests, watchdog/device-probe's shared 3min in-process
+ * housekeeping cadence, NOT a routine — RUSH-2495). The secrets broker and its
+ * self-heal/reap ticks moved out of this daemon entirely with the standalone
+ * `secrets` engine (PHNX-3989 OWN-1) — this daemon no longer hosts that broker.
  */
-// BROKER_SELF_HEAL_TICK_MS moved to secrets-broker-service.ts (RUSH-3193 P2).
 // Session-index warm interval/deadline live in session-index-service.ts now
 // (RUSH-3193 — migrated onto ServiceSupervisor).
 const WEDGE_THRESHOLD_TICKS = 3;
@@ -181,18 +175,6 @@ const DAEMON_START_LIMIT_BURST = 5;
  * start` is the deliberate override and is never gated by this.
  */
 export const DAEMON_AUTOSTART_FAILURE_LIMIT = 5;
-
-/**
- * RUSH-1817: decide whether the daemon should (re)take over hosting the secrets
- * broker. The startup host decision is one-shot; this drives the periodic
- * self-heal re-check. Take over ONLY when the daemon is not already hosting AND
- * no healthy broker answers a ping — i.e. a standalone the daemon deferred to at
- * start has since died or crash-looped. Never take over while our in-process
- * broker is hosting, and never clobber a reachable (healthy) broker.
- */
-export function shouldTakeOverBroker(isHosting: boolean, brokerReachable: boolean): boolean {
-  return !isHosting && !brokerReachable;
-}
 
 /**
  * What a gate re-evaluation must do with the routines scheduler. The daemon
@@ -525,11 +507,10 @@ export function claimDaemonInstance(): boolean {
     const existing = resolveLiveDaemonPid(true);
     if (existing !== null && existing !== process.pid) {
       // Evict, and WAIT for the incumbent to be provably dead — its graceful
-      // handleShutdown releasing the browser IPC binding and the secrets broker
-      // socket — before we write our pid and (later, in runDaemon) bind our own.
-      // Binding before the release recreates the two-brokers-on-one-socket orphan
-      // documented at stopDaemon below, so the pid file is not written until the
-      // prior owner is gone.
+      // handleShutdown releasing the browser IPC binding — before we write our
+      // pid and (later, in runDaemon) bind our own. Binding before the release
+      // recreates the two-owners-on-one-socket orphan documented at stopDaemon
+      // below, so the pid file is not written until the prior owner is gone.
       if (!evictIncumbentDaemon(existing)) return false;
     }
     writeDaemonPid(process.pid);
@@ -893,12 +874,12 @@ export function assertTestDaemonHome(
 // named in stack traces, readable without scrolling through runDaemon's
 // 500-line body, and not recreated on every function invocation.
 //
-// self-heal and keychain-reap moved to SelfHealService / KeychainReapService
-// on the ServiceSupervisor (RUSH-3193 P3) — the supervisor's own per-tick
-// deadline + inFlight guard replaces their local `healing`/`reapingKeychain`
-// flags. state-dir-check moved to StateDirCheckService (RUSH-3193 P3),
-// registered after `handleShutdown` is declared — see its registration site
-// below. runBrokerSelfHeal was moved into SecretsBrokerService (RUSH-3193 P2).
+// self-heal moved to SelfHealService on the ServiceSupervisor (RUSH-3193 P3)
+// — the supervisor's own per-tick deadline + inFlight guard replaces its local
+// `healing` flag. state-dir-check moved to StateDirCheckService (RUSH-3193
+// P3), registered after `handleShutdown` is declared — see its registration
+// site below. The secrets broker (self-heal, reap, and hosting) moved out of
+// this daemon entirely with the standalone `secrets` engine (PHNX-3989 OWN-1).
 // ---------------------------------------------------------------------------
 
 export async function runDaemon(): Promise<void> {
@@ -1016,19 +997,16 @@ export async function runDaemon(): Promise<void> {
     log('ERROR', `Stray daemon reaper failed: ${(err as Error).message}`);
   }
 
-  // Socket services: secrets broker, monitor engine, account-state, and
-  // browser IPC are all managed by the ServiceSupervisor (RUSH-3193 P2).
-  // The supervisor is created here — before the scheduler — so the secrets
-  // broker starts socket-first (#416) and `agents secrets` resolves within
-  // ms of daemon start, exactly as before.
+  // Socket services: monitor engine, account-state, and browser IPC are all
+  // managed by the ServiceSupervisor (RUSH-3193 P2). The secrets broker moved
+  // with the standalone `secrets` engine (PHNX-3989 OWN-1) — this daemon no
+  // longer hosts or takes over that broker; the standalone owns its own
+  // lifecycle exclusively.
   const supervisor = new ServiceSupervisor();
 
   if (isEnabled('session-state')) {
     supervisor.register(new SessionStateService(() => supervisor.runNow('session-state')));
   } else log('INFO', 'Live session-state service disabled');
-
-  if (isEnabled('secrets-broker')) supervisor.register(new SecretsBrokerService());
-  else log('INFO', 'Secrets broker service disabled; daemon not hosting it');
 
   const monitorEngineSvc = new MonitorEngineService();
   if (isEnabled('monitors')) supervisor.register(monitorEngineSvc);
@@ -1086,10 +1064,10 @@ export async function runDaemon(): Promise<void> {
   if (isEnabled('session-summarizer')) supervisor.register(new SessionSummarizerService());
   else log('INFO', 'Session summarizer service disabled');
 
-  // Watchdog, device-probe, self-heal, and keychain-reap are all periodic
-  // services managed by the ServiceSupervisor (RUSH-3193 P3). Each is gated
-  // the same way as the socket services above; state-dir-check is registered
-  // separately, later, after `handleShutdown` exists (see below).
+  // Watchdog, device-probe, and self-heal are all periodic services managed
+  // by the ServiceSupervisor (RUSH-3193 P3). Each is gated the same way as
+  // the socket services above; state-dir-check is registered separately,
+  // later, after `handleShutdown` exists (see below).
   if (isEnabled('watchdog')) supervisor.register(new WatchdogService());
   else log('INFO', 'Watchdog service disabled');
 
@@ -1104,9 +1082,6 @@ export async function runDaemon(): Promise<void> {
 
   if (isEnabled('harness-update')) supervisor.register(new HarnessUpdateService());
   else log('INFO', 'Harness-update service disabled');
-
-  if (isEnabled('keychain-reap')) supervisor.register(new KeychainReapService());
-  else log('INFO', 'Keychain-reap service disabled');
 
   if (isEnabled('auth-sync')) supervisor.register(new AuthSyncService());
   else log('INFO', 'Auth-sync service disabled');
@@ -1134,7 +1109,7 @@ export async function runDaemon(): Promise<void> {
 
   // scheduler.enabled=false in this machine's device doc means NO routines fire
   // here — the scheduler and its catchup recovery simply never start, while the
-  // daemon keeps its other duties (secrets broker, browser IPC, session sync).
+  // daemon keeps its other duties (browser IPC, session sync).
   // The refusal message is the same one the start surfaces
   // (`routines add` auto-start, manual `routines start`) raise. The gate is
   // re-evaluated on every SIGHUP reload (handleReload below) via
@@ -1348,15 +1323,14 @@ export async function runDaemon(): Promise<void> {
   // supervisor's immediate first tick on start replaces the old
   // SELF_HEAL_KICKOFF_MS (30s) delayed kickoff timer — see self-heal-service.ts.
 
-  // Broker self-heal (RUSH-1817) is now encapsulated in SecretsBrokerService
-  // (RUSH-3193 P2). The interval fires inside onStart() and is stopped in onStop().
+  // The secrets broker's self-heal and keychain-reap ticks (formerly
+  // SecretsBrokerService / KeychainReapService, RUSH-1817 / RUSH-2232) moved
+  // out of this daemon entirely with the standalone `secrets` engine
+  // (PHNX-3989 OWN-1) — the standalone owns its own broker lifecycle.
 
-  // RUSH-2232: keychain-reap is now managed by KeychainReapService on the
-  // supervisor (RUSH-3193 P3), registered above alongside the socket services.
-
-  // RUSH-2501: reap tmux sessions whose panes are all dead. Runs on the same
-  // 5-min cadence as the keychain reaper. Daemon-only (single executor).
-  // Dead managed panes and their orphan helpers are reaped by TmuxReapService.
+  // RUSH-2501: reap tmux sessions whose panes are all dead. Daemon-only
+  // (single executor). Dead managed panes and their orphan helpers are
+  // reaped by TmuxReapService.
 
   // RUSH-2622: close abandoned browser-task tabs on the same 5-min cadence,
   // reusing the daemon's long-lived BrowserService when browser IPC is enabled.
@@ -1503,7 +1477,7 @@ export async function runDaemon(): Promise<void> {
 
   // State-dir self-check (RUSH-2367 self-terminate guard) is registered on
   // the supervisor here — AFTER `handleShutdown` above — rather than
-  // alongside watchdog/device-probe/self-heal/keychain-reap earlier. The
+  // alongside watchdog/device-probe/self-heal earlier. The
   // supervisor fires an immediate first tick on `register()`+`start()`; doing
   // that before `handleShutdown` exists would reference the const in its
   // temporal dead zone the moment a mismatch is ever detected. Registering it
@@ -1673,9 +1647,8 @@ WantedBy=default.target`;
 }
 
 // Binary-resolution helpers (getAgentsBinPath / isNodeScriptEntry / getCliLaunch)
-// live in ./cli-entry.js — a leaf module the secrets broker also imports without
-// forming a cycle. Re-exported so existing `from './daemon.js'` importers of
-// getAgentsBinPath keep resolving.
+// live in ./cli-entry.js — a leaf module. Re-exported so existing
+// `from './daemon.js'` importers of getAgentsBinPath keep resolving.
 export { getAgentsBinPath };
 
 /**
@@ -2274,13 +2247,12 @@ export function findSurvivingStateDirDaemons(exclude: Set<number>): number[] {
  * from launchd/systemd if applicable.
  *
  * The SIGTERM → grace → killTree sequence is unchanged; what it adds is
- * verification. After the daemon is gone it checks that the secrets broker socket
- * and browser IPC binding actually released — a stale socket present on disk but
- * with no live owner is the orphan that keeps clients holding unlocked bundles
- * hanging (`daemon.ts` broker-hosting; the two-brokers-on-one-socket bug) — and
- * that no `__daemon-run` for THIS state dir survives. A killTree escalation exits
- * without running the daemon's graceful handleShutdown, so those sockets can be
- * left stale; this reclaims each (the owner is provably dead) and reports it. It
+ * verification. After the daemon is gone it checks that the browser IPC
+ * binding actually released — a stale socket present on disk but with no live
+ * owner is the orphan that keeps clients hanging on it — and that no
+ * `__daemon-run` for THIS state dir survives. A killTree escalation exits
+ * without running the daemon's graceful handleShutdown, so that socket can be
+ * left stale; this reclaims it (the owner is provably dead) and reports it. It
  * never reports success on an unverified stop.
  */
 export function stopDaemon(): DaemonStopResult {
@@ -2499,20 +2471,6 @@ function stopDaemonLocked(): DaemonStopResult {
       }
     } else {
       released.push('browser IPC socket');
-    }
-
-    // Secrets broker socket: released when it is gone, or still owned by a
-    // DIFFERENT live broker (a standalone service the daemon never hosted). A
-    // socket present with NO live owner is the orphan — reclaim it.
-    const brokerSock = secretsBrokerSocketPath();
-    if (!fs.existsSync(brokerSock)) {
-      released.push('secrets broker socket');
-    } else if (brokerPidAlive()) {
-      released.push('secrets broker socket (standalone owner)');
-    } else {
-      try { fs.unlinkSync(brokerSock); } catch { /* raced with a fresh bind */ }
-      if (fs.existsSync(brokerSock)) surviving.push('secrets broker socket not released');
-      else released.push('secrets broker socket (reclaimed)');
     }
   }
 

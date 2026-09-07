@@ -1,12 +1,13 @@
 /**
  * Full CLI bootstrap — loaded only after index.ts's argv fast paths miss.
  *
- * RUSH-2335: `src/index.ts` is a slim shell that statically imports only the
- * leaf `lib/secrets/sync-commands.js` so `__secrets-*` / `__vault-age-helper` /
- * `__shim` / `__daemon-run` can exit without evaluating the
- * commander + self-update + command-registry graph (~140ms saved per
- * synchronous broker read). Everything below that shell lands here via
- * `await import('./bootstrap.js')`.
+ * RUSH-2335: `src/index.ts` is a slim shell so `__shim` / `__daemon-run` and
+ * the other hidden fast paths can exit without evaluating the commander +
+ * self-update + command-registry graph. Everything below that shell lands
+ * here via `await import('./bootstrap.js')`. The `__secrets-*` / synchronous
+ * broker fast paths that used to justify this shell's one static import moved
+ * with the standalone `secrets` engine (PHNX-3989) — `index.ts` now has no
+ * static imports at all above this line.
  *
  * This module is the previous body of `index.ts` (command registration, update
  * checks, first-run setup, migrations, parse). Side-effecting top-level code
@@ -445,26 +446,9 @@ async function installResolvedPackage(metadata: NpmPackageMetadata): Promise<voi
       );
     }
   }
-  // The npm install above runs with --ignore-scripts, so the postinstall that
-  // installs the macOS Keychain helper never fires on upgrade. Force-refresh the
-  // helper here so a user upgrading FROM a broken build (e.g. the entitlement-less
-  // 1.20.4 helper that fails SecItemAdd with -34018) gets the fixed, signed bundle
-  // immediately — instead of waiting for the lazy staleness check in
-  // getKeychainHelperPath() to repair it on their next secret operation. The new
-  // package is already on disk, so the dynamic import resolves the freshly-installed
-  // helper module + bundle. Best-effort: an upgrade must never fail because the
-  // helper could not be reinstalled (the lazy staleness check in
-  // getKeychainHelperPath() still repairs it on the next secret operation).
-  if (process.platform === 'darwin') {
-    try {
-      const { ensureKeychainHelperInstalledAsync } = await import('./lib/secrets/install-helper.js');
-      // Async + download-capable: an upgrade to a tarball that dropped the
-      // bundle fetches the verified release asset instead of no-op'ing.
-      await ensureKeychainHelperInstalledAsync({ forceReinstall: true });
-    } catch {
-      // Non-fatal.
-    }
-  }
+  // The macOS Keychain helper this used to force-refresh on upgrade moved with
+  // the standalone `secrets` engine (PHNX-3989) — it downloads and verifies its
+  // own helper release now, off this CLI's upgrade path entirely.
 }
 
 /** Present an interactive upgrade prompt (TTY) or a one-line hint (non-TTY). */

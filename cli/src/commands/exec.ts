@@ -2156,8 +2156,8 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         // Engine DATA ops resolve through the standalone `secrets` process client
         // (PHNX-3989); the agents-owned `bundle@host` policy helpers stay in agents-cli.
         { readAndResolveBundleEnv, describeBundle, remoteResolveEnv },
-        { assertRemoteBundleFlagsUnsupported },
-        { splitBundleRef, resolveHostSshTarget },
+        { assertRemoteBundleFlagsUnsupported, splitBundleRef, resolveSecretsContextForRun },
+        { resolveHostSshTarget },
         { getConfiguredRunStrategy, normalizeRunStrategy, resolveRunVersion, rotationFailoverChain, shouldArmRotationFailover, RUN_STRATEGIES, collectHarnessCandidates, pickHarnessWeighted, classifyHarnessCandidates, formatHarnessPickBanner, formatNoHealthyHarnessError, formatNoHealthyAccountError, formatNoVerifiedUsageError, signInRecoverableCandidates },
         { getGlobalDefault, getVersionHomePath, resolveVersion, resolveVersionAlias, ensureAgentRunnable },
         { buildDiscoveredPlugin, loadPluginManifest, syncPluginToVersion },
@@ -2171,8 +2171,8 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         import('../lib/agents.js'),
         import('../lib/profiles.js'),
         import('../lib/secrets-client.js'),
-        import('../lib/secrets/bundles.js'),
-        import('../lib/secrets/remote.js'),
+        import('../lib/secrets-policy.js'),
+        import('../lib/hosts/credential-transport.js'),
         import('../lib/accounting/rotate.js'),
         import('../lib/installations/versions.js'),
         import('../lib/plugins/plugins.js'),
@@ -3225,6 +3225,11 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         ? options.secretsKeys.split(',').map((k: string) => k.trim()).filter(Boolean)
         : undefined;
       let secretsEnv: Record<string, string> = {};
+      // Resource-profile scoping (CTX-1): agents-cli computes which bundle
+      // names the active profile allows and forwards it as the client's
+      // `allowedBundles` on every local resolution — the standalone has no
+      // concept of a profile. undefined (no active profile) is full trust.
+      const secretsContext = await resolveSecretsContextForRun(agent);
       for (const bundleRef of options.secrets) {
         try {
           const { bundle: bundleName, host } = splitBundleRef(bundleRef);
@@ -3258,8 +3263,8 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
               // isHeadlessSecretsContext() left `--interactive` launches (the watchdog's
               // `agents run auto --interactive`) able to prompt, piling up helper sheets.
               agentOnly: true,
-            });
-            const entries = await describeBundle(bundle);
+            }, secretsContext);
+            const entries = await describeBundle(bundle, secretsContext);
             const counts: Record<string, number> = {};
             for (const e of entries) {
               counts[e.kind] = (counts[e.kind] || 0) + 1;

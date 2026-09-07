@@ -19,6 +19,7 @@ import { saveTask, hostsCacheDir } from '../hosts/tasks.js';
 import { _resetPerfDbForTest, aggregateSamples } from '../perf/db.js';
 import * as activation from '../routine-activation.js';
 import { query, _resetForTest } from '../feed/events.js';
+import { useFreshSecretsHome } from '../../../tests/secrets-standalone.js';
 
 // RUSH-2215: only process-group / real-spawn holder suites are POSIX-oriented.
 // Pure command construction and path helpers must still run on Windows.
@@ -1247,30 +1248,10 @@ describe('native slot routine dispatch (PHNX-3940 T5)', () => {
 
 describe('provider-pinned routine keeps injected env (PHNX-3940 T5 seam / T7)', () => {
   const name = `t7-prov-${Date.now().toString(36)}`;
-  const secretsRoot = fs.mkdtempSync(path.join(os.tmpdir(), 't7-prov-secrets-'));
-  class MemoryKeychain {
-    values = new Map<string, string>();
-    has(item: string) { return this.values.has(item); }
-    get(item: string) {
-      const value = this.values.get(item);
-      if (value === undefined) throw new Error('missing');
-      return value;
-    }
-    set(item: string, value: string) { this.values.set(item, value); }
-    delete(item: string) { return this.values.delete(item); }
-    list(prefix: string) { return [...this.values.keys()].filter((item) => item.startsWith(prefix)); }
-  }
 
-  beforeEach(async () => {
-    const { setKeychainBackendForTest } = await import('../secrets/index.js');
-    const { _resetFileStoreForTest } = await import('../secrets/filestore.js');
-    process.env.AGENTS_SECRETS_META_INDEX_FILE = path.join(secretsRoot, 'bundle-index.json');
-    process.env.AGENTS_SECRETS_NO_AGENT = '1';
-    _resetFileStoreForTest({ fileDir: path.join(secretsRoot, 'secrets'), passphrase: 't7-prov' });
-    setKeychainBackendForTest(new MemoryKeychain());
-  });
+  useFreshSecretsHome();
 
-  afterEach(async () => {
+  afterEach(() => {
     try { unbindAccount(name, 'claude', 'claude'); } catch { /* not bound */ }
     state.updateMeta((m) => {
       const defaults = { ...m.accounts?.defaults };
@@ -1280,11 +1261,6 @@ describe('provider-pinned routine keeps injected env (PHNX-3940 T5 seam / T7)', 
       return { ...m, accounts: { ...m.accounts, defaults, bindings } };
     });
     try { removeAccount(name); } catch { /* already gone */ }
-    const { setKeychainBackendForTest } = await import('../secrets/index.js');
-    const { _resetFileStoreForTest } = await import('../secrets/filestore.js');
-    setKeychainBackendForTest(null);
-    _resetFileStoreForTest();
-    fs.rmSync(secretsRoot, { recursive: true, force: true });
   });
 
   it('does not re-enter agents run and still injects the provider credential env', () => {

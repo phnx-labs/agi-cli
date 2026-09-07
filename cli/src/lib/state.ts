@@ -439,10 +439,13 @@ export function getUserSecretsDir(): string { return USER_SECRETS_DIR; }
  * AGENTS_SECRETS_DB without racing the module-load capture of USER_SECRETS_DIR —
  * mirrors the AGENTS_EVENTS_PATH / AGENTS_DEVICES_DIR escape hatches. Holds only
  * value-free usage telemetry (which bundle was created/imported/exported/viewed/
- * accessed/unlocked, when, by whom), never a secret value. It is a derived index
- * fed FROM the emitSecretAudit chokepoint alongside the append-only
- * ~/.agents/.history/events/YYYY-MM-DD audit log — the same way sessions.db indexes session
- * metadata off the real session flow — not a second write path.
+ * accessed/unlocked, when, by whom), never a secret value. It used to be a
+ * derived index fed FROM the in-repo secrets engine's own emitSecretAudit
+ * chokepoint — not a second write path — the same way sessions.db indexes
+ * session metadata off the real session flow. That engine (and its audit
+ * emission) moved out of this repo entirely with the standalone `secrets`
+ * engine (PHNX-3989), so nothing writes this DB from agents-cli today; the
+ * read-side queries in `analytics/usage-db.ts` have no current caller.
  */
 export function getSecretsDbPath(): string {
   return process.env.AGENTS_SECRETS_DB ?? path.join(USER_SECRETS_DIR, 'secrets.db');

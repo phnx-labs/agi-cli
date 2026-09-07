@@ -11,7 +11,7 @@
 import * as os from 'os';
 import type { DeviceProfile } from '../devices/registry.js';
 import { pushBundleToHost } from '../secrets-client.js';
-import type { RemoteBackend } from '../secrets/push.js';
+import type { RemoteBackend } from '../secrets-types.js';
 import { AUTH_BUNDLE_NAME, inspectReservedAuthBundle, isReservedBundleName } from '../secrets-policy.js';
 import { deviceIdentityArgs, sshTargetFor } from '../devices/connect.js';
 import { readyProbe, bootstrapAgentsCli } from '../hosts/ready.js';

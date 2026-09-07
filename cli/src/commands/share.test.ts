@@ -3,29 +3,10 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { Command } from 'commander';
-import type { KeychainBackend } from '../lib/secrets/index.js';
 import type { CloudflareRequest, CloudflareRequester } from '../lib/share/provision.js';
 import { formatSharePublishResult, formatShareDeleteResult, runShareDelete } from './share.js';
 import { SHARE_TOKEN_ENV_KEY } from '../lib/share/config.js';
 import type { DeleteShareResult } from '../lib/share/delete.js';
-
-interface StoredItem { value: string }
-
-function makeMemoryBackend(): { backend: KeychainBackend; store: Map<string, StoredItem> } {
-  const store = new Map<string, StoredItem>();
-  const backend: KeychainBackend = {
-    has: (item) => store.has(item),
-    get: (item) => {
-      const v = store.get(item);
-      if (!v) throw new Error(`Keychain item '${item}' not found.`);
-      return v.value;
-    },
-    set: (item, value) => { store.set(item, { value }); },
-    delete: (item) => store.delete(item),
-    list: (prefix) => Array.from(store.keys()).filter((k) => k.startsWith(prefix)),
-  };
-  return { backend, store };
-}
 
 let tmpHome = '';
 let previousHome: string | undefined;
@@ -33,19 +14,22 @@ let previousPath: string | undefined;
 let previousShareGitHubUser: string | undefined;
 let previousShareWriteToken: string | undefined;
 
+/**
+ * Re-import the share modules fresh, against the real standalone `secrets`
+ * engine (PHNX-3989) rooted at this test's already-isolated `tmpHome`
+ * (`beforeEach` below points `HOME` at a fresh temp dir per test, and the
+ * client's `SECRETS_HOME` default follows `getUserAgentsDir()`, i.e. HOME —
+ * so every test gets its own empty store with no shared state and no
+ * in-process fake to keep in sync with the client's wire behavior).
+ */
 async function freshShareModules() {
   vi.resetModules();
-  const mem = makeMemoryBackend();
-  const secrets = await import('../lib/secrets/index.js');
-  secrets.setKeychainBackendForTest(mem.backend);
-  const bundles = await import('../lib/secrets/bundles.js');
-  bundles.setKeychainAgentOnlyBypassForTest(true);
-  const filestore = await import('../lib/secrets/filestore.js');
-  filestore._resetFileStoreForTest({ fileDir: path.join(tmpHome, '.file-secrets') });
+  const { _resetSecretsClientForTest } = await import('../lib/secrets-client.js');
+  _resetSecretsClientForTest();
   const share = await import('./share.js');
   const artifacts = await import('./artifacts.js');
   const config = await import('../lib/share/config.js');
-  return { share, artifacts, config, mem };
+  return { share, artifacts, config };
 }
 
 /**

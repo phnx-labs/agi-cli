@@ -3,29 +3,33 @@
 /**
  * CLI entry point for agents-cli.
  *
- * Slim shell (RUSH-2335): only the leaf `lib/secrets/sync-commands.js` is a
- * static import, so the argv fast paths below can answer without evaluating the
- * commander + self-update + command-registry graph that used to be hoisted
- * above every intercept (~140ms of cold bootstrap per synchronous secrets-
- * broker read). The full CLI loads via `await import('./bootstrap.js')` once
- * none of the fast paths match.
+ * Slim shell (RUSH-2335): no static imports at all, so the argv fast paths
+ * below can answer without evaluating the commander + self-update +
+ * command-registry graph. The full CLI loads via `await import('./bootstrap.js')`
+ * once none of the fast paths match.
  *
  * Fast paths (must stay above the bootstrap import — ESM does not hoist dynamic
  * `import()`, but any static import here would still evaluate first):
- *   - `__vault-age-helper`
- *   - `__secrets-get` / `__secrets-ping` / `__secrets-lock` (SYNC_* tokens)
+ *   - `__launch-lease`
  *   - `__shim`
+ *   - `__gh`
  *   - `__claude-statusline`
  *   - `__usage-ingest` / `__usage-export`
+ *   - `__harness-update-run`
  *   - `__daemon-run`
  *
- * The tokens are imported from the leaf module sync-commands.ts — the SAME
- * bindings the clients spawn with, so this dispatch and those spawns cannot
- * drift apart. It is a leaf precisely so binding them here is free: importing
- * agent.js would pull the whole secrets graph into every invocation.
+ * The synchronous secrets-broker fast paths (`__secrets-get` / `__secrets-ping`
+ * / `__secrets-lock`) and `__vault-age-helper` moved out of this CLI entirely
+ * with the standalone `secrets` engine (PHNX-3989) — agents-cli now talks to
+ * it only through the bounded process client (`lib/secrets-client.ts`), never
+ * through a hidden subcommand of its own.
  */
 
-import { SYNC_GET_CMD, SYNC_PING_CMD, SYNC_LOCK_CMD } from './lib/secrets/sync-commands.js';
+// No static imports remain in this slim shell (the last one, the secrets-broker
+// sync-commands leaf, moved out with the standalone engine — PHNX-3989). An
+// empty `export {}` is what makes this a module rather than a script, which is
+// required for the top-level `await` the argv fast paths below use.
+export {};
 
 // Force exit on Ctrl+C when no interactive prompt is handling it — UNLESS a
 // guarded harness auto-update pass is mutating this process transactionally
@@ -45,40 +49,6 @@ process.on('SIGINT', () => {
 // Ignore SIGPIPE — prevents exit code 13 crashes in piped environments
 // (e.g. `agents sessions | head`, or when stdout is captured by another process).
 process.on('SIGPIPE', () => {});
-
-if (process.argv[2] === '__vault-age-helper') {
-  const { runVaultAgeHelperCli } = await import('./lib/secrets/vault-age-helper.js');
-  await runVaultAgeHelperCli();
-  process.exit(process.exitCode ?? 0);
-}
-
-// Synchronous secrets-broker clients (src/lib/secrets/agent.ts). These are the
-// hot read path: `readAndResolveBundleEnv` is synchronous all the way down, so
-// it can't await a socket round-trip — it spawns one of these and reads the
-// exit code (0 = hit/alive, 3 = miss/down).
-//
-// Intercepted HERE, before bootstrap, for the same reason as __daemon-run and
-// __vault-age-helper. Everything in bootstrap runs `checkForUpdates()` and
-// `spawnDetachedSync()` on every non-help invocation — so registering these as
-// ordinary hidden subcommands would fire an update check and fork a detached
-// background sync on *every cache hit*, which is both a fork storm on the hot
-// path and a source of stdout writes that could corrupt the JSON payload. Keep
-// them above the line; agent.test.ts asserts this ordering so the block can't
-// drift into bootstrap.
-if (
-  process.argv[2] === SYNC_GET_CMD ||
-  process.argv[2] === SYNC_PING_CMD ||
-  process.argv[2] === SYNC_LOCK_CMD
-) {
-  const { runAgentGetSync, runAgentPingSync, runAgentLockSync } = await import('./lib/secrets/agent.js');
-  const name = process.argv[3] ?? '';
-  const harness = process.argv[4] ?? 'cli';
-  const code =
-    process.argv[2] === SYNC_GET_CMD ? await runAgentGetSync(name, harness)
-    : process.argv[2] === SYNC_PING_CMD ? await runAgentPingSync()
-    : await runAgentLockSync(name);
-  process.exit(code);
-}
 
 // Launch-lease delegate: every generated native shim/alias calls
 // `agents __launch-lease <agent> <label> <pid>` right before its final `exec`

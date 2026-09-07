@@ -14,7 +14,7 @@
 
 import { spawn, spawnSync } from 'child_process';
 import { readAndResolveBundleEnvSync, listBundlesSync, bundleExistsSync } from '../secrets-client.js';
-import type { SecretsBundle } from '../secrets/bundles.js';
+import type { SecretsBundle } from '../secrets-types.js';
 import { readMeta, writeMeta } from '../state.js';
 import { DEFAULT_CRABBOX_PROFILE } from './config.js';
 

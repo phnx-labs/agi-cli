@@ -454,14 +454,16 @@ describe('ServiceSupervisor', () => {
     expect(svc.stopCalls).toBe(stopCallsAfterRestart + 1);
   });
 
-  // RUSH-3193 P3 migrated watchdog, device-probe, self-heal, keychain-reap,
-  // and state-dir-check onto the supervisor. The throw/hang mechanics above
-  // already exercise 'watchdog' (ThrowingService) and 'device-probe'
-  // (HangingService) by id; this closes the same two guarantees explicitly
-  // for every id P3 migrated, proving the mechanism the concrete
-  // `*-service.ts` wrappers rely on is id-agnostic.
+  // RUSH-3193 P3 migrated watchdog, device-probe, self-heal, and
+  // state-dir-check onto the supervisor (a fifth, keychain-reap, migrated too
+  // but moved out of this daemon entirely with the standalone `secrets` engine
+  // — PHNX-3989 OWN-1). The throw/hang mechanics above already exercise
+  // 'watchdog' (ThrowingService) and 'device-probe' (HangingService) by id;
+  // this closes the same two guarantees explicitly for every id P3 migrated
+  // that still lives here, proving the mechanism the concrete `*-service.ts`
+  // wrappers rely on is id-agnostic.
   describe('RUSH-3193 P3 migrated ids: throw parks, hang hits deadline', () => {
-    const P3_IDS: DaemonServiceId[] = ['watchdog', 'device-probe', 'self-heal', 'keychain-reap', 'state-dir-check'];
+    const P3_IDS: DaemonServiceId[] = ['watchdog', 'device-probe', 'self-heal', 'state-dir-check'];
 
     it.each(P3_IDS)('%s: a throwing tick parks the service after parkAfterFailures, without crashing a healthy sibling', async (id) => {
       const supervisor = new ServiceSupervisor({ parkAfterFailures: 3, backoffBaseMs: 5_000, backoffMaxMs: 20_000 });

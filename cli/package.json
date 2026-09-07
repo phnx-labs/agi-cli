@@ -43,7 +43,7 @@
     "url": "https://github.com/phnx-labs/agi-cli/issues"
   },
   "scripts": {
-    "build": "tsc && rm -rf 'dist/lib/secrets/AgentsKeychain.app' 'dist/lib/secrets/Agents CLI.app' 'dist/lib/menubar/MenubarHelper.app' && ([ -f 'bin/agents-macos' ] && mkdir -p dist/bin && cp -f 'bin/agents-macos' 'dist/bin/agents' && chmod 755 'dist/bin/agents' || true)",
+    "build": "tsc && rm -rf 'dist/lib/menubar/MenubarHelper.app' && ([ -f 'bin/agents-macos' ] && mkdir -p dist/bin && cp -f 'bin/agents-macos' 'dist/bin/agents' && chmod 755 'dist/bin/agents' || true)",
     "build:bin": "scripts/build-bin.sh",
     "prepare": "npm run build",
     "prepack": "cp ../README.md README.md",
@@ -95,7 +95,6 @@
     "@xterm/headless": "6.0.0",
     "@zed-industries/agent-client-protocol": "0.4.5",
     "acorn": "8.18.0",
-    "age-encryption": "0.3.0",
     "aws4fetch": "1.0.20",
     "chalk": "5.6.2",
     "commander": "15.0.0",

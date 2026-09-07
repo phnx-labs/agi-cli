@@ -21,7 +21,7 @@
  * reads and writes; the catalog ([[account-catalog]]) owns discovery.
  */
 import { parseBundleValue, secretsKeychainItem, type BundleValue } from './secrets-client.js';
-import type { SecretsBundle } from './secrets/bundles.js';
+import type { SecretsBundle } from './secrets-types.js';
 import type { AccountAuthKind } from './account-provider-registry.js';
 
 /** Canonical bundle variable names for a provider-account bundle. */

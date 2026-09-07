@@ -5,30 +5,17 @@ import { writeSession, clearSession, sessionFilePath } from '../../identity/clie
 import { resolveSessionsBackend, shouldUseManagedSessions, SESSIONS_BACKEND_ENV } from './backend.js';
 import { DEFAULT_SESSIONS_DOMAIN } from './managed-config.js';
 import { clearR2ConfigCache, SYNC_BUNDLE } from './config.js';
-import { setKeychainBackendForTest, type KeychainBackend } from '../../secrets/index.js';
-import { writeBundle, type SecretsBundle } from '../../secrets/bundles.js';
+import { writeBundleWithItemsSync } from '../../secrets-client.js';
+import type { SecretsBundle } from '../../secrets-types.js';
+import { useFreshSecretsHome } from '../../../../tests/secrets-standalone.js';
 
 // resolveSessionsBackend routes managed-vs-BYO through the shared selection
 // policy (lib/storage/selection). MANAGED-FIRST: a signed-in user resolves to the
 // managed Phoenix store even with an r2.backups bundle present; only an explicit
-// --byo / env / write-token override flips to BYO. Real session file + real
-// keychain seam, no mocking of the decision.
-
-class MemBackend implements KeychainBackend {
-  store = new Map<string, string>();
-  has(item: string) { return this.store.has(item); }
-  get(item: string) {
-    const v = this.store.get(item);
-    if (v === undefined) throw new Error(`missing ${item}`);
-    return v;
-  }
-  set(item: string, value: string) { this.store.set(item, value); }
-  delete(item: string) { return this.store.delete(item); }
-  list(prefix: string) { return [...this.store.keys()].filter(k => k.startsWith(prefix)); }
-}
+// --byo / env / write-token override flips to BYO. Real session file against the
+// real standalone `secrets` engine (PHNX-3989), no mocking of the decision.
 
 const ENV_PREV = process.env[SESSIONS_BACKEND_ENV];
-let prevBackend: KeychainBackend | null = null;
 
 function writeR2Bundle(): void {
   const b: SecretsBundle = {
@@ -36,21 +23,19 @@ function writeR2Bundle(): void {
     policy: 'never',
     vars: { R2_ACCOUNT_ID: 'acct', R2_BUCKET_NAME: 'mybucket', R2_ACCESS_KEY_ID: 'ak', R2_SECRET_ACCESS_KEY: 'sk' },
   };
-  writeBundle(b);
+  writeBundleWithItemsSync(b, new Map());
 }
 
 describe('resolveSessionsBackend — managed-first selection', () => {
+  useFreshSecretsHome();
+
   beforeEach(() => {
     fs.rmSync(path.dirname(sessionFilePath()), { recursive: true, force: true });
     delete process.env[SESSIONS_BACKEND_ENV];
-    prevBackend = setKeychainBackendForTest(new MemBackend());
-    process.env.AGENTS_SECRETS_NO_AGENT = '1';
     clearR2ConfigCache();
   });
   afterEach(() => {
     clearSession();
-    setKeychainBackendForTest(prevBackend);
-    delete process.env.AGENTS_SECRETS_NO_AGENT;
     if (ENV_PREV === undefined) delete process.env[SESSIONS_BACKEND_ENV];
     else process.env[SESSIONS_BACKEND_ENV] = ENV_PREV;
     clearR2ConfigCache();

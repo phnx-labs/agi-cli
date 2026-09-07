@@ -1,7 +1,19 @@
 <!-- guide -->
 # Secrets-agent process model (design decision)
 
-> Status: **accepted** · Supersedes nothing · Related: [secrets.md](secrets.md), [routines.md](routines.md)
+> **SUPERSEDED (PHNX-3989 Track D, OWN-1).** The in-repo secrets-agent broker
+> this document is about (`src/lib/secrets/agent.ts`) is deleted. The
+> standalone [`@phnx-labs/secrets-cli`](https://github.com/phnx-labs/secrets-cli)
+> engine now owns its broker's process lifecycle **exclusively** — the
+> agents-cli daemon documented below no longer hosts it, self-heals it, or
+> takes it over under any condition; `agents daemon status`/`services` only
+> probes its reachability. The daemon-hosting design this record accepted is
+> reversed. Kept as a historical record of the incidents (stale-daemon reads,
+> cold-start starvation, duplicate daemons) that motivated hosting it in a
+> long-running process at all — that reasoning still explains why the
+> standalone runs its own persistent broker today.
+
+> Status: **accepted** (superseded, see above) · Supersedes nothing · Related: [secrets.md](secrets.md), [routines.md](routines.md)
 
 > **Implementation (#416, steps 1 & 2 — landed):** the daemon hosts the broker
 > socket-first. `runDaemon()` calls `startHostedBroker()` before the scheduler

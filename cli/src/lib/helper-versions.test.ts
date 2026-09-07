@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { HELPER_RELEASES, helperFloor, helperTag, type HelperName } from './helper-versions.js';
 import { helperAssetUrls, type HelperSpec } from './helper-download.js';
 import { MENUBAR_HELPER_SPEC } from './menubar/download-menubar.js';
-import { KEYCHAIN_HELPER_SPEC } from './secrets/download-keychain.js';
 
 const spec = (over: Partial<HelperSpec> = {}): HelperSpec => ({
   helper: 'menubar',
@@ -43,7 +42,7 @@ describe('helper release tags', () => {
     // coupling the rest of this module removes.
     expect(helperTag('computer-win', '1.0.0')).toBe('computer-win/v1.0.0');
     expect(Object.keys(HELPER_RELEASES).sort())
-      .toEqual(['computer-mac', 'computer-win', 'keychain', 'menubar']);
+      .toEqual(['computer-mac', 'computer-win', 'menubar']);
   });
 
   it('every declared helper has a usable floor', () => {
@@ -57,12 +56,9 @@ describe('helper release tags', () => {
     // Pins the pair that broke in production: the spec's assetName and the name
     // the release actually serves must agree. `Agents CLI.app.zip` was uploaded
     // and served as `Agents.CLI.app.zip`, so the client 404'd on every attempt.
-    for (const s of [MENUBAR_HELPER_SPEC, KEYCHAIN_HELPER_SPEC]) {
+    for (const s of [MENUBAR_HELPER_SPEC]) {
       expect(s.assetName, `${s.helper} asset name`).not.toContain(' ');
       expect(() => helperAssetUrls(s, helperFloor(s.helper))).not.toThrow();
     }
-    expect(KEYCHAIN_HELPER_SPEC.assetName).toBe('Agents_CLI.app.zip');
-    // The bundle DIRECTORY keeps its space -- only the asset name changed.
-    expect(KEYCHAIN_HELPER_SPEC.appName).toBe('Agents CLI.app');
   });
 });

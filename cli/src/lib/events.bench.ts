@@ -4,8 +4,7 @@
  * `index.ts:213-214` imports `{ emit, emitFriction, redactArgs }` from
  * `./lib/events.js` and `{ stampProvenance }` from `./lib/event-provenance.js`
  * EAGERLY — top-level, before commander parses argv (`program.parseAsync()` at
- * index.ts:1440 is reached only after all module evaluation; index.ts:71 is the
- * separate `__secrets-ping`/`__secrets-get` fast-path intercept). Every `agents`
+ * index.ts:1440 is reached only after all module evaluation). Every `agents`
  * process pays the module-graph evaluation cost, including the `--version` /
  * `--help` fast paths that never emit an event. The `emit`/`redactArgs`/
  * `stampProvenance` RUNTIME cost is then paid on every real command: the root

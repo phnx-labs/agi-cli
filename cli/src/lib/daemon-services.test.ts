@@ -41,11 +41,11 @@ describe('daemon-services', () => {
   });
 
   it('persists a disabled toggle and reads it back', () => {
-    setDaemonServiceEnabled('secrets-broker', false);
-    expect(isDaemonServiceEnabled('secrets-broker')).toBe(false);
+    setDaemonServiceEnabled('browser-ipc', false);
+    expect(isDaemonServiceEnabled('browser-ipc')).toBe(false);
 
     const cfg = readDaemonServicesConfig();
-    expect(cfg.services['secrets-broker']).toBe(false);
+    expect(cfg.services['browser-ipc']).toBe(false);
     // Other services stay enabled.
     expect(cfg.services['scheduler']).toBe(true);
   });
@@ -57,25 +57,25 @@ describe('daemon-services', () => {
     expect(scheduler).toBeDefined();
     expect(scheduler!.enabled).toBe(false);
 
-    const broker = states.find((s) => s.id === 'secrets-broker');
-    expect(broker!.enabled).toBe(true);
+    const browserIpc = states.find((s) => s.id === 'browser-ipc');
+    expect(browserIpc!.enabled).toBe(true);
   });
 
   it('ignores unknown service ids without throwing', () => {
     const filePath = getDaemonServicesConfigPath();
-    fs.writeFileSync(filePath, 'services:\n  secrets-broker: false\n  unknown-service: false\n', 'utf-8');
+    fs.writeFileSync(filePath, 'services:\n  browser-ipc: false\n  unknown-service: false\n', 'utf-8');
     const cfg = readDaemonServicesConfig();
-    expect(cfg.services['secrets-broker']).toBe(false);
+    expect(cfg.services['browser-ipc']).toBe(false);
     // Unknown key is ignored, not crashed on.
     expect(cfg.services['scheduler']).toBe(true);
   });
 
   it('writeDaemonServicesConfig preserves extra top-level fields', () => {
     const filePath = getDaemonServicesConfigPath();
-    fs.writeFileSync(filePath, 'notes: "do not clobber"\nservices:\n  secrets-broker: false\n', 'utf-8');
-    setDaemonServiceEnabled('secrets-broker', true);
+    fs.writeFileSync(filePath, 'notes: "do not clobber"\nservices:\n  browser-ipc: false\n', 'utf-8');
+    setDaemonServiceEnabled('browser-ipc', true);
     const raw = fs.readFileSync(filePath, 'utf-8');
     expect(raw).toContain('notes: do not clobber');
-    expect(raw).toContain('secrets-broker: true');
+    expect(raw).toContain('browser-ipc: true');
   });
 });

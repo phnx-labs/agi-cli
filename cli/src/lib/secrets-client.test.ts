@@ -53,7 +53,7 @@ import {
   PROTOCOL_VERSION,
 } from './secrets-client.js';
 import { getUserAgentsDir } from './state.js';
-import type { SecretsBundle } from './secrets/bundles.js';
+import type { SecretsBundle } from './secrets-types.js';
 
 describe('resolveSecretsBin', () => {
   const savedBin = process.env.SECRETS_BIN;

@@ -46,7 +46,7 @@ import { padToWidth, stringWidth } from '../text/width.js';
 import type { AgentId } from '../types.js';
 import type { DuplicateVersionHook } from '../hooks/install.js';
 import type { AgentsBinaryShadow } from '../binary-shadow.js';
-import type { RcSecretFinding } from '../secrets/rc-hygiene.js';
+import type { RcSecretFinding } from '../secrets-types.js';
 import type { OwnerSinkStatus } from '../channels/owner-sink.js';
 import { windowsSshEnrollmentProblem, type WindowsSshEnrollmentAudit } from './windows-ssh-enrollment.js';
 import type { SyncStatusRow, OrphanRow } from '../drift.js';

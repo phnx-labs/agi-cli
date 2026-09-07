@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { SecretsBundle } from './secrets/bundles.js';
+import type { SecretsBundle } from './secrets-types.js';
 import { ACCOUNT_POLICY, ACCOUNT_VARS, accountSecretItem, buildAccountBundle, parseAccountBundle, secretVarFor } from './account-schema.js';
 
 describe('account bundle schema', () => {

@@ -1,9 +1,11 @@
 /**
- * Socket-service migration (RUSH-3193 P2): each of the four socket services
- * (SecretsBrokerService, BrowserIPCService, MonitorEngineService,
- * AccountStateDaemonService) is supervised by ServiceSupervisor. MonitorEngineService
- * is periodic; the other wrappers own lifecycle resources and account-state owns
- * its existing refresh lifecycle.
+ * Socket-service migration (RUSH-3193 P2): each of the three socket services
+ * (BrowserIPCService, MonitorEngineService, AccountStateDaemonService) is
+ * supervised by ServiceSupervisor. MonitorEngineService is periodic; the other
+ * wrappers own lifecycle resources and account-state owns its existing
+ * refresh lifecycle. A fourth, SecretsBrokerService, used to live here too;
+ * it moved out of this daemon entirely with the standalone `secrets` engine
+ * (PHNX-3989 OWN-1) — this daemon no longer hosts or supervises that broker.
  *
  * Tests here exercise:
  * 1. `BaseDaemonService` — the convenience base for lifecycle-only services.
@@ -12,15 +14,15 @@
  *    - A lifecycle service that starts successfully is `running` with lastRunMs set.
  *    - Periodic and lifecycle services coexist on the same supervisor.
  *    - `stopAll()` calls stop() on lifecycle services.
- * 3. The four REAL socket-service classes (SecretsBrokerService,
- *    BrowserIPCService, MonitorEngineService, AccountStateDaemonService),
- *    imported and driven through a real `ServiceSupervisor` — start/stop/health
- *    run their actual onStart()/onStop() bodies, not a stand-in. Only the
- *    subsystem pieces that would otherwise touch the real machine (a real
- *    daemon's helpers dir for the browser socket, and the network/fleet calls
- *    behind account-state's refresh ticks) are redirected/stubbed; the four
- *    wrapper classes themselves are never mocked. Deleting a real onStart()/
- *    onStop() body now fails this suite (verified manually while writing it).
+ * 3. The three REAL socket-service classes (BrowserIPCService,
+ *    MonitorEngineService, AccountStateDaemonService), imported and driven
+ *    through a real `ServiceSupervisor` — start/stop/health run their actual
+ *    onStart()/onStop() bodies, not a stand-in. Only the subsystem pieces that
+ *    would otherwise touch the real machine (a real daemon's helpers dir for
+ *    the browser socket, and the network/fleet calls behind account-state's
+ *    refresh ticks) are redirected/stubbed; the wrapper classes themselves are
+ *    never mocked. Deleting a real onStart()/onStop() body now fails this
+ *    suite (verified manually while writing it).
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -61,22 +63,6 @@ vi.mock('../daemon-ticks.js', () => ({
   runUsageRefreshTick: vi.fn(async () => {}),
   runFleetCacheWarmTick: vi.fn(async () => {}),
   refreshLocalFleetAuthState: vi.fn(async () => ({ row: { host: 'test' }, authRows: [] })),
-}));
-
-// Stub the broker primitives so SecretsBrokerService.onStart() takes a
-// DETERMINISTic path regardless of whether the box running the test already has
-// a live secrets broker: `agentPing` reports unreachable (so onStart always
-// hosts, and never blocks on a real socket probe) and `startHostedBroker`
-// returns a fake broker whose `close` we can observe. The wrapper's real
-// onStart()/onStop() bodies still run — only these two machine-touching broker
-// calls are redirected, exactly as the account-state ticks above are. The
-// shared `brokerCloseMock` lets onStop's `this.hostedBroker?.close()` be asserted.
-const brokerCloseMock = vi.fn();
-
-vi.mock('../secrets/agent.js', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../secrets/agent.js')>()),
-  agentPing: vi.fn(async () => ({ reachable: false })),
-  startHostedBroker: vi.fn(async () => ({ close: brokerCloseMock })),
 }));
 
 // ---------------------------------------------------------------------------
@@ -133,7 +119,7 @@ class RecordingLifecycleService extends BaseDaemonService {
 
 describe('BaseDaemonService', () => {
   it('starts idle, transitions to running on start() and stamps lastRunMs', async () => {
-    const svc = new RecordingLifecycleService('secrets-broker');
+    const svc = new RecordingLifecycleService('catchup');
     expect(svc.health().state).toBe('idle');
 
     await svc.start(makeCtx());
@@ -166,7 +152,7 @@ describe('BaseDaemonService', () => {
   });
 
   it('health() returns a snapshot copy, not a live reference', async () => {
-    const svc = new RecordingLifecycleService('secrets-broker');
+    const svc = new RecordingLifecycleService('catchup');
     await svc.start(makeCtx());
     const snapshot = svc.health();
     await svc.stop();
@@ -187,14 +173,14 @@ describe('BaseDaemonService', () => {
 describe('ServiceSupervisor — lifecycle-only DaemonService', () => {
   it('a lifecycle service that starts successfully is running with lastRunMs set', async () => {
     const supervisor = new ServiceSupervisor();
-    const svc = new RecordingLifecycleService('secrets-broker');
+    const svc = new RecordingLifecycleService('catchup');
     supervisor.register(svc);
     await supervisor.startAll(makeCtx());
 
     const health = supervisor.health();
-    expect(health['secrets-broker'].state).toBe('running');
-    expect(health['secrets-broker'].lastRunMs).toBeGreaterThan(0);
-    expect(health['secrets-broker'].consecutiveFailures).toBe(0);
+    expect(health['catchup'].state).toBe('running');
+    expect(health['catchup'].lastRunMs).toBeGreaterThan(0);
+    expect(health['catchup'].consecutiveFailures).toBe(0);
     expect(svc.startCalls).toBe(1);
 
     await supervisor.stopAll();
@@ -233,7 +219,7 @@ describe('ServiceSupervisor — lifecycle-only DaemonService', () => {
 
   it('stopAll() does NOT call stop() on a service that never successfully started', async () => {
     const supervisor = new ServiceSupervisor();
-    const failing = new RecordingLifecycleService('secrets-broker');
+    const failing = new RecordingLifecycleService('catchup');
     failing.shouldFailStart = true;
     supervisor.register(failing);
     await supervisor.startAll(makeCtx());
@@ -255,7 +241,7 @@ describe('ServiceSupervisor — lifecycle-only DaemonService', () => {
 
     const supervisor = new ServiceSupervisor();
     const periodic = new TinyPeriodicService();
-    const lifecycle = new RecordingLifecycleService('secrets-broker');
+    const lifecycle = new RecordingLifecycleService('catchup');
     supervisor.register(periodic);
     supervisor.register(lifecycle);
     await supervisor.startAll(makeCtx());
@@ -264,7 +250,7 @@ describe('ServiceSupervisor — lifecycle-only DaemonService', () => {
 
     const health = supervisor.health();
     expect(health['session-index'].state).toBe('running');
-    expect(health['secrets-broker'].state).toBe('running');
+    expect(health['catchup'].state).toBe('running');
     // No timer ticks for the lifecycle service — it stays at the start lastRunMs.
     expect(lifecycle.startCalls).toBe(1);
     expect(isPeriodicService(periodic)).toBe(true);
@@ -294,7 +280,7 @@ describe('ServiceSupervisor — lifecycle-only DaemonService', () => {
 
   it('health() records are written to daemon-health.ts on lifecycle service successful start', async () => {
     const supervisor = new ServiceSupervisor();
-    const svc = new RecordingLifecycleService('secrets-broker');
+    const svc = new RecordingLifecycleService('catchup');
     supervisor.register(svc);
     await supervisor.startAll(makeCtx());
 
@@ -303,9 +289,9 @@ describe('ServiceSupervisor — lifecycle-only DaemonService', () => {
     expect(fs.existsSync(healthPath)).toBe(true);
     const all = JSON.parse(fs.readFileSync(healthPath, 'utf-8'));
     // SubsystemHealth has lastOkAt (not a `status` field).
-    expect(all['secrets-broker']).toBeDefined();
-    expect(all['secrets-broker'].consecutiveFailures).toBe(0);
-    expect(all['secrets-broker'].lastOkAt).not.toBeNull();
+    expect(all['catchup']).toBeDefined();
+    expect(all['catchup'].consecutiveFailures).toBe(0);
+    expect(all['catchup'].lastOkAt).not.toBeNull();
 
     await supervisor.stopAll();
   });
@@ -315,24 +301,20 @@ describe('ServiceSupervisor — lifecycle-only DaemonService', () => {
 // The four REAL socket services, through a real ServiceSupervisor
 // ---------------------------------------------------------------------------
 
-describe('ServiceSupervisor — real socket services (SecretsBrokerService, BrowserIPCService, MonitorEngineService, AccountUsageService, AccountAuthService)', () => {
+describe('ServiceSupervisor — real socket services (BrowserIPCService, MonitorEngineService, AccountUsageService, AccountAuthService)', () => {
   it('starts, reports healthy, and cleanly stops all real services together', async () => {
-    const { SecretsBrokerService } = await import('./secrets-broker-service.js');
     const { BrowserIPCService } = await import('./browser-ipc-service.js');
     const { MonitorEngineService } = await import('./monitor-engine-service.js');
     const { AccountUsageService, AccountAuthService } = await import('./account-state-daemon-service.js');
     const { BrowserService } = await import('../browser/service.js');
     const { getSocketPath } = await import('../browser/ipc.js');
-    const { startHostedBroker } = await import('../secrets/agent.js');
     const { runUsageRefreshTick, refreshLocalFleetAuthState } = await import('../daemon-ticks.js');
 
     const supervisor = new ServiceSupervisor();
-    const secrets = new SecretsBrokerService();
     const monitors = new MonitorEngineService();
     const accountUsage = new AccountUsageService();
     const accountAuth = new AccountAuthService();
     const browserIpc = new BrowserIPCService(new BrowserService());
-    supervisor.register(secrets);
     supervisor.register(monitors);
     supervisor.register(accountUsage);
     supervisor.register(accountAuth);
@@ -341,7 +323,6 @@ describe('ServiceSupervisor — real socket services (SecretsBrokerService, Brow
     await supervisor.startAll(makeCtx());
 
     const health = supervisor.health();
-    expect(health['secrets-broker'].state).toBe('running');
     expect(health['monitors'].state).toBe('running');
     expect(health['account-state'].state).toBe('running');
     expect(health['account-auth'].state).toBe('running');
@@ -362,28 +343,23 @@ describe('ServiceSupervisor — real socket services (SecretsBrokerService, Brow
     // per-account verdicts and detect live→expired/revoked transitions.
     expect(vi.mocked(runUsageRefreshTick)).toHaveBeenCalled();
     expect(vi.mocked(refreshLocalFleetAuthState)).toHaveBeenCalled();
-    // secrets-broker: the real onStart() saw an unreachable broker (stubbed) and
-    // hosted one via startHostedBroker(). Emptying onStart() skips this call.
-    expect(vi.mocked(startHostedBroker)).toHaveBeenCalled();
 
     await supervisor.stopAll();
 
     const stopped = supervisor.health();
-    expect(stopped['secrets-broker'].state).toBe('stopped');
     expect(stopped['monitors'].state).toBe('stopped');
     expect(stopped['account-state'].state).toBe('stopped');
     expect(stopped['account-auth'].state).toBe('stopped');
     expect(stopped['browser-ipc'].state).toBe('stopped');
-    // Real stop() effects: browser socket unlinked, engine released, and the
-    // hosted broker's close() was invoked. Emptying each onStop() skips these.
+    // Real stop() effects: browser socket unlinked, engine released. Emptying
+    // each onStop() skips these.
     expect(fs.existsSync(getSocketPath())).toBe(false);
     expect(monitors.getEngine()).toBeNull();
-    expect(brokerCloseMock).toHaveBeenCalled();
   });
 
   it('a real service whose onStart() throws is parked and reported unhealthy, without taking down a healthy sibling', async () => {
-    const { SecretsBrokerService } = await import('./secrets-broker-service.js');
     const { BrowserIPCService } = await import('./browser-ipc-service.js');
+    const { MonitorEngineService } = await import('./monitor-engine-service.js');
     const { BrowserService } = await import('../browser/service.js');
     const { getSocketPath } = await import('../browser/ipc.js');
 
@@ -396,9 +372,9 @@ describe('ServiceSupervisor — real socket services (SecretsBrokerService, Brow
 
     const supervisor = new ServiceSupervisor();
     const failingBrowserIpc = new BrowserIPCService(new BrowserService());
-    const healthySecrets = new SecretsBrokerService();
+    const healthyMonitors = new MonitorEngineService();
     supervisor.register(failingBrowserIpc);
-    supervisor.register(healthySecrets);
+    supervisor.register(healthyMonitors);
 
     await supervisor.startAll(makeCtx());
 
@@ -408,7 +384,7 @@ describe('ServiceSupervisor — real socket services (SecretsBrokerService, Brow
     expect(health['browser-ipc'].consecutiveFailures).toBeGreaterThanOrEqual(1);
 
     // The sibling real service kept starting and is healthy.
-    expect(health['secrets-broker'].state).toBe('running');
+    expect(health['monitors'].state).toBe('running');
 
     await supervisor.stopAll();
   });

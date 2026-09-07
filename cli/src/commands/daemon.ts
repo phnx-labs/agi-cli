@@ -2,9 +2,11 @@
  * `agents daemon` — runtime, hosted services, and failure visibility for the
  * always-on daemon (RUSH-2354).
  *
- * The daemon holds the routines scheduler, the secrets broker, the browser IPC
- * server, and the watchdog pass — but until this command group existed it had
- * no user-facing surface: no way to see it, restart it, or turn it off.
+ * The daemon holds the routines scheduler, the browser IPC server, and the
+ * watchdog pass — but until this command group existed it had no user-facing
+ * surface: no way to see it, restart it, or turn it off. The secrets broker
+ * moved out of this daemon entirely with the standalone `secrets` engine
+ * (PHNX-3989 OWN-1); `agents daemon status` only probes its reachability.
  * `daemon.ts` (the runtime) has always implemented every mechanism this file
  * wires up; nothing here is new machinery, only the missing CLI surface.
  *
@@ -37,7 +39,6 @@ import { getConfigValue, setConfigValue, isDaemonEnabled } from '../lib/device-c
 import {
   readSubsystemHealth,
   readAllSubsystemHealth,
-  SUBSYSTEM_SECRETS_BROKER,
   SUBSYSTEM_BROWSER_IPC,
   SUBSYSTEM_DAEMON_START,
   type SubsystemHealth,
@@ -66,7 +67,6 @@ import {
   type HostedReceiverConfig,
 } from '../lib/daemon-webhooks.js';
 import { parseFunnelPort } from '../lib/funnel.js';
-import { parseEtimeToSeconds } from '../lib/secrets/reaper.js';
 
 // ─── Process scanning — which install owns the pid, and every duplicate ──────
 
@@ -304,6 +304,18 @@ function registryScopedDuplicates(processes: DaemonProcess[], ownerPid: number |
   return processes.filter((p) => registered.has(p.pid));
 }
 
+/** Parse a `ps -o etime=` value (`[[dd-]hh:]mm:ss`) into elapsed seconds. */
+export function parseEtimeToSeconds(raw: string): number | null {
+  const m = raw.match(/^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/);
+  if (!m) return null;
+  const days = m[1] ? parseInt(m[1], 10) : 0;
+  const hours = m[2] ? parseInt(m[2], 10) : 0;
+  const mins = parseInt(m[3], 10);
+  const secs = parseInt(m[4], 10);
+  if ([days, hours, mins, secs].some(isNaN)) return null;
+  return ((days * 24 + hours) * 60 + mins) * 60 + secs;
+}
+
 /** Elapsed wall-clock seconds since `pid` started, or null if unavailable (best-effort, POSIX only). */
 export function uptimeSeconds(pid: number): number | null {
   if (process.platform === 'win32') return null;
@@ -311,7 +323,7 @@ export function uptimeSeconds(pid: number): number | null {
     // `-o etimes=` is a GNU/procps keyword macOS/BSD `ps` rejects with a
     // non-zero exit (`ps: etimes: keyword not found`), so `agents daemon status`
     // errored out entirely on macOS. `etime` (`[[dd-]hh:]mm:ss`) is the portable
-    // POSIX field; `parseEtimeToSeconds` (shared with the keychain reaper) parses it.
+    // POSIX field; `parseEtimeToSeconds` above parses it.
     const out = execFileSync('ps', ['-o', 'etime=', '-p', String(pid)], { encoding: 'utf-8' }).trim();
     return parseEtimeToSeconds(out);
   } catch {
@@ -330,21 +342,32 @@ function humanDuration(seconds: number): string {
 
 interface SecretsBrokerHealth {
   reachable: boolean;
+  /**
+   * Always `null` — the broker's socket now lives entirely inside the
+   * standalone `secrets` engine's own process (PHNX-3989 OWN-1); the daemon
+   * neither hosts it nor knows its transport details. Kept in the shape for
+   * `--json` compatibility.
+   */
   socketPath: string | null;
   heldBundles: number | null;
+  /**
+   * Always `null` — no daemon service writes a health record for the broker
+   * anymore (the daemon does not host or supervise it). Kept in the shape for
+   * `--json` compatibility.
+   */
   record: SubsystemHealth | null;
 }
 
+/** Reachability probe only — the daemon does not host, supervise, or take over the broker (OWN-1). */
 async function probeSecretsBroker(): Promise<SecretsBrokerHealth> {
-  const record = readSubsystemHealth(SUBSYSTEM_SECRETS_BROKER);
   try {
-    const { agentPing, agentStatus, secretsBrokerSocketPath } = await import('../lib/secrets/agent.js');
+    const { agentPing, agentStatus } = await import('../lib/secrets-client.js');
     const ping = await agentPing();
-    if (!ping.reachable) return { reachable: false, socketPath: secretsBrokerSocketPath(), heldBundles: null, record };
+    if (!ping.reachable) return { reachable: false, socketPath: null, heldBundles: null, record: null };
     const entries = await agentStatus();
-    return { reachable: true, socketPath: secretsBrokerSocketPath(), heldBundles: entries.length, record };
+    return { reachable: true, socketPath: null, heldBundles: entries.length, record: null };
   } catch {
-    return { reachable: false, socketPath: null, heldBundles: null, record };
+    return { reachable: false, socketPath: null, heldBundles: null, record: null };
   }
 }
 
@@ -948,7 +971,7 @@ function runWebhooksList(json: boolean): void {
 export function registerDaemonCommand(program: Command): void {
   const cmd = program
     .command('daemon')
-    .description('The always-on daemon: secrets broker, browser IPC, watchdog, and the routines scheduler. Bare `agents daemon` shows status.')
+    .description('The always-on daemon: browser IPC, watchdog, and the routines scheduler. Bare `agents daemon` shows status.')
     .option('--json', 'Emit as JSON')
     .action(async (opts, command) => {
       await runStatus({ json: command.optsWithGlobals().json === true });
@@ -978,12 +1001,12 @@ export function registerDaemonCommand(program: Command): void {
       agents daemon services
 
       # Toggle or restart a service live — applies without a daemon restart
-      # for supervisor-managed services (secrets-broker, browser-ipc,
-      # account-state, session-index, monitors' off-transition, watchdog,
-      # device-probe, self-heal, keychain-reap, state-dir-check)
-      agents daemon services disable secrets-broker
-      agents daemon services enable secrets-broker
-      agents daemon services restart secrets-broker
+      # for supervisor-managed services (browser-ipc, account-state,
+      # session-index, monitors' off-transition, watchdog, device-probe,
+      # self-heal, state-dir-check)
+      agents daemon services disable browser-ipc
+      agents daemon services enable browser-ipc
+      agents daemon services restart browser-ipc
 
       # Host a signed webhook receiver here, supervised and restarted on crash
       agents daemon webhooks add --secrets-bundle linear-webhook
@@ -1124,17 +1147,18 @@ export function registerDaemonCommand(program: Command): void {
       agents daemon services
 
       # Machine-readable — additive: also carries the pre-existing
-      # secretsBroker/browserIpc hosted-socket fields
+      # secretsBroker (reachability-only probe, PHNX-3989)/browserIpc
+      # hosted-socket fields
       agents daemon services --json
 
       # Just the enable/disable metadata, no health probe
       agents daemon services list
 
       # Toggle or restart live — no daemon restart for a supervisor-managed
-      # service (secrets-broker, browser-ipc, account-state, session-index)
-      agents daemon services disable secrets-broker
-      agents daemon services enable secrets-broker
-      agents daemon services restart secrets-broker
+      # service (browser-ipc, account-state, session-index)
+      agents daemon services disable browser-ipc
+      agents daemon services enable browser-ipc
+      agents daemon services restart browser-ipc
     `,
     notes: `
       A service disabled at daemon boot is normally not registered on the

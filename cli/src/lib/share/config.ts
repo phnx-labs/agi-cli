@@ -18,7 +18,7 @@ import {
   secretsKeychainItem,
   writeBundleWithItemsSync as writeBundleWithItems,
 } from '../secrets-client.js';
-import type { SecretsBundle } from '../secrets/bundles.js';
+import type { SecretsBundle } from '../secrets-types.js';
 
 export interface ShareConfig {
   /** Public base, e.g. `https://share.getrush.ai` or `https://agent-share.<acct>.workers.dev`. */

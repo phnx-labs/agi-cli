@@ -61,7 +61,7 @@ describe('daemon-health', () => {
   });
 
   it('reports no record for a subsystem that has never checked in', () => {
-    expect(readSubsystemHealth('secrets-broker')).toBeNull();
+    expect(readSubsystemHealth('monitors')).toBeNull();
     expect(readAllSubsystemHealth()).toEqual([]);
   });
 
@@ -77,19 +77,19 @@ describe('daemon-health', () => {
   });
 
   it('accumulates consecutive failures and keeps the most recent error', () => {
-    recordSubsystemError('secrets-broker', 'ENOENT: socket missing', '2026-01-01T00:00:00.000Z');
-    recordSubsystemError('secrets-broker', 'ECONNREFUSED', '2026-01-01T00:01:00.000Z');
-    const record = readSubsystemHealth('secrets-broker');
+    recordSubsystemError('monitors', 'ENOENT: socket missing', '2026-01-01T00:00:00.000Z');
+    recordSubsystemError('monitors', 'ECONNREFUSED', '2026-01-01T00:01:00.000Z');
+    const record = readSubsystemHealth('monitors');
     expect(record?.consecutiveFailures).toBe(2);
     expect(record?.lastError).toBe('ECONNREFUSED');
     expect(record?.lastErrorAt).toBe('2026-01-01T00:01:00.000Z');
   });
 
   it('a success after failures clears the streak but keeps the failure history in lastError', () => {
-    recordSubsystemError('secrets-broker', 'boom', '2026-01-01T00:00:00.000Z');
-    recordSubsystemError('secrets-broker', 'boom again', '2026-01-01T00:01:00.000Z');
-    recordSubsystemOk('secrets-broker', '2026-01-01T00:02:00.000Z');
-    const record = readSubsystemHealth('secrets-broker');
+    recordSubsystemError('monitors', 'boom', '2026-01-01T00:00:00.000Z');
+    recordSubsystemError('monitors', 'boom again', '2026-01-01T00:01:00.000Z');
+    recordSubsystemOk('monitors', '2026-01-01T00:02:00.000Z');
+    const record = readSubsystemHealth('monitors');
     expect(record?.consecutiveFailures).toBe(0);
     expect(record?.lastOkAt).toBe('2026-01-01T00:02:00.000Z');
     // lastError is a record of what LAST happened, not cleared on recovery —
@@ -99,10 +99,10 @@ describe('daemon-health', () => {
 
   it('tracks multiple subsystems independently and returns them sorted by name', () => {
     recordSubsystemOk('browser-ipc');
-    recordSubsystemError('secrets-broker', 'unreachable');
+    recordSubsystemError('monitors', 'unreachable');
     const all = readAllSubsystemHealth();
-    expect(all.map((r) => r.subsystem)).toEqual(['browser-ipc', 'secrets-broker']);
-    expect(all.find((r) => r.subsystem === 'secrets-broker')?.consecutiveFailures).toBe(1);
+    expect(all.map((r) => r.subsystem)).toEqual(['browser-ipc', 'monitors']);
+    expect(all.find((r) => r.subsystem === 'monitors')?.consecutiveFailures).toBe(1);
   });
 
   it('persists on disk under the daemon dir — a separate reader process sees the same record', () => {
@@ -137,8 +137,8 @@ describe('daemon-health', () => {
     fs.writeFileSync(path.join(dir, 'health.json'), 'not json');
     expect(readAllSubsystemHealth()).toEqual([]);
     // And writing still recovers cleanly afterward.
-    recordSubsystemOk('secrets-broker');
-    expect(readSubsystemHealth('secrets-broker')?.consecutiveFailures).toBe(0);
+    recordSubsystemOk('monitors');
+    expect(readSubsystemHealth('monitors')?.consecutiveFailures).toBe(0);
   });
 
   // Review finding on PR #3037 (RUSH-3193 P1): recordSubsystemOk/Error are
