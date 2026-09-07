@@ -626,6 +626,32 @@ enum AgentsCLI {
         }
     }
 
+    /// Distinct recent working directories from local session history, newest
+    /// first, with `$HOME` dropped — running an agent straight in the home dir is
+    /// too broad a permission surface.
+    ///
+    /// This is the DEGRADED path, used only on a machine with no `agents projects`
+    /// definitions at all. `agents projects` is a separate, opt-in resource, so an
+    /// existing palette user very likely has none on upgrade; without this the
+    /// palette would have no scope to offer and would dispatch an `auto`-mode
+    /// agent with no `--cwd` — which the helper's launchd process inherits as `/`,
+    /// broader still than `$HOME` (PHNX-4001 review). A box WITH definitions never
+    /// takes this path; there, recent cwds only narrow a chosen project
+    /// (`recentDirs(in:from:)`).
+    static func recentDirs(from sessions: [RecentSession], limit: Int = 8) -> [String] {
+        let home = (NSHomeDirectory() as NSString).standardizingPath
+        var seen = Set<String>()
+        var dirs: [String] = []
+        for s in sessions {
+            guard let cwd = s.cwd, !cwd.isEmpty else { continue }
+            let norm = (cwd as NSString).standardizingPath
+            if norm == home { continue }
+            if seen.insert(norm).inserted { dirs.append(norm) }
+            if dirs.count >= limit { break }
+        }
+        return dirs
+    }
+
     /// Recent session working directories INSIDE one project — the worktrees and
     /// subdirectories the user has actually been in. Never the project list
     /// itself: the project is chosen by name, and this only narrows where inside

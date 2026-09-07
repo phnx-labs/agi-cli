@@ -34,6 +34,8 @@ enum ProjectSelfTest {
         testAttachmentNaming()
         testPasteAndDrop()
         testPinPolicy()
+        testRepoSubpath()
+        testNoDefinitionsFallback()
         if failures == 0 {
             print("\nALL PASS")
             exit(0)
@@ -335,6 +337,58 @@ enum ProjectSelfTest {
         check("a non-image file attaches nothing",
               AgentsCLI.imageAttachments(from: pb).isEmpty)
         pb.releaseGlobally()
+    }
+
+    // `repos[].subpath` narrows a bound repo to the subdirectory the project
+    // declares it cares about. Dropping it would bind the WHOLE checkout — the
+    // same over-binding that made `root` unusable as a bound dir.
+    private static func testRepoSubpath() {
+        // The bound repo is a DIFFERENT checkout from the project's own root, so
+        // the join is what decides how much of it belongs to this project. (A
+        // repos[] entry pointing at the root itself is already covered by the
+        // primary `defaultPath ?? root`, whatever its subpath says.)
+        let json = """
+        [{"name": "sub", "root": "~/src/app",
+          "repos": [{"slug": "o/mono", "path": "~/src/mono", "subpath": "packages/api"}]}]
+        """
+        guard let data = json.data(using: .utf8),
+              let defs = try? JSONDecoder().decode([ProjectDef].self, from: data),
+              let def = defs.first else {
+            check("a repos[] entry with a subpath decodes", false); return
+        }
+        let home = NSHomeDirectory()
+        check("subpath decodes", def.repos?.first?.subpath == "packages/api")
+        check("a bound repo path joins its subpath",
+              def.repos?.first?.absPath == "\(home)/src/mono/packages/api",
+              detail: def.repos?.first?.absPath ?? "nil")
+        check("the declared subdirectory is inside the project",
+              ProjectCatalog.contains(def, dir: "\(home)/src/mono/packages/api/src"))
+        // The point of joining: a SIBLING package under the same checkout is not
+        // this project, and over-binding to `path` would have claimed it.
+        check("a sibling package under the same checkout is NOT inside it",
+              !ProjectCatalog.contains(def, dir: "\(home)/src/mono/packages/web"))
+        // A repos[] entry with no subpath still binds its whole path.
+        let plain = ProjectCatalog.named("agi", in: decoded())
+        check("a repos[] entry with no subpath binds its whole path",
+              plain.map { ProjectCatalog.contains($0, dir: "\(home)/src/github.com/me/linear-cli/src") } ?? false)
+    }
+
+    // A box with NO `agents projects` definitions (the state every palette user is
+    // in until they run `agents projects add`) must still have somewhere to run:
+    // recent session cwds, never `$HOME`. Dispatching with neither `--project` nor
+    // `--cwd` makes `agents run` inherit the helper's launchd cwd, which is `/`.
+    private static func testNoDefinitionsFallback() {
+        let home = NSHomeDirectory()
+        let dirs = AgentsCLI.recentDirs(from: [
+            session("/work/first"), session(home), session("/work/first"),
+            session(nil), session("/work/second"), session("/work/third"),
+        ], limit: 2)
+        check("the no-definitions fallback offers recent cwds newest-first, deduped",
+              dirs == ["/work/first", "/work/second"], detail: dirs.joined(separator: ","))
+        check("the fallback never offers $HOME",
+              !AgentsCLI.recentDirs(from: [session(home)]).contains(home))
+        check("no sessions means no fallback directory — nothing to dispatch into",
+              AgentsCLI.recentDirs(from: []).isEmpty)
     }
 
     // The pin does exactly two things: it survives a relaunch, and it stops the
