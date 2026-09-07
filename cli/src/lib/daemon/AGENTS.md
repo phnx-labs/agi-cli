@@ -253,7 +253,7 @@ socket fields in `--json` (`commands/daemon.ts`'s `runServices`). An
 interactive TTY browser (reusing `dynamicPicker`, `lib/picker.ts`) is
 intentionally out of scope for this PR — see the linked follow-up ticket.
 
-**Four cross-device distribution patterns already exist, each hand-rolled
+**Three cross-device distribution patterns already exist, each hand-rolled
 independently — there is no shared abstraction between them:**
 
 - **fanout** (per-peer watch, local process per remote): `watchFleetFeed`
@@ -273,17 +273,13 @@ independently — there is no shared abstraction between them:**
   repo under one cross-process lock; its async git process tree has a 45-second
   hard deadline, so both daemon services share transport without racing or
   depending on a human `agents repo sync user`.
-- **elected-singleton** (first-come binds, others detect and back off):
-  the secrets broker binds a local socket in `startHostedBroker`
-  (`cli/src/lib/secrets/agent.ts:915`, bind call at `:925`); daemon-side
-  takeover logic is `shouldTakeOverBroker`
-  (`cli/src/lib/daemon/daemon.ts:182`):
-
-  ```ts
-  export function shouldTakeOverBroker(isHosting: boolean, brokerReachable: boolean): boolean {
-    return !isHosting && !brokerReachable;
-  }
-  ```
+The daemon used to host a fourth pattern — **elected-singleton** (first-come
+binds, others detect and back off) — for the secrets broker, via
+`startHostedBroker`/`shouldTakeOverBroker`. That hosting is gone (PHNX-3989,
+OWN-1): the standalone `secrets-cli` engine owns its own broker's process
+lifecycle exclusively now, and the daemon only probes its reachability
+(`probeSecretsBroker` in `cli/src/commands/daemon.ts`) — there is no longer a
+daemon-side elected-singleton example to point at.
 
 **Caching is mostly ad-hoc — the bounded primitive is underused.**
 `createMemoryCache` (`cli/src/lib/memory-cache.ts:21-23`) is a bounded
@@ -299,7 +295,7 @@ and `cli/src/commands/sessions-picker.ts:142` / `:160`. Roughly 28 other
 files implement their own ad-hoc TTL constants plus disk-mirror files with
 little or no eviction (`fleet-status.ts`, `auth-health.ts`, `mailbox.ts`,
 `linear-cache.ts`, `devices/stats-cache.ts`, `session/presence.ts`,
-`secrets/vault.ts`, and others) — so roughly 3 of ~31 cache-like constructs
+and others) — so roughly 3 of ~31 cache-like constructs
 in this area route through the shared bounded cache. State this as it is:
 most daemon-adjacent caching has no shared eviction policy today.
 

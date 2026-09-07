@@ -1,9 +1,9 @@
 /**
  * Install + lifecycle for the macOS menu-bar helper (`MenubarHelper.app`).
  *
- * Mirrors `src/lib/secrets/install-helper.ts` (stable Application Support path,
- * survives npm re-sign) and the secrets-agent launchd pattern in
- * `src/lib/secrets/agent.ts` (RunAtLoad + KeepAlive user service).
+ * Mirrors the stable-Application-Support-path-survives-npm-re-sign pattern and
+ * a RunAtLoad + KeepAlive user service, the same shape the deleted embedded
+ * secrets-agent used before it moved to the standalone secrets-cli (PHNX-3989).
  *
  * The helper is a no-Dock `.accessory` status-bar app. It reads live agent
  * state directly from disk and shells `agents` only for actions, so the plist

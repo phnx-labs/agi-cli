@@ -25,19 +25,6 @@ const PACKAGE_VERSION = (JSON.parse(
   fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf-8'),
 ) as { version: string }).version;
 
-// A source checkout on a GitHub macOS runner does not carry the signed
-// `Agents CLI.app`. Even `import --backend file` must probe the Keychain first
-// to reject an existing keychain-backed bundle with the same name, so the real
-// CLI subprocess cannot seed this fixture there. Keep the end-to-end coverage
-// on Linux and on macOS installs that have the shipped helper, matching the
-// established subprocess guards in commands/secrets.test.ts and ssh.test.ts.
-const keychainHelperAvailable =
-  process.platform !== 'darwin' ||
-  fs.existsSync(path.join(REPO_ROOT, 'src', 'lib', 'secrets', 'Agents CLI.app')) ||
-  fs.existsSync(path.join(REPO_ROOT, 'bin', 'Agents CLI.app')) ||
-  fs.existsSync(path.join(REPO_ROOT, 'dist', 'lib', 'secrets', 'Agents CLI.app'));
-const helperDependentIt = keychainHelperAvailable ? it : it.skip;
-
 // win32: export/import envelope + file-store decrypt path is POSIX-process oriented (RUSH-2215).
 const describeSecrets = process.platform === 'win32' ? describe.skip : describe;
 
@@ -105,7 +92,7 @@ afterEach(() => {
 });
 
 describeSecrets('export --to-file / import --from-file use AGENTS_SYNC_PASSPHRASE (RUSH-1968)', () => {
-  helperDependentIt('round-trips a bundle through an encrypted file under the NEW variable', () => {
+  it('round-trips a bundle through an encrypted file under the NEW variable', () => {
     const home = makeTempHome();
     seedBundle(home, 'src-bundle', 'DEMO_TOKEN', 'demo-value-123');
     const sealed = path.join(home, 'bundle.enc');
@@ -135,7 +122,7 @@ describeSecrets('export --to-file / import --from-file use AGENTS_SYNC_PASSPHRAS
   // prove the passthrough forwards `--to-file`/`--from-file` and seals the file
   // (not plaintext), which is what agents-cli remains on the hook for.
 
-  helperDependentIt('a file sealed on a LEGACY box opens on an upgraded box using the NEW variable', () => {
+  it('a file sealed on a LEGACY box opens on an upgraded box using the NEW variable', () => {
     // Same secret, two spellings, two machines: the upgrade must not strand a
     // file sealed by the other side of the version boundary. Two temp HOMEs,
     // because each box keys its own store differently.
