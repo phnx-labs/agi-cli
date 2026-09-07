@@ -202,6 +202,41 @@ Attachments reach the agent as `<host>:<abs-path>` references — the same token
 one dispatched to another device `scp`s it. A bare absolute path could only ever
 be read locally.
 
+### Finding a screenshot by the text on it (OCR search + grid)
+
+Every capture in the same three source folders is OCR'd once, on-device, and the
+recognized text is indexed so you can find a screenshot by the words on it
+(PHNX-4006). Nothing leaves the machine: recognition runs through Vision locally
+and the index is a plain SQLite file at
+`~/.agents/.history/menubar/screenshots.db`.
+
+- **Index.** `ScreenshotIndex` (`ScreenshotIndex.swift`) starts once at helper
+  launch: it scans the last 14 days of `AgentsCLI.screenshotSourceDirs()` and owns
+  its own FSEvents watcher for the whole helper lifetime, so a shot taken with the
+  palette closed is still recognized. Each image is keyed by the SHA-256 of its
+  bytes — a rename or a duplicate collapses onto one row and is **never OCR'd
+  twice**; a moved file re-points its row. Files over 20 MB are skipped, and each
+  image is downsampled to ≤ 2000 px on the long edge before
+  `VNRecognizeTextRequest` (`.fast`, no language correction). All hashing, OCR, and
+  writes run on a serial `.utility` queue against one WAL connection — never the
+  main thread, so the palette stays responsive during a scan.
+- **Search.** With the palette key, `Cmd-Shift-F` focuses a search field above the
+  strip. Typing filters the strip to captures whose recognized text matches every
+  token (case-insensitive substring, tokenized AND), newest first, and the hint
+  line reads `n of m match`. Clearing the field restores the newest-six strip. A
+  matched thumbnail attaches on click exactly like any other.
+- **Grid.** The **more** disclosure beside the search field expands the strip into
+  a scrollable grid grouped by hour (last 24 h) then by day; each cell shows the
+  thumbnail, the capture time, and the first recognized line as a caption. A single
+  click attaches; a double click previews the full image in Preview.app. **fewer**
+  collapses it back to the six-wide strip.
+
+Self-tests live behind `MENUBAR_OCR_TEST=1` (real Vision over the committed
+`Tests/fixtures/*.png`, asserting `first_line`, hash dedupe, tokenized search, the
+pure grouping helper, and that all work is off the main thread), wired into
+`scripts/test-menubar.sh`. `MENUBAR_BENCH=1 MENUBAR_BENCH_OCR_REAL=1` reports a cold
+index's count / wall time / RSS and the search latency on a 1,000-row db.
+
 `--notify` is what makes a dispatch report back. The run is launched **detached**
 and posts its own "finished"/"failed" notification when it ends (see
 [Notifications](#notifications)). Earlier the helper monitored the child and
@@ -788,6 +823,7 @@ sent. `done` banners are the exception: they ride the run process's own exit
 | `~/Library/Application Support/agents-cli/.menubar-tcc-migrated` | marks the one-time ad-hoc -> Developer ID `tccutil reset Accessibility` as done |
 | `~/.agents/.cache/state/menubar.disabled` | sticky opt-out marker |
 | `~/.agents/.cache/helpers/menubar/menubar.log` | helper stdout / stderr |
+| `~/.agents/.history/menubar/screenshots.db` | SQLite (WAL) OCR index of recent screenshots — `{hash, path, taken_at, width, height, ocr_text, first_line}` — behind the palette's screenshot search and grid (PHNX-4006) |
 | `~/.agents/.history/menubar/projects.json` | last `agents projects list --json` result, so the palette's project dropdown fills on the first summon after a launch |
 | `~/.agents/.history/feed/notified/<key>` | actionable-banner idempotency ledger — one sidecar per notified attention key, pruned at 14 days (`attention-notify` service) |
 | `~/.agents/.history/menubar/recent-tickets.json` | tickets filed from the quick-dispatch panel (RECENT TICKETS) |
