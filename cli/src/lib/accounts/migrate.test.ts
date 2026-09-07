@@ -345,17 +345,72 @@ describe('accounts migrate (PHNX-3940 T7)', () => {
     fs.rmSync(getVersionDir('claude', label), { recursive: true, force: true });
   });
 
-  it('fails loud when a slot dir already exists for the account', async () => {
+  it('trashes a stale home whose account already holds a provisioned slot instead of aborting', async () => {
     prevDefault = fixtureFleet().prevDefault;
     await applyAccountMigration(['claude'], { isActive: async () => false });
     const natives = listNativeAccounts(readMeta()).filter((a) => a.identityLabel === gmail || a.identityLabel === icloud);
     plantedAccounts.push(...natives.map((a) => a.name));
+    const gmailAcct = natives.find((a) => a.identityLabel === gmail)!;
+    const slotBefore = fs.readdirSync(slotDir('claude', gmailAcct.id));
+    expect(slotBefore.length).toBeGreaterThan(0);
+    // Canonical is the newest signed-in install, so plant a newer icloud home
+    // to hold that role: it also already has a slot, which exercises the
+    // canonical branch (binary kept, home left in place) while the older gmail
+    // home below takes the trash branch.
+    const pinnedDefault = `9.9.9-${suffix}-def`;
+    extraCleanupLabels.push(pinnedDefault);
+    plantInstall(pinnedDefault, '9.9.9', { email: icloud });
+    setGlobalDefault('claude', pinnedDefault);
     const extra = `0.7.0-${suffix}`;
     plantInstall(extra, '0.7.0', { email: gmail });
     invalidateInstalledVersionsCache('claude');
-    await expect(applyAccountMigration(['claude'], { isActive: async () => false }))
-      .rejects.toThrow(/Slot already exists/);
-    fs.rmSync(getVersionDir('claude', extra), { recursive: true, force: true });
+    bindAccount(gmailAcct.id, `claude@${extra}`, 'claude');
+
+    const plan = await planAccountMigration(['claude'], { isActive: async () => false });
+    const action = plan.harnesses.find((h) => h.agent === 'claude')?.actions.find((a) => a.label === extra);
+    expect(action?.kind).toBe('trash');
+    expect(action?.reason).toMatch(/already holds a provisioned slot/);
+    expect(action?.accountId).toBe(gmailAcct.id);
+    const canonicalAction = plan.harnesses.find((h) => h.agent === 'claude')?.actions.find((a) => a.label === pinnedDefault);
+    expect(canonicalAction?.kind).toBe('canonical');
+    expect(canonicalAction?.reason).toMatch(/already holds a slot/);
+
+    const result = await applyAccountMigration(['claude'], { isActive: async () => false });
+    expect(result.manifest.status).toBe('complete');
+    expect(fs.existsSync(getVersionDir('claude', extra))).toBe(false);
+    expect(fs.existsSync(path.join(getHistoryDir(), 'trash', 'versions', 'claude', extra))).toBe(true);
+    expect(result.manifest.harnesses.claude?.trashed.find((t) => t.label === extra)?.reason).toMatch(/already holds a provisioned slot/);
+    // The slot the account already owned is untouched, and the binding that
+    // named the trashed version now names the account.
+    expect(fs.readdirSync(slotDir('claude', gmailAcct.id))).toEqual(slotBefore);
+    const bindings = { ...readMeta().accounts?.bindings, ...readMeta().deviceAccounts?.bindings };
+    expect(bindings[`claude@${extra}`]).toBe(gmailAcct.id);
+    // The canonical home stayed where it was.
+    expect(fs.existsSync(path.join(getVersionDir('claude', pinnedDefault), 'home', '.claude.json'))).toBe(true);
+    unbindAccount(gmailAcct.id, `claude@${extra}`, 'claude');
+  });
+
+  it('still fails loud when the slot path is occupied by something that is not a slot directory', async () => {
+    prevDefault = fixtureFleet().prevDefault;
+    await applyAccountMigration(['claude'], { isActive: async () => false });
+    const natives = listNativeAccounts(readMeta()).filter((a) => a.identityLabel === gmail || a.identityLabel === icloud);
+    plantedAccounts.push(...natives.map((a) => a.name));
+    const gmailAcct = natives.find((a) => a.identityLabel === gmail)!;
+    const dest = slotDir('claude', gmailAcct.id);
+    const keep = path.join(path.dirname(dest), `${path.basename(dest)}.keep-${suffix}`);
+    fs.renameSync(dest, keep);
+    fs.writeFileSync(dest, 'not a directory');
+    const extra = `0.7.0-${suffix}`;
+    plantInstall(extra, '0.7.0', { email: gmail });
+    invalidateInstalledVersionsCache('claude');
+    try {
+      await expect(applyAccountMigration(['claude'], { isActive: async () => false }))
+        .rejects.toThrow(/Slot already exists/);
+    } finally {
+      fs.rmSync(dest, { force: true });
+      fs.renameSync(keep, dest);
+      fs.rmSync(getVersionDir('claude', extra), { recursive: true, force: true });
+    }
   });
 
   it('writes the manifest before the first move and records only completed identities after a mid-loop failure', async () => {
@@ -370,9 +425,11 @@ describe('accounts migrate (PHNX-3940 T7)', () => {
     invalidateInstalledVersionsCache('claude');
     const acctA = await registerHomeAccount(labelA, `crash-a-${suffix}`, emailA);
     const acctB = await registerHomeAccount(labelB, `crash-b-${suffix}`, emailB);
+    // A regular file at the slot path is not a provisioned slot, so the plan
+    // still routes B to `slot` and the apply-time guard is what fails.
     const destB = slotDir('claude', acctB.id);
-    fs.mkdirSync(destB, { recursive: true, mode: 0o700 });
-    fs.writeFileSync(path.join(destB, 'occupied'), 'preexisting');
+    fs.mkdirSync(path.dirname(destB), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(destB, 'preexisting');
 
     await expect(applyAccountMigration(['claude'], { isActive: async () => false }))
       .rejects.toThrow(/Slot already exists/);

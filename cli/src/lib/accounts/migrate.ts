@@ -291,6 +291,23 @@ function assertSlotAbsent(agent: AgentId, accountId: string): string {
   return dest;
 }
 
+/**
+ * True when this device already holds a populated slot directory for the
+ * account. The daemon's auth-sync provisions durable worker slots on its own
+ * (PHNX-3940), so by the time an operator runs `--apply` a worker commonly has
+ * a slot for every account whose legacy per-version home is still on disk.
+ * A regular file at the slot path is NOT a slot: the plan keeps routing such a
+ * home to `slot` so the apply-time guard fails loud on the corruption.
+ */
+function provisionedSlotExists(agent: AgentId, accountId: string): boolean {
+  const dest = slotDir(agent, accountId);
+  try {
+    return fs.statSync(dest).isDirectory() && fs.readdirSync(dest).length > 0;
+  } catch {
+    return false;
+  }
+}
+
 function takenNames(meta: ReturnType<typeof readMeta>): Set<string> {
   const taken = new Set<string>();
   for (const row of listNativeAccounts(meta)) {
@@ -367,6 +384,41 @@ async function planHarness(
         label: item.label,
         release: item.release,
         reason: 'duplicate identity — keeping the better home via planDuplicatePrune',
+        identityKey: item.identityKey,
+        email: item.email,
+        sessionCount: item.sessionCount,
+        pathMoves: [{ from: item.dir, to: plannedTrashPath(agent, item.label) }],
+      });
+      continue;
+    }
+    if (item.hasCredential && item.accountId && provisionedSlotExists(agent, item.accountId)) {
+      // The account already owns a populated slot on this device, so this
+      // per-version home is a stale copy of a credential the slot now carries.
+      // Routing it to `slot` would only trip `assertSlotAbsent` and abort the
+      // whole apply with nothing done — the state every auth-synced worker was
+      // in. Trash it instead (`agents trash restore` reverses); a busy or
+      // canonical home is never moved, so the canonical case keeps its binary
+      // and leaves the home where it is.
+      if (canonical && item.label === canonical.label) {
+        actions.push({
+          kind: 'canonical',
+          label: item.label,
+          release: item.release,
+          reason: 'canonical install (binary kept); account already holds a slot — home left in place',
+          accountId: item.accountId,
+          identityKey: item.identityKey,
+          email: item.email,
+          sessionCount: item.sessionCount,
+          pathMoves: [],
+        });
+        continue;
+      }
+      actions.push({
+        kind: 'trash',
+        label: item.label,
+        release: item.release,
+        reason: 'account already holds a provisioned slot on this device — stale home trashed',
+        accountId: item.accountId,
         identityKey: item.identityKey,
         email: item.email,
         sessionCount: item.sessionCount,
@@ -667,6 +719,13 @@ export async function applyAccountMigration(
       removeVersionedAlias(h.agent, item.label);
       remaps.push({ from: item.dir, to: trashPath });
       stillPresent.delete(item.label);
+      if (action.accountId) {
+        // A home trashed because its account already holds a slot: anything
+        // bound to this version label follows the account, and the stale
+        // home record clears so spawn resolves through the slot alone.
+        labelToAccount.set(item.label, action.accountId);
+        movedAccountIds.push(action.accountId);
+      }
       entry.trashed.push({ label: item.label, reason: action.reason, trashPath });
       manifest.map[`${h.agent}@${item.label}`] = trashPath;
       persistManifest(manifestPath, manifest);
