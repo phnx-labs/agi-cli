@@ -8,9 +8,15 @@ import AppKit
 // It is a PROJECTION, never a scheduler (spec SING-2): it renders FeedStream diffs
 // and offers controls that shell ONE bounded `agents` argv each — it owns no
 // timer that acts on the fleet. The single timer it holds is a 1 s relative-time
-// refresh that re-renders only the VISIBLE list cells; all other redraws are
-// driven by FeedStream diffs. Closing the window hides it and keeps FeedStream
-// attached, so re-opening is instant and the badge stays live.
+// refresh that updates the TEXT of the visible list cells in place (no reload,
+// no view rebuild); all other redraws are driven by FeedStream diffs. Closing the
+// window hides it and keeps FeedStream attached, so re-opening is instant and the
+// badge stays live.
+//
+// The list is a view-based NSTableView with real cell reuse: the two cell classes
+// below (`GroupCellView`, `SessionCellView`) own their label subviews for life,
+// are dequeued with `makeView(withIdentifier:owner:)`, and are updated in place —
+// a helper that stays resident for days never rebuilds a subview tree per row.
 
 /// The panel accepts key/main so its search and reply fields take focus — a bare
 /// NSPanel is non-activating by default.
@@ -23,6 +29,109 @@ final class SessionsPanel: NSPanel {
     override func keyDown(with event: NSEvent) {
         if keyHandler?(event) == true { return }
         super.keyDown(with: event)
+    }
+}
+
+/// A project group header row. One label, built once, updated in place.
+final class GroupCellView: NSTableCellView {
+    static let reuseIdentifier = NSUserInterfaceItemIdentifier("SessionsWindow.group")
+
+    private let label = NSTextField(labelWithString: "")
+
+    init() {
+        super.init(frame: .zero)
+        identifier = Self.reuseIdentifier
+        label.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        label.textColor = .secondaryLabelColor
+        label.lineBreakMode = .byTruncatingTail
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -8),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
+
+    func update(name: String, count: Int, needYou: Int, collapsed: Bool) {
+        let arrow = collapsed ? "\u{25B6}" : "\u{25BC}"
+        var text = "\(arrow)  \(name)  (\(count))"
+        guard needYou > 0 else {
+            label.stringValue = text
+            return
+        }
+        text += "   \(needYou) need you"
+        let attr = NSMutableAttributedString(string: text, attributes: [
+            .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+            .foregroundColor: NSColor.secondaryLabelColor,
+        ])
+        let r = (text as NSString).range(of: "\(needYou) need you")
+        if r.location != NSNotFound { attr.addAttribute(.foregroundColor, value: Palette.needsYou, range: r) }
+        label.attributedStringValue = attr
+    }
+}
+
+/// A session row: two labels in a vertical stack, built once, updated in place.
+/// `update(_:now:)` is what the 1 s timer calls on the visible rows, so it must
+/// touch text only.
+final class SessionCellView: NSTableCellView {
+    static let reuseIdentifier = NSUserInterfaceItemIdentifier("SessionsWindow.session")
+
+    private let title = NSTextField(labelWithString: "")
+    private let sub = NSTextField(labelWithString: "")
+
+    init() {
+        super.init(frame: .zero)
+        identifier = Self.reuseIdentifier
+        title.lineBreakMode = .byTruncatingTail
+        sub.font = NSFont.systemFont(ofSize: 10)
+        sub.textColor = .secondaryLabelColor
+        sub.lineBreakMode = .byTruncatingTail
+        let vstack = NSStackView(views: [title, sub])
+        vstack.orientation = .vertical
+        vstack.alignment = .leading
+        vstack.spacing = 1
+        vstack.detachesHiddenViews = true
+        vstack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(vstack)
+        NSLayoutConstraint.activate([
+            vstack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
+            vstack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -8),
+            vstack.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
+
+    /// Re-render the two lines. The phase line is recomputed against `now` so
+    /// the relative age advances; everything else rides the stored presentation.
+    func update(_ entry: SessionEntry, now: Date) {
+        let p = entry.presentation
+        let phase = SessionRowModel.phaseText(entry.row, attention: entry.attention,
+                                              status: p.status, now: now)
+        let (dot, color) = Palette.dot(p.status)
+
+        // Line 1: dot + title + progress + phase/device.
+        var line1 = "\(dot) \(p.title)"
+        if let prog = p.progress { line1 += "  \(prog.done)/\(prog.total)" }
+        line1 += "   \(phase)"
+        let attr = NSMutableAttributedString(string: line1, attributes: [
+            .font: NSFont.systemFont(ofSize: 12, weight: .medium),
+            .foregroundColor: NSColor.labelColor,
+        ])
+        let r = (line1 as NSString).range(of: dot)
+        if r.location != NSNotFound { attr.addAttribute(.foregroundColor, value: color, range: r) }
+        title.attributedStringValue = attr
+
+        // Line 2: latest action + PR chip; hidden (and detached from layout) when empty.
+        var line2Parts: [String] = []
+        if let action = p.latestAction { line2Parts.append(action) }
+        if let chip = p.prChip { line2Parts.append(chip.text) }
+        let line2 = line2Parts.joined(separator: "   ")
+        sub.stringValue = line2
+        sub.isHidden = line2.isEmpty
     }
 }
 
@@ -74,14 +183,53 @@ final class SessionsWindowController: NSObject, NSWindowDelegate, NSTableViewDat
     private let statusLabel = NSTextField(labelWithString: "")
     private var timeTimer: Timer?
 
+    // MARK: Selection published for the notifications layer (PHNX-4004)
+
+    /// The session id of the selected row while the window is visible, mirrored
+    /// under a lock: `Notifier.isSessionSelectedInSessionsWindow` asks from the
+    /// UNUserNotificationCenter delegate's queue, never main, so it must not read
+    /// table state directly.
+    private let shownSessionLock = NSLock()
+    private var shownSessionId: String?
+
     private override init() { super.init() }
+
+    /// Whether `sessionId` is the selected row of a visible Sessions window —
+    /// the operator is already looking at it, so its banner is not presented.
+    /// Thread-safe.
+    func isShowingSession(_ sessionId: String) -> Bool {
+        shownSessionLock.lock()
+        defer { shownSessionLock.unlock() }
+        return shownSessionId == sessionId
+    }
+
+    /// Re-derive the published id from the live selection + visibility. Called on
+    /// every path that changes either: reload, selection change, open, close.
+    private func publishShownSession() {
+        var id: String?
+        if panel?.isVisible == true {
+            let row = table.selectedRow
+            if row >= 0, row < listItems.count, case let .session(entry) = listItems[row] {
+                id = entry.sessionId
+            }
+        }
+        shownSessionLock.lock()
+        shownSessionId = id
+        shownSessionLock.unlock()
+    }
 
     // MARK: - Public entry points
 
     /// Toggle the window (Cmd-Shift-I / the dropdown "Sessions" row). FeedStream is
     /// started once and stays attached.
     func toggle() {
-        if let panel, panel.isVisible { panel.orderOut(nil) } else { open(selecting: nil) }
+        if let panel, panel.isVisible {
+            panel.orderOut(nil)
+            stopTimeTimer()
+            publishShownSession()
+        } else {
+            open(selecting: nil)
+        }
     }
 
     /// Show the window, optionally selecting a specific session (clicking a
@@ -252,6 +400,7 @@ final class SessionsWindowController: NSObject, NSWindowDelegate, NSTableViewDat
         listItems = items
         table.reloadData()
         restoreSelection()
+        publishShownSession()
         updateChips(all)
         updateStatusBar(now: now)
         rebuildDeviceStrip(now: now)
@@ -366,7 +515,11 @@ final class SessionsWindowController: NSObject, NSWindowDelegate, NSTableViewDat
         DispatchQueue.global(qos: .utility).async { [weak self] in
             let devices = AgentsCLI.menubarSnapshot()?.devices ?? []
             DispatchQueue.main.async {
-                self?.snapshotDevices = Dictionary(uniqueKeysWithValues: devices.map { ($0.name, $0) })
+                guard let self else { return }
+                self.snapshotDevices = Dictionary(uniqueKeysWithValues: devices.map { ($0.name, $0) })
+                // The card needs this machine's registry name so a peer-owned
+                // terminal row injects with --device (Reply.fallbackTarget).
+                self.card.localDevice = devices.first { $0.isLocal }?.name
             }
         }
     }
@@ -375,13 +528,22 @@ final class SessionsWindowController: NSObject, NSWindowDelegate, NSTableViewDat
 
     func numberOfRows(in tableView: NSTableView) -> Int { listItems.count }
 
+    /// Dequeue a reusable cell for the row's kind and update it in place. The
+    /// cell classes set their own `identifier`, so a returned view re-enters the
+    /// table's reuse queue when it scrolls off or reloads.
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         guard row < listItems.count else { return nil }
         switch listItems[row] {
         case let .group(name, count, needYou):
-            return groupCell(name: name, count: count, needYou: needYou)
+            let cell = tableView.makeView(withIdentifier: GroupCellView.reuseIdentifier, owner: self) as? GroupCellView
+                ?? GroupCellView()
+            cell.update(name: name, count: count, needYou: needYou, collapsed: collapsed.contains(name))
+            return cell
         case let .session(entry):
-            return sessionCell(entry)
+            let cell = tableView.makeView(withIdentifier: SessionCellView.reuseIdentifier, owner: self) as? SessionCellView
+                ?? SessionCellView()
+            cell.update(entry, now: Date())
+            return cell
         }
     }
 
@@ -410,6 +572,7 @@ final class SessionsWindowController: NSObject, NSWindowDelegate, NSTableViewDat
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
+        publishShownSession()
         let row = table.selectedRow
         guard row >= 0, row < listItems.count, case let .session(entry) = listItems[row] else { return }
         selectedRowKey = entry.rowKey
@@ -434,82 +597,6 @@ final class SessionsWindowController: NSObject, NSWindowDelegate, NSTableViewDat
     private func refreshCardArtifacts() {
         guard let key = selectedRowKey, let entry = entries[key] else { return }
         showCard(entry)
-    }
-
-    private func groupCell(name: String, count: Int, needYou: Int) -> NSView {
-        let arrow = collapsed.contains(name) ? "\u{25B6}" : "\u{25BC}"
-        var text = "\(arrow)  \(name)  (\(count))"
-        let f = NSTextField(labelWithString: text)
-        f.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
-        f.textColor = .secondaryLabelColor
-        if needYou > 0 {
-            text += "   \(needYou) need you"
-            let attr = NSMutableAttributedString(string: text, attributes: [
-                .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
-                .foregroundColor: NSColor.secondaryLabelColor,
-            ])
-            let r = (text as NSString).range(of: "\(needYou) need you")
-            if r.location != NSNotFound { attr.addAttribute(.foregroundColor, value: Palette.needsYou, range: r) }
-            f.attributedStringValue = attr
-        }
-        let container = NSTableCellView()
-        f.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(f)
-        NSLayoutConstraint.activate([
-            f.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
-            f.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -8),
-            f.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-        ])
-        return container
-    }
-
-    private func sessionCell(_ entry: SessionEntry) -> NSView {
-        // Recompute the phase line with a fresh clock so the age stays live on the
-        // 1 s visible-cell refresh; everything else rides the stored presentation.
-        let p = entry.presentation
-        let phase = SessionRowModel.phaseText(entry.row, attention: entry.attention,
-                                              status: p.status, now: Date())
-        let (dot, color) = Palette.dot(p.status)
-
-        // Line 1: dot + title + progress + phase/device.
-        var line1 = "\(dot) \(p.title)"
-        if let prog = p.progress { line1 += "  \(prog.done)/\(prog.total)" }
-        line1 += "   \(phase)"
-        // Line 2: latest action + PR chip.
-        var line2Parts: [String] = []
-        if let action = p.latestAction { line2Parts.append(action) }
-        if let chip = p.prChip { line2Parts.append(chip.text) }
-        let line2 = line2Parts.joined(separator: "   ")
-
-        let title = NSTextField(labelWithString: line1)
-        let attr = NSMutableAttributedString(string: line1, attributes: [
-            .font: NSFont.systemFont(ofSize: 12, weight: .medium),
-            .foregroundColor: NSColor.labelColor,
-        ])
-        let r = (line1 as NSString).range(of: dot)
-        if r.location != NSNotFound { attr.addAttribute(.foregroundColor, value: color, range: r) }
-        title.attributedStringValue = attr
-        title.lineBreakMode = .byTruncatingTail
-
-        let sub = NSTextField(labelWithString: line2)
-        sub.font = NSFont.systemFont(ofSize: 10)
-        sub.textColor = .secondaryLabelColor
-        sub.lineBreakMode = .byTruncatingTail
-
-        let vstack = NSStackView(views: line2.isEmpty ? [title] : [title, sub])
-        vstack.orientation = .vertical
-        vstack.alignment = .leading
-        vstack.spacing = 1
-        vstack.translatesAutoresizingMaskIntoConstraints = false
-
-        let container = NSTableCellView()
-        container.addSubview(vstack)
-        NSLayoutConstraint.activate([
-            vstack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 20),
-            vstack.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -8),
-            vstack.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-        ])
-        return container
     }
 
     // MARK: - Actions
@@ -558,17 +645,23 @@ final class SessionsWindowController: NSObject, NSWindowDelegate, NSTableViewDat
         timeTimer = nil
     }
 
-    /// Re-render ONLY the visible session cells so their relative ages advance,
-    /// and refresh the status bar's "last event" — no data reload, no CLI call.
+    /// Update the TEXT of the visible session cells in place so their relative
+    /// ages advance, and refresh the status bar's "last event" — no reload, no
+    /// view rebuild, no selection churn, no CLI call. A row with no materialized
+    /// cell (`makeIfNecessary: false`) is skipped; it renders fresh when scrolled in.
     private func tickTime() {
         guard panel?.isVisible == true else { return }
+        let now = Date()
         let visible = table.rows(in: table.visibleRect)
         if visible.length > 0 {
-            table.reloadData(forRowIndexes: IndexSet(integersIn: visible.location..<(visible.location + visible.length)),
-                             columnIndexes: IndexSet(integer: 0))
-            restoreSelection()
+            for i in visible.location..<(visible.location + visible.length) where i < listItems.count {
+                guard case let .session(entry) = listItems[i],
+                      let cell = table.view(atColumn: 0, row: i, makeIfNecessary: false) as? SessionCellView
+                else { continue }
+                cell.update(entry, now: now)
+            }
         }
-        updateStatusBar(now: Date())
+        updateStatusBar(now: now)
     }
 
     // MARK: - Window lifecycle
@@ -576,6 +669,7 @@ final class SessionsWindowController: NSObject, NSWindowDelegate, NSTableViewDat
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         sender.orderOut(nil)
         stopTimeTimer()
+        publishShownSession() // hidden → nothing is "being looked at"
         return false // hide, keep FeedStream attached
     }
 

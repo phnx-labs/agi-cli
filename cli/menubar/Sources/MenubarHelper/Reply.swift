@@ -45,19 +45,24 @@ struct ReplyTarget: Equatable {
     /// Team + teammate for the `team` rail.
     let team: String?
     let mate: String?
+    /// The device whose terminal/tmux pane the inject must land on, when it is
+    /// not this machine — a bare `sessions inject <id>` resolves only local
+    /// panes, so a peer-owned row rides `--device <name>` (PHNX-3688).
+    let device: String?
     /// The CLI's stated reason the rail is unavailable, shown when `capability`
     /// is `.none` (the reply field is disabled and only Terminal remains).
     let disabledReason: String?
 
     init(sessionId: String?, attentionKey: String? = nil, capability: ReplyCapability,
          cloudId: String? = nil, team: String? = nil, mate: String? = nil,
-         disabledReason: String? = nil) {
+         device: String? = nil, disabledReason: String? = nil) {
         self.sessionId = sessionId
         self.attentionKey = attentionKey
         self.capability = capability
         self.cloudId = cloudId
         self.team = team
         self.mate = mate
+        self.device = device
         self.disabledReason = disabledReason
     }
 }
@@ -75,9 +80,12 @@ enum Reply {
         ["feed", "answer", key, "--text", text]
     }
 
-    /// Inject free text into a live terminal/tmux session.
-    static func injectArgs(sessionId: String, text: String) -> [String] {
-        ["sessions", "inject", sessionId, text]
+    /// Inject free text into a live terminal/tmux session. A peer-owned session
+    /// names its device so the CLI resolves the pane THERE.
+    static func injectArgs(sessionId: String, text: String, device: String? = nil) -> [String] {
+        var args = ["sessions", "inject", sessionId, text]
+        if let device, !device.isEmpty { args += ["--device", device] }
+        return args
     }
 
     /// Message a cloud task/session.
@@ -112,7 +120,7 @@ enum Reply {
         switch target.capability {
         case .terminal, .tmux:
             guard let sid = target.sessionId, !sid.isEmpty else { return nil }
-            return injectArgs(sessionId: sid, text: body)
+            return injectArgs(sessionId: sid, text: body, device: target.device)
         case .cloud:
             guard let id = target.cloudId ?? target.sessionId, !id.isEmpty else { return nil }
             return cloudMessageArgs(id: id, text: body)
@@ -134,6 +142,93 @@ enum Reply {
         case .team:            return target.team?.isEmpty == false && target.mate?.isEmpty == false
         case .none:            return false
         }
+    }
+
+    // MARK: - No-block fallback (pinned by MENUBAR_REPLY_TEST)
+
+    /// The reply target for a row with NO open feed block. Mirrors the CLI's own
+    /// reply-rail ladder (`replyCapabilityForSession`,
+    /// cli/src/lib/feed/attention.ts) so the card never invents a rail the CLI
+    /// would not report:
+    ///
+    ///   - `host == "tmux"`        → `.tmux`  inject (any context — a tmux pane is addressable)
+    ///   - `context == "teams"`    → `.team`  `teams message <teamName> <agentId>`
+    ///   - `context == "cloud"`    → `.cloud` `cloud message <cloudTaskId>`
+    ///   - `context == "terminal"` → `.terminal` inject, only with a detected host
+    ///                               surface (iterm/ghostty/code/…); a bare shell
+    ///                               with no recognized ancestor has no backend
+    ///   - anything else (headless, recent/history, unknown) → `.none`, with the
+    ///     reason spelled out so the disabled field says why.
+    ///
+    /// A terminal/tmux row is also injectable only while it is LIVE; a closed or
+    /// crashed session reads `.none` ("the session is not live"). A peer-owned row
+    /// names its `sourceDevice` so the inject resolves there; `localDevice` is
+    /// this machine's registry name (nil while the snapshot has not arrived, in
+    /// which case every row routes explicitly — a self-hop is correct, just slower).
+    ///
+    /// Note `spawnedTeam` is deliberately NOT a team signal: it marks the
+    /// ORCHESTRATOR session that ran `agents teams create` (an ordinary terminal
+    /// row you can inject into), not a teammate. A teammate's own row carries
+    /// `context: teams` + `teamName` + `agentId`, which is what `teams message`
+    /// addresses.
+    static func fallbackTarget(for row: SessionRow, localDevice: String?) -> ReplyTarget {
+        let live = row.status == "running" || row.status == "idle"
+            || row.activity == "working" || row.activity == "waiting_input"
+        let context = row.context ?? ""
+        let device: String? = {
+            guard let source = row.sourceDevice, !source.isEmpty else { return nil }
+            return source == localDevice ? nil : source
+        }()
+
+        if row.host == "tmux" {
+            guard live else { return notLive(row) }
+            return ReplyTarget(sessionId: row.sessionId, capability: row.sessionId == nil ? .none : .tmux,
+                               device: device,
+                               disabledReason: row.sessionId == nil ? "the tmux session has no session id yet" : nil)
+        }
+        switch context {
+        case "teams":
+            let team = row.teamName ?? ""
+            let mate = row.agentId ?? row.label ?? ""
+            if team.isEmpty || mate.isEmpty {
+                return ReplyTarget(sessionId: row.sessionId, capability: .none,
+                                   disabledReason: "the teammate row names no team or member to message")
+            }
+            return ReplyTarget(sessionId: row.sessionId, capability: .team, team: team, mate: mate)
+        case "cloud":
+            let id = row.cloudTaskId ?? row.sessionId ?? ""
+            if id.isEmpty {
+                return ReplyTarget(sessionId: row.sessionId, capability: .none,
+                                   disabledReason: "the cloud row carries no task id to message")
+            }
+            return ReplyTarget(sessionId: row.sessionId, capability: .cloud, cloudId: id)
+        case "terminal":
+            guard live else { return notLive(row) }
+            guard let host = row.host, !host.isEmpty else {
+                return ReplyTarget(sessionId: row.sessionId, capability: .none,
+                                   disabledReason: "no terminal surface was detected for this session (a bare shell cannot be injected into)")
+            }
+            guard let sid = row.sessionId, !sid.isEmpty else {
+                return ReplyTarget(sessionId: nil, capability: .none,
+                                   disabledReason: "the \(host) session has no session id yet")
+            }
+            return ReplyTarget(sessionId: sid, capability: .terminal, device: device)
+        case "headless":
+            return ReplyTarget(sessionId: row.sessionId, capability: .none,
+                               disabledReason: "a headless run with no tmux pane has no reply rail")
+        case "recent":
+            return ReplyTarget(sessionId: row.sessionId, capability: .none,
+                               disabledReason: "this is a finished session from history")
+        default:
+            return ReplyTarget(sessionId: row.sessionId, capability: .none,
+                               disabledReason: context.isEmpty
+                                   ? "the session reports no context, so no reply rail can be chosen"
+                                   : "no reply rail for a \(context) session")
+        }
+    }
+
+    private static func notLive(_ row: SessionRow) -> ReplyTarget {
+        ReplyTarget(sessionId: row.sessionId, capability: .none, disabledReason: "the session is not live")
     }
 
     // MARK: - Bounded execution

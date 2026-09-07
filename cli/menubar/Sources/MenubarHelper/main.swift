@@ -250,6 +250,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // configureForLaunch registers the action categories, installs the
         // delegate, and requests authorization once.
         Notifier.configureForLaunch()
+        // A banner for the session the operator is already looking at (the
+        // selected row of a visible Sessions window) is suppressed at present
+        // time; the item still lands in the notification list. Thread-safe read —
+        // the delegate asks off the main queue.
+        Notifier.isSessionSelectedInSessionsWindow = { sessionId in
+            SessionsWindowController.shared.isShowingSession(sessionId)
+        }
         let mods = UInt32(cmdKey | shiftKey)
         hotkey.register([
             .init(id: HotkeyManager.clipID, keyCode: UInt32(kVK_ANSI_V), modifiers: mods,
