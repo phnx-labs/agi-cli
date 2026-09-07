@@ -1007,10 +1007,17 @@ legacy `auth` alias keyed by email); the elected single publisher (`syncReserved
 [`secrets-policy.ts`](src/lib/secrets-policy.ts)) pushes a reserved store to a
 peer whenever that peer is missing **any** of its keys — so a newly-added account
 propagates within one tick instead of hiding behind a coarse "already has the bundle"
-verdict. Pushes target `role=worker` peers only: a headed (`personal`/`desktop`) peer
+verdict. **The publisher is a ready HEADED device** (`electPublisher`: `personal`/
+`desktop` first — where tokens are minted — then by name to break ties); a worker is
+elected only when no headed box is ready. Pushes target `role=worker` peers only: a
+headed (`personal`/`desktop`) peer
 receives the account **row** through the normal repo sync but **never a durable key**
-(`isHeadedDeviceRole`, invariant 7). After a key lands on a worker,
-`reconcileLocalWorkerSlots` → `provisionWorkerSlot` materializes that account's slot;
+(`isHeadedDeviceRole`, invariant 7). On a worker, `reconcileLocalWorkerSlots` →
+`provisionWorkerSlot` materializes a slot for **every** registered account whose key
+is on the box — a v2 row through its reserved key, a pre-v2 claude row through the
+email-keyed `auth` token (both via `reservedSyncTargets`, so the push plan and the
+materialization can never disagree) — and it runs **first** in the tick so a failed
+shared-state git exchange cannot postpone it;
 a native OAuth/session file is never transported (`fleet/auth-sync.ts`
 `isCredentialSafeToPropagate` stays `false`). Each exceptional push is async with a
 hard deadline that kills the direct SSH client and remote connection. The store path

@@ -5,17 +5,26 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { updateFleetSharedDeviceState } from './fleet-shared-state.js';
 import type { DeviceProfile } from './devices/registry.js';
+import type { ConfiguredDeviceRole } from './device-config.js';
 import {
+  electPublisher,
   peerPresentKeys,
   planAuthBundlePush,
   planReservedStoreSync,
   reconcileLocalWorkerSlots,
   reservedSyncTargets,
   syncReservedAuthBundle,
+  syncReservedStores,
   type AuthSyncDevice,
   type ReservedSyncAccount,
   type ReservedSyncPeer,
 } from './secrets-policy.js';
+import { claudeAccountTokenKey, readClaudeAccountEmail } from './claude-account-token.js';
+import { readSlots, slotDir } from './accounts/slots.js';
+import { keychainRef, secretsKeychainItem, writeBundleWithItemsSync } from './secrets-client.js';
+import type { SecretsBundle } from './secrets-types.js';
+import { readMeta } from './state.js';
+import { useFreshSecretsHome } from '../../tests/secrets-standalone.js';
 import type { Meta, NativeAccountRecord } from './types.js';
 
 const dirs: string[] = [];
@@ -272,5 +281,150 @@ describe('reconcileLocalWorkerSlots', () => {
     const res = reconcileLocalWorkerSlots({ selfRole: 'worker', readMetaFn: withSlot, hasLocalKey: () => true, provision: () => { throw new Error('should not re-provision'); } });
     expect(res.provisioned).toEqual([]);
     expect(res.skipped[0]).toMatchObject({ accountId: 'a1', reason: expect.stringContaining('already provisioned') });
+  });
+
+  // The mac-mini 2026-09-06 gap: every registered claude row predated T1 (no
+  // `workerCredential`), so the loop skipped all 8 while their tokens sat in the
+  // legacy `auth` bundle on the box. A legacy row resolves to (auth, email key)
+  // exactly as the push plan does, and gets a slot from the same key.
+  it('provisions a legacy claude row (no workerCredential) from its email-keyed auth token', () => {
+    const legacy: NativeAccountRecord = { id: 'l1', name: 'dev', agent: 'claude', identityKey: 'claude:account=b:org=o', scope: 'version', identityLabel: 'dev@getrush.ai' };
+    const kimi: NativeAccountRecord = { id: 'k1', name: 'kimi', agent: 'kimi', identityKey: 'kimi:user=k', scope: 'version', identityLabel: 'k@x.io' };
+    const meta = () => ({ accounts: { native: { l1: legacy, k1: kimi } }, deviceAccounts: {} }) as Pick<Meta, 'accounts' | 'deviceAccounts'>;
+    const asked: Array<[string, string]> = [];
+    const provisioned: string[] = [];
+    const res = reconcileLocalWorkerSlots({
+      selfRole: 'worker',
+      readMetaFn: meta,
+      hasLocalKey: (bundle, key) => { asked.push([bundle, key]); return true; },
+      provision: (a) => provisioned.push(a.id),
+    });
+    expect(asked).toEqual([['auth', claudeAccountTokenKey('dev@getrush.ai')]]);
+    expect(provisioned).toEqual(['l1']);
+    // A per-device harness row has no derivable durable credential: neither
+    // provisioned nor reported as "not synced" — there is nothing to sync.
+    expect(res.skipped).toEqual([]);
+  });
+
+  it('reports a legacy row whose auth key is not on this box as not synced yet', () => {
+    const legacy: NativeAccountRecord = { id: 'l1', name: 'dev', agent: 'claude', identityKey: 'claude:account=b:org=o', scope: 'version', identityLabel: 'dev@getrush.ai' };
+    const meta = () => ({ accounts: { native: { l1: legacy } }, deviceAccounts: {} }) as Pick<Meta, 'accounts' | 'deviceAccounts'>;
+    const res = reconcileLocalWorkerSlots({ selfRole: 'worker', readMetaFn: meta, hasLocalKey: () => false, provision: () => { throw new Error('should not provision'); } });
+    expect(res.skipped).toEqual([{ accountId: 'l1', reason: 'durable key not synced yet' }]);
+  });
+});
+
+// End to end through the real standalone secrets store and the real slot
+// writer: a legacy row + its token in a file-backed `auth` bundle ⇒ a durable
+// slot with a 0600 `.oauth_token` and the seeded email the claude adapter keys
+// the token on at spawn. No mocks; HOME is the vitest sandbox (tests/setup.ts).
+describe('reconcileLocalWorkerSlots through the real auth bundle', () => {
+  useFreshSecretsHome();
+  const created: string[] = [];
+  afterEach(() => {
+    for (const dir of created.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  function writeAuthBundle(values: Record<string, string>): void {
+    const bundle: SecretsBundle = { name: 'auth', backend: 'file', policy: 'never', vars: {}, meta: {} };
+    const items = new Map<string, string>();
+    for (const [key, value] of Object.entries(values)) {
+      bundle.vars[key] = keychainRef(key);
+      bundle.meta![key] = { type: 'token' };
+      items.set(secretsKeychainItem('auth', key), value);
+    }
+    writeBundleWithItemsSync(bundle, items);
+  }
+
+  it('materializes a slot for a pre-T1 claude row from the synced auth token, and only once', () => {
+    writeAuthBundle({
+      [claudeAccountTokenKey('prix@example.com')]: 'sk-ant-oat01-prix',
+      [claudeAccountTokenKey('trp@example.com')]: 'sk-ant-oat01-trp',
+    });
+    const rows: NativeAccountRecord[] = [
+      { id: 'lp', name: 'prix', agent: 'claude', identityKey: 'claude:account=p:org=o', scope: 'version', identityLabel: 'prix@example.com' },
+      { id: 'lt', name: 'trp', agent: 'claude', identityKey: 'claude:account=t:org=o', scope: 'version', identityLabel: 'trp@example.com' },
+      // Registered, but its token never reached this box.
+      { id: 'lm', name: 'smores', agent: 'claude', identityKey: 'claude:account=m:org=o', scope: 'version', identityLabel: 'smores@example.com' },
+    ];
+    const readMetaFn = () => ({ ...readMeta(), accounts: { native: Object.fromEntries(rows.map((r) => [r.id, r])) } });
+    for (const id of ['lp', 'lt', 'lm']) created.push(slotDir('claude', id));
+
+    const first = reconcileLocalWorkerSlots({ selfRole: 'worker', readMetaFn });
+    expect(first.errors).toEqual([]);
+    expect(first.provisioned.sort()).toEqual(['lp', 'lt']);
+    expect(first.skipped).toEqual([{ accountId: 'lm', reason: 'durable key not synced yet' }]);
+
+    for (const [id, token, email] of [['lp', 'sk-ant-oat01-prix', 'prix@example.com'], ['lt', 'sk-ant-oat01-trp', 'trp@example.com']] as const) {
+      const dir = slotDir('claude', id);
+      const tokenPath = path.join(dir, '.claude', '.oauth_token');
+      expect(fs.readFileSync(tokenPath, 'utf-8')).toBe(token);
+      expect(fs.statSync(tokenPath).mode & 0o777).toBe(0o600);
+      expect(readClaudeAccountEmail(dir)).toBe(email);
+      expect(readSlots(readMeta())[id]).toMatchObject({ slotDir: dir, authMode: 'durable' });
+    }
+
+    const second = reconcileLocalWorkerSlots({ selfRole: 'worker', readMetaFn });
+    expect(second.provisioned).toEqual([]);
+    expect(second.skipped.map((s) => s.accountId).sort()).toEqual(['lm', 'lp', 'lt']);
+  });
+});
+
+describe('electPublisher', () => {
+  const roles: Record<string, ConfiguredDeviceRole | undefined> = {
+    zion: 'personal',
+    'mac-studio': 'desktop',
+    'mac-mini': 'worker',
+    'yosemite-s1': 'worker',
+    unmarked: undefined,
+  };
+  const roleOf = (name: string) => roles[name];
+
+  it('prefers a ready headed device over a ready worker whatever the name order', () => {
+    // The live 2026-09-06 shape: every device ready, name order alone elected mac-mini.
+    expect(electPublisher(['mac-mini', 'yosemite-s1', 'zion'], roleOf)).toBe('zion');
+    expect(electPublisher(['mac-mini', 'unmarked', 'mac-studio'], roleOf)).toBe('mac-studio');
+  });
+
+  it('breaks ties by name within a tier, and returns null with nobody ready', () => {
+    expect(electPublisher(['zion', 'mac-studio'], roleOf)).toBe('mac-studio');
+    expect(electPublisher(['yosemite-s1', 'mac-mini'], roleOf)).toBe('mac-mini');
+    expect(electPublisher([], roleOf)).toBeNull();
+  });
+
+  it('is what both sync arms elect with, through real shared-state files', async () => {
+    const root = tempStore();
+    updateFleetSharedDeviceState('mac-mini', { auth: { status: 'ready' } }, root);
+    const devices = [profile('mac-mini')];
+    const peerRole = (name: string) => roles[name];
+    const legacy = await syncReservedAuthBundle({
+      userAgentsDir: root,
+      localName: 'zion',
+      inspectLocal: () => ({ exists: true, ok: true }),
+      listDevices: () => devices,
+      isPinned: () => true,
+      peerRole,
+      selfRole: () => 'personal',
+      push: async () => ({ ok: true, message: 'pushed' }),
+    });
+    expect(legacy.publisher).toBe('zion');
+    // mac-mini reports `ready`, so the legacy plan (bundle-coarse) skips it as present.
+    expect(legacy.skipped).toEqual([{ device: 'mac-mini', reason: 'already present' }]);
+
+    const reserved = await syncReservedStores({
+      userAgentsDir: root,
+      cacheDir: tempStore(),
+      localName: 'zion',
+      localReady: true,
+      listDevices: () => devices,
+      isPinned: () => true,
+      peerRole,
+      selfRole: () => 'personal',
+      readMetaFn: () => ({ accounts: { native: { a1: { id: 'a1', name: 'work', agent: 'claude', identityKey: 'claude:account=a:org=o', scope: 'version', identityLabel: 'w@x.io', workerCredential: { bundle: '__claude__', key: 'K1', kind: 'setup-token', mintedAt: 'm1' } } } } }),
+      hasLocalKey: () => true,
+      push: async () => ({ ok: true, message: 'pushed' }),
+    });
+    expect(reserved.publisher).toBe('zion');
+    expect(reserved.pushed).toEqual([{ device: 'mac-mini', bundle: '__claude__', keys: ['K1'] }]);
   });
 });

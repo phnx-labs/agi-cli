@@ -205,8 +205,27 @@ export interface AuthSyncDeps {
   localName?: string;
   userAgentsDir?: string;
   isPinned?: (name: string) => boolean;
+  peerRole?: (name: string) => ReturnType<typeof selfConfiguredDeviceRole>;
+  selfRole?: () => ReturnType<typeof selfConfiguredDeviceRole>;
   push?: (bundle: string, host: string) => Promise<PushBundleResult>;
   sshTarget?: (device: DeviceProfile) => string;
+}
+
+/**
+ * The one device that pushes credentials this tick. A ready HEADED device
+ * (`personal`/`desktop`) wins over any ready worker: the headed box is where
+ * tokens are minted (invariant 7), so it is the copy of record; a worker holds
+ * only what was once pushed to it. Name order breaks ties so every box elects
+ * the same publisher from the same shared verdicts. Before this rule the sort
+ * was by name alone, which elected `mac-mini` (a worker with a 6-day-old copy)
+ * over `zion`, and zion then skipped every peer as a non-publisher.
+ */
+export function electPublisher(
+  ready: readonly string[],
+  roleOf: (name: string) => ReturnType<typeof selfConfiguredDeviceRole>,
+): string | null {
+  const rank = (name: string): number => (isHeadedDeviceRole(roleOf(name)) ? 0 : 1);
+  return [...ready].sort((a, b) => rank(a) - rank(b) || normalizeHost(a).localeCompare(normalizeHost(b)))[0] ?? null;
 }
 
 export interface PublishAuthVerdictOptions {
@@ -280,8 +299,9 @@ export async function syncReservedAuthBundle(deps: AuthSyncDeps = {}): Promise<A
   if (localStatus === 'ready' && !readyPublishers.some((name) => normalizeHost(name) === localNorm)) {
     readyPublishers.push(localName);
   }
-  readyPublishers.sort((a, b) => normalizeHost(a).localeCompare(normalizeHost(b)));
-  result.publisher = readyPublishers[0] ?? null;
+  const peerRole = deps.peerRole ?? configuredDeviceRole;
+  const selfRole = deps.selfRole ?? selfConfiguredDeviceRole;
+  result.publisher = electPublisher(readyPublishers, (name) => (normalizeHost(name) === localNorm ? selfRole() : peerRole(name)));
   const localIsPublisher = result.publisher !== null && normalizeHost(result.publisher) === localNorm;
 
   const pinned = deps.isPinned ?? ((name: string) => isHostPinned(name, managedKnownHostsPath()));
@@ -509,6 +529,7 @@ export interface ReservedStoreSyncDeps {
   readMetaFn?: () => Pick<Meta, 'accounts' | 'deviceAccounts'>;
   isPinned?: (name: string) => boolean;
   peerRole?: (name: string) => ReturnType<typeof selfConfiguredDeviceRole>;
+  selfRole?: () => ReturnType<typeof selfConfiguredDeviceRole>;
   localReady?: boolean;
   /** Does THIS publisher hold (bundle, key) to push? Defaults to a local bundle read. */
   hasLocalKey?: (bundle: string, key: string) => boolean;
@@ -554,8 +575,9 @@ export async function syncReservedStores(deps: ReservedStoreSyncDeps = {}): Prom
     })
     .map((s) => s.device);
   if (localReady && !readyPublishers.some((n) => normalizeHost(n) === localNorm)) readyPublishers.push(localName);
-  readyPublishers.sort((a, b) => normalizeHost(a).localeCompare(normalizeHost(b)));
-  result.publisher = readyPublishers[0] ?? null;
+  const peerRole = deps.peerRole ?? configuredDeviceRole;
+  const selfRole = deps.selfRole ?? selfConfiguredDeviceRole;
+  result.publisher = electPublisher(readyPublishers, (name) => (normalizeHost(name) === localNorm ? selfRole() : peerRole(name)));
   const localIsPublisher = result.publisher !== null && normalizeHost(result.publisher) === localNorm;
   if (targets.length === 0 || !localIsPublisher) {
     for (const d of devices) {
@@ -566,7 +588,6 @@ export async function syncReservedStores(deps: ReservedStoreSyncDeps = {}): Prom
 
   const memo = readDeliveryMemo(deps.cacheDir);
   const pinned = deps.isPinned ?? ((name: string) => isHostPinned(name, managedKnownHostsPath()));
-  const peerRole = deps.peerRole ?? configuredDeviceRole;
   const peers: ReservedSyncPeer[] = devices.map((d) => ({
     name: d.name,
     headed: isHeadedDeviceRole(peerRole(d.name)),
@@ -634,10 +655,18 @@ export function reconcileLocalWorkerSlots(deps: ReconcileWorkerSlotsDeps = {}): 
   const slots = readSlots(meta as Pick<Meta, 'deviceAccounts'>);
   const hasLocalKey = deps.hasLocalKey ?? defaultHasLocalKey;
   const provision = deps.provision ?? provisionWorkerSlot;
-  for (const account of listNativeAccounts(meta)) {
-    const cred = account.workerCredential;
-    if (!cred) continue; // legacy claude worker resolves its token at spawn
-    if (!hasLocalKey(cred.bundle, cred.key)) { result.skipped.push({ accountId: account.id, reason: 'durable key not synced yet' }); continue; }
+  const byId = new Map(listNativeAccounts(meta).map((account) => [account.id, account]));
+  // Resolve each account to the one (bundle, key) the push plan uses: a T1 row's
+  // reserved `__<harness>__` key, or the legacy `auth` key by email for a claude
+  // row predating T1. Both are worker credentials this box may already hold, so
+  // both get a slot. Skipping the legacy rows here is what left every registered
+  // pre-T1 account without a slot on every worker while its token sat in `auth`:
+  // the picker then fell back to identity-less version homes and Claude showed a
+  // login screen on a headless box (the mac-mini 2026-09-06 incident).
+  for (const target of reservedSyncTargets(meta)) {
+    const account = byId.get(target.accountId);
+    if (!account) continue;
+    if (!hasLocalKey(target.bundle, target.key)) { result.skipped.push({ accountId: account.id, reason: 'durable key not synced yet' }); continue; }
     if (slots[account.id]?.authMode === 'durable') { result.skipped.push({ accountId: account.id, reason: 'slot already provisioned' }); continue; }
     try { provision(account); result.provisioned.push(account.id); }
     catch (err) { result.errors.push({ accountId: account.id, message: (err as Error).message }); }

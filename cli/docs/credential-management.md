@@ -217,19 +217,37 @@ from the single legacy `auth` bundle to every portable account:
   of its keys — so a newly-added account propagates within one tick, instead of
   being hidden behind a bundle-coarse "already has the bundle" verdict.
   (`planReservedStoreSync` / `reservedSyncTargets`, `lib/secrets-policy.ts`.)
+- **The publisher is a ready HEADED device.** `electPublisher` ranks every device
+  reporting `auth: ready` headed-first (`personal`/`desktop`, where tokens are
+  minted and the copy of record lives), then by name to break ties, so every box
+  elects the same one. A worker is elected only when no headed device is ready.
+  Sorting by name alone (the pre-fix rule) elected `mac-mini` — a worker holding a
+  six-day-old copy of `auth` — over `zion`, and zion then skipped every peer as
+  "another ready device is the elected publisher".
 - **Pushes target `role=worker` devices only.** A headed (`personal`/`desktop`)
   peer receives the account **row** through the normal repo sync, but **never a
   durable key** — it authenticates from its own native login (invariant 7). The
   filter is `isHeadedDeviceRole` on the peer's synced role.
-- **After a key lands on a worker, the daemon materializes a slot for it.**
-  `reconcileLocalWorkerSlots` → `provisionWorkerSlot` runs `ensureSlot` (T1) and
-  writes the credential the way the pre-slot Claude worker home was provisioned —
-  for `claude`, the setup-token → `.oauth_token` (0600) plus the seeded identity
-  email (the read-side join then completes the account/org uuids from the registry
-  row); an API-key harness gets a `durable` slot with **no** file (the key is
-  injected at spawn); a token-less harness (`kimi`, `antigravity`) gets a
-  `per-device` slot and no push. Slot reconciliation runs only on a non-headed
-  device.
+- **After a key lands on a worker, the daemon materializes a slot for it — for
+  every registered account, T1 or legacy.** `reconcileLocalWorkerSlots` walks
+  `reservedSyncTargets` (the same resolver the push plan uses), so a T1 row keys
+  its reserved `__<harness>__` store and a claude row predating T1 keys the legacy
+  `auth` bundle by email; whichever key is on the box, `provisionWorkerSlot` runs
+  `ensureSlot` (T1) and writes the credential the way the pre-slot Claude worker
+  home was provisioned — for `claude`, the setup-token → `.oauth_token` (0600) plus
+  the seeded identity email (the read-side join then completes the account/org
+  uuids from the registry row); an API-key harness gets a `durable` slot with
+  **no** file (the key is injected at spawn); a token-less harness (`kimi`,
+  `antigravity`) gets a `per-device` slot and no push. A row whose key has not
+  reached the box is reported `durable key not synced yet` and retried next tick.
+  Slot reconciliation runs only on a non-headed device, and it runs **first** in
+  the tick, before the shared-state git exchange: it reads only local state, so a
+  `git rebase timed out` on that tick never postpones it. (Before this, legacy
+  rows were skipped on the assumption that "a legacy worker resolves its token at
+  spawn" — true only for `agents run claude#<name>`, never for the interactive
+  picker, which enumerates slots and version homes and therefore showed the 8
+  registered accounts as logged out on a worker whose `auth` bundle held all 8
+  tokens.)
 - **Invariant 1 (transport, retain nothing).** The daemon moves a durable key over
   the existing encrypted SSH bundle push (the process client's
   `pushBundleToHostAsync`, `lib/secrets-client.ts`) and retains
