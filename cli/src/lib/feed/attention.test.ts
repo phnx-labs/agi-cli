@@ -81,8 +81,64 @@ describe('reconcileAttention', () => {
     expect(item!.source).toBe('hook');
     expect(item!.state).toBe('open');
     expect(item!.question?.text).toBe('Which reconciliation rule?');
-    // Discrete options are numbered into stable choice ids for the UI to echo back.
-    expect(item!.choices?.map((c) => [c.id, c.label])).toEqual([['0', 'Augment'], ['1', 'Replace']]);
+    // Discrete options become slug-id choices. A feed block carries no per-option
+    // key, so deliveryKey stays absent and the router matches the label to a digit.
+    expect(item!.choices).toEqual([
+      { label: 'Augment', id: 'augment' },
+      { label: 'Replace', id: 'replace' },
+    ]);
+  });
+
+  it('a permission item exposes exactly approve / approve-session / deny for Claude', () => {
+    const item = reconcileAttention({
+      session: session({
+        kind: 'claude',
+        sessionId: 'perm-1',
+        activity: 'waiting_input',
+        awaitingReason: 'permission',
+        question: { text: 'Permission — run tests', reason: 'permission', options: [{ label: 'Approve', key: '1' }, { label: 'Deny', key: 'esc' }] },
+        lastActivityMs: 4000,
+      }),
+      nowMs: 10_000,
+    });
+    expect(item!.kind).toBe('permission');
+    expect(item!.choices).toEqual([
+      { id: 'approve', label: 'Approve', deliveryKey: '1' },
+      { id: 'approve-session', label: 'Approve for session', deliveryKey: '2' },
+      { id: 'deny', label: 'Deny', deliveryKey: 'esc' },
+    ]);
+  });
+
+  it('a non-Claude permission item omits approve-session', () => {
+    const item = reconcileAttention({
+      session: session({
+        kind: 'codex',
+        sessionId: 'perm-2',
+        activity: 'waiting_input',
+        awaitingReason: 'permission',
+        question: { text: 'Permission', reason: 'permission' },
+        lastActivityMs: 4000,
+      }),
+      nowMs: 10_000,
+    });
+    expect(item!.choices?.map((c) => c.id)).toEqual(['approve', 'deny']);
+  });
+
+  it('a plan-review item exposes approve / send-back', () => {
+    const item = reconcileAttention({
+      session: session({
+        sessionId: 'plan-choices',
+        activity: 'waiting_input',
+        awaitingReason: 'plan_review',
+        question: { text: 'Plan ready', reason: 'plan_review' },
+        lastActivityMs: 4000,
+      }),
+      nowMs: 10_000,
+    });
+    expect(item!.choices).toEqual([
+      { id: 'approve', label: 'Approve plan', deliveryKey: '1' },
+      { id: 'send-back', label: 'Send back', deliveryKey: 'esc' },
+    ]);
   });
 
   it('lifecycle fallback: with no block, a structural plan handoff becomes the attention item', () => {

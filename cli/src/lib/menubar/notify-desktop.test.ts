@@ -51,6 +51,64 @@ describe('buildMenubarNotifyArgs', () => {
     expect(buildMenubarNotifyArgs({ title: 'T', body: 'B', agent: '' })).not.toContain('--agent');
   });
 
+  it('appends category, key, session, and one --choice per choice (ordered)', () => {
+    expect(
+      buildMenubarNotifyArgs({
+        title: 'claude · Command approval',
+        body: 'Run the test suite?',
+        subtitle: 'zion · agents-cli',
+        agent: 'claude',
+        category: 'permission',
+        key: 'zion/sess-1/t4000',
+        sessionId: 'sess-1',
+        choices: [
+          { id: 'approve', label: 'Approve' },
+          { id: 'approve-session', label: 'Approve for session' },
+          { id: 'deny', label: 'Deny' },
+        ],
+      }),
+    ).toEqual([
+      '--notify',
+      '--title',
+      'claude · Command approval',
+      '--body',
+      'Run the test suite?',
+      '--subtitle',
+      'zion · agents-cli',
+      '--agent',
+      'claude',
+      '--category',
+      'permission',
+      '--key',
+      'zion/sess-1/t4000',
+      '--session',
+      'sess-1',
+      '--choice',
+      'approve=Approve',
+      '--choice',
+      'approve-session=Approve for session',
+      '--choice',
+      'deny=Deny',
+    ]);
+  });
+
+  it('omits the new flags when absent and carries no --choice for an empty list', () => {
+    const args = buildMenubarNotifyArgs({ title: 'T', body: 'B', choices: [] });
+    expect(args).not.toContain('--category');
+    expect(args).not.toContain('--key');
+    expect(args).not.toContain('--session');
+    expect(args).not.toContain('--choice');
+  });
+
+  it('passes a choice label verbatim, splitting only the first = (label may contain =)', () => {
+    const args = buildMenubarNotifyArgs({
+      title: 'T',
+      body: 'B',
+      choices: [{ id: 'approve', label: 'a=b=c' }],
+    });
+    expect(args[args.indexOf('--choice') + 1]).toBe('approve=a=b=c');
+  });
+
   it('passes title/body verbatim as separate argv (no shell interpolation)', () => {
     // The one-shot receives each field as its own argv entry, so quotes and
     // shell metacharacters are inert — no escaping needed, no injection surface.

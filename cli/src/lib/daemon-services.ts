@@ -35,6 +35,7 @@ export type DaemonServiceId =
   | 'browser-task-reap'
   | 'session-state'
   | 'session-summarizer'
+  | 'attention-notify'
   | 'harness-update';
 
 /** Human-readable metadata for each service. */
@@ -134,6 +135,11 @@ export const DAEMON_SERVICES: DaemonServiceDef[] = [
     id: 'session-summarizer',
     title: 'Session summarizer',
     description: 'Computes a per-session goal / progress checkpoints / checklist off the request path and delivers them on the session stream. Off unless summarizer.enabled and a local model endpoint are configured (PHNX-3939).',
+  },
+  {
+    id: 'attention-notify',
+    title: 'Attention desktop banners',
+    description: 'Posts one actionable desktop banner per new attention item (question / permission / plan review / stall) so the macOS helper can answer it through agents feed answer (PHNX-4004).',
   },
   {
     id: 'auth-sync',

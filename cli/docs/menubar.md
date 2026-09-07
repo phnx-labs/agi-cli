@@ -674,6 +674,67 @@ helpers that predate `--notify` (and would ignore it and hang) are replaced by
 the upgrade self-heal (`installMenubarLaunchAgentOnUpgrade`), which reinstalls
 the current bundle on any version bump.
 
+### Actionable notifications (PHNX-4004)
+
+A banner is not just a "finished" toast — the ones that need a decision carry the
+buttons that answer them. The CLI posts one actionable banner per new attention
+item (a session asking a question, a permission prompt, a plan review) and per
+finished/failed run, and the companion turns each into a
+`UNUserNotificationCenter` category whose action buttons route the operator's
+choice back through `agents feed answer`.
+
+The one-shot argv extends the base `--notify` contract with four optional fields:
+
+```bash
+"AGI Menu" --notify --title T --body B [--subtitle S] [--action A] [--agent claude] \
+  --category permission|question|plan_review|done|failure \
+  --key <attention-key> \
+  --session <session-id> \
+  --choice approve=Approve --choice approve-session=Approve for session --choice deny=Deny
+```
+
+- **`--category`** picks the companion's action set: `permission` → Approve /
+  Approve for session / Deny; `question` → the options plus a typed reply;
+  `plan_review` → Approve / Send back; `done`/`failure` → open-report / open-pr /
+  open-terminal.
+- **`--key`** is the `AttentionItem.key` (`host/session/generation`) the companion
+  hands to `agents feed answer <key> --choice <id>`. It is the stable handle the
+  reply rail resolves against.
+- **`--session`** is the session the banner belongs to, so the companion can open
+  or focus it.
+- **`--choice <id>=<label>`** repeats, once per ordered choice (≤ 6). The `id` is
+  `[a-z0-9-]+` and is exactly what the companion echoes back to
+  `agents feed answer --choice <id>`; the `label` is the plain-text button
+  caption. Each field is its own argv entry — the child never sees a shell — so an
+  `=` inside a label is inert (the companion splits on the FIRST `=`).
+
+**Where the choices come from.** The attention reconciler
+(`src/lib/feed/attention.ts`) owns them. Every `permission` item exposes exactly
+`approve` / `approve-session` / `deny` (Claude Code's numbered permission prompt is
+option 1 / option 2 "don't ask again for this session" / Esc; a harness with no
+verified session-scoped option omits `approve-session`); a `plan_review` item
+exposes `approve` / `send-back`; a `question` item carries the harness's own option
+list, each choice slugging its label to an id and carrying the harness selection
+key as its `deliveryKey`. A `done` banner (from `run-notify.ts`) carries
+`open-report` when the run produced a report path and `open-pr` when a PR URL is
+known; a stall/failure carries a single `open-terminal`.
+
+**The answer path.** `agents feed answer <key> --choice <id>`
+(`src/lib/feed/answer.ts`) resolves the id to the choice's `deliveryKey` (falling
+back to the label), atomically claims the first answer, and routes it over the
+session's recorded reply rail — a keystroke into the parked TUI (`1` selects
+option 1, `2` selects "don't ask again this session"), a headless resume, or the
+mailbox for a running agent between tool calls.
+
+**Who posts, and once.** The `attention-notify` daemon service
+(`src/lib/daemon/attention-notify-service.ts`, tick 5 s, deadline 10 s,
+reader-independent) reconciles this host's live sessions each tick and posts one
+banner per attention key not yet notified. Its idempotency truth is a filesystem
+ledger — one sidecar file per key under `~/.agents/.history/feed/notified/`, pruned
+with the feed's 14-day rule — so a daemon restart never re-posts a banner already
+sent. `done` banners are the exception: they ride the run process's own exit
+(`agents run --notify`), not this service.
+
 ## Files
 
 | Path | Purpose |
@@ -686,5 +747,6 @@ the current bundle on any version bump.
 | `~/.agents/.cache/state/menubar.disabled` | sticky opt-out marker |
 | `~/.agents/.cache/helpers/menubar/menubar.log` | helper stdout / stderr |
 | `~/.agents/.history/menubar/projects.json` | last `agents projects list --json` result, so the palette's project dropdown fills on the first summon after a launch |
+| `~/.agents/.history/feed/notified/<key>` | actionable-banner idempotency ledger — one sidecar per notified attention key, pruned at 14 days (`attention-notify` service) |
 | `~/.agents/.history/menubar/recent-tickets.json` | tickets filed from the quick-dispatch panel (RECENT TICKETS) |
 | `~/.agents/.history/menubar/linear-cache.json` | warm cache of Linear projects + each project's open tickets |

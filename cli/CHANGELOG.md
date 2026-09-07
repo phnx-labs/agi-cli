@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+- **The CLI now posts one actionable desktop banner per new attention item, so a
+  session asking a question, a permission prompt, or a plan review is answerable
+  straight from the notification (PHNX-4004).** A new supervised `attention-notify`
+  daemon service (tick 5 s, reader-independent) reconciles this host's live
+  sessions each tick and posts a banner carrying the category, the attention key,
+  the session id, and the answerable choices — Approve / Approve for session / Deny
+  for a permission, the options plus a typed reply for a question, Approve / Send
+  back for a plan review, Open terminal for a stall — which the macOS helper routes
+  back through `agents feed answer <key> --choice <id>`. `agents run --notify`
+  finish banners now carry `category: done|failure`, the session id, and
+  open-report / open-pr choices. Idempotency is a filesystem ledger under
+  `~/.agents/.history/feed/notified/`, pruned at 14 days, so a daemon restart never
+  re-posts a banner already sent. The `--notify` argv gains `--category`, `--key`,
+  `--session`, and repeated `--choice <id>=<label>` (see `docs/menubar.md`
+  → Actionable notifications). Source: `src/lib/menubar/notify-desktop.ts`,
+  `src/lib/daemon/attention-notify-service.ts`, `src/lib/feed/attention.ts`,
+  `src/lib/run-notify.ts`.
+
 ## 1.22.88
 
 - **`agents run` no longer fails with `secrets request failed: spawnSync sh
