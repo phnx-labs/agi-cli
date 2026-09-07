@@ -216,19 +216,27 @@ groups:
     checks: [typecheck]
     budget_sec: 120
 
-  # 240s, not the default 85s. The secrets suite is the heaviest in the tree: the
-  # vault round-trip tests (secrets/bundles.test.ts, secrets/agent.test.ts) each drive a
-  # real keychain / file-store lifecycle at ~2-8s a case (repo convention forbids
-  # mocking), and a secrets/** edit selects the whole secrets suite plus its
-  # installations/hosts importers. Secrets had NO group of its own, so a secrets change
-  # fell back to whatever else it touched — PR #3218 (a comment-only trim of
-  # secrets+installations+hosts) inherited the installations 120s ceiling and measured
-  # 122-174s of a PASSING vitest run (2195 tests, all green) across 5 runs on loaded AND
-  # idle fleet workers, failing the gate every time. Same pattern as sessions 240 /
-  # daemon 240. Raise this only against a measured run, and lower it when the suite is split.
+  # 240s, not the default 85s. The embedded engine (cli/src/lib/secrets/**) is gone
+  # (PHNX-3989 Track D) — this group now covers the process-client seam instead:
+  # secrets-client/secrets-policy/reserved-stores/sync-passphrase each drive a real
+  # spawned `secrets __serve` round trip against a real file-store SECRETS_HOME
+  # (repo convention forbids mocking), which is the same slow-real-lifecycle shape
+  # that earned this group its own 240s budget in the first place — keep the
+  # ceiling rather than re-deriving it. Raise this only against a measured run, and
+  # lower it when the suite is split.
   - id: secrets
     when:
-      - cli/src/lib/secrets/**
+      - cli/src/lib/secrets-client.ts
+      - cli/src/lib/secrets-client.test.ts
+      - cli/src/lib/secrets-policy.ts
+      - cli/src/lib/secrets-policy.test.ts
+      - cli/src/lib/secrets-types.ts
+      - cli/src/lib/reserved-stores.ts
+      - cli/src/lib/reserved-stores.test.ts
+      - cli/src/lib/sync-passphrase.ts
+      - cli/src/lib/sync-passphrase.test.ts
+      - cli/src/commands/secrets-passthrough.ts
+      - cli/src/commands/setup-secrets.ts
     checks: [typecheck]
     budget_sec: 240
 
@@ -297,7 +305,6 @@ testless:
   - cli/scripts/bench-browser-loop.sh
   - cli/scripts/bench-ssh.mjs
   - cli/scripts/bench-staleness.ts
-  - cli/scripts/build-keychain-helper.sh
   - cli/scripts/companion-shim/bin/agents.js
   - cli/scripts/companion-shim/scripts/postinstall.js
   # One-time per-box fleet fix (PHNX-3285): re-enables unprivileged userns so
@@ -306,13 +313,11 @@ testless:
   # which IS tested.
   - cli/scripts/enable-codex-sandbox.sh
   - cli/scripts/headless-sign-context.sh
-  - cli/scripts/install-helper.js
   - cli/scripts/release-changelog.ts
   - cli/scripts/remote-sign-mac.sh
   - cli/scripts/scrub-orphan-branches.sh
   - cli/scripts/setup-npm-secret.sh
   - cli/scripts/sign-cli-binary.sh
-  - cli/scripts/verify-keychain-helper.sh
   - cli/tests/bench-concurrent-writes.ts
   - cli/tests/bench-concurrent-writes.worker.ts
   - cli/tests/e2e/container-fresh-install.sh
