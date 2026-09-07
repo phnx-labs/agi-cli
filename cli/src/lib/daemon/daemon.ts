@@ -46,6 +46,7 @@ import { AuthSyncService } from './auth-sync-service.js';
 import { UsageSyncService } from './usage-sync-service.js';
 import { StateDirCheckService } from './state-dir-check-service.js';
 import { SessionStateService } from './session-state-service.js';
+import { AttentionNotifyService } from './attention-notify-service.js';
 import { WebhookReceiverService } from './webhook-receiver-service.js';
 import { HeartbeatService } from './heartbeat-service.js';
 import { TmuxReapService } from './tmux-reap-service.js';
@@ -1065,6 +1066,13 @@ export async function runDaemon(): Promise<void> {
   // a model endpoint, so registering it costs nothing while unconfigured.
   if (isEnabled('session-summarizer')) supervisor.register(new SessionSummarizerService());
   else log('INFO', 'Session summarizer service disabled');
+
+  // Attention desktop banners (PHNX-4004) — posts one actionable native banner
+  // per new attention key. Reader-independent: it fires whether or not a
+  // `sessions watch` reader is present, and the notified-ledger is its
+  // idempotency truth across daemon restarts.
+  if (isEnabled('attention-notify')) supervisor.register(new AttentionNotifyService());
+  else log('INFO', 'Attention-notify service disabled');
 
   // Watchdog, device-probe, and self-heal are all periodic services managed
   // by the ServiceSupervisor (RUSH-3193 P3). Each is gated the same way as

@@ -61,6 +61,30 @@ export interface DesktopNotification {
    * repeating the left one. macOS-only; osascript / notify-send carry no image.
    */
   agent?: string;
+  /**
+   * What the banner is asking of the operator, so the companion can pick the
+   * UNUserNotificationCenter category (its action buttons) — a `permission`
+   * banner offers Approve / Approve for session / Deny; a `question` offers the
+   * options plus a typed reply; a `plan_review` offers Approve / Send back; a
+   * `done`/`failure` banner offers open-report / open-pr / open-terminal.
+   * macOS-only (the companion decides the buttons); osascript / notify-send
+   * carry no actions. See {@link choices} for the answerable set.
+   */
+  category?: 'permission' | 'question' | 'plan_review' | 'done' | 'failure';
+  /**
+   * The attention key (`AttentionItem.key`) the companion hands to
+   * `agents feed answer <key>` when the operator picks a choice. The stable
+   * handle the reply rail resolves against; carried verbatim in argv.
+   */
+  key?: string;
+  /** Session this banner belongs to, so the companion can open/focus it. */
+  sessionId?: string;
+  /**
+   * Ordered, answerable choices (≤ 6). Each `id` is `[a-z0-9-]+` and is what the
+   * companion echoes back to `agents feed answer --choice <id>`; `label` is the
+   * plain-text button caption. Carried one `--choice <id>=<label>` per entry.
+   */
+  choices?: { id: string; label: string }[];
 }
 
 /** Argv for the "AGI Menu" one-shot notify mode. Exported for tests. */
@@ -69,6 +93,13 @@ export function buildMenubarNotifyArgs(n: DesktopNotification): string[] {
   if (n.subtitle) args.push('--subtitle', n.subtitle);
   if (n.action) args.push('--action', n.action);
   if (n.agent) args.push('--agent', n.agent);
+  if (n.category) args.push('--category', n.category);
+  if (n.key) args.push('--key', n.key);
+  if (n.sessionId) args.push('--session', n.sessionId);
+  // Each choice is one argv pair `id=label`. ids are `[a-z0-9-]+` and labels are
+  // plain text; every field is its own argv entry (the child never sees a shell),
+  // so an `=` inside a label is inert — the companion splits on the FIRST `=`.
+  for (const c of n.choices ?? []) args.push('--choice', `${c.id}=${c.label}`);
   return args;
 }
 

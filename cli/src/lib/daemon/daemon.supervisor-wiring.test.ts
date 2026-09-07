@@ -139,7 +139,7 @@ describe('runDaemon() supervisor wiring (integration: real daemon subprocess)', 
     'account-auth', 'catchup', 'browser-ipc', 'session-index', 'watchdog',
     'device-probe', 'self-heal', 'self-update', 'auth-sync',
     'usage-sync', 'webhook-receiver', 'daemon-heartbeat', 'tmux-reap',
-    'browser-task-reap', 'state-dir-check',
+    'browser-task-reap', 'state-dir-check', 'attention-notify',
   ] as const;
 
   it('registers every supervised service during a real daemon boot', async () => {

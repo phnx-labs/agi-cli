@@ -67,6 +67,34 @@ describe('run finish notification', () => {
       '--body', 'p',
       '--action', 'url:https://github.com/phnx-labs/agents-cli/pull/1690',
       '--agent', 'claude',
+      '--category', 'done',
+      '--choice', 'open-pr=Open PR',
+    ]);
+  });
+
+  it('a clean finish is the done category and carries the session id', () => {
+    const n = buildRunFinishNotification(
+      { agent: 'claude', prompt: 'p', sessionId: 'sess-42' },
+      0,
+    );
+    expect(n.category).toBe('done');
+    expect(n.sessionId).toBe('sess-42');
+  });
+
+  it('a failed run is the failure category', () => {
+    const n = buildRunFinishNotification({ agent: 'codex', prompt: 'p' }, 1);
+    expect(n.category).toBe('failure');
+  });
+
+  it('a report path becomes the open: action and an open-report choice', () => {
+    const n = buildRunFinishNotification(
+      { agent: 'claude', prompt: 'p', reportPath: '/tmp/run/report.md', url: 'https://example.com/pr/1' },
+      0,
+    );
+    expect(n.action).toBe('open:/tmp/run/report.md');
+    expect(n.choices).toEqual([
+      { id: 'open-report', label: 'Open report' },
+      { id: 'open-pr', label: 'Open PR' },
     ]);
   });
 });
