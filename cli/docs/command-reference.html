@@ -1232,8 +1232,8 @@ Harness worker credentials are minted by `agents accounts add &lt;harness&gt; [n
       # stop hosting the receiver bound to a port
       agents daemon webhooks remove 8788 the bundle must hold github_webhook_secret and/or linear_webhook_secret
       (&#39;agents secrets add &lt;bundle&gt; linear_webhook_secret&#39;). the daemon reads it
-      through the secrets broker, so a hosted receiver needs no
-      agents_secrets_passphrase and no nohup. a locked bundle fails that receiver
+      headlessly through the standalone &#39;secrets&#39; cli, so a hosted receiver needs
+      no agents_secrets_passphrase and no nohup. a locked bundle fails that receiver
       loud in &#39;agents daemon logs&#39; rather than binding unverified ingress.
 
       port is the identity: a second &#39;add&#39; on the same port edits that receiver.
@@ -1252,8 +1252,8 @@ Harness worker credentials are minted by `agents accounts add &lt;harness&gt; [n
       # Stop hosting the receiver bound to a port
       agents daemon webhooks remove 8788</code></pre><h4>Notes</h4><p class="notes">The bundle must hold GITHUB_WEBHOOK_SECRET and/or LINEAR_WEBHOOK_SECRET
       (&#39;agents secrets add &lt;bundle&gt; LINEAR_WEBHOOK_SECRET&#39;). The daemon reads it
-      through the secrets broker, so a hosted receiver needs no
-      AGENTS_SECRETS_PASSPHRASE and no nohup. A LOCKED bundle fails that receiver
+      headlessly through the standalone &#39;secrets&#39; CLI, so a hosted receiver needs
+      no AGENTS_SECRETS_PASSPHRASE and no nohup. A LOCKED bundle fails that receiver
       loud in &#39;agents daemon logs&#39; rather than binding unverified ingress.
 
       Port is the identity: a second &#39;add&#39; on the same port edits that receiver.

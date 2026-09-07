@@ -871,8 +871,8 @@ function registerWebhooksSubcommand(parent: Command): void {
     notes: `
       The bundle must hold GITHUB_WEBHOOK_SECRET and/or LINEAR_WEBHOOK_SECRET
       ('agents secrets add <bundle> LINEAR_WEBHOOK_SECRET'). The daemon reads it
-      through the secrets broker, so a hosted receiver needs no
-      AGENTS_SECRETS_PASSPHRASE and no nohup. A LOCKED bundle fails that receiver
+      headlessly through the standalone 'secrets' CLI, so a hosted receiver needs
+      no AGENTS_SECRETS_PASSPHRASE and no nohup. A LOCKED bundle fails that receiver
       loud in 'agents daemon logs' rather than binding unverified ingress.
 
       Port is the identity: a second 'add' on the same port edits that receiver.

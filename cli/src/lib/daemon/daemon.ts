@@ -522,8 +522,10 @@ export function claimDaemonInstance(): boolean {
 
 /**
  * SIGTERM a live incumbent daemon and block until it is provably dead, so its
- * graceful handleShutdown has released the browser IPC binding and the secrets
- * broker socket BEFORE the newcomer binds anything of its own (SING-11). Escalates
+ * graceful handleShutdown has released the browser IPC binding BEFORE the
+ * newcomer binds anything of its own (SING-11) — the daemon no longer hosts a
+ * secrets broker socket to release (the standalone `secrets` CLI owns it now,
+ * PHNX-3989 OWN-1). Escalates
  * to killTree after the grace window. Passes the POSITIVE pid so the kill reaches
  * only the incumbent daemon — never its detached routine children, which run in
  * their own process groups and must survive takeover (SING-11a); the new daemon
@@ -1312,9 +1314,10 @@ export async function runDaemon(): Promise<void> {
   // on the supervisor (RUSH-3193 P2). The orphan reap runs inside onStart().
 
   // Webhook receivers: signed webhook receiver(s) + their funnel (RUSH-2548).
-  // Started after the broker (above) so it resolves each receiver's signing
-  // secret headlessly — no AGENTS_SECRETS_PASSPHRASE, no nohup. Binds nothing
-  // unless daemon/webhooks.yaml declares a receiver, so an unconfigured box no-ops.
+  // Resolves each receiver's signing secret headlessly through the standalone
+  // `secrets` CLI (an agentOnly secrets-client read) — no AGENTS_SECRETS_PASSPHRASE,
+  // no nohup. Binds nothing unless daemon/webhooks.yaml declares a receiver, so an
+  // unconfigured box no-ops.
   // Signed webhook ingress is owned by WebhookReceiverService, including
   // per-service failure isolation, measured health, and shutdown cleanup.
 
