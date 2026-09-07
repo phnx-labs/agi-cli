@@ -50,9 +50,18 @@ enum FeedSelfTest {
                 && state.attention["s-bbbbbbbb"]?.choices?.first?.deliveryKey == "a")
         check("two devices are tracked in the heartbeat map",
               Set(state.deviceHeartbeat.keys) == ["host-a", "host-b"])
-        check("latest activity is retained per session (one line only)",
-              state.latestActivity["s-aaaaaaaa"]?.event == "bash.executed"
-                && state.latestActivity.count == 1)
+        // s-aaaaaaaa got an activity line (seq7) then its row was removed (seq8);
+        // the pruning fix means no leaked activity entry survives the removal.
+        check("activity for a removed session is pruned (no leak)",
+              state.latestActivity["s-aaaaaaaa"] == nil && state.latestActivity.isEmpty)
+
+        // MARK: activity is retained while the row lives, then pruned on removal.
+        var churn = FeedState()
+        _ = churn.apply(env(#"{"type":"reset","streamId":"c","sequence":1,"scope":"z","agents":[{"rowKey":"ck1","sessionId":"cs1"}],"attention":[]}"#))
+        _ = churn.apply(env(#"{"type":"activity.append","streamId":"c","sequence":2,"scope":"z","event":{"sessionId":"cs1","event":"pr.opened"}}"#))
+        check("activity is retained while the row lives", churn.latestActivity["cs1"]?.event == "pr.opened")
+        _ = churn.apply(env(#"{"type":"agent.remove","streamId":"c","sequence":3,"scope":"z","rowKey":"ck1"}"#))
+        check("activity is pruned when the row is removed", churn.latestActivity["cs1"] == nil)
 
         // MARK: reset-on-gap — a sequence gap drops rows and waits for the next reset.
         var gap = FeedState()

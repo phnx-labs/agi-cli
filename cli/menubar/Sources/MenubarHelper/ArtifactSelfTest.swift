@@ -64,6 +64,12 @@ enum ArtifactSelfTest {
         // MARK: an unknown session resolves nothing.
         check("an unknown session resolves nothing", index.artifacts(forSession: "ffffffff").isEmpty)
 
+        // MARK: notify() runs on the private queue without self-deadlocking.
+        // A rescan is always dispatched ONTO `queue`; notify() must not queue.sync
+        // back onto it. Pre-fix this hangs and the semaphore times out.
+        check("rescan + notify complete on the queue (no self-deadlock)",
+              index.forceRescanOnQueueForTest())
+
         print(pass ? "ALL PASS" : "SOME FAILED")
         exit(pass ? 0 : 1)
     }
