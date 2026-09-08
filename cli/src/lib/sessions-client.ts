@@ -54,10 +54,6 @@ const READ_FLAGS = new Set([
   '--json',
   '--local',
   '--no-interactive',
-  '--help',
-  '-h',
-  '-v',
-  '--version',
 ]);
 
 const ENGINE_VERBS = new Set([
@@ -82,6 +78,10 @@ const ENGINE_VERBS = new Set([
   'focus',
   'render',
   'stats',
+  'go',
+  'reconnect',
+  'migrations',
+  'export',
 ]);
 
 export function isReadQuery(args: string[]): boolean {
