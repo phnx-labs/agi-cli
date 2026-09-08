@@ -43,7 +43,8 @@ export interface NativeSpawnHome {
  * `durable`; the key rides the harness's own env var (`CURSOR_API_KEY`, …)
  * on every launch. Anything else — a native login in the slot on a headed
  * device, a claude durable slot (its setup-token is a `.oauth_token` file the
- * adapter reads), a harness with no api-key worker kind — injects nothing.
+ * adapter reads), a harness with no api-key worker kind, a headed device — injects
+ * nothing.
  * Without this, `agents run cursor#gmail` on a worker reached Cursor with an
  * empty env and got `Authentication required … set CURSOR_API_KEY`.
  */
@@ -52,8 +53,14 @@ export function durableSlotEnv(
   account: { id: string },
   resolved: Pick<NativeSpawnHome, 'slot'>,
   meta: Pick<Meta, 'accounts' | 'deviceAccounts'>,
+  deps: { selfRole?: () => ReturnType<typeof selfConfiguredDeviceRole> } = {},
 ): Record<string, string> {
   if (resolved.slot?.authMode !== 'durable') return {};
+  // A headed device authenticates from its own native login (invariant 7). A
+  // `durable` record can outlive a role change (`agents devices role … personal`
+  // never rewrites slots), so the gate is the box's CURRENT role, the same
+  // predicate `isProvisionableWorker` applies — never a record on disk.
+  if (isHeadedDeviceRole((deps.selfRole ?? selfConfiguredDeviceRole)())) return {};
   const envName = workerApiKeyEnv(agent);
   if (!envName) return {};
   const row = nativeRow(account.id, meta);

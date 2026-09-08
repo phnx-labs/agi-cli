@@ -252,6 +252,12 @@ describe('durableSlotEnv', () => {
     expect(durableSlotEnv('cursor', account, {}, meta)).toEqual({});
     // A harness whose worker credential is a setup-token file, not an env key.
     expect(durableSlotEnv('claude', account, { slot: durable }, meta)).toEqual({});
+    // A headed device never trusts a durable record it did not provision — a
+    // stale one survives `agents devices role <box> personal` — and keeps its
+    // native login (invariant 7).
+    expect(durableSlotEnv('cursor', account, { slot: durable }, meta, { selfRole: () => 'personal' })).toEqual({});
+    expect(durableSlotEnv('cursor', account, { slot: durable }, meta, { selfRole: () => 'desktop' })).toEqual({});
+    expect(durableSlotEnv('cursor', account, { slot: durable }, meta, { selfRole: () => 'worker' })).toEqual({ CURSOR_API_KEY: 'crsr_test_worker_key' });
     removeAccount(account.name);
   });
 });
