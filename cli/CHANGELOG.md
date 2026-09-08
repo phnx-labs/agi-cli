@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.22.92
+
+- **AGI Menu 1.1.0 is the helper the CLI installs (PHNX-4007).** The menu-bar
+  helper floor moves from 1.0.0 to 1.1.0, so `agents menubar setup` and
+  `agents menubar enable` download and install the release that carries the
+  dispatch form, the Sessions window, actionable notification banners, the
+  screenshot OCR index, and the FeedStream data layer (PHNX-3999). The startup
+  self-heal stays network-free: it reinstalls only from a bundled or cached copy,
+  so an existing 1.0.0 install upgrades on the next `agents menubar setup`.
+  Source: `src/lib/helper-versions.ts`.
+
 ## 1.22.91
 
 - **`agents sessions` search/list execs the standalone `sessions` CLI (PHNX-4012).** Read queries intercept in `index.ts` before bootstrap so they skip the 6K-line in-process engine. Lifecycle verbs (`resume`, `stop`, `inject`, `watch`, `--active`, `--markdown`) still load the in-repo command. The `sessions` alias shim is retired like `secrets` so it cannot recurse. Install: `npm i -g @phnx-labs/sessions-cli`. Source: `cli/src/index.ts`, `cli/src/lib/sessions-client.ts`, `cli/scripts/postinstall.js`.
