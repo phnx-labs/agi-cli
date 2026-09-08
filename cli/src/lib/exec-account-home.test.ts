@@ -7,9 +7,11 @@ import { recordSlot, slotDir } from './accounts/slots.js';
 import { getAgentConfigPath, isSymlinkAdoptedHarness } from './installations/shims.js';
 import { getVersionDir, getVersionHomePath, invalidateInstalledVersionsCache } from './installations/store.js';
 import { getHistoryDir, getVersionsDir, readMeta, updateMeta } from './state.js';
+import { seedReservedStoreKey, workerCredentialStoreKey } from './auth-mint.js';
 import {
   adoptedConfigPointsAtHome,
   adoptedSymlinkMismatchError,
+  durableSlotEnv,
   ensureAdoptedDefaultRepoint,
   isAccountSlotDir,
   missingSlotHint,
@@ -219,5 +221,37 @@ describe('adopted default repoint + symlink guard (PHNX-3940 T5 review)', () => 
     fs.unlinkSync(configPath);
     fs.symlinkSync(path.join(home, '.factory'), configPath);
     expect(adoptedConfigPointsAtHome('droid', home)).toBe(true);
+  });
+});
+
+// A worker's durable api-key slot holds no file: the launch must carry the
+// pushed key in the harness env var. Nothing else injects (a native login in
+// the slot, a harness without an api-key worker kind, a key not on the box).
+describe('durableSlotEnv', () => {
+  it('injects the reserved worker API key for a durable api-key slot, and nothing otherwise', () => {
+    const account = addNativeAccount(`gmail-${suffix}`, 'cursor', `cursor:user=t6-${suffix}`, 'g@example.com', 'version');
+    const key = workerCredentialStoreKey('cursor', account.id);
+    seedReservedStoreKey('cursor', 'api-key', key, 'crsr_test_worker_key');
+    updateMeta((m) => ({
+      ...m,
+      accounts: {
+        ...m.accounts,
+        native: {
+          ...m.accounts?.native,
+          [account.id]: { ...m.accounts!.native![account.id], workerCredential: { bundle: '__cursor__', key, kind: 'api-key', mintedAt: 'm1' } },
+        },
+      },
+    }));
+    const meta = readMeta();
+    const dir = slotDir('cursor', account.id);
+    const durable = { accountId: account.id, slotDir: dir, authMode: 'durable' as const, verdict: 'live' as const };
+    expect(durableSlotEnv('cursor', account, { slot: durable }, meta)).toEqual({ CURSOR_API_KEY: 'crsr_test_worker_key' });
+    // A native login in the slot (headed device) keeps its own credential.
+    expect(durableSlotEnv('cursor', account, { slot: { ...durable, authMode: 'native' } }, meta)).toEqual({});
+    // No slot at all (legacy home) injects nothing.
+    expect(durableSlotEnv('cursor', account, {}, meta)).toEqual({});
+    // A harness whose worker credential is a setup-token file, not an env key.
+    expect(durableSlotEnv('claude', account, { slot: durable }, meta)).toEqual({});
+    removeAccount(account.name);
   });
 });

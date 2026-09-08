@@ -2596,6 +2596,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
             const {
               adoptedConfigPointsAtHome,
               adoptedSymlinkMismatchError,
+              durableSlotEnv,
               isSymlinkAdoptedHarness,
               resolveNativeSpawnHome,
               symlinkAdoptedAccountError,
@@ -2616,6 +2617,10 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
                 process.exit(1);
               }
               execHome = resolved.execHome;
+              // A worker's durable api-key slot holds no file: the pushed key
+              // rides the harness env var (CURSOR_API_KEY, …) on this launch.
+              const durable = durableSlotEnv(agent, spawnAccount, resolved, meta);
+              if (Object.keys(durable).length > 0) accountEnv = { ...accountEnv, ...durable };
               if (resolved.source === 'legacy-home') {
                 accountConfigVersion = resolved.label;
                 // A leftover version-labeled home is both the spawn HOME and

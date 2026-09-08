@@ -13,7 +13,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { listNativeAccounts, nativeAccountHome, type NativeAccount } from './account-registry.js';
 import { readSlots } from './accounts/slots.js';
-import { workerProvisioningHint } from './accounts/add.js';
+import { workerProvisioningHint, workerApiKeyEnv } from './accounts/add.js';
 import { AGENTS, credentialPresence, getAccountInfo } from './agents.js';
 import { AUTH_BUNDLE, claudeAccountTokenKey, provisionWorkerSlot, readReservedCredential } from './claude-account-token.js';
 import { isHeadedDeviceRole, selfConfiguredDeviceRole } from './device-config.js';
@@ -33,6 +33,35 @@ export interface NativeSpawnHome {
   slot?: DeviceAccountSlot;
   /** Installation label when `source` is `legacy-home`. */
   label?: string;
+}
+
+/**
+ * The env a DURABLE slot injects at spawn (PHNX-3940 T5/T6). A worker's slot
+ * for an api-key harness (codex/grok/cursor/opencode/droid) holds no file — the
+ * daemon pushed the account's worker API key into the reserved
+ * `__<harness>__` store and `provisionWorkerSlot` recorded the slot as
+ * `durable`; the key rides the harness's own env var (`CURSOR_API_KEY`, …)
+ * on every launch. Anything else — a native login in the slot on a headed
+ * device, a claude durable slot (its setup-token is a `.oauth_token` file the
+ * adapter reads), a harness with no api-key worker kind — injects nothing.
+ * Without this, `agents run cursor#gmail` on a worker reached Cursor with an
+ * empty env and got `Authentication required … set CURSOR_API_KEY`.
+ */
+export function durableSlotEnv(
+  agent: AgentId,
+  account: { id: string },
+  resolved: Pick<NativeSpawnHome, 'slot'>,
+  meta: Pick<Meta, 'accounts' | 'deviceAccounts'>,
+): Record<string, string> {
+  if (resolved.slot?.authMode !== 'durable') return {};
+  const envName = workerApiKeyEnv(agent);
+  if (!envName) return {};
+  const row = nativeRow(account.id, meta);
+  const cred = row?.workerCredential;
+  if (!cred || cred.kind !== 'api-key') return {};
+  const value = readReservedCredential(cred.bundle, cred.key);
+  if (!value) return {};
+  return { [envName]: value };
 }
 
 export function missingSlotHint(agent: AgentId, name: string): string {
