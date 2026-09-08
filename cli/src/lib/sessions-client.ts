@@ -1,7 +1,11 @@
 /**
  * sessions-client.ts — agents-cli's process client for the standalone
- * `sessions` CLI (PHNX-4012). DIST-1: a missing binary fails loud; there is
- * no fallback to the in-repo `lib/session` query engine on the read path.
+ * `sessions` CLI (PHNX-4012). This client never falls back itself: a missing
+ * binary throws `SESSIONS_BIN_MISSING` (loud, DIST-1). The caller decides what
+ * that means — the read fast-path in `index.ts` falls through to the in-repo
+ * `lib/session` engine when the standalone is not installed (every worker and
+ * CI runner, until @phnx-labs/sessions-cli is published), and takes the fast
+ * path when it is.
  *
  * Bin resolution uses `findInPath`, which skips `~/.agents/.cache/shims`.
  * That skip is load-bearing: the leftover `sessions` alias shim execs
