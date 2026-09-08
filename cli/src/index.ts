@@ -161,24 +161,31 @@ if (process.argv[2] === 'sessions') {
   } = await import('./lib/sessions-client.js');
   if (isReadQuery(forwarded)) {
     const { spawnSync } = await import('node:child_process');
-    let bin: string;
+    let bin: string | null = null;
     try {
       bin = resolveSessionsBin();
     } catch (err) {
-      if (err instanceof SessionsClientError && err.code === 'SESSIONS_BIN_MISSING') {
-        process.stderr.write('The standalone `sessions` CLI is not installed.\n');
-        process.stderr.write(`Install it, then re-run this command:\n  ${SESSIONS_INSTALL_HINT}\n`);
+      // No standalone on this box: fall through to the in-repo engine below
+      // rather than refusing the query. The fast path is an optimization for a
+      // box that has `sessions` installed (skips bootstrap and the sessions
+      // module); a box without it must still answer `agents sessions --json`
+      // exactly as it did before PHNX-4012 — every worker in the fleet and
+      // every CI runner is such a box until @phnx-labs/sessions-cli is
+      // published, and refusing here turned main's full suite red.
+      if (!(err instanceof SessionsClientError && err.code === 'SESSIONS_BIN_MISSING')) throw err;
+      if (process.env.AGENTS_SESSIONS_FASTPATH_HINT !== '0') {
+        process.stderr.write(`agents: standalone \`sessions\` not installed; using the in-process engine (${SESSIONS_INSTALL_HINT})\n`);
+      }
+    }
+    if (bin) {
+      const { command, prefix } = invocation(bin);
+      const res = spawnSync(command, [...prefix, ...forwarded], { stdio: 'inherit' });
+      if (res.error) {
+        process.stderr.write(`Failed to run \`sessions\`: ${res.error.message}\n`);
         process.exit(1);
       }
-      throw err;
+      process.exit(res.status ?? 1);
     }
-    const { command, prefix } = invocation(bin);
-    const res = spawnSync(command, [...prefix, ...forwarded], { stdio: 'inherit' });
-    if (res.error) {
-      process.stderr.write(`Failed to run \`sessions\`: ${res.error.message}\n`);
-      process.exit(1);
-    }
-    process.exit(res.status ?? 1);
   }
 }
 
