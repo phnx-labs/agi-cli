@@ -44,8 +44,23 @@ export function invocation(bin: string): { command: string; prefix: string[] } {
   return { command: bin, prefix: [] };
 }
 
-/** Verbs/flags the standalone v1 does not own — stay on the in-repo engine. */
-const LIFECYCLE_VERBS = new Set([
+/**
+ * Allowlist of what sessions-cli v1 actually implements. Anything else —
+ * picker (no args), `--since`, `-D`, `--waiting`, `render`, `stats`,
+ * lifecycle verbs — stays on the in-repo engine. A denylist leaked those
+ * through `allowUnknownOption()` as FTS tokens (PR review on #3554).
+ */
+const READ_FLAGS = new Set([
+  '--json',
+  '--local',
+  '--no-interactive',
+  '--help',
+  '-h',
+  '-v',
+  '--version',
+]);
+
+const ENGINE_VERBS = new Set([
   'resume',
   'detach',
   'stop',
@@ -65,32 +80,31 @@ const LIFECYCLE_VERBS = new Set([
   'preview',
   'attach',
   'focus',
-]);
-
-const LIVE_FLAGS = new Set([
-  '--active',
-  '--working',
-  '--idle',
-  '--orphan',
-  '--orphaned',
-  '--crashed',
-  '--markdown',
-  '--include',
-  '--preview',
-  '--teams',
-  '--fleet',
-  '--routine',
+  'render',
+  'stats',
 ]);
 
 export function isReadQuery(args: string[]): boolean {
-  for (const arg of args) {
-    if (LIVE_FLAGS.has(arg)) return false;
-    if (arg.startsWith('--device') || arg.startsWith('--include') || arg.startsWith('--host')) {
-      return false;
+  if (args.length === 0) return false;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '--limit' || arg === '--agent') {
+      i += 1;
+      continue;
     }
-    if (!arg.startsWith('-') && LIFECYCLE_VERBS.has(arg)) return false;
+    if (arg.startsWith('--limit=') || arg.startsWith('--agent=')) continue;
+    if (arg.startsWith('-')) {
+      if (!READ_FLAGS.has(arg)) return false;
+      continue;
+    }
+    if (ENGINE_VERBS.has(arg)) return false;
   }
   return true;
+}
+
+/** Test seam: drop the memoized bin so PATH fixtures can re-resolve. */
+export function _resetSessionsClientForTest(): void {
+  cachedBin = undefined;
 }
 
 export const SESSIONS_INSTALL_HINT = INSTALL_HINT;
