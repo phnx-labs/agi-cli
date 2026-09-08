@@ -91,10 +91,7 @@ export const loadRepo: ModuleLoader = async () => (await import('../commands/rep
 export const loadSetup: ModuleLoader = async () => (await import('../commands/setup.js')).registerSetupCommand;
 export const loadUninstall: ModuleLoader = async () => (await import('../commands/uninstall.js')).registerUninstallCommands;
 export const loadUpgrade: ModuleLoader = async () => (await import('../commands/upgrade.js')).registerUpgradeCommand;
-// PHNX-4012: read queries passthrough to `@phnx-labs/sessions-cli`.
-// Lifecycle verbs still load commands/sessions.ts from the passthrough action.
-export const loadSessions: ModuleLoader = async () =>
-  (await import('../commands/sessions-passthrough.js')).registerSessionsCommands;
+export const loadSessions: ModuleLoader = async () => (await import('../commands/sessions.js')).registerSessionsCommands;
 export const loadTeams: ModuleLoader = async () => (await import('../commands/teams.js')).registerTeamsCommands;
 export const loadCloud: ModuleLoader = async () => (await import('../commands/cloud.js')).registerCloudCommands;
 export const loadMessage: ModuleLoader = async () => (await import('../commands/message.js')).registerMessageCommand;

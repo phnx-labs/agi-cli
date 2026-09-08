@@ -17,6 +17,7 @@
  *   - `__usage-ingest` / `__usage-export`
  *   - `__harness-update-run`
  *   - `__daemon-run`
+ *   - `sessions` (read queries only — PHNX-4012)
  *
  * The synchronous secrets-broker fast paths (`__secrets-get` / `__secrets-ping`
  * / `__secrets-lock`) and `__vault-age-helper` moved out of this CLI entirely
@@ -144,6 +145,41 @@ if (process.argv[2] === '__daemon-run') {
     crash('startup failure')(err);
   }
   process.exit(process.exitCode ?? 0);
+}
+
+// PHNX-4012: search/list/id lookup of `agents sessions` execs the standalone
+// `sessions` binary without loading bootstrap or the 6K-line sessions module.
+// Lifecycle verbs (resume/stop/inject/watch/--active/--markdown) fall through.
+if (process.argv[2] === 'sessions') {
+  const forwarded = process.argv.slice(3);
+  const {
+    isReadQuery,
+    resolveSessionsBin,
+    invocation,
+    SessionsClientError,
+    SESSIONS_INSTALL_HINT,
+  } = await import('./lib/sessions-client.js');
+  if (isReadQuery(forwarded)) {
+    const { spawnSync } = await import('node:child_process');
+    let bin: string;
+    try {
+      bin = resolveSessionsBin();
+    } catch (err) {
+      if (err instanceof SessionsClientError && err.code === 'SESSIONS_BIN_MISSING') {
+        process.stderr.write('The standalone `sessions` CLI is not installed.\n');
+        process.stderr.write(`Install it, then re-run this command:\n  ${SESSIONS_INSTALL_HINT}\n`);
+        process.exit(1);
+      }
+      throw err;
+    }
+    const { command, prefix } = invocation(bin);
+    const res = spawnSync(command, [...prefix, ...forwarded], { stdio: 'inherit' });
+    if (res.error) {
+      process.stderr.write(`Failed to run \`sessions\`: ${res.error.message}\n`);
+      process.exit(1);
+    }
+    process.exit(res.status ?? 1);
+  }
 }
 
 // Full CLI: commander tree, update checks, migrations, parse. Static imports

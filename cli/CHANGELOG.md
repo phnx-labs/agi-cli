@@ -1,9 +1,5 @@
 # Changelog
 
-## Unreleased
-
-- **`agents sessions` search/list is a passthrough to the standalone `sessions` CLI (PHNX-4012).** Read queries (`sessions "auth" --json`, id lookup, `--limit`) exec `@phnx-labs/sessions-cli` and skip the 6K-line in-process engine. Lifecycle verbs (`resume`, `stop`, `inject`, `watch`, `--active`, `--markdown`) stay in-repo. The `sessions` alias shim is retired the same way `secrets` was: postinstall no longer writes it and prunes leftovers so the standalone is not shadowed (the 1.22.85 fork-bomb class). Install: `npm i -g @phnx-labs/sessions-cli`. Source: `cli/src/commands/sessions-passthrough.ts`, `cli/src/lib/sessions-client.ts`, `cli/scripts/postinstall.js`.
-
 ## 1.22.90
 
 - **`accounts migrate --apply` no longer aborts on a worker whose accounts already hold slots (PHNX-3940).** The daemon's auth-sync provisions a durable slot per account on every worker, so `--apply` hit `Slot already exists` on the first credential-bearing legacy home and cleaned nothing. The plan now routes such a home to `trash` (restorable with `agents trash restore`) with the reason "account already holds a provisioned slot on this device", rewrites any `<harness>@<label>` binding to the account, and clears the stale home record; a canonical install in that state keeps its binary, has its stale home moved to `~/.agents/.history/trash/homes/…` (manifest key `<harness>@<label>#home`), and gets an empty home back. A regular file at the slot path is still not a slot, so the apply-time guard still fails loud on that corruption. Source: `cli/src/lib/accounts/migrate.ts`.
