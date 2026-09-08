@@ -50,16 +50,15 @@ function shellQuote(value) {
 }
 
 // Shorthands that delegate to the installed agents-cli entrypoint.
-const ALIASES = ['sessions', 'browser', 'pty', 'teams'];
+const ALIASES = ['browser', 'pty', 'teams'];
 
 // Aliases this script USED to write and must now remove on every install.
-// `secrets`: the name belongs to the standalone `@phnx-labs/secrets-cli` binary
-// (PHNX-3989); `agents secrets` is a passthrough to it, so an alias shim that
-// `exec`s `agents secrets` can only re-enter the passthrough, and it shadows the
-// real `secrets` bin because the shims dir sits first on PATH. The self-heal
-// shim pass prunes it too, but that only runs from a daemon or a TTY session —
-// postinstall is what every upgrade path actually executes, so it cleans up here.
-const RETIRED_ALIASES = ['secrets'];
+// `secrets` (PHNX-3989) and `sessions` (PHNX-4012): those names belong to the
+// standalone CLIs. An alias shim that `exec`s `agents <name>` re-enters the
+// passthrough and shadows the real binary because the shims dir sits first on
+// PATH — the 1.22.85 fork bomb. Postinstall is the upgrade path that actually
+// runs, so it prunes here.
+const RETIRED_ALIASES = ['secrets', 'sessions'];
 
 function removeRetiredAliasShims() {
   for (const name of RETIRED_ALIASES) {
