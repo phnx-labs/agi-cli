@@ -76,16 +76,15 @@ describe.skipIf(process.platform === 'win32')('shim AGENTS_BIN drift + orphan pr
 
     expect(r.files).toEqual(['browser', 'claude', 'myalias', 'secrets', 'sessions']);
     expect(r.prunedBrowser).toBe(true);    // dead target -> removed
-    expect(r.prunedSessions).toBe(false);  // live target -> spared
+    expect(r.prunedSessions).toBe(true);   // live target, but re-enters `agents sessions` -> removed (PHNX-4012)
     expect(r.prunedSecrets).toBe(true);    // live target, but re-enters `agents secrets` -> removed (PHNX-3989)
     expect(r.prunedAlias).toBe(false);     // user alias -> spared
     expect(r.prunedClaude).toBe(false);    // agent command -> never pruned here
     expect(r.claudePointsLive).toBe(false); // agent shim baked at a different, removed install -> drift
 
-    // browser + secrets actually gone from disk; the spared ones remain.
     expect(fs.existsSync(path.join(shimsDir, 'browser'))).toBe(false);
     expect(fs.existsSync(path.join(shimsDir, 'secrets'))).toBe(false);
-    expect(fs.existsSync(path.join(shimsDir, 'sessions'))).toBe(true);
+    expect(fs.existsSync(path.join(shimsDir, 'sessions'))).toBe(false);
     expect(fs.existsSync(path.join(shimsDir, 'myalias'))).toBe(true);
     expect(fs.existsSync(path.join(shimsDir, 'claude'))).toBe(true);
   });
