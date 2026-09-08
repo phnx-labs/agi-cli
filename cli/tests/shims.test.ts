@@ -417,7 +417,7 @@ describe('shims - generateVersionedAliasScript', () => {
     const script = generateVersionedAliasScript('claude', '2.1.110');
     // The alias now reuses the main shim's adapter block, keyed off VERSION_DIR, so
     // CLAUDE_CONFIG_DIR resolves to the same per-version config dir as before.
-    expect(script).toContain('VERSION_DIR="$HOME/.agents/.history/versions/claude/2.1.110"');
+    expect(script).toContain('VERSION_DIR="$AGENTS_REAL_HOME/.agents/.history/versions/claude/2.1.110"');
     expect(script).toContain('export CLAUDE_CONFIG_DIR="$VERSION_DIR/home/.claude"');
   });
 
