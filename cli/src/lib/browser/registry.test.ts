@@ -263,7 +263,7 @@ describe('device declaration lifecycle', () => {
       process.env.AGENTS_ARC_DIR = path.join(import.meta.dirname, 'testdata', 'arc', 'valid');
       const { machineId } = await import('../machine-id.js');
       const { createProfile, getProfile, listProfiles } = await import('./profiles.js');
-      await createProfile({ name: 'comet-here', browser: 'comet', endpoints: ['cdp://127.0.0.1:9333'] });
+      await createProfile({ name: 'remote-here', browser: 'custom', endpoints: ['ssh://browser-host?port=9344'] });
       // An alias whose Space the user has since deleted in Arc.
       await createProfile({
         name: 'arc-gone',
@@ -275,16 +275,16 @@ describe('device declaration lifecycle', () => {
       });
 
       const names = (await listProfiles()).map((profile) => profile.name);
-      expect(names).toEqual(expect.arrayContaining(['comet-here', 'arc-gone', 'arc-home', 'arc-work']));
+      expect(names).toEqual(expect.arrayContaining(['remote-here', 'arc-gone', 'arc-home', 'arc-work']));
       expect((await getProfile('arc-gone'))?.arc?.spaceId).toBe('deleted-space');
 
       // Arc rewrites its sidebar file constantly; a torn read must not take
       // the Comet row down with it, and only an Arc name pays for the failure.
       process.env.AGENTS_ARC_DIR = path.join(import.meta.dirname, 'testdata', 'arc', 'malformed-profile');
       const degraded = await listProfiles();
-      expect(degraded.map((profile) => profile.name)).toEqual(expect.arrayContaining(['comet-here', 'arc-gone']));
+      expect(degraded.map((profile) => profile.name)).toEqual(expect.arrayContaining(['remote-here', 'arc-gone']));
       expect(degraded.some((profile) => profile.name === 'arc-home')).toBe(false);
-      expect((await getProfile('comet-here'))?.devices).toEqual([machineId()]);
+      expect((await getProfile('remote-here'))?.devices).toEqual([machineId()]);
       await expect(getProfile('arc-home')).rejects.toThrow(/Cannot discover Arc Spaces: Arc Space "space-malformed" has an unknown profile mapping/);
       expect(await getProfile('no-such-profile')).toBeNull();
     } finally {
