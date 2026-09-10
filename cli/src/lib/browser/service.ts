@@ -2346,7 +2346,7 @@ export class BrowserService {
     // Firefox BiDi) is truthfully "not recording". Throwing here took the
     // idle reaper down with it — one Firefox task parked reaping for every task.
     const live = this.findTaskByHandle(taskId) ?? await this.findTask(taskId).catch(() => undefined);
-    if (live && live.conn.backend !== 'cdp') return { recording: false };
+    if (live && (live.conn.backend === 'arc-native' || live.conn.backend === 'bidi')) return { recording: false };
     const rec = this.recordings.get(taskId);
     if (!rec) return { recording: false };
     return { recording: true, path: rec.outputPath, elapsedMs: Date.now() - rec.startedAt };
