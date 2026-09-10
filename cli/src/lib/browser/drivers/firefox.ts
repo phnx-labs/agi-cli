@@ -437,21 +437,6 @@ export async function bidiScreenshot(
   return Buffer.from(shot.data, 'base64');
 }
 
-/** Override a context's viewport size (CSS px). */
-export async function bidiSetViewport(
-  bidi: FirefoxBiDiClient,
-  context: string,
-  width: number,
-  height: number,
-  devicePixelRatio?: number,
-): Promise<void> {
-  await bidi.send('browsingContext.setViewport', {
-    context,
-    viewport: { width, height },
-    ...(devicePixelRatio ? { devicePixelRatio } : {}),
-  });
-}
-
 /**
  * A real, trusted left click at viewport coordinates via `input.performActions`
  * — the pointer path CDP `Input.dispatchMouseEvent` gives Chromium, which Arc
