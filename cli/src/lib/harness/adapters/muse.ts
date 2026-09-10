@@ -1,6 +1,6 @@
 import * as path from 'path';
 import type { HarnessAdapter } from '../adapter.js';
-import { stripForeignConfigDir } from '../adapter.js';
+import { stripForeignConfigDir, slotAwareConfigEnvBash } from '../adapter.js';
 
 export const museAdapter: HarnessAdapter = {
   id: 'muse',
@@ -27,8 +27,9 @@ export const museAdapter: HarnessAdapter = {
 # Pin XDG into the version home so managed runs never walk the adopt-time
 # ~/.config/muse -> version-home symlink — Muse refuses agent-definition
 # sources that are SymlinkOrReparse (exit 1). Same idea as CLAUDE_CONFIG_DIR.
-export XDG_CONFIG_HOME="$VERSION_DIR/home/.config"
-export XDG_DATA_HOME="$VERSION_DIR/home/.local/share"
+# An account-slot launch has already chosen the home (AGENTS_EXEC_HOME); the pins
+# yield to it — see slotAwareConfigEnvBash.
+${slotAwareConfigEnvBash([{ env: 'XDG_CONFIG_HOME', rel: '.config' }, { env: 'XDG_DATA_HOME', rel: '.local/share' }], '$VERSION_DIR/home')}
 `;
   },
 

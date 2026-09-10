@@ -130,6 +130,24 @@ describe('generateVersionedAliasScript', () => {
     expect(run({})).toBe('/v/home/.claude|unset');
   });
 
+  it('yields every harness config-dir pin to an account-slot launch (bare shim and direct alias)', () => {
+    // Same override existed for every harness whose shim pins a config-dir env.
+    const cases: Array<[Parameters<typeof generateShimScript>[0], string, string[]]> = [
+      ['grok', '0.2.91', ['GROK_HOME']],
+      ['opencode', '1.18.4', ['OPENCODE_CONFIG_DIR']],
+      ['kimi', '0.32.0', ['KIMI_CODE_HOME']],
+      ['copilot', '0.0.1', ['COPILOT_HOME']],
+      ['muse', '0.1.0', ['XDG_CONFIG_HOME', 'XDG_DATA_HOME']],
+    ];
+    for (const [agent, version, envs] of cases) {
+      for (const script of [generateShimScript(agent), generateVersionedAliasScript(agent, version)]) {
+        expect(script).toContain('if [ -n "${AGENTS_EXEC_HOME:-}" ]; then');
+        for (const env of envs) expect(script).toContain(`export ${env}="$AGENTS_EXEC_HOME/`);
+        expect(script).toContain('unset AGENTS_EXEC_HOME');
+      }
+    }
+  });
+
   it('keeps the same real-home anchor and lease order for a claude@version alias', () => {
     const script = generateVersionedAliasScript('claude', '2.1.196');
     expect(script).toContain('BINARY="$AGENTS_REAL_HOME/.agents/.history/versions/claude/2.1.196/node_modules/.bin/claude"');

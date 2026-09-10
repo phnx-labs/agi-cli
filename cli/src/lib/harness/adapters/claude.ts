@@ -1,6 +1,6 @@
 import * as path from 'path';
 import type { HarnessAdapter } from '../adapter.js';
-import { stripForeignConfigDir } from '../adapter.js';
+import { slotAwareConfigEnvBash, stripForeignConfigDir } from '../adapter.js';
 import { isHeadedDeviceRole } from '../../device-config.js';
 
 export const claudeAdapter: HarnessAdapter = {
@@ -98,19 +98,9 @@ export const claudeAdapter: HarnessAdapter = {
 # Claude stores OAuth credentials in the macOS keychain. Scope them to the
 # selected version's config directory so switching versions also switches the
 # live Claude account. An account-slot launch (PHNX-3940 T5) has already chosen
-# the config dir: \`agents run\` hands the HOME-shaped slot in AGENTS_EXEC_HOME,
-# and the version-home pin yields to it — the same way the cursor alias's HOME
-# swap yields to a spawner-chosen HOME. Without this the alias re-pinned every
-# slot launch onto the shared version home, so a worker run picked as one
-# account onboarded and kept its history in another account's home. The marker
-# is consumed here so the launched harness never inherits it into a nested
-# launch; a bare \`claude@<version>\` from a terminal still gets the version home.
-if [ -n "\${AGENTS_EXEC_HOME:-}" ]; then
-  export CLAUDE_CONFIG_DIR="$AGENTS_EXEC_HOME/${ctx.configDirName}"
-  unset AGENTS_EXEC_HOME
-else
-  export CLAUDE_CONFIG_DIR="$VERSION_DIR/home/${ctx.configDirName}"
-fi
+# the config dir (AGENTS_EXEC_HOME) and the pin yields to it — see
+# slotAwareConfigEnvBash.
+${slotAwareConfigEnvBash([{ env: 'CLAUDE_CONFIG_DIR', rel: ctx.configDirName }], '$VERSION_DIR/home')}
 # Managed installs are pinned in a per-version dir; Claude Code's background
 # auto-updater would rewrite the pinned binary in place. Disable it so a pin
 # stays a pin. An explicit user value always wins.

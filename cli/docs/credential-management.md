@@ -478,11 +478,14 @@ binary still comes from the one managed install. Two slots in one install never
 share a config-dir env: adapters pin `CLAUDE_CONFIG_DIR` / `CODEX_HOME` /
 `GROK_HOME` / `OPENCODE_CONFIG_DIR` / XDG at the slot, and the strip list
 removes every other pin so a parent agent's dir cannot leak. The spawn also
-stamps the slot in `AGENTS_EXEC_HOME` so the versioned alias's own config-dir
-pin yields to it (the claude alias used to re-export the version home over the
-slot, so a worker run picked as one account onboarded and kept its history in
-the shared version home); the alias consumes the marker before `exec`, so a
-nested launch never inherits its parent's slot. A headed device
+stamps the slot in `AGENTS_EXEC_HOME` so the shim's own config-dir pin (bare
+shim and `<agent>@<version>` alias; claude, grok, opencode, kimi, muse, copilot
+— `slotAwareConfigEnvBash`) yields to it. Every one of those shims used to
+re-export the version home over the slot, so a worker run picked as one account
+onboarded and kept its history in the shared version home; the shim consumes
+the marker before `exec`, so a nested launch never inherits its parent's slot.
+Codex (a caller-provided `CODEX_HOME` wins) and cursor (its HOME swap yields to
+a spawner-chosen HOME) already behaved this way. A headed device
 still authenticates only with the native login in that slot; a worker still
 injects only the durable credential for that account. Native OAuth files never
 leave the device that minted them.

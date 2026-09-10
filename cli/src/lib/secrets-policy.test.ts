@@ -296,12 +296,29 @@ describe('reconcileLocalWorkerSlots', () => {
       selfRole: 'worker',
       readMetaFn: withSlot,
       hasLocalKey: () => true,
-      slotSeeded: (harness, slotDir) => { asked.push([harness, slotDir]); return false; },
+      // Unseeded before provisioning, seeded after — the converging case.
+      slotSeeded: (harness, slotDir) => { asked.push([harness, slotDir]); return provisioned.length > 0; },
       provision: (a) => provisioned.push(a.id),
     });
-    expect(asked).toEqual([['claude', '/x']]);
+    expect(asked).toEqual([['claude', '/x'], ['claude', '/x']]);
     expect(provisioned).toEqual(['a1']);
     expect(res.provisioned).toEqual(['a1']);
+  });
+
+  it('reports a re-seed that does not converge as an error instead of "provisioned" every tick', () => {
+    const withSlot = () => ({
+      accounts: { native: Object.fromEntries(rows.map((r) => [r.id, r])) },
+      deviceAccounts: { slots: { a1: { accountId: 'a1', slotDir: '/x', authMode: 'durable', verdict: 'unverified' } } },
+    }) as Pick<Meta, 'accounts' | 'deviceAccounts'>;
+    const res = reconcileLocalWorkerSlots({
+      selfRole: 'worker',
+      readMetaFn: withSlot,
+      hasLocalKey: () => true,
+      slotSeeded: () => false,
+      provision: () => { /* writes nothing the seeded check can see */ },
+    });
+    expect(res.provisioned).toEqual([]);
+    expect(res.errors[0]).toMatchObject({ accountId: 'a1', message: expect.stringContaining('still not fully seeded') });
   });
 
   // The mac-mini 2026-09-06 gap: every registered claude row predated T1 (no
