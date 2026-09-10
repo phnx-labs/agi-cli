@@ -14,7 +14,7 @@ agents clis install secrets
 # or: agents setup secrets
 ```
 
-`agents secrets <anything>` is a thin exec passthrough (`commands/secrets-passthrough.ts`) that forwards argv verbatim to the installed binary. The macOS broker is `secrets _agent-run`, not `agents daemon` — see [`secrets-agent-process-model.md`](secrets-agent-process-model.md).
+`agents secrets <anything>` is a thin exec passthrough (`commands/secrets-passthrough.ts`) that forwards argv verbatim to the installed binary. The macOS broker is `secrets _agent-run`, not `agents daemon` — see [`secrets-agent-process-model.md`](secrets-agent-process-model.md). `agents setup secrets` is the onboarding entry point: it installs the pinned standalone (a declared `clis/secrets.yaml` if present, otherwise the same npm pin) and then hands off to the standalone's own `secrets migrate`.
 
 Read `secrets-client.md` for the process-client architecture (the wire
 protocol, the sync/async transports, the environment contract). This page

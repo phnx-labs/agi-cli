@@ -30,8 +30,7 @@ import { buildServeEnv, invocation, resolveSecretsBin, SecretsClientError } from
 import { flagValue } from '../lib/hosts/routing-flag.js';
 import { stripRoutingFlags } from '../lib/hosts/remote-cmd.js';
 import { resolveRemoteDevice } from '../lib/ssh-tunnel.js';
-
-const INSTALL_HINT = 'npm i -g @phnx-labs/secrets-cli';
+import { SECRETS_CLI_INSTALL_HINT } from '../lib/secrets-cli.js';
 
 /**
  * Rewrite a `--device <name>` (or `-D`) on the forwarded argv to
@@ -65,7 +64,7 @@ export function registerSecretsCommands(program: Command): void {
         if (err instanceof SecretsClientError && err.code === 'SECRETS_BIN_MISSING') {
           console.error(chalk.red('The standalone `secrets` CLI is not installed.'));
           console.error(chalk.gray(`Install it, then re-run this command:`));
-          console.error(chalk.cyan(`  ${INSTALL_HINT}`));
+          console.error(chalk.cyan(`  ${SECRETS_CLI_INSTALL_HINT}`));
           process.exit(1);
         }
         throw err;
