@@ -98,6 +98,8 @@ export interface RotateCandidate {
    * binary (managed install) and is no longer the account identity.
    */
   nativeAccount?: string;
+  /** Stable registry id for {@link nativeAccount}; never inferred from version. */
+  nativeAccountId?: string;
   /** Slot dir when this candidate is a slot — the spawn HOME. */
   slotDir?: string;
   /** True when this row came from `deviceAccounts.slots`, not a version home. */
@@ -483,14 +485,16 @@ function compareCandidates(a: RotateCandidate, b: RotateCandidate): number {
  * are genuinely separate buckets and must stay distinct. Prefer the org usage
  * key; fall back to email only when no usage identity is available.
  */
-function candidateIdentity(c: RotateCandidate): string {
-  return c.usageKey ?? c.accountKey ?? c.email ?? `${c.agent}@${c.version}`;
+export function candidateAccountKey(c: RotateCandidate): string {
+  if (c.nativeAccountId) return `native:${c.nativeAccountId}`;
+  if (c.providerAccount) return `provider:${c.providerAccount}`;
+  return c.usageKey ?? c.accountKey ?? c.email ?? `${c.agent}:unregistered:${c.accountLabel || c.version}`;
 }
 
 function dedupeAndSortCandidates(candidates: RotateCandidate[]): RotateCandidate[] {
   const byIdentity = new Map<string, RotateCandidate>();
   for (const c of candidates) {
-    const id = candidateIdentity(c);
+    const id = candidateAccountKey(c);
     const existing = byIdentity.get(id);
     if (!existing) {
       byIdentity.set(id, c);
@@ -983,6 +987,7 @@ export async function collectRunCandidates(agent: AgentId): Promise<RotateCandid
         })(),
         lastActive: info.lastActive,
         nativeAccount: account.name,
+        nativeAccountId: account.id,
         slotDir: home,
         fromSlot: true as const,
       };
