@@ -20,8 +20,7 @@ import type { Command } from 'commander';
 import chalk from 'chalk';
 import { spawnSync } from 'node:child_process';
 import { buildServeEnv, invocation, resolveSecretsBin, SecretsClientError } from '../lib/secrets-client.js';
-
-const INSTALL_HINT = 'npm i -g @phnx-labs/secrets-cli';
+import { SECRETS_CLI_INSTALL_HINT } from '../lib/secrets-cli.js';
 
 export function registerSecretsCommands(program: Command): void {
   program
@@ -40,7 +39,7 @@ export function registerSecretsCommands(program: Command): void {
         if (err instanceof SecretsClientError && err.code === 'SECRETS_BIN_MISSING') {
           console.error(chalk.red('The standalone `secrets` CLI is not installed.'));
           console.error(chalk.gray(`Install it, then re-run this command:`));
-          console.error(chalk.cyan(`  ${INSTALL_HINT}`));
+          console.error(chalk.cyan(`  ${SECRETS_CLI_INSTALL_HINT}`));
           process.exit(1);
         }
         throw err;

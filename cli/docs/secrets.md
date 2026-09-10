@@ -6,11 +6,14 @@ backends all live there now — this repo carries none of that code. agents-cli
 reaches the engine only through the bounded process client documented in
 [`secrets-client.md`](secrets-client.md) (`cli/src/lib/secrets-client.ts`); it
 never rebundles the engine (DIST-1), so a missing `secrets` executable fails
-loud with install guidance (`npm i -g @phnx-labs/secrets-cli`) rather than
-falling back to anything in-repo. `agents secrets <anything>` is a thin exec
-passthrough (`commands/secrets-passthrough.ts`) that forwards argv verbatim to
-the installed binary. `agents setup secrets` is the onboarding entry point:
-install guidance, then a hand-off to the standalone's own `secrets migrate`.
+loud with install guidance (`npm i -g @phnx-labs/secrets-cli@0.1.2`, or
+`agents setup secrets`) rather than falling back to anything in-repo.
+`agents secrets <anything>` is a thin exec passthrough
+(`commands/secrets-passthrough.ts`) that forwards argv verbatim to the
+installed binary. `agents setup secrets` is the onboarding entry point: it
+installs the pinned standalone (declared `clis/secrets.yaml` if present,
+otherwise the same npm pin) and then hands off to the standalone's own
+`secrets migrate`. `agents doctor` lists `secrets` as a host CLI.
 
 Read `secrets-client.md` for the process-client architecture (the wire
 protocol, the sync/async transports, the environment contract). This page

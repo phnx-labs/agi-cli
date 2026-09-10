@@ -791,10 +791,12 @@ describe('doctor when the standalone `secrets` CLI is missing (PHNX-3989)', () =
   // doctor.ts's scanUserRcFiles()/masterPassphraseInEnv() wrappers swallow that
   // transport error and degrade to "nothing to report" from those two checks so
   // the rest of the fleet report still prints. Spawned with an EMPTY PATH and a
-  // blank SECRETS_BIN so nothing resolves `secrets`.
-  it('degrades gracefully — full report, exit 0, no stacktrace', () => {
+  // blank SECRETS_BIN so nothing resolves `secrets`. Secrets is listed as a
+  // host CLI (builtin pin when no clis/secrets.yaml) with the same install
+  // remediation, not a stacktrace.
+  it('degrades gracefully — full report, exit 0, no stacktrace, lists secrets as a host CLI', () => {
     seedHome(['2.0.0'], '2.0.0');
-    const r = spawnSync(resolveBun(), [INDEX, 'doctor', '--cwd', projectDir], {
+    const r = spawnSync(resolveBun(), [INDEX, 'doctor', '--json', '--cwd', projectDir], {
       encoding: 'utf-8',
       timeout: 15_000,
       env: {
@@ -813,9 +815,20 @@ describe('doctor when the standalone `secrets` CLI is missing (PHNX-3989)', () =
       },
     });
     expect(r.status).toBe(0);
+    const out = r.stdout + r.stderr;
     // The one thing this guards: the typed transport error never surfaces raw.
-    expect(r.stdout + r.stderr).not.toContain('SecretsClientError');
-    expect(r.stdout + r.stderr).not.toMatch(/\n\s+at /);
-    expect(r.stdout + r.stderr).not.toContain('secrets-client.ts');
+    expect(out).not.toContain('SecretsClientError');
+    expect(out).not.toMatch(/\n\s+at /);
+    expect(out).not.toContain('secrets-client.ts');
+    const payload = JSON.parse(r.stdout) as {
+      hostClis: { statuses: Array<{ name: string; installed: boolean }> };
+      findings: Array<{ kind: string; message: string; remediation: string }>;
+    };
+    const secrets = payload.hostClis.statuses.find((s) => s.name === 'secrets');
+    expect(secrets).toEqual(expect.objectContaining({ name: 'secrets', installed: false }));
+    const missing = payload.findings.find((f) => f.kind === 'host-cli-missing');
+    expect(missing).toBeDefined();
+    expect(missing!.message).toMatch(/secrets/);
+    expect(missing!.remediation).toMatch(/agents cli install( secrets)?/);
   });
 });

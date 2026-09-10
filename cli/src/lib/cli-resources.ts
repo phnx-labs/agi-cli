@@ -24,6 +24,7 @@ import { listResources, resolveResource } from './resources.js';
 import { probeCapture } from './probe.js';
 import { composeWin32CommandLine } from './platform/index.js';
 import { localBinDir } from './platform/posixpath.js';
+import { builtinSecretsCliManifest, isSecretsPresent, SECRETS_CLI_NAME } from './secrets-cli.js';
 
 // ─── Validation primitives ───────────────────────────────────────────────────
 
@@ -314,20 +315,29 @@ export function listCliManifests(cwd?: string): {
     }
   }
 
+  // agents-cli cannot run without the standalone `secrets` CLI. When no
+  // clis/secrets.yaml is declared yet, still expose the pinned npm method so
+  // `agents clis install secrets`, doctor, and setup share one path.
+  if (!manifests.some((m) => m.name === SECRETS_CLI_NAME)) {
+    manifests.push(builtinSecretsCliManifest());
+  }
+
   return { manifests, errors };
 }
 
 /** Resolve a single CLI manifest by name. Returns null when not declared. */
 export function resolveCliManifest(name: string, cwd?: string): CliManifest | null {
   const resolved = resolveResource('clis', name, cwd);
-  if (!resolved) return null;
-  if (!resolved.path.endsWith('.yaml') && !resolved.path.endsWith('.yml')) return null;
-  const contents = fs.readFileSync(resolved.path, 'utf-8');
-  return parseCliManifest(contents, {
-    name: resolved.name,
-    source: resolved.source,
-    path: resolved.path,
-  });
+  if (resolved && (resolved.path.endsWith('.yaml') || resolved.path.endsWith('.yml'))) {
+    const contents = fs.readFileSync(resolved.path, 'utf-8');
+    return parseCliManifest(contents, {
+      name: resolved.name,
+      source: resolved.source,
+      path: resolved.path,
+    });
+  }
+  if (name === SECRETS_CLI_NAME) return builtinSecretsCliManifest();
+  return null;
 }
 
 // ─── Host detection ──────────────────────────────────────────────────────────
@@ -362,6 +372,12 @@ export function hasCommand(cmd: string): boolean {
  * shell, never interpolates strings into a command line.
  */
 export function isCliInstalled(manifest: CliManifest): boolean {
+  // `secrets` must never be resolved via `command -v` / a PATH spawn: the
+  // leftover `~/.agents/.cache/shims/secrets` alias execs `agents secrets`
+  // and sits first on PATH (agi-cli#3532). findInPath skips that dir.
+  if (manifest.name === SECRETS_CLI_NAME || manifest.check.cmd === SECRETS_CLI_NAME) {
+    return isSecretsPresent();
+  }
   const c = manifest.check;
   if (c.kind === 'which') {
     cmdExistsCache.delete(c.cmd);
@@ -391,6 +407,9 @@ export function isCliInstalled(manifest: CliManifest): boolean {
  * hanging probe can't stall the whole set past 10s.
  */
 export function isCliInstalledAsync(manifest: CliManifest): Promise<boolean> {
+  if (manifest.name === SECRETS_CLI_NAME || manifest.check.cmd === SECRETS_CLI_NAME) {
+    return Promise.resolve(isSecretsPresent());
+  }
   const c = manifest.check;
   if (c.kind === 'which') {
     cmdExistsCache.delete(c.cmd);

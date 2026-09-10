@@ -28,9 +28,10 @@ import { spawnSync } from 'node:child_process';
 import { afterEach, beforeEach } from 'vitest';
 import { _resetSecretsClientForTest, keychainUsesFileFallback } from '../src/lib/secrets-client.js';
 import { invalidateClaudeSetupTokenCache } from '../src/lib/claude-account-token.js';
+import { SECRETS_CLI_VERSION } from '../src/lib/secrets-cli.js';
 
 /** The published standalone the suite is pinned to; bump with the protocol. */
-export const STANDALONE_SECRETS_VERSION = '0.1.2';
+export const STANDALONE_SECRETS_VERSION = SECRETS_CLI_VERSION;
 const LOCK_STALE_MS = 10 * 60 * 1000;
 const LOCK_WAIT_MS = 5 * 60 * 1000;
 

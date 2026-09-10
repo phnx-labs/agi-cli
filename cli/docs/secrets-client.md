@@ -141,8 +141,8 @@ export: it resolves how to spawn the binary (through this process's Node for a
 `.js` entrypoint, or directly for an installed shim), for a caller that needs
 to run a standalone verb this client doesn't wrap as an op — the `agents
 secrets` passthrough (`commands/secrets-passthrough.ts`, execs any subcommand
-verbatim) and `agents setup secrets` (hands off to the standalone's own
-interactive `secrets migrate`) both use it.
+verbatim) and `agents setup secrets` (installs the pinned standalone if missing,
+then hands off to `secrets migrate`) both use it.
 
 The wrapper types are imported `type`-only from `cli/src/lib/secrets-types.ts` —
 a pure re-declaration of the standalone's wire types with no runtime code, so

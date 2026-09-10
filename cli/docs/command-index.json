@@ -23931,7 +23931,7 @@
           "name": "secrets",
           "path": "setup secrets",
           "aliases": [],
-          "description": "Install guidance for the standalone `secrets` CLI, then run its own `secrets migrate` onboarding.",
+          "description": "Install the standalone `secrets` CLI if missing, then run its own `secrets migrate` onboarding.",
           "args": [],
           "options": [
             {

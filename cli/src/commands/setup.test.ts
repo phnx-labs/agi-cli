@@ -167,12 +167,10 @@ describe('agents setup command group', () => {
 });
 
 describe('agents setup secrets', () => {
-  // `agents setup secrets` no longer runs a backend/policy wizard against an
-  // in-repo engine (PHNX-3989). It is install guidance for the standalone
-  // `secrets` CLI, then a hand-off to that CLI's own `secrets migrate`. The
-  // wizard behavior is unit-tested in setup-secrets.test.ts; here we pin the
-  // registered command surface: the old wizard flags are gone, and a missing
-  // standalone fails loud rather than silently writing setup prefs.
+  // `agents setup secrets` installs the standalone when missing, then hands
+  // off to `secrets migrate`. The wizard is unit-tested in setup-secrets.test.ts;
+  // here we pin the registered command surface: the old wizard flags are gone,
+  // and a PATH with no `secrets` and no npm fails loud rather than writing prefs.
   it('no longer accepts the removed --backend/--policy wizard flags', async () => {
     const program = new Command();
     program.exitOverride();
@@ -183,7 +181,7 @@ describe('agents setup secrets', () => {
     ).rejects.toThrow(/unknown option '--backend'/);
   });
 
-  it('prints install guidance and exits non-zero when the standalone `secrets` CLI is not installed', async () => {
+  it('exits non-zero when the standalone `secrets` CLI is not installed and cannot be installed', async () => {
     const originalPath = process.env.PATH;
     const originalBin = process.env.SECRETS_BIN;
     const { _resetSecretsClientForTest } = await import('../lib/secrets-client.js');
