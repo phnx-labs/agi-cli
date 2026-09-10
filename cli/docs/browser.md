@@ -390,10 +390,14 @@ already have, without creating anything:
   agents attach when your Comet is running with remote debugging on the
   profile's port, launch Comet on your own store (your logins, your history)
   when it is not running, and fail loud with the exact relaunch command when it
-  is running without a port. Clicking Comet in the Dock while agents hold it
-  open focuses that same window. `AGENTS_COMET_DIR` points discovery at another
-  store. Two profiles with the same display name stay distinct by their
-  directory (`comet-work-default`, `comet-work-profile-2`).
+  is running without a port (the store's `SingletonLock` names the process that
+  holds it; a launch that exits before binding its port is reported the same
+  way). Clicking Comet in the Dock while agents hold it open focuses that same
+  window. One Comet instance serves a whole store, so of several profiles in
+  the same store only the one Comet was launched with is drivable at a time;
+  the others report the holder and its relaunch. `AGENTS_COMET_DIR` points
+  discovery at another store. Two profiles with the same display name stay
+  distinct by their directory (`comet-work-default`, `comet-work-profile-2`).
 
 The daemon's fleet-sync tick publishes every discovered profile into this
 device's declaration (`~/.agents/devices/<device>/agents.yaml`), which the

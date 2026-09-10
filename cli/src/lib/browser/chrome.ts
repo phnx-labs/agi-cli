@@ -1,4 +1,4 @@
-import { spawn, execFileSync } from 'child_process';
+import { spawn, execFileSync, type ChildProcess } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -257,6 +257,42 @@ export interface LaunchResult {
 }
 
 /**
+ * The process that holds a Chromium user-data dir, read from the `SingletonLock`
+ * symlink Chromium keeps inside the dir on macOS and Linux (`<host>-<pid>`,
+ * PHNX-4042). A live pid means a browser already owns that store: a launch on it
+ * would only hand its arguments to the running instance and the requested debug
+ * port would never bind. Windows keeps no lock file, so this reports null there
+ * and `launchBrowser` catches the hand-off by the child's early exit instead.
+ */
+export function storeOccupant(userDataDir: string): { pid: number } | null {
+  let target: string;
+  try {
+    target = fs.readlinkSync(path.join(userDataDir, 'SingletonLock'));
+  } catch {
+    return null;
+  }
+  const pid = Number(/-(\d+)$/.exec(target)?.[1]);
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  try {
+    process.kill(pid, 0);
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM' ? { pid } : null;
+  }
+  return { pid };
+}
+
+/**
+ * The relaunch that makes a browser holding `userDataDir` attachable: the
+ * ownership guard reads `--user-data-dir` off the running process, so the
+ * owner's normal launch (no flag) can never be verified.
+ */
+export function storeRelaunchCommand(browserType: BrowserType, port: number, userDataDir: string, profileDirectory?: string): string {
+  const app = browserType === 'comet' ? 'Comet' : browserType;
+  const profileFlag = profileDirectory ? ` --profile-directory=${profileDirectory}` : '';
+  return `open -a ${app} --args --remote-debugging-port=${port} --user-data-dir=${userDataDir}${profileFlag}`;
+}
+
+/**
  * Resolve a browser-profile secrets bundle into an env map for the child, or an
  * EMPTY map when the bundle is absent, locked, or otherwise unreadable — never a
  * throw and never a prompt. Injecting profile secrets on launch is a BACKGROUND
@@ -384,7 +420,7 @@ export async function launchBrowser(
     }
     wsUrl = registerPipeTransport({ read: readPipe, write: writePipe });
   } else {
-    wsUrl = (await waitForDevToolsPort(port, profileName, pid)).wsUrl;
+    wsUrl = (await waitForDevToolsPort(port, profileName, child, { browserType, userDataDir, profileDirectory: options.profileDirectory })).wsUrl;
   }
 
   writeProfileRuntime(profileName, {
@@ -401,17 +437,36 @@ export async function launchBrowser(
  * Poll the DevTools endpoint of a browser just launched with
  * `--remote-debugging-port` until it answers, or fail loud naming the pid.
  * Chromium binds the port only after its profile has loaded, which on a real
- * signed-in store takes a few seconds.
+ * signed-in store takes a few seconds. A child that exits first never bound
+ * it: on an owner's store that is the singleton hand-off to a browser already
+ * open there (PHNX-4042), so the failure names that instance's relaunch
+ * instead of waiting out the deadline.
  */
 async function waitForDevToolsPort(
   port: number,
   profileName: string,
-  pid: number,
+  child: ChildProcess,
+  store: { browserType: BrowserType; userDataDir: string; profileDirectory?: string },
   timeoutMs = 20_000,
 ): Promise<BrowserDiscovery> {
+  const pid = child.pid!;
+  let exited: string | undefined;
+  child.once('exit', (code, signal) => {
+    exited = code !== null ? `code ${code}` : `signal ${signal}`;
+  });
   const deadline = Date.now() + timeoutMs;
   let lastError = '';
   while (Date.now() < deadline) {
+    if (exited) {
+      const app = store.browserType === 'comet' ? 'Comet' : store.browserType;
+      throw new Error(
+        `${app} (pid ${pid}) exited (${exited}) before serving the DevTools protocol on port ${port} ` +
+          `for profile "${profileName}". A ${app} already open on ${store.userDataDir} takes a new launch ` +
+          `as an argument hand-off and never binds the port; quit it, then relaunch it with remote debugging:\n` +
+          `  ${storeRelaunchCommand(store.browserType, port, store.userDataDir, store.profileDirectory)}\n` +
+          `and retry. If none is open, the browser crashed on start.`,
+      );
+    }
     try {
       return await discoverBrowserWsUrl(port, 'localhost', profileName);
     } catch (error) {
