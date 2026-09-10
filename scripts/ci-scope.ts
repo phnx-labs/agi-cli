@@ -823,7 +823,11 @@ export function commandsForPlan(plan: ImpactPlan, repoRoot: string): RunCommand[
   for (const check of plan.checks) {
     switch (check) {
       case 'typecheck':
-        out.push({ cwd: cli, cmd: ['bun', 'run', 'build'] });
+        // Already proven: `bun install` (installCommandsForPlan) runs the CLI's
+        // `prepare` script, which is `npm run build`, which is `tsc`. Running
+        // the build a second time here cost a measured 18s on every selected
+        // run (PR #3568: 126s against a 120s budget, 2113 tests green).
+        // ci-scope.test.ts pins both halves of that invariant.
         break;
       case 'command-index':
         out.push({ cwd: cli, cmd: ['bash', 'scripts/verify-command-index.sh'] });
@@ -862,6 +866,8 @@ export function installCommandsForPlan(plan: ImpactPlan, repoRoot: string): RunC
   const needsCli = plan.suite === 'cli-full'
     || plan.tests.some((t) => t.file.startsWith('cli/'))
     || plan.checks.some((c) => ['typecheck', 'command-index', 'docs', 'binary-smoke', 'sessions-bench'].includes(c));
+  // The CLI install is also the typecheck: its `prepare` script builds with tsc
+  // (see the `typecheck` case in commandsForPlan).
   if (needsCli) out.push({ cwd: join(repoRoot, 'cli'), cmd: ['bun', 'install', '--frozen-lockfile'] });
   if (plan.checks.includes('session-tracker')) {
     out.push({

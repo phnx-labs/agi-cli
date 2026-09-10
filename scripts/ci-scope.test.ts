@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
   IMPACT_BUDGET_SEC,
+  type ImpactPlan,
   canReuseProof,
   changedFilesBetween,
   isVitestWorkerCrashWithZeroFailures,
@@ -20,6 +21,7 @@ import {
   commandForTestFile,
   commandsForPlan,
   companionCandidates,
+  installCommandsForPlan,
   existingCompanions,
   formatGitHubOutputs,
   loadOwnershipManifest,
@@ -857,6 +859,32 @@ describe('commandsForPlan', () => {
       suite: 'selected',
     }, REPO);
     for (const c of batched) expect(c.cmd).not.toContain('--');
+  });
+});
+
+describe('typecheck runs once per selected run (PR #3568)', () => {
+  test('the CLI install is the typecheck: prepare builds with tsc, and the check adds no second build', () => {
+    // Half one: the package's install lifecycle really is a tsc build. If this
+    // ever stops being true the `typecheck` check must run a build again.
+    const pkg = JSON.parse(readFileSync(join(REPO, 'cli', 'package.json'), 'utf8')) as {
+      scripts: Record<string, string>;
+    };
+    expect(pkg.scripts.prepare).toBe('npm run build');
+    expect(pkg.scripts.build.startsWith('tsc')).toBe(true);
+
+    // Half two: a plan that asks for typecheck installs the CLI (which builds)
+    // and runs no separate build command.
+    const plan = {
+      ...selectImpact({ files: ['cli/src/commands/webhook.ts'], repoRoot: REPO, related: false }),
+      tests: [],
+      checks: ['typecheck'] as ImpactPlan['checks'],
+      suite: 'selected' as const,
+    };
+    const install = installCommandsForPlan(plan, REPO);
+    expect(install.map((c) => c.cmd.join(' '))).toEqual(['bun install --frozen-lockfile']);
+    const cmds = commandsForPlan(plan, REPO);
+    expect(cmds.some((c) => c.cmd.join(' ') === 'bun run build')).toBe(false);
+    expect(cmds.some((c) => c.cmd.includes('tsc'))).toBe(false);
   });
 });
 
