@@ -8,6 +8,7 @@ import {
   listProfiles,
   getConfiguredDefaultProfileName,
   isProfileLaunchableHere,
+  isProfileDeclaredHere,
   deleteProfile,
   DEFAULT_BROWSER_PROFILE_NAME,
   LEGACY_DEFAULT_BROWSER_PROFILE_NAME,
@@ -523,6 +524,14 @@ export async function buildProfilePrunePlan(): Promise<PrunePlan> {
   for (const profile of profiles) {
     const scope: PruneProfileClass = profile.devices.length > 1 ? 'fungible' : 'identity';
     const misfiled = identityLoopbackMismatch(profile);
+    if (profile.arc && !isProfileDeclaredHere(profile.name)) {
+      peerKept.push({
+        name: profile.name,
+        scope,
+        why: 'read-only native Arc discovery; no agents-cli alias to prune',
+      });
+      continue;
+    }
     if (profile.devices.includes(current)) {
       declaredHere.push({
         name: profile.name,

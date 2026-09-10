@@ -73,9 +73,42 @@ describe('sshEndpointForDeclaration', () => {
     const config = { browser: 'custom' as const, endpoints: ['ssh://browser-host?port=9344'] };
     expect(sshEndpointForDeclaration('peer-zulu', config)).toBe('ssh://browser-host?port=9344');
   });
+
+  it('does not manufacture an SSH/CDP endpoint for native Arc', async () => {
+    const { sshEndpointForDeclaration } = await import('./resolve-target.js');
+    const config = {
+      browser: 'arc' as const,
+      endpoints: { native: { target: 'arc-native://local' } },
+      arc: { profileId: 'Profile 1', profileName: 'Work', spaceId: 'space-work', spaceTitle: 'Work' },
+    };
+    expect(sshEndpointForDeclaration('zion', config)).toBe('arc-native://local');
+  });
 });
 
 describe('resolveBrowserTarget', () => {
+  it('marks a remote native Arc declaration for whole-command dispatch', async () => {
+    const config = {
+      browser: 'arc' as const,
+      endpoints: { native: { target: 'arc-native://local' } },
+      defaultEndpoint: 'native',
+      arc: { profileId: 'Profile 1', profileName: 'Work', spaceId: 'space-work', spaceTitle: 'Work' },
+    };
+    writeYaml(deviceFile('zion'), { browser: { 'arc-work': config } });
+
+    const { resolveBrowserTarget } = await import('./resolve-target.js');
+    const routed = resolveBrowserTarget('arc-work', {
+      here: 'worker',
+      probe: () => ({ reachable: true, os: 'Darwin' }),
+    });
+    expect(routed).toMatchObject({
+      local: false,
+      device: 'zion',
+      target: 'arc-native://local',
+      commandDispatch: true,
+      profile: { arc: config.arc },
+    });
+  });
+
   it('connects locally when THIS device declares the name', async () => {
     const { machineId } = await import('../machine-id.js');
     writeYaml(deviceFile(machineId()), { browser: { work: chrome } });

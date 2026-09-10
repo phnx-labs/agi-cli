@@ -24,6 +24,7 @@ import {
   isAttachOnlyProfile,
   resolveProfileDataDir,
   normalizeDataDir,
+  persistDiscoveredArcProfile,
   type EditableProfileFields,
 } from '../lib/browser/profiles.js';
 import { declaringDevices, migrateCentralBrowserProfiles, profileKind } from '../lib/browser/registry.js';
@@ -98,6 +99,8 @@ import { buildHar } from '../lib/browser/har.js';
 import { getCliVersion } from '../lib/version.js';
 import { runBrowserIPCStream } from '../lib/browser/stream.js';
 import { machineId } from '../lib/machine-id.js';
+import { isArcRunning } from '../lib/browser/drivers/arc.js';
+import { resolveBrowserTarget } from '../lib/browser/resolve-target.js';
 
 /**
  * Task name inferred from the local task→device index when `--task` was
@@ -236,6 +239,19 @@ async function dispatchBrowserToDevice(
     stdout: result.stdout,
     stderr: result.stderr,
   };
+}
+
+export function remoteStartTaskName(stdout: string, explicit?: string): string | undefined {
+  if (explicit) return explicit;
+  const trimmed = stdout.trim();
+  if (!trimmed) return undefined;
+  try {
+    const decoded = JSON.parse(trimmed) as { task?: unknown };
+    if (typeof decoded.task === 'string' && decoded.task.length > 0) return decoded.task;
+  } catch {
+    // Human output is one task name on the first non-empty line.
+  }
+  return trimmed.split('\n').map((line) => line.trim()).find(Boolean);
 }
 
 async function pullRemoteFile(device: string, remotePath: string, localPath: string): Promise<void> {
@@ -538,6 +554,7 @@ export async function runBrowserUse(
     if (all.length > 0) console.error(`Available profiles: ${all.map((profile) => profile.name).join(', ')}`);
     return false;
   }
+  await persistDiscoveredArcProfile(selectedName);
   setConfigValue('browser.profile', selectedName);
   const endpoint = Object.values(getEndpointPresets(target))[0]?.target ?? '';
   console.log(`Default browser profile (this machine) is now "${selectedName}" (${target.browser}${endpoint ? `, ${endpoint}` : ''}).`);
@@ -600,7 +617,7 @@ function registerProfilesCommands(browser: Command): void {
           allProfiles.map((profile) => ({
             ...profile,
             devices: profile.devices,
-            kind: profileKind(profile.name),
+            kind: profile.arc ? 'identity' : profileKind(profile.name),
             isConfiguredDefault: profile.name === configuredDefault,
           })),
           null,
@@ -1085,6 +1102,10 @@ function registerProfilesCommands(browser: Command): void {
       }
       if (profile.targetFilter) console.log(`Target filter: ${profile.targetFilter}`);
       if (profile.description) console.log(`Description: ${profile.description}`);
+      if (profile.arc) {
+        console.log(`Arc Space: ${profile.arc.spaceTitle} (${profile.arc.spaceId})`);
+        console.log(`Arc profile: ${profile.arc.profileName} (${profile.arc.profileId})`);
+      }
       const presets = getEndpointPresets(profile);
       const defaultName = profile.defaultEndpoint && presets[profile.defaultEndpoint]
         ? profile.defaultEndpoint
@@ -1107,6 +1128,7 @@ function registerProfilesCommands(browser: Command): void {
 
       // Login state per known service: live session + account identity + whether
       // login creds are declared in the profile's secrets bundle.
+      if (profile.arc) return;
       const active = await loginsForProfile(profile.name);
       const accounts = await accountsForProfile(profile.name);
       const lines: string[] = [];
@@ -1129,7 +1151,7 @@ function registerProfilesCommands(browser: Command): void {
   profiles
     .command('remove <name>')
     .alias('delete')
-    .description('Remove a browser profile (drops YAML config + all cached runtime dirs)')
+    .description('Remove the agents-cli profile alias and cached runtime dirs (never deletes native Arc data)')
     .option('--keep-cache', "Leave ~/.agents/.cache/browser/<name>* dirs in place (don't wipe chrome-data)")
     .action(async (name: string, opts: { keepCache?: boolean }) => {
       await deleteProfile(name);
@@ -1257,12 +1279,14 @@ function registerProfilesCommands(browser: Command): void {
       profile that is in use, the configured default, or the \`auto-chrome\`
       profile a setup wizard created.
 
-      Arc is your PERSONAL browser and Comet is what agents drive (PHNX-3967).
-      Arc is single-instance with no debug port, so agents can only attach to a
-      running Arc, never launch one — it stays yours. Point agents at Comet as
-      one canonical signed-in profile that never spawns a second window:
+      On a Mac with Arc, every Arc Space is listed as a profile (arc-personal,
+      arc-work, ...) discovered read-only from Arc's own metadata — a Space
+      already carries its Arc profile's logins, so it IS the browser profile.
+      Agents attach to the running Arc through Apple Events and never launch or
+      relaunch it. Point agents at Comet instead when a workflow needs screenshots,
+      downloads, network capture, or trusted input:
         agents browser profiles create agents-comet --browser comet --attach-only
-      An \`--attach-only\` profile (and Arc, always) attaches to a browser you
+      A CDP \`--attach-only\` profile attaches to a browser you
       already started with remote debugging and fails loud with the relaunch
       command otherwise, pinned to a durable --user-data-dir so the sign-in
       survives quit+relaunch. A foreign browser squatting the canonical port is
@@ -1278,6 +1302,21 @@ function registerProfilesCommands(browser: Command): void {
       if (!profile) {
         console.error(`Profile "${name}" not found`);
         process.exit(1);
+      }
+
+      if (profile.arc && !isFleetRemoteInvocation()) {
+        const routed = resolveBrowserTarget(profile.name);
+        if (!routed.local && routed.commandDispatch) {
+          const result = await dispatchBrowserToDevice(
+            routed.device,
+            ['browser', 'profiles', 'doctor', name],
+            'capture',
+          );
+          process.stdout.write(result.stdout);
+          process.stderr.write(result.stderr);
+          if (result.code !== 0) process.exit(result.code);
+          return;
+        }
       }
 
       const checks: Array<{ label: string; ok: boolean; detail: string }> = [];
@@ -1307,6 +1346,31 @@ function registerProfilesCommands(browser: Command): void {
           console.log(`${marker}  ${c.label.padEnd(15)} ${c.detail}`);
         }
         process.exit(1);
+      }
+
+      if (profile.arc) {
+        checks.push({
+          label: 'space',
+          ok: true,
+          detail: `${profile.arc.spaceTitle} (${profile.arc.spaceId})`,
+        });
+        checks.push({
+          label: 'arc-profile',
+          ok: true,
+          detail: `${profile.arc.profileName} (${profile.arc.profileId})`,
+        });
+        const running = await isArcRunning();
+        checks.push({
+          label: 'Arc process',
+          ok: running,
+          detail: running ? 'running; native automation attaches without launching or restarting Arc' : 'not running — start Arc normally',
+        });
+        const allOk = checks.every((check) => check.ok);
+        for (const check of checks) {
+          console.log(`${check.ok ? 'OK  ' : 'FAIL'}  ${check.label.padEnd(15)} ${check.detail}`);
+        }
+        if (!allOk) process.exit(1);
+        return;
       }
 
       // 1. Binary exists for declared browser type, and is a real executable we
@@ -1526,8 +1590,44 @@ function registerTaskCommands(browser: Command): void {
 
     if (top === 'stop' && opts.profile && !taskFlag) return;
 
+    // A native Arc endpoint cannot be represented by an SSH-forwarded socket.
+    // For a cold profile-scoped page verb, create the task on the declaring
+    // owner first and bind that owner locally; the ordinary task router below
+    // then forwards this complete verb and every subsequent verb to that host.
+    if (!taskFlag && opts.profile) {
+      try {
+        const profileName = (await resolveProfileRef(opts.profile)) ?? opts.profile;
+        const target = resolveBrowserTarget(profileName);
+        if (!target.local && target.commandDispatch) {
+          const started = await dispatchBrowserToDevice(
+            target.device,
+            ['browser', 'start', '--profile', profileName, '--json'],
+            'capture',
+          );
+          if (started.code !== 0) {
+            process.stdout.write(started.stdout);
+            process.stderr.write(started.stderr);
+            process.exit(started.code);
+          }
+          const task = remoteStartTaskName(started.stdout);
+          if (!task) throw new Error(`Remote start on ${target.device} produced no task name.`);
+          bindTask(task, {
+            device: target.device,
+            profile: profileName,
+            sessionId: callerSessionId(),
+            launchId: callerLaunchId(),
+            createdAt: Date.now(),
+          });
+          inferredTaskName = task;
+        }
+      } catch (err) {
+        console.error(err instanceof Error ? err.message : String(err));
+        process.exit(1);
+      }
+    }
+
     const route = resolveTaskRoute({
-      task: taskFlag ?? process.env.AGENTS_BROWSER_TASK,
+      task: inferredTaskName ?? taskFlag ?? process.env.AGENTS_BROWSER_TASK,
       sessionId: callerSessionId(),
       launchId: callerLaunchId(),
       hub: defaultBrowserHub(),
@@ -1722,8 +1822,7 @@ function registerTaskCommands(browser: Command): void {
             process.stdout.write(result.stdout);
             process.stderr.write(result.stderr);
             if (result.code !== 0) process.exit(result.code);
-            const taskName =
-              opts.task || result.stdout.trim().split('\n').find((line) => line.length > 0);
+            const taskName = remoteStartTaskName(result.stdout, opts.task);
             if (!taskName) {
               console.error(`Remote start on ${hub} produced no task name.`);
               process.exit(1);
@@ -1793,7 +1892,7 @@ function registerTaskCommands(browser: Command): void {
             process.stdout.write(result.stdout);
             process.stderr.write(result.stderr);
             if (result.code !== 0) process.exit(result.code);
-            const taskName = opts.task || result.stdout.trim().split('\n').find((line) => line.length > 0);
+            const taskName = remoteStartTaskName(result.stdout, opts.task);
             if (!taskName) {
               console.error(`Remote start on ${deviceName} produced no task name.`);
               process.exit(1);
@@ -1848,6 +1947,44 @@ function registerTaskCommands(browser: Command): void {
           `Create one with: agents browser profiles create ${profileName} --browser <chrome|comet|chromium|brave|edge|arc|custom>`
         );
         process.exit(1);
+      }
+
+      // Discovery is read-only for list/show/doctor. Starting is the explicit
+      // adoption point: persist only the agents-cli alias/native identity, never
+      // mutate Arc's own profile or Space data.
+      await persistDiscoveredArcProfile(profileName);
+
+      // A native endpoint is not CDP and cannot be tunnelled. Re-exec the
+      // complete command on the declaring owner, then bind its returned task
+      // locally so every later verb follows the same owner from task-index.
+      if (!isFleetRemoteInvocation()) {
+        let routed;
+        try {
+          routed = resolveBrowserTarget(profileName, { endpointName: opts.endpoint });
+        } catch (err) {
+          console.error(err instanceof Error ? err.message : String(err));
+          process.exit(1);
+        }
+        if (!routed.local && routed.commandDispatch) {
+          const result = await dispatchBrowserToDevice(routed.device, browserForwardedArgv(), 'capture');
+          process.stdout.write(result.stdout);
+          process.stderr.write(result.stderr);
+          if (result.code !== 0) process.exit(result.code);
+          const taskName = remoteStartTaskName(result.stdout, opts.task);
+          if (!taskName) {
+            console.error(`Remote start on ${routed.device} produced no task name.`);
+            process.exit(1);
+          }
+          bindTask(taskName, {
+            device: routed.device,
+            profile: profileName,
+            url: opts.url,
+            sessionId: callerSessionId(),
+            launchId: callerLaunchId(),
+            createdAt: Date.now(),
+          });
+          return;
+        }
       }
 
       // Pre-check the endpoint name too — same fail-fast rationale.

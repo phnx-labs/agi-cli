@@ -1380,6 +1380,13 @@ export interface BrowserProfileConfig {
   logDir?: string;
   /** Optional SSH host where logDir lives, e.g. "user@remote-host". */
   logHost?: string;
+  /** Stable native identity for an Arc Space profile; display names are never addresses. */
+  arc?: {
+    profileId: string;
+    profileName: string;
+    spaceId: string;
+    spaceTitle: string;
+  };
 }
 
 /** Options controlling which agents and resources are synced during `agents sync` / `agents use`. */

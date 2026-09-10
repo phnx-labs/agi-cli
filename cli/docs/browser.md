@@ -39,6 +39,9 @@ agent process
 
   Remote variant (ssh:// endpoint):
   CLI → SSH tunnel → CDP on remote host → remote Chrome
+
+  Native Arc variant (arc-native:// endpoint, macOS only):
+  CLI → osascript (Apple Events) → running Arc → Space/tab
 ```
 
 The browser service auto-starts on the first command that needs it. If the
@@ -179,11 +182,10 @@ A profile has a **launch policy** that decides how agents get a live browser:
   fail loud with the exact relaunch command instead of opening a second,
   logged-out instance. This is how you keep **one** signed-in browser.
 
-**Arc is the user's personal browser; Comet is what agents drive.** Arc is
-single-instance and exposes no debug port — agents-cli cannot drive it without
-you quitting and relaunching it, so Arc stays yours and is always attach-only.
-Point agents at **Comet** instead, as one canonical signed-in attach-only
-profile:
+**Arc is always attach-only.** On macOS, agents-cli discovers and drives the
+already-running Arc through native Apple Events; it never asks you to relaunch
+Arc with a debug port. Comet remains the recommended Chromium/CDP profile when
+the workflow needs screenshots, downloads, network capture, or trusted input:
 
 ```bash
 agents browser profiles create agents-comet --browser comet --attach-only
@@ -265,7 +267,7 @@ the same device-local `browser remote-control` consent gate as the ordinary
 | Command | Description |
 |---------|-------------|
 | `agents browser use [name]` | Pick this machine's default profile. No name opens a picker on a TTY or prints the current default headlessly; `--unset` or `auto` restores auto-detect. |
-| `agents browser profiles list` | List all configured profiles and the devices declaring each one (`WHERE`). A `*` marks this machine's configured default — which is NOT the same thing as the profile named `default`. `--json` adds `devices` + `kind` (`identity` \| `fungible`) + `isConfiguredDefault` |
+| `agents browser profiles list` | List configured profiles plus read-only native Arc discovery and the devices declaring each one (`WHERE`). A `*` marks this machine's configured default — which is NOT the same thing as the profile named `default`. `--json` adds `devices` + `kind` (`identity` \| `fungible`) + `isConfiguredDefault` |
 | `agents browser profiles create <name>` | Create a new profile on this device (`add` is an alias). Prints `Added "<name>" on <device> (port N).` `--attach-only` makes it never spawn a rival window (PHNX-3967); `--user-data-dir <path>` pins a durable data dir |
 | `agents browser profiles add <name>` | Alias of `create` |
 | `agents browser profiles seed` | Create a machine-local profile for each installed browser (named `<browser>-local`), so you can `browser use` one instead of hand-crafting each. Idempotent — existing profiles are left untouched |
@@ -276,14 +278,14 @@ the same device-local `browser remote-control` consent gate as the ordinary
 | `agents browser profiles show <name>` | Show profile details |
 | `agents browser profiles use <name>` | Compatibility spelling for `agents browser use <name>` |
 | `agents browser profiles logins` | Per profile: `SERVICE \| ACCOUNT \| CREDS` — live session, the signed-in account (plaintext username, never decrypts), and whether login creds are in the profile's secrets bundle |
-| `agents browser profiles remove <name>` (alias `delete`) | Remove profile config and chrome-data cache |
-| `agents browser profiles doctor <name>` | Diagnose where it is declared, binary, port, user-data-dir, onboarding state. Fails `where` when an identity-bearing name (exactly one declaring device) is a loopback endpoint on a box that is not the declaring device — the original `comet-local` bug. |
+| `agents browser profiles remove <name>` (alias `delete`) | Remove the agents-cli alias and cache. For native Arc, never removes Arc profile, Space, or tab data. |
+| `agents browser profiles doctor <name>` | Diagnose the native Arc profile/Spaces and running app, or the CDP profile's declaration, binary, port, user-data-dir, and onboarding state. |
 
 `profiles create` flags:
 
 | Flag | Description |
 |------|-------------|
-| `-b, --browser <type>` | Required. One of: `chrome`, `comet`, `chromium`, `brave`, `edge`, `arc`, `custom`. `arc` **attaches to your running Arc** — it never launches its own (Arc is single-instance); see [Arc](#arc-attach-to-your-running-window) below. Opening a brand-new tab is the one thing Arc can't do over CDP (`Target.createTarget` crashes it), so tab-creating verbs fail clearly there |
+| `-b, --browser <type>` | Required. One of: `chrome`, `comet`, `chromium`, `brave`, `edge`, `arc`, `custom`. Native Arc profiles are auto-discovered rather than manually created; see [Arc](#arc-native-automation). Legacy CDP Arc declarations remain compatible. |
 | `-e, --endpoint <url>` | CDP endpoint URL (repeatable). Auto-assigned if omitted |
 | `-s, --secrets <bundle>` | Secrets bundle for this profile: injected as env vars at launch, AND the credential store for `browser type --secret` (keys `<PREFIX>_USERNAME`/`<PREFIX>_PASSWORD`). Warns if the bundle doesn't exist yet |
 | `-d, --description <text>` | Human-readable description |
@@ -375,55 +377,91 @@ agents browser type --task post --ref @e3 "hello"
 agents browser screenshot --task post
 ```
 
-### Arc — attach to your running window
+### Arc native automation
 
-Arc is different from every other supported browser, and the difference is
-structural, not cosmetic: **Arc is single-instance.** Relaunching the Arc binary
-with a fresh `--user-data-dir` does not start a second debuggable process —
-macOS routes the launch to the Arc you already have open (which was started with
-no debug port), so you get a stray window and no CDP endpoint. So `agents
-browser` **never launches Arc**. It attaches to the Arc you are already running,
-or it fails loud — it never silently opens a duplicate (PHNX-2399).
+Arc is single-instance, so `agents browser` never launches it. On macOS every
+**Arc Space is listed as a browser profile** — `arc-personal`, `arc-work`,
+`arc-dev` — discovered read-only from Arc's own metadata. A Space already
+carries its Arc profile's cookies and logins, so it IS the profile agents pick
+with `--profile`; there is no second "space" concept and nothing to create. The
+CLI drives the Arc instance already running through Apple Events. No debug port
+or Arc relaunch is required.
 
-Two consequences shape how you use it:
+Discovery is read-only for `profiles list`, `profiles show`, and `profiles
+doctor`. `browser use <arc-profile>` and an explicit `browser start` are the
+adoption points that persist only the agents-cli alias; removal deletes that
+alias, never Arc's profile, Space, or tab data.
 
-1. **You launch Arc with remote debugging; agents attaches.** Point the profile's
-   endpoint at the port you started Arc's remote debugging on, and start Arc
-   yourself with that port:
+```bash
+agents browser profiles list          # one row per Arc Space
+agents browser profiles show arc-personal
+agents browser use arc-personal       # agents default to your Personal Space
 
-   ```bash
-   # 1. quit Arc, then relaunch it with a debug port
-   open -a Arc --args --remote-debugging-port=9222
+agents browser start --profile arc-dev --url https://example.com
+agents browser navigate https://example.org   # the task's own tab, in Dev
+agents browser done                   # closes only the tabs the task created
+```
 
-   # 2. bind a profile to that exact port
-   agents browser profiles create arc --browser arc --endpoint cdp://127.0.0.1:9222
+Native Arc profiles use an `arc-native:` endpoint protocol and support a subset of
+browser operations:
 
-   # 3. drive it — agents attaches to the running Arc, no new window
-   agents browser navigate --profile arc --url https://example.com
-   ```
+| Capability | Status |
+|---|---|
+| Space discovery from Arc metadata, one profile per Space | Supported |
+| Create a tab in the profile's Space | Supported (marker-based resolution); Arc selects the new tab for about 100 ms, then the previously selected tab is restored |
+| Navigate an owned tab | Supported, silent |
+| Evaluate synchronous JavaScript | Supported, silent (a tab Arc has put to sleep times out after 15 s) |
+| DOM click, fill, scroll via evaluate | Supported (events are `isTrusted: false`) |
+| Close owned tabs | Supported, silent |
+| Explicit `tab focus` | Supported; this is the only routine that keeps a tab selected |
+| Screenshot and PDF | Unsupported |
+| Async/promise evaluation | Unsupported |
+| Network/console capture | Unsupported |
+| Upload/download and trusted coordinate/key input | Unsupported |
+| Background operation | Unsupported (`background:false`); Arc never becomes frontmost, but tab creation briefly selects the new tab |
 
-   If the running Arc is **not** serving CDP on that port, the command fails with
-   the one relaunch that fixes it (the `open -a Arc …` line above) rather than
-   spawning a duplicate. The port must match the profile's endpoint.
+Unsupported capabilities throw a structured `ArcNativeCapabilityError` with a clear
+message and a pointer to Chromium-family alternatives. They never return fabricated
+success or silently switch to another browser.
 
-2. **Select a Space by binding the profile to its tab.** Arc does not expose
-   Spaces as separate CDP contexts, so you target a Space by pointing at a tab
-   that lives in it with `--target-filter` (accepted for `--browser arc`, not just
-   `--electron`):
+**Discovery.** `arc-discovery.ts` reads Arc's `User Data/Local State` (Chromium
+profiles) and `StorableSidebar.json` (Spaces and the profile each binds to) under
+`~/Library/Application Support/Arc` as read-only metadata; `AGENTS_ARC_DIR` points
+at another root. Profile ids and Space ids are authoritative; profile names and
+Space titles are display-only, and two Spaces sharing a title get the first six
+characters of their Space id appended to the profile name. An unknown or malformed
+Space-to-profile mapping fails discovery instead of falling back to the Default
+profile.
 
-   ```bash
-   agents browser profiles edit arc --target-filter 'url:notion.so'
-   # or by tab title
-   agents browser profiles edit arc --target-filter 'title:Roadmap'
-   ```
+**Tab identity.** Durable task state stores `{windowId, spaceId, tabId}` for each
+owned tab. URL and title are display data, never identifiers. Every AppleScript
+operation re-resolves current indices from those ids inside the same call. A tab
+moved out of its original window/Space is missing and is never adopted elsewhere.
 
-   `navigate` then reuses the matched tab in place (it will not hijack an
-   unrelated page you are reading).
+**Tab creation and crash recovery.** Before asking Arc to create anything, the
+service persists a unique exact marker plus the intended final URL. It then
+creates at that marker in the profile's Space, persists the returned native ids,
+navigates, and restores the tab you had selected. After a daemon restart,
+reconciliation matches that exact marker only; ambiguous, externally changed,
+moved, or otherwise unprovable state fails closed. The prior active tab is
+restored only when the newly owned tab is still active, so a later human
+selection wins.
 
-**The one thing Arc can't do: open a new tab.** `Target.createTarget` crashes the
-user's Arc window, so any tab-creating verb fails clearly and points you at
-reusing an existing tab or at a Chromium-family browser (Comet, Chrome, Chromium,
-Brave) for brand-new tabs. This is why Arc is never used as the [viewer](#which-browser-shows-you-a-page-browserviewer)
+**DOM actions.** `refs` records CSS selectors for the current owned tab.
+`click` invokes the element's `.click()`. Fill/type calls the native input or
+textarea value setter and dispatches bubbling `input` and `change` events, so
+React-controlled forms observe the edit. `scroll` calls `window.scrollBy`.
+These operations use the exact native tab reference and do not select it.
+
+**Invisible windows excluded.** Arc enumerates closed window tombstones with
+`visible:false` — the driver filters them out so only user-accessible windows appear.
+
+**Remote dispatch.** A worker dispatches the whole command to the device that
+declares the native Arc profile. The task-to-device index records that owner, so
+later task verbs follow it. Native endpoints are never exposed as fake local CDP
+sockets or SSH tunnels. The existing remote-control consent gate still applies.
+
+This is why Arc is never used as the [viewer](#which-browser-shows-you-a-page-browserviewer)
 (showing a human a page needs its own fresh tab).
 
 ### Cleaning up dead profiles (`prune`)

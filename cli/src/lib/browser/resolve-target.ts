@@ -52,6 +52,8 @@ export interface ResolvedBrowserTarget {
    * surfaces this so the caller knows WHERE the browser actually lives.
    */
   picked?: string;
+  /** Native endpoints cannot be tunnelled; the CLI must re-exec on this device. */
+  commandDispatch?: boolean;
 }
 
 /** Fork only fungible Electron profiles; identity-bearing ones share one connection. */
@@ -77,11 +79,14 @@ export function profileFromDeclaration(
     targetFilter: config.targetFilter,
     endpoints: config.endpoints,
     defaultEndpoint: config.defaultEndpoint,
+    launchPolicy: config.launchPolicy,
+    userDataDir: config.userDataDir,
     chrome: config.chrome,
     secrets: config.secrets,
     viewport: config.viewport,
     logDir: config.logDir,
     logHost: config.logHost,
+    arc: config.arc,
   };
 }
 
@@ -200,6 +205,9 @@ export function sshEndpointForDeclaration(
   const profile = profileFromDeclaration('_', { device, config });
   const resolved = resolveEndpoint(profile, endpointName);
   if (resolved.target.startsWith('ssh:')) return resolved.target;
+  // Native Arc endpoints (arc-native:) must NOT be rewritten into SSH tunnels
+  // (PHNX-2399). They dispatch the whole command to the owner device instead.
+  if (resolved.target.startsWith('arc-native:')) return resolved.target;
   const parsed = parseEndpointUrl(resolved.target);
   const port = parsed?.port ?? 9222;
   const osQuery = isWindowsOs(os) ? '&os=windows' : '';
@@ -294,6 +302,7 @@ export function resolveBrowserTarget(
         targetFilter: resolved.targetFilter,
       },
       picked,
+      commandDispatch: resolved.target.startsWith('arc-native:'),
     };
   }
 
