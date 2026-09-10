@@ -1,7 +1,7 @@
 import * as net from 'net';
 
 import { CDPClient, discoverBrowserWsUrl, verifyBrowserIdentity } from '../cdp.js';
-import { launchBrowser, getPortOccupant, getProcessUserDataDir } from '../chrome.js';
+import { launchBrowser, getPortOccupant, getProcessUserDataDir, storeOccupant, storeRelaunchCommand } from '../chrome.js';
 import { parseEndpointUrl, isAttachOnlyProfile, resolveProfileDataDir, normalizeDataDir } from '../profiles.js';
 import type { BrowserProfile, ConnectionKey } from '../types.js';
 
@@ -119,6 +119,30 @@ export function foreignInstanceError(
       `so it is not this profile's credentialed browser. agents will not drive it. Close ` +
       `that instance (\`kill ${pid}\`), then relaunch the canonical ${app}:\n` +
       `  open -a ${app} --args --remote-debugging-port=${port} --user-data-dir=${expected}`
+  );
+}
+
+/**
+ * The loud error a profile pinned to the owner's own store (PHNX-4042) raises
+ * when a browser already holds that store without a debug port. Launching on it
+ * would not open a second browser: Chromium hands the arguments to the running
+ * instance and exits, the port never binds, and the agent would wait out a
+ * timeout while the owner sees a stray window. Exported for unit testing.
+ */
+export function storeInUseError(
+  profile: Pick<BrowserProfile, 'name' | 'browser' | 'userDataDir' | 'profileDirectory'>,
+  port: number,
+  pid: number,
+): Error {
+  const app = profile.browser === 'comet' ? 'Comet' : profile.browser;
+  const dataDir = resolveProfileDataDir(profile);
+  return new Error(
+    `Profile "${profile.name}" is pinned to ${dataDir}, and a ${app} (pid ${pid}) already has that ` +
+      `store open without remote debugging, so nothing serves the Chrome DevTools Protocol on ` +
+      `cdp://127.0.0.1:${port}. agents browser will not launch a second ${app} on the same store. ` +
+      `Quit that ${app}, then relaunch it with remote debugging:\n` +
+      `  ${storeRelaunchCommand(profile.browser, port, dataDir, profile.profileDirectory)}\n` +
+      `and retry. Your logins stay: the store is the one you already use.`,
   );
 }
 
@@ -258,6 +282,14 @@ export async function connectLocal(
           `quit it and relaunch with \`--remote-debugging-port=${port}\`. Otherwise, ` +
           `update the profile to a free port (\`agents browser profiles list\`).`
       );
+    }
+
+    // A store-pinned profile launches on the owner's store only while nothing
+    // holds it; a browser already open there without a port must be relaunched
+    // by the owner, never doubled (PHNX-4042).
+    if (profile.userDataDir) {
+      const holder = storeOccupant(profile.userDataDir);
+      if (holder) throw storeInUseError(profile, port, holder.pid);
     }
 
     const newPort = port;

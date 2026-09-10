@@ -1,7 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import * as net from 'net';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { spawnSync } from 'child_process';
 
-import { connectLocal, arcAttachRequiredError, attachOnlyRequiredError, foreignInstanceError } from './local.js';
+import { connectLocal, arcAttachRequiredError, attachOnlyRequiredError, foreignInstanceError, storeInUseError } from './local.js';
 import type { BrowserProfile, ConnectionKey } from '../types.js';
 
 function freePort(): Promise<number> {
@@ -273,5 +277,112 @@ describe('foreignInstanceError — port-squat rejection (PHNX-3967)', () => {
     expect(err.message).toContain('/tmp/rush-mockup-comet.abc');
     expect(err.message).toContain('/data/comet');
     expect(err.message).toContain('kill 45995');
+  });
+});
+
+describe('connectLocal — a store-pinned Comet never doubles a browser that already holds its store (PHNX-4042 review)', () => {
+  const key = 'comet-work@endpoint-0' as ConnectionKey;
+
+  // A discovered Comet profile: pinned to the owner's store, no launch policy,
+  // so the driver may launch on that store — but only while nothing holds it.
+  function storePinned(userDataDir: string, port: number, binary: string): BrowserProfile {
+    return {
+      name: 'comet-work',
+      browser: 'comet',
+      userDataDir,
+      profileDirectory: 'Default',
+      binary,
+      endpoints: [`cdp://127.0.0.1:${port}`],
+    };
+  }
+
+  function tempStore(): string {
+    return fs.mkdtempSync(path.join(os.tmpdir(), 'agents-comet-store-'));
+  }
+
+  it('refuses with the relaunch command when a live process holds the store (SingletonLock) and the port is silent', async () => {
+    const store = tempStore();
+    // Chromium's lock: `<host>-<pid>`. This test process is the live holder.
+    fs.symlinkSync(`${os.hostname()}-${process.pid}`, path.join(store, 'SingletonLock'));
+    const port = await freePort();
+    const profile = storePinned(store, port, path.join(store, 'no-such-binary'));
+    try {
+      const err = await connectLocal(`cdp://127.0.0.1:${port}`, profile, key).then(
+        () => {
+          throw new Error('expected connectLocal to reject, not launch');
+        },
+        (e: unknown) => e as Error,
+      );
+      expect(err.message).toMatch(/comet-work/);
+      expect(err.message).toMatch(new RegExp(`\\(pid ${process.pid}\\) already has that store open`));
+      expect(err.message).toMatch(
+        new RegExp(`open -a Comet --args --remote-debugging-port=${port} --user-data-dir=${store} --profile-directory=Default`),
+      );
+      // Never reached launchBrowser: that path fails on the missing binary instead.
+      expect(err.message).not.toMatch(/Could not start/);
+    } finally {
+      fs.rmSync(store, { recursive: true, force: true });
+    }
+  });
+
+  it('ignores a stale lock (dead pid) and goes on to launch', async () => {
+    const store = tempStore();
+    // A pid that has already exited: the lock is a leftover, not an owner.
+    const dead = spawnSync('true');
+    fs.symlinkSync(`${os.hostname()}-${dead.pid}`, path.join(store, 'SingletonLock'));
+    const port = await freePort();
+    const profile = storePinned(store, port, path.join(store, 'no-such-binary'));
+    try {
+      // The launch itself fails on the missing binary, which proves the stale
+      // lock did not stop the flow before launchBrowser.
+      await expect(connectLocal(`cdp://127.0.0.1:${port}`, profile, key)).rejects.toThrow(
+        /Could not start comet for profile "comet-work".*Custom binary not found/,
+      );
+    } finally {
+      fs.rmSync(store, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'fails loud with the relaunch command when the launched browser exits before binding its port (singleton hand-off)',
+    async () => {
+      const store = tempStore();
+      // A "browser" that exits at once, exactly what Chromium does after handing
+      // its arguments to the instance already holding the store.
+      const binary = path.join(store, 'comet-handoff.sh');
+      fs.writeFileSync(binary, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      const port = await freePort();
+      const profile = storePinned(store, port, binary);
+      const started = Date.now();
+      try {
+        const err = await connectLocal(`cdp://127.0.0.1:${port}`, profile, key).then(
+          () => {
+            throw new Error('expected connectLocal to reject');
+          },
+          (e: unknown) => e as Error,
+        );
+        expect(err.message).toMatch(/exited \(code 0\) before serving the DevTools protocol/);
+        expect(err.message).toMatch(
+          new RegExp(`open -a Comet --args --remote-debugging-port=${port} --user-data-dir=${store} --profile-directory=Default`),
+        );
+        // The exit is caught on the first poll tick, not after the 20s deadline.
+        expect(Date.now() - started).toBeLessThan(10_000);
+      } finally {
+        fs.rmSync(store, { recursive: true, force: true });
+      }
+    },
+  );
+});
+
+describe('storeInUseError (PHNX-4042)', () => {
+  it('names the profile, the pid, the store, and the relaunch with the profile directory', () => {
+    const message = storeInUseError(
+      { name: 'comet-personal', browser: 'comet', userDataDir: '/Users/o/Library/Application Support/Comet', profileDirectory: 'Profile 1' },
+      9335,
+      4242,
+    ).message;
+    expect(message).toMatch(/comet-personal/);
+    expect(message).toMatch(/Comet \(pid 4242\) already has that store open/);
+    expect(message).toMatch(/--remote-debugging-port=9335 --user-data-dir=\/Users\/o\/Library\/Application Support\/Comet --profile-directory=Profile 1/);
   });
 });
