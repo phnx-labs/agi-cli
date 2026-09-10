@@ -33,11 +33,11 @@ import {
   listInstalledVersionDirs,
   readInstallation,
   setGlobalDefault,
-  softDeleteVersionDir,
 } from '../installations/versions.js';
 import { removeVersionedAlias } from '../installations/shims.js';
 import { countSessionsWithFilePrefix, reindexMovedSessionPaths } from '../session/db.js';
-import { atomicWriteFileSync } from '../fs-atomic.js';
+import { atomicWriteFileSync, withFileLockAsync } from '../fs-atomic.js';
+import { installationLockTarget, INSTALLATION_LOCK_OPTIONS } from '../installations/installation-lock.js';
 import { getHistoryDir, readMeta, updateMeta } from '../state.js';
 import type { AgentId, DeviceAccountSlot } from '../types.js';
 import { recordSlot, slotDir } from './slots.js';
@@ -113,11 +113,15 @@ export interface AccountMigrationManifest {
   }>;
   /** old `agent@label` → new slot dir (or trash path). */
   map: Record<string, string>;
+  /** Cumulative rows updated while the journal was applied or resumed. */
+  sessionsReindexed?: number;
 }
 
 export interface AccountMigrateDeps {
   isActive?: (installation: { agent: AgentId; label: string }) => Promise<boolean>;
   now?: () => Date;
+  /** Test-only crash injection after a filesystem move has committed. */
+  afterMove?: (move: { agent: AgentId; label: string; from: string; to: string }) => void;
 }
 
 const OPAQUE_LABEL = /^(?:latest|main|acct-[0-9a-f]+|\d+\.\d+.*)$/i;
@@ -274,33 +278,6 @@ function plannedTrashPath(agent: AgentId, label: string): string {
   return path.join(getHistoryDir(), 'trash', 'versions', agent, label, '<stamp>');
 }
 
-/**
- * Where a canonical install's stale `home/` goes when its account already holds
- * a slot: the binary and the (recreated, empty) home stay under `versions/`, so
- * the old home cannot use the versions trash — `agents trash restore` would put a
- * whole install back over a live one. Restoring is a plain move back; the
- * migration manifest records the path under `<agent>@<label>#home`.
- */
-function homeTrashDir(agent: AgentId, label: string): string {
-  return path.join(getHistoryDir(), 'trash', 'homes', agent, label);
-}
-
-function plannedHomeTrashPath(agent: AgentId, label: string): string {
-  return path.join(homeTrashDir(agent, label), '<stamp>');
-}
-
-function trashHome(agent: AgentId, item: InstallationInventory): string {
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const dest = path.join(homeTrashDir(agent, item.label), stamp);
-  fs.mkdirSync(path.dirname(dest), { recursive: true, mode: 0o700 });
-  if (!fs.existsSync(item.home)) {
-    throw new Error(`Home ${item.home} is missing; cannot trash it.`);
-  }
-  fs.renameSync(item.home, dest);
-  fs.mkdirSync(item.home, { recursive: true, mode: 0o700 });
-  return dest;
-}
-
 function emptyDir(dir: string): boolean {
   if (!fs.existsSync(dir)) return true;
   try {
@@ -333,6 +310,10 @@ function provisionedSlotExists(agent: AgentId, accountId: string): boolean {
   } catch {
     return false;
   }
+}
+
+function legacyArchiveDir(agent: AgentId, accountId: string, label: string): string {
+  return path.join(slotDir(agent, accountId), '.agents-migration', 'legacy', label);
 }
 
 function takenNames(meta: ReturnType<typeof readMeta>): Set<string> {
@@ -419,38 +400,21 @@ async function planHarness(
       continue;
     }
     if (item.hasCredential && item.accountId && provisionedSlotExists(agent, item.accountId)) {
-      // The account already owns a populated slot on this device, so this
-      // per-version home is a stale copy of a credential the slot now carries.
-      // Routing it to `slot` would only trip `assertSlotAbsent` and abort the
-      // whole apply with nothing done — the state every auth-synced worker was
-      // in. Trash it instead (`agents trash restore` reverses). The canonical
-      // install keeps its binary and ends up with an empty home, exactly as it
-      // does when its home is the one that moves into the slot: two on-disk
-      // copies of one credential is not an end state the migration leaves.
-      if (canonical && item.label === canonical.label) {
-        actions.push({
-          kind: 'canonical',
-          label: item.label,
-          release: item.release,
-          reason: 'canonical install (binary kept); account already holds a slot — stale home trashed, empty home recreated',
-          accountId: item.accountId,
-          identityKey: item.identityKey,
-          email: item.email,
-          sessionCount: item.sessionCount,
-          pathMoves: [{ from: item.home, to: plannedHomeTrashPath(agent, item.label) }],
-        });
-        continue;
-      }
+      const archive = legacyArchiveDir(agent, item.accountId, item.label);
       actions.push({
-        kind: 'trash',
+        kind: 'slot',
         label: item.label,
         release: item.release,
-        reason: 'account already holds a provisioned slot on this device — stale home trashed',
+        reason: 'account already holds a distinct slot — preserve the legacy home inside that account slot',
         accountId: item.accountId,
         identityKey: item.identityKey,
         email: item.email,
+        slotDir: slotDir(agent, item.accountId),
         sessionCount: item.sessionCount,
-        pathMoves: [{ from: item.dir, to: plannedTrashPath(agent, item.label) }],
+        pathMoves: [
+          { from: item.home, to: archive },
+          ...(item.label === canonical?.label ? [] : [{ from: item.dir, to: plannedTrashPath(agent, item.label) }]),
+        ],
       });
       continue;
     }
@@ -611,6 +575,7 @@ function clearHomes(accountIds: string[]): void {
 }
 
 function moveHomeToSlot(item: InstallationInventory, dest: string): void {
+  if (!fs.existsSync(item.home) && fs.existsSync(dest)) return;
   if (fs.existsSync(dest) && !emptyDir(dest)) {
     throw new Error(`Slot already exists for ${item.agent} account at ${dest}.`);
   }
@@ -620,6 +585,52 @@ function moveHomeToSlot(item: InstallationInventory, dest: string): void {
     throw new Error(`Home ${item.home} is missing; cannot move it into a slot.`);
   }
   fs.renameSync(item.home, dest);
+}
+
+function moveDirectoryTo(item: InstallationInventory, source: string, dest: string): void {
+  if (!fs.existsSync(source) && fs.existsSync(dest)) return;
+  if (!fs.existsSync(source)) throw new Error(`${source} is missing; cannot move it to ${dest}.`);
+  if (fs.existsSync(dest)) throw new Error(`${dest} already exists while ${source} is still present.`);
+  fs.mkdirSync(path.dirname(dest), { recursive: true, mode: 0o700 });
+  try {
+    fs.renameSync(source, dest);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== 'EPERM' && code !== 'EACCES') throw err;
+    fs.cpSync(source, dest, { recursive: true });
+    fs.rmSync(source, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Run one installation-mutating step (home→slot rename, binary trash) under the
+ * SHARED per-installation exclusion, re-checking the install is idle FIRST.
+ *
+ * This is the migration side of the shared installation-lock contract
+ * (`installation-lock.ts`): one lock per `(agent, label)`, its target kept
+ * OUTSIDE the installation dir, every holder agreeing on
+ * `INSTALLATION_LOCK_OPTIONS` (same stale threshold, so none breaks a live npm
+ * install). The contract has two peers that MUST both honor it, or a launch and
+ * a migration race the same home:
+ *   - Launch (the local-account launch path, `agents run`): MUST hold this lock
+ *     through ACTUAL process registration — acquire before spawning and release
+ *     only once the live process is recorded, so the recheck below observes it.
+ *   - Migration (here): MUST hold it for the FINAL active recheck AND the move,
+ *     as one critical section. Planning's `isActive` read is advisory and racy;
+ *     the authoritative decision is this recheck under the lock, immediately
+ *     before the rename. An install that went busy between planning and now is
+ *     deferred, never renamed out from under a running agent.
+ */
+async function withMigrationExclusion<T>(
+  item: InstallationInventory,
+  deps: AccountMigrateDeps,
+  mutate: () => T,
+): Promise<{ deferred: boolean; value?: T }> {
+  return withFileLockAsync(installationLockTarget(item.agent, item.label), async () => {
+    const active = await (deps.isActive ?? defaultIsActive)({ agent: item.agent, label: item.label });
+    if (active) return { deferred: true };
+    return { deferred: false, value: mutate() };
+  }, INSTALLATION_LOCK_OPTIONS);
 }
 
 function recordMovedSlot(agent: AgentId, account: NativeAccount, dest: string): void {
@@ -639,6 +650,40 @@ function persistManifest(manifestPath: string, manifest: AccountMigrationManifes
     manifestPath,
     `${JSON.stringify(manifest, null, 2)}\n`,
     { encoding: 'utf8', mode: 0o600 },
+  );
+}
+
+function pendingManifest(): { manifestPath: string; manifest: AccountMigrationManifest } | null {
+  const dir = path.join(getHistoryDir(), 'accounts');
+  let names: string[];
+  try {
+    names = fs.readdirSync(dir).filter((name) => /^migration-.*\.json$/.test(name)).sort().reverse();
+  } catch {
+    return null;
+  }
+  for (const name of names) {
+    const manifestPath = path.join(dir, name);
+    try {
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as AccountMigrationManifest;
+      if (manifest.schema === ACCOUNT_MIGRATION_SCHEMA && manifest.status === 'planned' && manifest.dryRun === false) {
+        return { manifestPath, manifest };
+      }
+    } catch {
+      // A corrupt journal is not safe to guess through; a later valid journal
+      // can still be resumed, otherwise the next apply creates a fresh plan.
+    }
+  }
+  return null;
+}
+
+function exactTrashPath(manifest: AccountMigrationManifest, item: InstallationInventory): string {
+  return path.join(
+    getHistoryDir(),
+    'trash',
+    'versions',
+    item.agent,
+    item.label,
+    manifest.at.replace(/[:.]/g, '-'),
   );
 }
 
@@ -665,16 +710,16 @@ export async function applyAccountMigration(
   agents: AgentId[] = [...ALL_AGENT_IDS],
   deps: AccountMigrateDeps = {},
 ): Promise<ApplyMigrationResult> {
-  const plan = await planAccountMigration(agents, deps);
+  const pending = pendingManifest();
+  const plan = pending?.manifest.plan ?? await planAccountMigration(agents, deps);
   const now = deps.now ?? (() => new Date());
-  const at = now();
-  const stamp = at.toISOString();
-  const manifestPath = path.join(
+  const stamp = pending?.manifest.at ?? now().toISOString();
+  const manifestPath = pending?.manifestPath ?? path.join(
     getHistoryDir(),
     'accounts',
     `migration-${stamp.replace(/[:.]/g, '-')}.json`,
   );
-  const manifest: AccountMigrationManifest = {
+  const manifest: AccountMigrationManifest = pending?.manifest ?? {
     schema: ACCOUNT_MIGRATION_SCHEMA,
     at: stamp,
     dryRun: false,
@@ -682,10 +727,11 @@ export async function applyAccountMigration(
     plan,
     harnesses: {},
     map: {},
+    sessionsReindexed: 0,
   };
   persistManifest(manifestPath, manifest);
 
-  const remaps: Array<{ from: string; to: string }> = [];
+  let sessionsReindexed = manifest.sessionsReindexed ?? 0;
   const taken = takenNames(readMeta());
 
   for (const h of plan.harnesses) {
@@ -708,27 +754,66 @@ export async function applyAccountMigration(
       const item = byLabel.get(action.label);
       if (!item) throw new Error(`Plan named ${h.agent}@${action.label} but inventory has no such install.`);
       const account = resolveOrRegisterAccount(item, taken);
-      const dest = assertSlotAbsent(h.agent, account.id);
-      moveHomeToSlot(item, dest);
-      recordMovedSlot(h.agent, account, dest);
-      remaps.push({ from: item.home, to: dest });
+      const slotRoot = slotDir(h.agent, account.id);
+      const mapKey = `${h.agent}@${item.label}`;
+      const priorDest = manifest.map[mapKey];
+      const dest = priorDest ?? (provisionedSlotExists(h.agent, account.id)
+        ? legacyArchiveDir(h.agent, account.id, item.label)
+        : assertSlotAbsent(h.agent, account.id));
+      manifest.map[mapKey] = dest;
+      persistManifest(manifestPath, manifest);
+
+      const moved = await withMigrationExclusion(item, deps, () => {
+        if (dest === slotRoot) moveHomeToSlot(item, dest);
+        else moveDirectoryTo(item, item.home, dest);
+      });
+      if (moved.deferred) {
+        if (!entry.deferred.some((row) => row.label === item.label)) {
+          entry.deferred.push({ label: item.label, reason: 'installation became busy before its migration move' });
+        }
+        delete manifest.map[mapKey];
+        persistManifest(manifestPath, manifest);
+        continue;
+      }
+      deps.afterMove?.({ agent: h.agent, label: item.label, from: item.home, to: dest });
+
+      // Only the home that BECAME the account's slot defines its slot record. A
+      // legacy home archived alongside an already-provisioned slot
+      // (dest = legacyArchiveDir) must leave that record pointing at slotRoot —
+      // recording the archive subdir would make spawn launch the preserved copy.
+      if (dest === slotRoot) recordMovedSlot(h.agent, account, dest);
+      sessionsReindexed += reindexMovedSessionPaths([{ from: item.home, to: dest }]);
+      manifest.sessionsReindexed = sessionsReindexed;
       labelToAccount.set(item.label, account.id);
       if (item.identityKey) identityToAccount.set(item.identityKey, account.id);
       movedAccountIds.push(account.id);
-      entry.slots.push({ oldLabel: item.label, accountId: account.id, accountName: account.name, slotDir: dest });
-      manifest.map[`${h.agent}@${item.label}`] = dest;
+      if (!entry.slots.some((row) => row.oldLabel === item.label)) {
+        entry.slots.push({ oldLabel: item.label, accountId: account.id, accountName: account.name, slotDir: slotRoot });
+      }
       persistManifest(manifestPath, manifest);
 
       if (item.label === h.canonical) {
         fs.mkdirSync(item.home, { recursive: true, mode: 0o700 });
       } else {
-        const trashPath = softDeleteVersionDir(h.agent, item.label);
-        if (!trashPath) throw new Error(`Failed to trash binary leftover ${h.agent}@${item.label}.`);
+        const binaryKey = `${mapKey}#binary`;
+        const trashPath = manifest.map[binaryKey] ?? exactTrashPath(manifest, item);
+        manifest.map[binaryKey] = trashPath;
+        persistManifest(manifestPath, manifest);
+        const trashed = await withMigrationExclusion(item, deps, () => moveDirectoryTo(item, item.dir, trashPath));
+        if (trashed.deferred) {
+          if (!entry.deferred.some((row) => row.label === item.label)) {
+            entry.deferred.push({ label: item.label, reason: 'installation became busy before its binary cleanup' });
+          }
+          persistManifest(manifestPath, manifest);
+          continue;
+        }
         removeVersionedAlias(h.agent, item.label);
-        remaps.push({ from: item.dir, to: trashPath });
+        sessionsReindexed += reindexMovedSessionPaths([{ from: item.dir, to: trashPath }]);
+        manifest.sessionsReindexed = sessionsReindexed;
         stillPresent.delete(item.label);
-        entry.trashed.push({ label: item.label, reason: 'binary leftover after home moved to slot', trashPath });
-        manifest.map[`${h.agent}@${item.label}#binary`] = trashPath;
+        if (!entry.trashed.some((row) => row.label === item.label && row.trashPath === trashPath)) {
+          entry.trashed.push({ label: item.label, reason: 'binary leftover after home moved to slot', trashPath });
+        }
         persistManifest(manifestPath, manifest);
       }
     }
@@ -739,28 +824,30 @@ export async function applyAccountMigration(
       if (kept) labelToAccount.set(item.label, kept);
     }
 
-    for (const action of h.actions.filter((a) => a.kind === 'canonical' && a.accountId)) {
-      // Canonical install whose account already holds a slot: hand the stale
-      // home off to the homes trash and leave an empty home behind, mirroring
-      // the slot branch's end state for a canonical home.
-      const item = byLabel.get(action.label);
-      if (!item) throw new Error(`Plan named ${h.agent}@${action.label} but inventory has no such install.`);
-      const trashPath = trashHome(h.agent, item);
-      remaps.push({ from: item.home, to: trashPath });
-      labelToAccount.set(item.label, action.accountId!);
-      movedAccountIds.push(action.accountId!);
-      entry.trashed.push({ label: item.label, reason: 'stale canonical home — account already holds a provisioned slot', trashPath });
-      manifest.map[`${h.agent}@${item.label}#home`] = trashPath;
-      persistManifest(manifestPath, manifest);
-    }
-
     for (const action of trashActions) {
       const item = byLabel.get(action.label);
       if (!item) throw new Error(`Plan named ${h.agent}@${action.label} but inventory has no such install.`);
-      const trashPath = softDeleteVersionDir(h.agent, item.label);
-      if (!trashPath) throw new Error(`Failed to trash ${h.agent}@${item.label}.`);
+      const mapKey = `${h.agent}@${item.label}`;
+      const trashPath = manifest.map[mapKey] ?? exactTrashPath(manifest, item);
+      manifest.map[mapKey] = trashPath;
+      persistManifest(manifestPath, manifest);
+      // Recheck the installation is idle under the shared exclusion before the
+      // rename, so a launch that started after planning defers this trash
+      // instead of racing it. A resumed apply is idempotent: moveDirectoryTo is
+      // a no-op once the dir already moved to the recorded trash path.
+      const trashed = await withMigrationExclusion(item, deps, () => moveDirectoryTo(item, item.dir, trashPath));
+      if (trashed.deferred) {
+        if (!entry.deferred.some((row) => row.label === item.label)) {
+          entry.deferred.push({ label: item.label, reason: 'installation became busy before its trash move' });
+        }
+        delete manifest.map[mapKey];
+        persistManifest(manifestPath, manifest);
+        continue;
+      }
+      deps.afterMove?.({ agent: h.agent, label: item.label, from: item.dir, to: trashPath });
       removeVersionedAlias(h.agent, item.label);
-      remaps.push({ from: item.dir, to: trashPath });
+      sessionsReindexed += reindexMovedSessionPaths([{ from: item.dir, to: trashPath }]);
+      manifest.sessionsReindexed = sessionsReindexed;
       stillPresent.delete(item.label);
       if (action.accountId) {
         // A home trashed because its account already holds a slot: anything
@@ -769,8 +856,9 @@ export async function applyAccountMigration(
         labelToAccount.set(item.label, action.accountId);
         movedAccountIds.push(action.accountId);
       }
-      entry.trashed.push({ label: item.label, reason: action.reason, trashPath });
-      manifest.map[`${h.agent}@${item.label}`] = trashPath;
+      if (!entry.trashed.some((row) => row.label === item.label && row.trashPath === trashPath)) {
+        entry.trashed.push({ label: item.label, reason: action.reason, trashPath });
+      }
       persistManifest(manifestPath, manifest);
     }
 
@@ -780,7 +868,6 @@ export async function applyAccountMigration(
     invalidateInstalledVersionsCache(h.agent);
   }
 
-  const sessionsReindexed = reindexMovedSessionPaths(remaps);
   manifest.status = 'complete';
   persistManifest(manifestPath, manifest);
 

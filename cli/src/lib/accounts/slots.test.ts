@@ -3,8 +3,10 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { addNativeAccount, readSlots, removeAccount } from '../account-registry.js';
 import { getGlobalDefault, getVersionHomePath, listInstalledVersions } from '../installations/store.js';
+import { getVersionDir, invalidateInstalledVersionsCache, removeVersion } from '../installations/versions.js';
+import { loadManifest } from '../staleness/index.js';
 import { getHistoryDir, readMeta, updateMeta } from '../state.js';
-import { ensureSlot, recordSlot, slotDir } from './slots.js';
+import { ensureSlot, recordSlot, slotDir, syncResourcesToAccountSlots } from './slots.js';
 
 describe('slotDir', () => {
   it('is ~/.agents/.history/accounts/<harness>/<accountId>/', () => {
@@ -106,5 +108,79 @@ describe('recordSlot / readSlots device-doc round-trip', () => {
       authMode: 'native',
       verdict: 'unconfigured',
     })).toThrow(/mismatch/);
+  });
+});
+
+describe('syncResourcesToAccountSlots (single home-targeted writer, two accounts one binary)', () => {
+  const suffix = `slotsync-${Date.now().toString(36)}`;
+  const version = '2.1.0';
+  const created: string[] = [];
+
+  afterEach(() => {
+    for (const name of created.splice(0)) {
+      try { removeAccount(name); } catch { /* already gone */ }
+    }
+    const claudeAccounts = path.join(getHistoryDir(), 'accounts', 'claude');
+    const codexAccounts = path.join(getHistoryDir(), 'accounts', 'codex');
+    for (const root of [claudeAccounts, codexAccounts]) {
+      if (fs.existsSync(root)) fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('reconciles every materialized slot for the harness, skips other harnesses and unmaterialized slots, and never writes version-home staleness metadata into a slot', () => {
+    const a = addNativeAccount(`a-${suffix}`, 'claude', `claude:user=a-${suffix}`, `a-${suffix}@example.com`, 'version');
+    const b = addNativeAccount(`b-${suffix}`, 'claude', `claude:user=b-${suffix}`, `b-${suffix}@example.com`, 'version');
+    const cx = addNativeAccount(`cx-${suffix}`, 'codex', `codex:user=cx-${suffix}`, `cx-${suffix}@example.com`, 'version');
+    const ghost = addNativeAccount(`ghost-${suffix}`, 'claude', `claude:user=ghost-${suffix}`, `ghost-${suffix}@example.com`, 'version');
+    created.push(a.name, b.name, cx.name, ghost.name);
+
+    // a + b have real slot dirs; codex slot is materialized too (must still be
+    // skipped, wrong harness); ghost has a slot RECORD but no dir on disk.
+    recordSlot(a.id, ensureSlot('claude', a.id));
+    recordSlot(b.id, ensureSlot('claude', b.id));
+    recordSlot(cx.id, ensureSlot('codex', cx.id));
+    recordSlot(ghost.id, { accountId: ghost.id, slotDir: slotDir('claude', ghost.id), authMode: 'native', verdict: 'unconfigured' });
+
+    const results = syncResourcesToAccountSlots('claude', version, undefined, { force: true });
+    const targeted = results.map((r) => r.accountId).sort();
+    expect(targeted).toEqual([a.id, b.id].sort());
+    expect(targeted).not.toContain(cx.id);
+    expect(targeted).not.toContain(ghost.id);
+
+    // The slot sync projects resources into the slot home but must NOT write the
+    // version-home `.sync-manifest.json` staleness record — that stays scoped to
+    // the managed installation (the isManagedVersionHome guard).
+    expect(loadManifest('claude', version)).toBeNull();
+    expect(fs.existsSync(path.join(slotDir('claude', a.id), '.sync-manifest.json'))).toBe(false);
+  });
+});
+
+describe('binary lifecycle preserves account slots', () => {
+  it('removeVersion trashes the binary but leaves the account slot intact', () => {
+    const id = `lifecycle-${Date.now().toString(36)}`;
+    const version = `0.0.0-lifecycle-${Date.now().toString(36)}`;
+    const slot = ensureSlot('claude', id);
+    fs.writeFileSync(path.join(slot.slotDir, '.claude.json'), JSON.stringify({ marker: id }));
+    fs.writeFileSync(path.join(slot.slotDir, '.claude', '.credentials.json'), JSON.stringify({ token: id }));
+
+    const vdir = getVersionDir('claude', version);
+    fs.mkdirSync(path.join(vdir, 'node_modules', '.bin'), { recursive: true });
+    fs.writeFileSync(path.join(vdir, 'node_modules', '.bin', 'claude'), '#!/bin/sh\n');
+    fs.writeFileSync(path.join(vdir, 'package.json'), '{}');
+    invalidateInstalledVersionsCache('claude');
+
+    try {
+      expect(removeVersion('claude', version)).toBe(true);
+      // The binary install is gone; the account slot lives outside the version
+      // tree (~/.agents/.history/accounts/…), so it is untouched, credential and all.
+      expect(fs.existsSync(vdir)).toBe(false);
+      expect(JSON.parse(fs.readFileSync(path.join(slot.slotDir, '.claude.json'), 'utf8'))).toEqual({ marker: id });
+      expect(fs.existsSync(path.join(slot.slotDir, '.claude', '.credentials.json'))).toBe(true);
+    } finally {
+      fs.rmSync(slot.slotDir, { recursive: true, force: true });
+      const trash = path.join(getHistoryDir(), 'trash', 'versions', 'claude', version);
+      if (fs.existsSync(trash)) fs.rmSync(trash, { recursive: true, force: true });
+      invalidateInstalledVersionsCache('claude');
+    }
   });
 });

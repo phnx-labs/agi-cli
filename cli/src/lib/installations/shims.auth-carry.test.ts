@@ -27,6 +27,8 @@ vi.mock('../state.js', async () => {
 
 import { switchConfigSymlink, carryForwardAuthFiles, readAuthFileIdentity } from './shims.js';
 import { getAccountInfo } from '../agents.js';
+import { addNativeAccount, removeAccount } from '../account-registry.js';
+import { recordSlot, slotDir } from '../accounts/slots.js';
 
 const tempDirs: string[] = [];
 
@@ -197,6 +199,32 @@ describe('carryForwardAuthFiles — account-identity guard (RUSH-1764)', () => {
 
     const body = JSON.parse(fs.readFileSync(path.join(destDir, 'antigravity-oauth-token'), 'utf8'));
     expect(body.token.refresh_token).toBe('REFRESH_A'); // account B's newer token was refused
+  });
+
+  it('is a no-op once the harness has adopted an account slot — credentials are account-owned (PHNX-3940)', () => {
+    // With no slot, an empty target is seeded from the freshest source (the
+    // `seeds an EMPTY target` case above). Once this harness owns a materialized
+    // slot, that version-home carry must stop entirely: switching a binary must
+    // never refresh version-owned auth again.
+    const v1 = droidHome('latest');    // a freshest source that WOULD be carried
+    const v2 = droidHome('0.159.1');   // empty target
+    writeDroidCred(v1, { email: 'a@x.com', org_id: 'orgA' }, 2_000_000);
+
+    const acct = addNativeAccount(`carry-gate-${Date.now().toString(36)}`, 'droid', `droid:user=carry-${Date.now().toString(36)}`, 'a@x.com', 'version');
+    try {
+      const dir = slotDir('droid', acct.id);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'auth.json'), '{}');
+      recordSlot(acct.id, { accountId: acct.id, slotDir: dir, authMode: 'per-device', verdict: 'unconfigured' });
+
+      carryForwardAuthFiles('droid', path.join(v2, '.factory'));
+
+      // The empty target stayed empty — the adopted slot short-circuited the carry.
+      expect(fs.existsSync(path.join(v2, '.factory', 'auth.v2.file'))).toBe(false);
+      fs.rmSync(dir, { recursive: true, force: true });
+    } finally {
+      removeAccount(`droid#${acct.name}`);
+    }
   });
 });
 

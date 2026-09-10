@@ -1,9 +1,6 @@
 import type { Command } from 'commander';
-import * as fs from 'fs';
-import * as path from 'path';
 import chalk from 'chalk';
 import { password, select } from '@inquirer/prompts';
-import { readClaudeAccountEmail, resolveClaudeSetupToken, resolveClaudeSetupTokenForEmail, seedClaudeWorkerHomeIdentity } from '../lib/claude-account-token.js';
 import { setHelpSections } from '../lib/help.js';
 import { readMeta, updateMeta } from '../lib/state.js';
 import { machineId } from '../lib/machine-id.js';
@@ -34,6 +31,7 @@ import { applyAccountMigration, formatMigrationPlan, planAccountMigration } from
 import { isSymlinkAdoptedHarness } from '../lib/installations/shims.js';
 import { ensureAdoptedDefaultRepoint } from '../lib/exec-account-home.js';
 import { acquireAuthOperationLock } from '../lib/accounts/auth-operation-lock.js';
+import { readSlots } from '../lib/accounts/slots.js';
 import { isSecretsClientError, pushBundleToHost, readAndResolveBundleEnv, readBundle } from '../lib/secrets-client.js';
 import { getAccountProvider, listAccountProviders, providerAuthenticatesHarness, type AccountAuthKind } from '../lib/account-provider-registry.js';
 import { accountBindings, addAccount, addNativeAccount, assertUnambiguousNativeAccount, bindAccount, findAccount, findUnifiedAccount, inspectAccount, labelNativeAccount, listNativeAccounts, nativeAccountHome, parseAccountSelector, readAccountRegistry, removeAccount, renameAccount, setAccountSecret, unbindAccount, type UnifiedAccount } from '../lib/account-registry.js';
@@ -135,39 +133,6 @@ export function classifyAttachTarget(target: string): AttachTarget {
   const agent = resolveAgentName(target);
   if (agent) return { kind: 'device-agent', agent };
   throw new Error(`Unknown attach target '${target}'. Expected an installed <agent>@<version>, a harness id, or an existing custom harness profile.`);
-}
-
-/**
- * Persist the attached setup-token to a per-version `.oauth_token` file so an
- * INTERACTIVE Claude launch on a keychain-less Linux worker can authenticate from it.
- * Headless runs inject the token via `buildExecEnv`. Since PHNX-3502 an interactive
- * launch on a worker-role device ALSO injects it through `claudeAdapter.applyExecConfigEnv`
- * (only a headed `personal`/`desktop` device defers to its per-version native login), and
- * the shim's Linux fallback (`claudeAdapter.shimConfigEnvBash`) reads exactly this file —
- * so writing it is what makes a freshly-attached setup-token visible to that shim fallback
- * on a worker. macOS keeps the credential in the keychain, so `resolveClaudeSetupToken`
- * returns null there and this is a no-op off Linux.
- */
-export function writeClaudeInteractiveOauthToken(target: AttachTarget, targetAgent: AgentId, email?: string): void {
-  if (process.platform !== 'linux' || targetAgent !== 'claude' || target.kind !== 'installation') return;
-  const versionHome = getVersionHomePath('claude', target.version);
-  const tokenPath = path.join(versionHome, '.claude', '.oauth_token');
-  // Resolve by the attached account's email when known (a freshly-seeded worker
-  // home the `.claude.json` read below could not key on yet), else by the home's
-  // own recorded identity for a re-point/detach.
-  const token = email
-    ? resolveClaudeSetupTokenForEmail(email, versionHome)
-    : resolveClaudeSetupToken(versionHome);
-  // A re-point (attach B over A, or a detach) can leave no setup-token resolving for
-  // this version — B's may not be minted yet. A leftover file from the previous binding
-  // would silently authenticate interactive runs as the OLD account (the shim's Linux
-  // fallback reads it), so clear it rather than leave it stale.
-  if (!token) {
-    fs.rmSync(tokenPath, { force: true });
-    return;
-  }
-  fs.mkdirSync(path.dirname(tokenPath), { recursive: true });
-  fs.writeFileSync(tokenPath, token, { mode: 0o600 });
 }
 
 export function parseBundleKey(raw: string): { bundle: string; key: string } {
@@ -517,8 +482,29 @@ export function parseLogoutTarget(target: string): { agentRaw: string; installat
   return { agentRaw: target };
 }
 
+export interface LogoutTarget {
+  agent: AgentId;
+  version: string;
+  home: string;
+  source: 'slot' | 'legacy-home';
+  accountName?: string;
+}
+
 /** Explicit account logout must never fall back to another account's home. */
-async function resolveAccountHomeLabel(account: UnifiedAccount & { kind: 'native' }): Promise<string> {
+async function resolveAccountLogoutTarget(account: UnifiedAccount & { kind: 'native' }): Promise<LogoutTarget> {
+  const meta = readMeta();
+  const slot = readSlots(meta)[account.id];
+  const installed = listInstalledVersions(account.agent);
+  const version = getGlobalDefault(account.agent) ?? installed[installed.length - 1];
+  if (slot) {
+    if (!version) throw new Error(`No installed version of ${account.agent}. Install one with: agents add ${account.agent}`);
+    const info = await getAccountInfo(account.agent, slot.slotDir);
+    const observed = nativeIdentityKey(info, nativeAccountCapability(account.agent));
+    if (observed && observed !== account.identityKey) {
+      throw new Error(`Account '${account.name}' slot contains a different ${account.agent} identity; refusing to sign it out.`);
+    }
+    return { agent: account.agent, version, home: slot.slotDir, source: 'slot', accountName: account.name };
+  }
   const rows = await collectNativeHomeRows();
   const homes = rows
     .filter(r => r.signedIn && (r.accountKey ?? r.email))
@@ -529,7 +515,13 @@ async function resolveAccountHomeLabel(account: UnifiedAccount & { kind: 'native
   if (!label || !listInstalledVersions(account.agent).includes(label)) {
     throw new Error(`Account '${account.name}' has no installed ${account.agent} home to sign out of.`);
   }
-  return label;
+  return {
+    agent: account.agent,
+    version: label,
+    home: getVersionHomePath(account.agent, label),
+    source: 'legacy-home',
+    accountName: account.name,
+  };
 }
 
 /**
@@ -537,7 +529,7 @@ async function resolveAccountHomeLabel(account: UnifiedAccount & { kind: 'native
  * should be signed out — honoring a passed `@label` or `#account` selector
  * instead of always selecting the global default (PHNX-3940).
  */
-export async function resolveLogoutTarget(target: string): Promise<{ agent: AgentId; version: string }> {
+export async function resolveLogoutTarget(target: string): Promise<LogoutTarget> {
   const parsed = parseLogoutTarget(target);
   const meta = readMeta();
   if (ALL_AGENT_IDS.includes(parsed.agentRaw as AgentId)) {
@@ -546,14 +538,14 @@ export async function resolveLogoutTarget(target: string): Promise<{ agent: Agen
       if (!listInstalledVersions(agent).includes(parsed.installationLabel)) {
         throw new Error(`${agent}@${parsed.installationLabel} is not installed.`);
       }
-      return { agent, version: parsed.installationLabel };
+      return { agent, version: parsed.installationLabel, home: getVersionHomePath(agent, parsed.installationLabel), source: 'legacy-home' };
     }
     if (parsed.identitySelector) {
       const account = findUnifiedAccount(parsed.identitySelector, meta, undefined, agent);
       if (!account || account.kind !== 'native' || account.agent !== agent) {
         throw new Error(`No ${agent} account '${parsed.identitySelector}'.`);
       }
-      return { agent, version: await resolveAccountHomeLabel(account) };
+      return resolveAccountLogoutTarget(account);
     }
     const configuredDefault = meta.accounts?.defaults?.[agent];
     if (configuredDefault) {
@@ -561,17 +553,17 @@ export async function resolveLogoutTarget(target: string): Promise<{ agent: Agen
       if (!account || account.kind !== 'native') {
         throw new Error(`${agent}'s default is not a locally connected native account. Select the native account to sign out explicitly.`);
       }
-      return { agent, version: await resolveAccountHomeLabel(account) };
+      return resolveAccountLogoutTarget(account);
     }
     const installed = listInstalledVersions(agent);
     const version = getGlobalDefault(agent) ?? installed[installed.length - 1];
     if (!version) throw new Error(`No installed version of ${agent}. Install one with: agents add ${agent}`);
-    return { agent, version };
+    return { agent, version, home: getVersionHomePath(agent, version), source: 'legacy-home' };
   }
   // A bare, non-harness target may be a native account name.
   const account = findUnifiedAccount(target, meta);
   if (account?.kind === 'native') {
-    return { agent: account.agent, version: await resolveAccountHomeLabel(account) };
+    return resolveAccountLogoutTarget(account);
   }
   throw new Error(
     `Unknown target '${target}'. Pass a native harness (claude, codex, …), <harness>@<label>, <harness>#<account>, or a native account name. Provider API-key accounts use \`agents accounts remove\`.`,
@@ -912,27 +904,11 @@ agents run codex#work`,
             if (t.kind !== 'device-agent') throw new Error(`${account.agent} authentication is device-scoped. Attach it with 'agents accounts attach ${account.name} ${account.agent}'.`);
           } else {
             if (t.kind !== 'installation') throw new Error(`${account.agent} authentication is per-version. Attach '${account.name}' to a specific ${account.agent}@<version>.`);
-            const versionHome = getVersionHomePath(t.agent, t.version);
-            // The literal email keys the account's `auth`-bundle setup-token. It lives
-            // in `identityLabel` — `identityKey` is a synthetic composite
-            // (`claude:account=<uuid>:org=<uuid>`, agents.ts nativeIdentityKey), never
-            // the address, so it must NOT be used to derive the token key.
-            const accountEmail = account.identityLabel;
-            // Headless-worker bootstrap: a keychain-less Linux worker home never had
-            // an interactive login, so its `.claude.json` carries no identity and
-            // `nativeIdentityFromSource` would reject the attach — yet the account's
-            // non-rotating setup-token is already fleet-synced in the `auth` bundle.
-            // Seed the identity (email only, no rotating credential) so the token
-            // resolves; `writeClaudeInteractiveOauthToken` then writes `.oauth_token`.
-            if (
-              process.platform === 'linux' &&
-              account.agent === 'claude' &&
-              accountEmail &&
-              !readClaudeAccountEmail(versionHome) &&
-              resolveClaudeSetupTokenForEmail(accountEmail)
-            ) {
-              seedClaudeWorkerHomeIdentity(versionHome, accountEmail);
-            } else {
+            const slot = readSlots(meta)[account.id];
+            if (!slot) {
+              // One-release compatibility for an unmigrated account: an existing
+              // legacy home may still be attached, but attach never creates or
+              // transports auth into that version-owned home.
               const identity = await nativeIdentityFromSource(target);
               if (identity.identityKey !== account.identityKey) throw new Error(`'${target}' is signed in to a different identity than account '${account.name}'.`);
             }
@@ -942,7 +918,6 @@ agents run codex#work`,
           getAccountProvider(account.provider).envFor(targetAgent, account.auth);
         }
         bindAccount(name, target, targetAgent);
-        writeClaudeInteractiveOauthToken(t, targetAgent, account.kind === 'native' && account.agent === 'claude' ? account.identityLabel : undefined);
         console.log(chalk.green(`Attached ${account.name} to ${target}.`));
       });
     }), 'agents run <harness>#<name> (accounts select by name; installation bindings are legacy)');
@@ -959,13 +934,6 @@ agents run codex#work`,
           targetAgent = t.kind === 'profile' ? t.profile.host.agent : t.agent;
         } catch { /* an unresolvable target still unbinds by whatever row matches */ }
         unbindAccount(name, target, targetAgent);
-        // With the binding gone, no setup-token resolves for this version home, so this
-        // clears any .oauth_token the attach left behind (else interactive runs would keep
-        // authenticating as the just-detached account).
-        try {
-          const t = classifyAttachTarget(target);
-          writeClaudeInteractiveOauthToken(t, t.kind === 'profile' ? t.profile.host.agent : t.agent);
-        } catch { /* an unresolvable target has no version home to clean */ }
         console.log(chalk.green(`Detached ${name} from ${target}.`));
       });
     }), 'agents run <harness>#<name> (accounts select by name; installation bindings are legacy)');
@@ -1039,16 +1007,15 @@ agents accounts rename codex#icloud cloud`,
         try {
           const resolved = await resolveLogoutTarget(target);
           if (resolved.agent !== agent) throw new Error('Account selection changed; retry sign-out.');
-          const { version } = resolved;
+          const { version, home } = resolved;
           const { runNativeAccountCommand } = await import('../lib/installations/native-command.js');
-          const { getVersionHomePath } = await import('../lib/installations/versions.js');
           const { buildExecEnv } = await import('../lib/exec.js');
           // Pin the harness's own config-dir env (CLAUDE_CONFIG_DIR / CODEX_HOME) to
           // the resolved home so `logout` signs out THAT account's home — not
           // whichever the global default happens to be. HOME alone was insufficient
           // for a config-dir-env harness, which is why a passed @label was ignored.
-          const env = buildExecEnv({ agent, version, configVersion: version, interactive: true, mode: 'auto', effort: 'auto', cwd: process.cwd() });
-          env.HOME = getVersionHomePath(agent, version);
+          const env = buildExecEnv({ agent, version, execHome: home, interactive: true, mode: 'auto', effort: 'auto', cwd: process.cwd() });
+          env.HOME = home;
           lock.assertHeld();
           const result = await runNativeAccountCommand(agent, version, agent === 'claude' ? ['auth', 'logout'] : ['logout'], env, lock.signal);
           lock.assertHeld();
@@ -1057,7 +1024,8 @@ agents accounts rename codex#icloud cloud`,
               `${agent} logout exited ${result.code ?? 'null'}. If this harness has no logout verb, sign out from its own UI.`,
             );
           }
-          console.log(chalk.green(`Signed out native ${agent} login (${agent}@${version}).`));
+          const owner = resolved.accountName ? `${agent}#${resolved.accountName}` : `${agent}@${version}`;
+          console.log(chalk.green(`Signed out native ${agent} login (${owner}).`));
         } finally {
           lock.release();
         }

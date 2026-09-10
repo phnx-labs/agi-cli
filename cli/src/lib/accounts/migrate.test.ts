@@ -347,54 +347,64 @@ describe('accounts migrate (PHNX-3940 T7)', () => {
     fs.rmSync(getVersionDir('claude', label), { recursive: true, force: true });
   });
 
-  it('trashes a stale home whose account already holds a provisioned slot instead of aborting', async () => {
+  it('preserves a legacy home inside the account slot it already owns instead of losing its differing contents', async () => {
     prevDefault = fixtureFleet().prevDefault;
     await applyAccountMigration(['claude'], { isActive: async () => false });
     const natives = listNativeAccounts(readMeta()).filter((a) => a.identityLabel === gmail || a.identityLabel === icloud);
     plantedAccounts.push(...natives.map((a) => a.name));
     const gmailAcct = natives.find((a) => a.identityLabel === gmail)!;
-    const slotBefore = fs.readdirSync(slotDir('claude', gmailAcct.id));
+    const icloudAcct = natives.find((a) => a.identityLabel === icloud)!;
+    const slotBefore = fs.readdirSync(slotDir('claude', gmailAcct.id)).sort();
     expect(slotBefore.length).toBeGreaterThan(0);
     // Canonical is the newest signed-in install, so plant a newer icloud home
-    // to hold that role: it also already has a slot, which exercises the
-    // canonical branch (binary kept, home left in place) while the older gmail
-    // home below takes the trash branch.
+    // to hold that role: it also already has a slot, exercising the canonical
+    // branch (binary kept, home archived into the slot), while the older gmail
+    // home below exercises the non-canonical branch (binary trashed).
     const pinnedDefault = `9.9.9-${suffix}-def`;
     extraCleanupLabels.push(pinnedDefault);
     plantInstall(pinnedDefault, '9.9.9', { email: icloud });
     setGlobalDefault('claude', pinnedDefault);
     const extra = `0.7.0-${suffix}`;
     plantInstall(extra, '0.7.0', { email: gmail });
+    // A file present ONLY in the legacy home: folding it in must not drop it.
+    const legacyOnly = path.join(getVersionDir('claude', extra), 'home', '.claude', 'settings.local.json');
+    fs.writeFileSync(legacyOnly, JSON.stringify({ legacyOnly: true }));
     invalidateInstalledVersionsCache('claude');
     bindAccount(gmailAcct.id, `claude@${extra}`, 'claude');
 
     const plan = await planAccountMigration(['claude'], { isActive: async () => false });
     const action = plan.harnesses.find((h) => h.agent === 'claude')?.actions.find((a) => a.label === extra);
-    expect(action?.kind).toBe('trash');
-    expect(action?.reason).toMatch(/already holds a provisioned slot/);
+    expect(action?.kind).toBe('slot');
+    expect(action?.reason).toMatch(/preserve the legacy home inside that account slot/);
     expect(action?.accountId).toBe(gmailAcct.id);
     const canonicalAction = plan.harnesses.find((h) => h.agent === 'claude')?.actions.find((a) => a.label === pinnedDefault);
-    expect(canonicalAction?.kind).toBe('canonical');
-    expect(canonicalAction?.reason).toMatch(/already holds a slot — stale home trashed/);
+    expect(canonicalAction?.kind).toBe('slot');
 
     const result = await applyAccountMigration(['claude'], { isActive: async () => false });
     expect(result.manifest.status).toBe('complete');
+    // Non-canonical legacy install: the binary is trashed (recoverable)...
     expect(fs.existsSync(getVersionDir('claude', extra))).toBe(false);
     expect(fs.existsSync(path.join(getHistoryDir(), 'trash', 'versions', 'claude', extra))).toBe(true);
-    expect(result.manifest.harnesses.claude?.trashed.find((t) => t.label === extra)?.reason).toMatch(/already holds a provisioned slot/);
-    // The slot the account already owned is untouched, and the binding that
-    // named the trashed version now names the account.
-    expect(fs.readdirSync(slotDir('claude', gmailAcct.id))).toEqual(slotBefore);
+    // ...but its home is archived INSIDE the account's own slot, contents intact,
+    // never trashed out of reach. The differing file survives.
+    const gmailArchive = path.join(slotDir('claude', gmailAcct.id), '.agents-migration', 'legacy', extra);
+    expect(fs.existsSync(path.join(gmailArchive, '.claude.json'))).toBe(true);
+    expect(JSON.parse(fs.readFileSync(path.join(gmailArchive, '.claude', 'settings.local.json'), 'utf8'))).toEqual({ legacyOnly: true });
+    // The slot record still points at the real slot, NOT the archive subdir, so
+    // spawn launches the live slot and not the preserved copy.
+    expect(readSlots(readMeta())[gmailAcct.id]?.slotDir).toBe(slotDir('claude', gmailAcct.id));
+    // The slot's own top-level contents are untouched; the archive rides beside
+    // them under a hidden dir the harness ignores.
+    expect(fs.readdirSync(slotDir('claude', gmailAcct.id)).filter((n) => n !== '.agents-migration').sort()).toEqual(slotBefore);
     const bindings = { ...readMeta().accounts?.bindings, ...readMeta().deviceAccounts?.bindings };
     expect(bindings[`claude@${extra}`]).toBe(gmailAcct.id);
-    // The canonical install keeps its binary with an empty home; its stale
-    // credential copy went to the homes trash and the manifest names the path.
+    // The canonical install keeps its binary and gets a fresh empty home; its
+    // legacy credential copy is archived in the icloud slot, not trashed.
     const canonicalHome = path.join(getVersionDir('claude', pinnedDefault), 'home');
     expect(fs.existsSync(canonicalHome)).toBe(true);
     expect(fs.readdirSync(canonicalHome)).toEqual([]);
-    const homeTrash = result.manifest.map[`claude@${pinnedDefault}#home`];
-    expect(homeTrash).toContain(path.join('trash', 'homes', 'claude', pinnedDefault));
-    expect(fs.existsSync(path.join(homeTrash!, '.claude.json'))).toBe(true);
+    const icloudArchive = path.join(slotDir('claude', icloudAcct.id), '.agents-migration', 'legacy', pinnedDefault);
+    expect(fs.existsSync(path.join(icloudArchive, '.claude.json'))).toBe(true);
     expect(fs.existsSync(path.join(getVersionDir('claude', pinnedDefault), 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude-launcher'))).toBe(true);
     unbindAccount(gmailAcct.id, `claude@${extra}`, 'claude');
   });
@@ -516,5 +526,87 @@ describe('accounts migrate (PHNX-3940 T7)', () => {
       .rejects.toThrow(/Identity mismatch for claude@.*: home is '.*' but account row '.*' is 'claude:account=other:org=other'/);
     await expect(applyAccountMigration(['claude'], { isActive: async () => false }))
       .rejects.toThrow(/Identity mismatch/);
+  });
+
+  it('rechecks the install is idle under the shared exclusion before renaming and defers one that went busy after planning', async () => {
+    const label = `0.1.0-${suffix}-recheck`;
+    extraCleanupLabels.push(label);
+    prevDefault = getGlobalDefault('claude');
+    plantInstall(label, '0.1.0', { email: gmail });
+    invalidateInstalledVersionsCache('claude');
+    // Idle at plan time (inventory), busy at the apply-time recheck: the launch
+    // started in the window between planning and the move. The exclusion recheck
+    // must defer it rather than rename a live home out from under a process.
+    let seen = 0;
+    const isActive = async (inst: { label: string }) => {
+      if (inst.label !== label) return false;
+      seen += 1;
+      return seen > 1;
+    };
+    const result = await applyAccountMigration(['claude'], { isActive });
+    plantedAccounts.push(...listNativeAccounts(readMeta())
+      .filter((a) => a.agent === 'claude' && a.identityLabel === gmail).map((a) => a.name));
+    expect(result.manifest.status).toBe('complete');
+    expect(result.manifest.harnesses.claude?.deferred.some((d) => d.label === label && /busy/.test(d.reason))).toBe(true);
+    // The home was never moved and its credential is intact.
+    expect(fs.existsSync(path.join(getVersionDir('claude', label), 'home', '.claude.json'))).toBe(true);
+    expect(fs.existsSync(getVersionDir('claude', label))).toBe(true);
+    // The deferred move left no committed slot destination in the manifest map.
+    expect(result.manifest.map[`claude@${label}`]).toBeUndefined();
+  });
+
+  it('resumes an interrupted apply from its manifest and completes idempotently without losing data', async () => {
+    const labelA = `0.1.0-${suffix}-resume-a`;
+    const labelB = `0.2.0-${suffix}-resume-b`;
+    extraCleanupLabels.push(labelA, labelB);
+    const emailA = `resume-a-${suffix}@example.com`;
+    const emailB = `resume-b-${suffix}@example.com`;
+    prevDefault = getGlobalDefault('claude');
+    plantInstall(labelA, '0.1.0', { email: emailA });
+    plantInstall(labelB, '0.2.0', { email: emailB });
+    invalidateInstalledVersionsCache('claude');
+    const acctA = await registerHomeAccount(labelA, `resume-a-${suffix}`, emailA);
+    const acctB = await registerHomeAccount(labelB, `resume-b-${suffix}`, emailB);
+    // A transcript in A's home whose path the DB indexes, to prove reindex
+    // survives the crash + resume rather than dangling.
+    const resumeSession = `t7-resume-${suffix}`;
+    const sessionFile = path.join(getVersionDir('claude', labelA), 'home', '.claude', 'projects', '-Users-resume', `${suffix}.jsonl`);
+    fs.mkdirSync(path.dirname(sessionFile), { recursive: true });
+    fs.writeFileSync(sessionFile, `${JSON.stringify({ type: 'user', message: { content: 'resume me' } })}\n`);
+    getDB().prepare(`
+      INSERT INTO sessions (id, short_id, agent, timestamp, last_activity, file_path, is_team_origin)
+      VALUES (?, ?, 'claude', ?, ?, ?, 0)
+    `).run(resumeSession, resumeSession.slice(0, 8), new Date().toISOString(), new Date().toISOString(), sessionFile);
+
+    // Crash after the first filesystem move commits: the move is durable but the
+    // journal is still `planned` and the account/session records are not written.
+    let crashed = false;
+    await expect(applyAccountMigration(['claude'], {
+      isActive: async () => false,
+      afterMove: () => { if (!crashed) { crashed = true; throw new Error('injected crash after first move'); } },
+    })).rejects.toThrow(/injected crash/);
+    const manifests = path.join(getHistoryDir(), 'accounts');
+    const planned = fs.readdirSync(manifests).filter((f) => f.startsWith('migration-') && f.endsWith('.json'));
+    expect(planned).toHaveLength(1);
+    expect((JSON.parse(fs.readFileSync(path.join(manifests, planned[0]!), 'utf8')) as { status: string }).status).toBe('planned');
+
+    // Resume: picks up the same journal, re-does nothing already done, finishes.
+    const result = await applyAccountMigration(['claude'], { isActive: async () => false });
+    expect(result.manifest.status).toBe('complete');
+    // Exactly one manifest — the resume reused the pending one, never a second.
+    expect(fs.readdirSync(manifests).filter((f) => f.startsWith('migration-') && f.endsWith('.json'))).toHaveLength(1);
+    for (const acct of [acctA, acctB]) {
+      expect(fs.existsSync(path.join(slotDir('claude', acct.id), '.claude.json'))).toBe(true);
+      expect(fs.existsSync(path.join(slotDir('claude', acct.id), '.claude', '.credentials.json'))).toBe(true);
+    }
+    expect(fs.existsSync(path.join(getVersionDir('claude', labelA), 'home', '.claude.json'))).toBe(false);
+    expect(fs.existsSync(path.join(getVersionDir('claude', labelB), 'home', '.claude.json'))).toBe(false);
+    // No duplicate account rows minted across the two apply passes.
+    expect(listNativeAccounts(readMeta()).filter((a) => a.identityLabel === emailA)).toHaveLength(1);
+    // The transcript followed A's home into its slot and the DB points at it.
+    const row = getDB().prepare(`SELECT file_path FROM sessions WHERE id = ?`).get(resumeSession) as { file_path: string };
+    expect(row.file_path.includes(`${path.sep}accounts${path.sep}claude${path.sep}${acctA.id}${path.sep}`)).toBe(true);
+    expect(fs.existsSync(row.file_path)).toBe(true);
+    getDB().prepare(`DELETE FROM sessions WHERE id = ?`).run(resumeSession);
   });
 });

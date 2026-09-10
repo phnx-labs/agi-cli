@@ -77,6 +77,7 @@ import { addHostOption } from '../lib/hosts/option.js';
 import { syncRepoGit, adoptUserRepoIfNeeded, recordUserRepoRemote, resolveUserRepoRemoteUrl } from '../lib/git.js';
 import { getSystemAgentsDir, getUserAgentsDir, getEnabledExtraRepos } from '../lib/state.js';
 import { registerStatusCommand } from './status.js';
+import { syncResourcesToAccountSlots } from '../lib/accounts/slots.js';
 
 interface SyncOpts {
   agent?: string;
@@ -130,6 +131,17 @@ interface SyncOpts {
   rule?: string[] | true;
   rules?: string[] | true;
   memory?: boolean;
+}
+
+function syncVersionAndAccountSlots(
+  agent: AgentId,
+  version: string,
+  selection: ResourceSelection | undefined,
+  options: Parameters<typeof syncResourcesToVersion>[3],
+): SyncResult {
+  const result = syncResourcesToVersion(agent, version, selection, options);
+  syncResourcesToAccountSlots(agent, version, selection, { ...options, prune: false });
+  return result;
 }
 
 /** Emit one JSON object to stdout for `--json` callers / fleet fan-out. */
@@ -522,7 +534,7 @@ async function runInteractiveReconcile(
   for (const agentId of agents) {
     const version = resolveVersion(agentId, cwd) || listInstalledVersions(agentId).slice(-1)[0];
     if (!version) continue;
-    const result = syncResourcesToVersion(agentId, version, selection, { cwd, prune: true });
+    const result = syncVersionAndAccountSlots(agentId, version, selection, { cwd, prune: true });
     printSyncDetail(result, agentId, version, cwd);
     if (result.hooks && hookCapable.has(agentId) && Object.keys(hookManifest).length > 0) {
       registerHooksToSettings(agentId, getVersionHomePath(agentId, version), hookManifest);
@@ -908,7 +920,7 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
       // it no longer provides. Bare @all (no repo) leaves selection undefined
       // and falls through to the full-sync orphan sweep, so prune is a no-op
       // there (it requires a caller selection).
-      const result = syncResourcesToVersion(agentId, v, selection, { projectDir, cwd, force, prune: !!repoScope, allowExecSurfaces: !!opts.allowExecSurfaces });
+      const result = syncVersionAndAccountSlots(agentId, v, selection, { projectDir, cwd, force, prune: !!repoScope, allowExecSurfaces: !!opts.allowExecSurfaces });
       versions.push({ version: v, result });
       if (!quiet && !json) printSyncDetail(result, agentId, v, cwd);
     }
@@ -1058,7 +1070,7 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
       if (json) emitJson({ ok: true, mode: 'dry-run', agent: agentId, version, repo: repoScope, selection: scoped });
       return;
     }
-    const result = syncResourcesToVersion(agentId, version, scoped, { projectDir, cwd, force, prune: !!repoScope, allowExecSurfaces: !!opts.allowExecSurfaces });
+    const result = syncVersionAndAccountSlots(agentId, version, scoped, { projectDir, cwd, force, prune: !!repoScope, allowExecSurfaces: !!opts.allowExecSurfaces });
     const scopedRepair = await repairAfterSync({ agent: agentId, versions: [version], cwd });
     const scopedRepairFailed = repairHadFailures(scopedRepair);
     if (scopedRepairFailed) process.exitCode = 1;
@@ -1145,7 +1157,7 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
     if (json) emitJson({ ok: true, mode: 'dry-run', agent: agentId, version, repo: repoScope, selection: selection ?? 'all' });
     return;
   }
-  const result = syncResourcesToVersion(agentId, version, selection, { projectDir, cwd, force, allowExecSurfaces: !!opts.allowExecSurfaces });
+  const result = syncVersionAndAccountSlots(agentId, version, selection, { projectDir, cwd, force, allowExecSurfaces: !!opts.allowExecSurfaces });
 
   // Post-reconcile verification (PHNX-3186). Only for a FULL reconcile
   // (`!selection`): an interactive subset-selection deliberately touched only the

@@ -2546,13 +2546,37 @@ export function resolveHookSelection(sel: string[] | 'all' | undefined, availabl
   return out;
 }
 
-export function syncResourcesToVersion(agent: AgentId, version: string, selection?: ResourceSelection, options: { projectDir?: string; cwd?: string; force?: boolean; available?: AvailableResources; prune?: boolean; allowExecSurfaces?: boolean } = {}): SyncResult {
+export interface SyncResourcesOptions {
+  projectDir?: string;
+  cwd?: string;
+  force?: boolean;
+  available?: AvailableResources;
+  prune?: boolean;
+  allowExecSurfaces?: boolean;
+}
+
+/**
+ * Reconcile one harness home through the canonical resource writers.
+ *
+ * `version` selects binary capabilities and resource policy; `versionHome` is
+ * the HOME-shaped destination. Account slots deliberately use this same writer
+ * instead of detecting/copying a version home's output. Version-only project
+ * fan-out and staleness metadata stay scoped to the managed installation.
+ */
+export function syncResourcesToHome(
+  agent: AgentId,
+  version: string,
+  versionHome: string,
+  selection?: ResourceSelection,
+  options: SyncResourcesOptions = {},
+): SyncResult {
   if (isAgentHardDeprecated(agent)) {
     return { commands: false, skills: false, hooks: false, memory: [], permissions: false, mcp: [], subagents: [], plugins: [], workflows: [], projectSkipped: [], pruned: { commands: [], skills: [] }, declined: [] };
   }
 
   const agentConfig = AGENTS[agent];
-  const versionHome = getVersionHomePath(agent, version);
+  const managedVersionHome = getVersionHomePath(agent, version);
+  const isManagedVersionHome = path.resolve(versionHome) === path.resolve(managedVersionHome);
   const agentDir = path.join(versionHome, agentConfigDirName(agent));
   fs.mkdirSync(agentDir, { recursive: true });
   // Capture whether the caller passed a selection. The pattern-expansion
@@ -2571,7 +2595,7 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
 
   // Project-layer fan-out always runs — even on the early guard hit — so the
   // `projectSkipped` contract is preserved for callers (RUSH-2320 #4).
-  if (projectAgentsDir) {
+  if (isManagedVersionHome && projectAgentsDir) {
     result.projectSkipped = syncProjectResourcesToAgent(agent, version, projectAgentsDir).skipped;
   }
 
@@ -2580,7 +2604,7 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   // staleness guard, because the hook is registered in the harness's native
   // config (not in the version-home resource tree the manifest tracks).
   if (supports(agent, 'hooks', version).ok) {
-    const trackerResult = installSessionTrackerHookSync(agent, version);
+    const trackerResult = installSessionTrackerHookSync(agent, version, versionHome);
     if (!trackerResult.installed && trackerResult.error) {
       console.warn(`agents: SessionStart hook not installed for ${agent}@${version}: ${trackerResult.error}`);
     }
@@ -2601,7 +2625,7 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   // version resource patterns, so skipping ensureVersionResourcePatterns on
   // the hit path is safe in practice but is not byte-identical to the old
   // order (that call always wrote missing pattern defaults).
-  if (!userPassedSelection && !options.force) {
+  if (isManagedVersionHome && !userPassedSelection && !options.force) {
     const manifest = loadManifest(agent, version);
     if (manifest && !isStale(manifest, agent, version, cwd)) {
       return { ...result };
@@ -2614,7 +2638,7 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
 
   // Write default resource selection patterns for this version (idempotent —
   // only sets fields that aren't already present, preserving user edits).
-  {
+  if (isManagedVersionHome) {
     const extraAliases = extraRepos.map(e => e.alias);
     const noProject = defaultPatterns(extraAliases, false);
     ensureVersionResourcePatterns(agent, version, {
@@ -3103,7 +3127,7 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   // and only when they are gone from ALL source layers — so a user-authored
   // file the sync never placed, or a same-named resource still provided by
   // another layer, is never removed. No manifest → fail loud (delete nothing).
-  if (options.prune && userPassedSelection) {
+  if (isManagedVersionHome && options.prune && userPassedSelection) {
     const previousManifest = loadManifest(agent, version);
     const outcome = pruneRemovedResources({
       agent,
@@ -3131,7 +3155,7 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   // one-off override, so the resulting state matches what the manifest
   // records as the synced set. Carry forward still-fresh fingerprints from
   // the previous manifest so we do not re-hash an unchanged tree (RUSH-2320 #3).
-  if (!userPassedSelection) {
+  if (isManagedVersionHome && !userPassedSelection) {
     const previous = loadManifest(agent, version);
     const manifest = buildSyncManifest(agent, version, cwd, previous);
     manifest.writtenCommands = writtenCommands;
@@ -3141,6 +3165,15 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   }
 
   return result;
+}
+
+export function syncResourcesToVersion(
+  agent: AgentId,
+  version: string,
+  selection?: ResourceSelection,
+  options: SyncResourcesOptions = {},
+): SyncResult {
+  return syncResourcesToHome(agent, version, getVersionHomePath(agent, version), selection, options);
 }
 
 
