@@ -856,11 +856,17 @@ Harness worker credentials are minted by `agents accounts add &lt;harness&gt; [n
       profile that is in use, the configured default, or the `auto-chrome`
       profile a setup wizard created.
 
-      on a mac with arc, every arc space is listed as a profile (arc-personal,
+      on a mac with arc, every arc space is listed as a profile (arc-gmail,
       arc-work, ...) discovered read-only from arc&#39;s own metadata — a space
       already carries its arc profile&#39;s logins, so it is the browser profile.
       agents attach to the running arc through apple events and never launch or
-      relaunch it. point agents at comet instead when a workflow needs screenshots,
+      relaunch it. comet&#39;s own profiles are listed the same way (comet-work, ...),
+      pinned to comet&#39;s real user-data dir, so agents and you share one comet
+      window per profile: agents attach when it is running with remote debugging,
+      launch it on your store when it is not running, and fail loud with the
+      relaunch command when it runs without a port. the daemon publishes every
+      discovered profile into this device&#39;s declaration, so other fleet boxes list
+      it with where=&lt;this device&gt; and route to it. point agents at comet when a workflow needs screenshots,
       downloads, network capture, or trusted input:
         agents browser profiles create agents-comet --browser comet --attach-only
       a cdp `--attach-only` profile attaches to a browser you
@@ -897,11 +903,17 @@ Harness worker credentials are minted by `agents accounts add &lt;harness&gt; [n
       profile that is in use, the configured default, or the `auto-chrome`
       profile a setup wizard created.
 
-      On a Mac with Arc, every Arc Space is listed as a profile (arc-personal,
+      On a Mac with Arc, every Arc Space is listed as a profile (arc-gmail,
       arc-work, ...) discovered read-only from Arc&#39;s own metadata — a Space
       already carries its Arc profile&#39;s logins, so it IS the browser profile.
       Agents attach to the running Arc through Apple Events and never launch or
-      relaunch it. Point agents at Comet instead when a workflow needs screenshots,
+      relaunch it. Comet&#39;s own profiles are listed the same way (comet-work, ...),
+      pinned to Comet&#39;s real user-data dir, so agents and you share one Comet
+      window per profile: agents attach when it is running with remote debugging,
+      launch it on your store when it is not running, and fail loud with the
+      relaunch command when it runs without a port. The daemon publishes every
+      discovered profile into this device&#39;s declaration, so other fleet boxes list
+      it with WHERE=&lt;this device&gt; and route to it. Point agents at Comet when a workflow needs screenshots,
       downloads, network capture, or trusted input:
         agents browser profiles create agents-comet --browser comet --attach-only
       A CDP `--attach-only` profile attaches to a browser you

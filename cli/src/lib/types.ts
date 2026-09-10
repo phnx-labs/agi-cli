@@ -1370,6 +1370,12 @@ export interface BrowserProfileConfig {
    * ownership guard compares a running instance against to reject a port-squatter.
    */
   userDataDir?: string;
+  /**
+   * Chromium profile directory inside {@link userDataDir} (`Default`,
+   * `Profile 1`, ...) for a profile discovered from the browser's own store
+   * (PHNX-4042). Launch passes it as `--profile-directory`.
+   */
+  profileDirectory?: string;
   chrome?: {
     headless?: boolean;
     args?: string[];

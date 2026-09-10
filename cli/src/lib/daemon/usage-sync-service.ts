@@ -38,6 +38,16 @@ export class UsageSyncService extends BasePeriodicService {
     const { consumeUsageSnapshotsFromSharedStore, publishUsageSnapshotToSharedStore } = await import('../accounting/usage-sync.js');
     const { consumeSessionMirrorFromSharedStore, publishSessionMirrorToSharedStore } = await import('../session/mirror.js');
     // Publish every owned field BEFORE the single git exchange so they ride one commit.
+    // Discovered native browser profiles (Arc Spaces, Comet profiles) go into this
+    // device's declaration first, so every other box lists them with WHERE=<here>
+    // and routes a `--profile` for one of them to this machine (PHNX-4042).
+    const { publishDiscoveredProfiles } = await import('../browser/profiles.js');
+    const profiles = await publishDiscoveredProfiles().catch((error: unknown) => ({
+      published: [] as string[],
+      errors: { publish: error instanceof Error ? error.message : String(error) },
+    }));
+    if (profiles.published.length > 0) ctx.log('INFO', `browser-profiles: published ${profiles.published.join(', ')} to this device's declaration`);
+    for (const [browser, message] of Object.entries(profiles.errors)) ctx.log('WARN', `browser-profiles: ${browser}: ${message}`);
     const published = await publishUsageSnapshotToSharedStore();
     if (published.changed) ctx.log('INFO', `usage-sync: published usage snapshot to ${published.path}`);
     if (published.error) ctx.log('WARN', `usage-sync: publish: ${published.error}`);

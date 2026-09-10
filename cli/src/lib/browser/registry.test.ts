@@ -293,6 +293,52 @@ describe('device declaration lifecycle', () => {
     }
   });
 
+  it('publishes discovered Arc and Comet profiles into this device declaration for the fleet', async () => {
+    const previousArc = process.env.AGENTS_ARC_DIR;
+    const previousComet = process.env.AGENTS_COMET_DIR;
+    try {
+      process.env.AGENTS_ARC_DIR = path.join(import.meta.dirname, 'testdata', 'arc', 'valid');
+      process.env.AGENTS_COMET_DIR = path.join(import.meta.dirname, 'testdata', 'comet', 'valid');
+      const { machineId } = await import('../machine-id.js');
+      const { createProfile, getProfile, listProfiles, publishDiscoveredProfiles, isProfileDeclaredHere } = await import('./profiles.js');
+      // A pre-existing declaration on the canonical Comet port: discovered rows step past it.
+      await createProfile({ name: 'comet-local', browser: 'comet', endpoints: ['cdp://127.0.0.1:9333'] });
+
+      const first = await publishDiscoveredProfiles();
+      expect(first.errors).toEqual({});
+      expect(first.published.sort()).toEqual(['arc-home', 'arc-reading', 'arc-work', 'comet-personal', 'comet-work-default', 'comet-work-profile-2']);
+      for (const name of first.published) expect(isProfileDeclaredHere(name)).toBe(true);
+
+      const stored = yaml.parse(fs.readFileSync(deviceFile(machineId()), 'utf8')).browser;
+      expect(stored['comet-work-default']).toMatchObject({
+        browser: 'comet',
+        userDataDir: process.env.AGENTS_COMET_DIR,
+        profileDirectory: 'Default',
+      });
+      const ports = ['comet-work-default', 'comet-personal', 'comet-work-profile-2'].map((name) => stored[name].endpoints[0]);
+      expect(new Set(ports).size).toBe(3);
+      expect(ports).not.toContain('cdp://127.0.0.1:9333');
+
+      // Idempotent: nothing new on the second pass, and listing shows one row per name.
+      expect((await publishDiscoveredProfiles()).published).toEqual([]);
+      const names = (await listProfiles()).map((profile) => profile.name);
+      expect(names.filter((name) => name === 'comet-work-default')).toHaveLength(1);
+      expect((await getProfile('comet-personal'))?.profileDirectory).toBe('Profile 1');
+
+      // A torn Comet read skips Comet, keeps the Arc and declared rows, and only a comet-* lookup pays.
+      process.env.AGENTS_COMET_DIR = path.join(import.meta.dirname, 'testdata', 'comet', 'malformed');
+      const degraded = await publishDiscoveredProfiles();
+      expect(degraded.published).toEqual([]);
+      expect(degraded.errors.comet).toMatch(/has no non-empty name/);
+      expect((await listProfiles()).map((profile) => profile.name)).toEqual(expect.arrayContaining(['comet-local', 'comet-work-default', 'arc-home']));
+      await expect(getProfile('comet-nope')).rejects.toThrow(/Cannot discover comet profiles/);
+      expect(await getProfile('arc-nope')).toBeNull();
+    } finally {
+      if (previousArc === undefined) delete process.env.AGENTS_ARC_DIR; else process.env.AGENTS_ARC_DIR = previousArc;
+      if (previousComet === undefined) delete process.env.AGENTS_COMET_DIR; else process.env.AGENTS_COMET_DIR = previousComet;
+    }
+  });
+
   it('round-trips create, read, and rename without losing configuration', async () => {
     const { machineId } = await import('../machine-id.js');
     const { createProfile, getProfile, renameProfile } = await import('./profiles.js');

@@ -211,6 +211,8 @@ export interface BrowserProfile {
    * `resolveProfileDataDir(profile)` rather than reading directly.
    */
   userDataDir?: string;
+  /** Chromium profile directory inside `userDataDir` for a discovered native profile (PHNX-4042). */
+  profileDirectory?: string;
   chrome?: ChromeOptions;
   secrets?: string;
   viewport?: { width: number; height: number; x?: number; y?: number };
@@ -232,6 +234,10 @@ export interface ChromeOptions {
   headless?: boolean;
   args?: string[];
   viewport?: { width: number; height: number; x?: number; y?: number };
+  /** The browser's own user-data dir; set only for a discovered native profile (PHNX-4042). */
+  userDataDir?: string;
+  /** Chromium profile directory inside `userDataDir` (`Default`, `Profile 1`, ...). */
+  profileDirectory?: string;
 }
 
 export interface Task {

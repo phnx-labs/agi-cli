@@ -377,6 +377,33 @@ agents browser type --task post --ref @e3 "hello"
 agents browser screenshot --task post
 ```
 
+### Native profiles are discovered, and the fleet sees them
+
+On a Mac, `agents browser profiles list` shows the profiles your browsers
+already have, without creating anything:
+
+- **Arc**: one profile per Space (`arc-gmail`, `arc-work`, ...), see
+  [Arc native automation](#arc-native-automation).
+- **Comet**: one profile per entry in Comet's own profile menu (`comet-work`,
+  ...), read from Comet's `Local State` and pinned to Comet's real user-data dir
+  and profile directory. Agents and you share **one Comet window per profile**:
+  agents attach when your Comet is running with remote debugging on the
+  profile's port, launch Comet on your own store (your logins, your history)
+  when it is not running, and fail loud with the exact relaunch command when it
+  is running without a port. Clicking Comet in the Dock while agents hold it
+  open focuses that same window. `AGENTS_COMET_DIR` points discovery at another
+  store. Two profiles with the same display name stay distinct by their
+  directory (`comet-work-default`, `comet-work-profile-2`).
+
+The daemon's fleet-sync tick publishes every discovered profile into this
+device's declaration (`~/.agents/devices/<device>/agents.yaml`), which the
+shared-store sync carries to every other box. So on a worker,
+`agents browser profiles list` shows `arc-gmail` with `WHERE=zion`, and
+`agents browser start --profile arc-gmail` from that worker runs on zion
+(native Arc dispatches the whole command; a Comet profile tunnels its CDP port
+over SSH). A discovery read that fails for one browser never hides the others;
+only a lookup of that browser's profile by name reports the failure.
+
 ### Arc native automation
 
 Arc is single-instance, so `agents browser` never launches it. On macOS every
