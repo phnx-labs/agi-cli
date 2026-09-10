@@ -149,6 +149,25 @@ d('BrowserService over Firefox BiDi against real Firefox', () => {
     await expect(service.printToPdf('nope')).rejects.toThrow(/Firefox.*does not support pdf|Chromium/i);
   }, 60_000);
 
+  it('tabs --all lists every tab in the profile, the owner\'s next to the task\'s (profileTabs)', async () => {
+    const { bidiCreateTab, bidiNavigate } = await import('./drivers/firefox.js');
+    const task = seedTask('all');
+    const mine = await service.tabAdd('all', dataUrl('<title>Agent tab</title>'));
+    // A tab nobody's task owns: the owner opened it (or another tool did).
+    const foreign = await bidiCreateTab(conn.bidi);
+    await bidiNavigate(conn.bidi, foreign, dataUrl('<title>Owner tab</title>'));
+
+    const rows = await service.profileTabs('all');
+    const agentRow = rows.find((r: { id: string }) => r.id === mine.tabId);
+    expect(agentRow).toMatchObject({ task: 'all', title: 'Agent tab', current: task.currentTabId === mine.tabId });
+    const ownerRow = rows.find((r: { id: string }) => r.id === foreign);
+    expect(ownerRow).toMatchObject({ title: 'Owner tab' });
+    expect(ownerRow.task).toBeUndefined();
+    // Read-only: listing changed nothing the task owns.
+    expect((await service.tabs('all')).map((t: { id: string }) => t.id)).toEqual([mine.tabId]);
+    await service.tabClose('all');
+  });
+
   it('done closes the task tabs without killing Firefox', async () => {
     seedTask('close');
     await service.tabAdd('close', dataUrl('<title>C</title>'));

@@ -37,6 +37,7 @@ import {
   isValidTaskId,
   type Task,
   type TabInfo,
+  type ProfileTabInfo,
   type ProfileStatus,
   type TaskStatus,
   type BrowserProfile,
@@ -1590,6 +1591,69 @@ export class BrowserService {
       }
     }
     return tabs;
+  }
+
+  /**
+   * Every top-level tab open in the task's profile browser, the owner's tabs
+   * included (`agents browser tabs --all`). Read-only: nothing is focused,
+   * navigated, or closed. A tab an agents-cli task owns carries that task's
+   * name and short id (so it can be addressed); any other tab carries the
+   * browser's own id and no task. Same rows on every backend.
+   */
+  async profileTabs(taskId: string): Promise<ProfileTabInfo[]> {
+    const { conn, task } = await this.findTask(taskId);
+    const owners = new Map<string, { owner: Task; shortId: string }>();
+    for (const [, owner] of conn.tasks) {
+      const entries = conn.backend === 'arc-native'
+        ? Object.entries(owner.arcNative?.tabs ?? {}).map(([shortId, ref]) => [shortId, ref.tabId] as const)
+        : Object.entries(owner.tabs);
+      for (const [shortId, nativeId] of entries) owners.set(nativeId, { owner, shortId });
+    }
+    const row = (nativeId: string, url: string, title: string): ProfileTabInfo => {
+      const owned = owners.get(nativeId);
+      if (!owned) return { id: nativeId, url, title };
+      return {
+        id: owned.shortId,
+        url,
+        title,
+        task: owned.owner.name,
+        current: owned.owner === task && owned.shortId === task.currentTabId,
+      };
+    };
+
+    if (conn.backend === 'arc-native') {
+      const native = this.requireArcTask(task);
+      const space = (await enumerateArcSpaces()).find(
+        (candidate) => candidate.windowId === native.windowId && candidate.spaceId === native.spaceId,
+      );
+      if (!space) {
+        throw new Error(
+          `Arc Space "${native.spaceTitle}" is not open in its original window (${native.windowId}); ` +
+            'open it in Arc and retry.',
+        );
+      }
+      return space.tabs.map((tab) => row(tab.tabId, tab.url, tab.title));
+    }
+    if (conn.backend === 'bidi') {
+      const rows: ProfileTabInfo[] = [];
+      for (const context of await bidiTopLevelContexts(conn.bidi)) {
+        let title = '';
+        try {
+          title = String(await bidiEvaluate(conn.bidi, context.context, 'document.title'));
+        } catch {
+          /* about: pages or a mid-navigation context — url is enough */
+        }
+        rows.push(row(context.context, context.url, title));
+      }
+      return rows;
+    }
+    requireCdp(conn, 'enumerate');
+    const { targetInfos } = (await conn.cdp.send('Target.getTargets')) as {
+      targetInfos: Array<{ targetId: string; type: string; url: string; title: string }>;
+    };
+    return targetInfos
+      .filter((target) => target.type === 'page')
+      .map((target) => row(target.targetId, target.url, target.title));
   }
 
   private async resolveTabHint(conn: ProfileConnection, task: Task, hint: string): Promise<string> {

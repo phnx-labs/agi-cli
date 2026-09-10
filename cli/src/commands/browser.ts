@@ -2452,15 +2452,17 @@ function registerTaskCommands(browser: Command): void {
 
   browser
     .command('tabs')
-    .description('List tabs open for the current task')
+    .description('List tabs open for the current task; --all shows every tab open in the profile browser, yours included')
     .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
     .option(DEVICE_ON_PAGE_VERB_FLAG, DEVICE_ON_PAGE_VERB_DESC)
+    .option('--all', "Every tab open in the profile browser, not only this task's: OWNER names the owning task, or \"you\" for a tab no task owns")
     .option('--json', 'Output machine-readable JSON')
     .action(async (opts) => {
       const task = resolveTaskName(opts);
       const response = await sendIPCRequest({
         action: 'tab-list',
         task,
+        ...(opts.all ? { all: true } : {}),
       });
 
       if (!response.ok) {
@@ -2482,6 +2484,16 @@ function registerTaskCommands(browser: Command): void {
         return;
       }
 
+      if (opts.all) {
+        console.log('TAB'.padEnd(12) + 'OWNER'.padEnd(18) + 'URL');
+        console.log('-'.repeat(88));
+        for (const t of response.tabs) {
+          const owner = t.task ?? 'you';
+          const current = t.current ? ' *' : '';
+          console.log(t.id.slice(0, 11).padEnd(12) + owner.slice(0, 17).padEnd(18) + t.url.slice(0, 55) + current);
+        }
+        return;
+      }
       console.log('TAB'.padEnd(12) + 'URL');
       console.log('-'.repeat(70));
       for (const t of response.tabs) {

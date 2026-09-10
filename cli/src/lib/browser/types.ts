@@ -358,6 +358,21 @@ export interface TabInfo {
   current?: boolean;
 }
 
+/**
+ * One row of `agents browser tabs --all`: a top-level tab open in the profile's
+ * browser. Owned by an agents-cli task → `task` names it and `id` is that
+ * task's short tab id; otherwise (the owner's own tab, or a tab from another
+ * tool) `task` is absent and `id` is the browser's own tab id.
+ */
+export interface ProfileTabInfo {
+  id: string;
+  url: string;
+  title: string;
+  task?: string;
+  /** The queried task's current tab. */
+  current?: boolean;
+}
+
 export interface ProfileStatus {
   /**
    * The BARE profile name — what the user passed to `--profile` and what
@@ -387,7 +402,7 @@ export interface TaskStatus {
   createdAt: number;
   endedAt?: number;
   domains?: string[];
-  tabs?: Array<{ id: string; url: string; title?: string; current?: boolean }>;
+  tabs?: Array<{ id: string; url: string; title?: string; current?: boolean; task?: string }>;
 }
 
 export interface HistoricalTask {
@@ -470,6 +485,8 @@ export interface IPCRequest {
   action: IPCAction;
   task?: string;
   taskName?: string; // human-readable task name for 'open'
+  /** tab-list: every tab open in the profile browser, not only the task's own. */
+  all?: boolean;
   profile?: string;
   url?: string;
   tabId?: string;
@@ -642,7 +659,8 @@ export interface IPCResponse {
    */
   reused?: boolean;
   windowTargetId?: string;
-  tabs?: TabInfo[];
+  /** `tab-list` rows; `task` is absent for a tab no agents-cli task owns (`--all`). */
+  tabs?: ProfileTabInfo[];
   profiles?: ProfileStatus[];
   history?: HistoricalTask[];
   /** `gc`: what the abandoned-task reaper closed (or would close under dryRun). */
