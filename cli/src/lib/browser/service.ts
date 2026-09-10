@@ -4585,7 +4585,9 @@ export class BrowserService {
             // creation itself fails. Put the owner back on their tab before
             // surfacing the error, so a failed agent verb never leaves them
             // staring at the wrong Space.
-            if (intent.previousTabId) await selectWindowTab(native.windowId, intent.previousTabId);
+            if (intent.previousTabId) {
+              await selectWindowTab(native.windowId, intent.previousTabId).catch(() => undefined);
+            }
             throw error;
           }
         }
