@@ -167,8 +167,9 @@ each machine keeps its own choice — the profile it points at may hold
 machine-local logins. It is machine-local: only this box can set it. Set it
 once per machine.
 
-Safari and Firefox are not supported. They do not implement the Chrome
-DevTools Protocol.
+Safari is not supported — it implements neither the Chrome DevTools Protocol
+nor WebDriver BiDi. **Firefox is supported over WebDriver BiDi** (Firefox 129+
+dropped CDP); see [Firefox automation](#firefox-automation-webdriver-bidi).
 
 ### Attach-only profiles — one canonical browser (PHNX-3967)
 
@@ -494,6 +495,80 @@ sockets or SSH tunnels. The existing remote-control consent gate still applies.
 
 This is why Arc is never used as the [viewer](#which-browser-shows-you-a-page-browserviewer)
 (showing a human a page needs its own fresh tab).
+
+### Firefox automation (WebDriver BiDi)
+
+Firefox 129 removed the Chrome DevTools Protocol, so `agents browser` drives it
+over **WebDriver BiDi** — a JSON-RPC protocol on a WebSocket at
+`ws://127.0.0.1:<port>/session`. Every **Firefox profile in `profiles.ini` is
+listed as a browser profile** — `firefox-default`, `firefox-default-release`,
+`firefox-<name>` — discovered read-only from Firefox's own metadata. A profile
+already carries its cookies and logins, so it IS the profile agents pick with
+`--profile`; there is nothing to create.
+
+Unlike Arc, agents **launch** Firefox for you: a bare
+`agents browser start --profile firefox-<name>` starts a headless Firefox bound
+to that profile directory with a debug port, or attaches to one already serving
+the port. If a Firefox is already open on that profile without a debug port,
+agents fail loud with the exact relaunch rather than starting a rival (Firefox
+is single-instance per profile directory).
+
+```bash
+agents browser profiles list                     # one row per profiles.ini entry
+agents browser profiles show firefox-default
+agents browser use firefox-default               # agents default to this profile
+
+agents browser start --profile firefox-default --url https://example.com
+agents browser refs                              # the accessibility listing
+agents browser type 1 --text "hello"             # DOM value + input/change events
+agents browser click 2                           # trusted pointer via input.performActions
+agents browser screenshot -o /tmp/shot.png
+agents browser done                              # closes the task's tabs; Firefox stays up
+```
+
+Firefox profiles use a `firefox-bidi:` endpoint protocol and support this set of
+operations:
+
+| Capability | Status |
+|---|---|
+| Profile discovery from `profiles.ini`, one profile per entry | Supported |
+| Launch headless (or attach to a running debug port) | Supported |
+| Start, navigate, tab add, tabs, tab focus, done | Supported |
+| Same-task reopen (navigate to an owned URL refreshes it, no duplicate) | Supported |
+| Evaluate JavaScript (async/promise capable) | Supported (`script.evaluate`) |
+| `refs` accessibility listing, `click`, `fill`/`type`, `scroll` | Supported |
+| Trusted pointer click | Supported (`input.performActions`) |
+| Screenshot | Supported (`browsingContext.captureScreenshot`) |
+| Network capture, upload, PDF, trusted key input, recording, viewport emulation | Unsupported |
+
+Unsupported capabilities throw a structured `FirefoxCapabilityError` naming a
+Chromium-family profile (chrome/comet/chromium/brave/edge). They never return
+fabricated success or silently switch to another browser.
+
+**Discovery.** `firefox-discovery.ts` reads `profiles.ini` under
+`~/.mozilla/firefox` and the snap location `~/snap/firefox/common/.mozilla/firefox`
+(macOS: `~/Library/Application Support/Firefox`; Windows: `%APPDATA%\Mozilla\Firefox`)
+as read-only metadata; `AGENTS_FIREFOX_DIRS` (a path-separator list) points at
+another root. Each entry's directory is authoritative; the profile name is
+display + slug source, and each profile is pinned to a stable port in the 9600–9699
+range (derived from its directory) so the relaunch hint and a post-restart
+reattach address the same Firefox. A torn or malformed `profiles.ini` read is
+reported where a `firefox-` profile is asked for by name and never breaks listing
+the other browsers.
+
+**Transport.** `drivers/firefox.ts` launches
+`firefox --remote-debugging-port <port> --profile <dir> --no-remote [--headless]`,
+connects the BiDi WebSocket, and runs `session.new`. Page work uses
+`browsingContext.create/navigate/reload/close/getTree/captureScreenshot`,
+`script.evaluate`, and `input.performActions`; `script.evaluate` results are
+deserialized from BiDi's structured `RemoteValue` back into plain JS values.
+
+**Remote dispatch.** A worker dispatches the whole command to the device that
+declares the Firefox profile (the BiDi socket is local to that box). The
+task-to-device index records that owner, so later task verbs follow it. Firefox
+endpoints are never exposed as fake local CDP sockets or SSH tunnels, and the
+remote-control consent gate still applies. A headless-automation Firefox is never
+used as the [viewer](#which-browser-shows-you-a-page-browserviewer).
 
 ### Cleaning up dead profiles (`prune`)
 

@@ -87,6 +87,7 @@ export function profileFromDeclaration(
     logDir: config.logDir,
     logHost: config.logHost,
     arc: config.arc,
+    firefox: config.firefox,
   };
 }
 
@@ -208,6 +209,10 @@ export function sshEndpointForDeclaration(
   // Native Arc endpoints (arc-native:) must NOT be rewritten into SSH tunnels
   // (PHNX-2399). They dispatch the whole command to the owner device instead.
   if (resolved.target.startsWith('arc-native:')) return resolved.target;
+  // Firefox BiDi endpoints (firefox-bidi:) are a local WebSocket bound to a
+  // specific profile directory on the owner box; they dispatch the whole
+  // command to that box rather than tunnelling (PHNX-4043).
+  if (resolved.target.startsWith('firefox-bidi:')) return resolved.target;
   const parsed = parseEndpointUrl(resolved.target);
   const port = parsed?.port ?? 9222;
   const osQuery = isWindowsOs(os) ? '&os=windows' : '';
@@ -302,7 +307,8 @@ export function resolveBrowserTarget(
         targetFilter: resolved.targetFilter,
       },
       picked,
-      commandDispatch: resolved.target.startsWith('arc-native:'),
+      commandDispatch:
+        resolved.target.startsWith('arc-native:') || resolved.target.startsWith('firefox-bidi:'),
     };
   }
 

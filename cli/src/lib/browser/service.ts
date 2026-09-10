@@ -82,8 +82,24 @@ import type {
   PageOpenResult,
   ArcNativeProfileIdentity,
   ArcNativeTabRef,
+  FirefoxProfileIdentity,
 } from './types.js';
 import { resolveFfmpeg } from './ffmpeg.js';
+import {
+  FirefoxCapabilityError,
+  FirefoxBiDiClient,
+  connectFirefox,
+  bidiTopLevelContexts,
+  bidiCreateTab,
+  bidiNavigate,
+  bidiReload,
+  bidiCloseTab,
+  bidiActivate,
+  bidiEvaluate,
+  bidiScreenshot,
+  bidiSetViewport,
+  bidiClickAt,
+} from './drivers/firefox.js';
 import {
   ArcNativeCapabilityError,
   executeJavaScript,
@@ -316,6 +332,11 @@ async function isConnHealthy(conn: ProfileConnection, timeoutMs = 1000): Promise
   if (conn.backend === 'arc-native') {
     return isArcRunning();
   }
+  // Firefox BiDi connections: healthy while the WebSocket is open (a killed
+  // Firefox closes it). No lightweight round-trip verb is needed.
+  if (conn.backend === 'bidi') {
+    return conn.bidi.isOpen;
+  }
   if (!conn.cdp.isOpen) return false;
   try {
     await Promise.race([
@@ -384,13 +405,37 @@ interface ArcProfileConnection extends BaseProfileConnection {
   arcProfile: ArcNativeProfileIdentity;
 }
 
-type ProfileConnection = CdpProfileConnection | ArcProfileConnection;
+/**
+ * A Firefox connection driven over WebDriver BiDi (PHNX-4043). No CDP socket:
+ * `bidi` is the live BiDi client, and `firefoxProfile` is the discovered
+ * profile identity. Task tab ids map to BiDi browsing-context ids.
+ */
+interface FirefoxProfileConnection extends BaseProfileConnection {
+  backend: 'bidi';
+  browserType: 'firefox';
+  bidi: FirefoxBiDiClient;
+  firefoxProfile: FirefoxProfileIdentity;
+  /** The BiDi session id from `session.new`. */
+  sessionId: string;
+  /** Absolute Firefox profile directory this connection is bound to. */
+  profileDir: string;
+}
 
+type ProfileConnection = CdpProfileConnection | ArcProfileConnection | FirefoxProfileConnection;
+
+/**
+ * Narrow `conn` to the CDP backend, or throw the backend's capability error.
+ * Because the union now carries `arc-native` AND `bidi`, every action that
+ * reaches `conn.cdp` without a preceding backend branch fails to type-check —
+ * the compiler is the checklist that no verb silently calls CDP on a
+ * non-CDP connection.
+ */
 function requireCdp(
   conn: ProfileConnection,
   capability: string,
 ): asserts conn is CdpProfileConnection {
   if (conn.backend === 'arc-native') throw new ArcNativeCapabilityError(capability);
+  if (conn.backend === 'bidi') throw new FirefoxCapabilityError(capability);
 }
 
 /** Join error lines so callers get a next command, not a dead-end message. */
@@ -782,7 +827,7 @@ export class BrowserService {
     // pile-up in RUSH-2622. Tabs the daemon did NOT open are still left alone —
     // the branch only fires when the profile has no page target at all.
     let startupBlankTargetId: string | undefined;
-    if (!opts.url && !conn.electron && conn.backend !== 'arc-native') {
+    if (!opts.url && !conn.electron && conn.backend !== 'arc-native' && conn.backend !== 'bidi') {
       const { targetInfos } = (await conn.cdp.send('Target.getTargets')) as {
         targetInfos: Array<{ type: string }>;
       };
@@ -836,7 +881,7 @@ export class BrowserService {
     }
 
     // For Electron, get the existing window as the tab
-    if (conn.electron && conn.backend !== 'arc-native') {
+    if (conn.electron && conn.backend !== 'arc-native' && conn.backend !== 'bidi') {
       const windowId = await this.getOrCreateWindow(conn);
       if (windowId) {
         const shortId = generateShortId();
@@ -891,7 +936,13 @@ export class BrowserService {
     // opening a fresh target is created:true.
     let tabId: string | undefined;
     let firstOpen: PageOpenResult | undefined;
-    if (opts.url && conn.backend !== 'arc-native' && !conn.electron && conn.browserType !== 'arc') {
+    if (opts.url && conn.backend === 'bidi') {
+      // Firefox: the implicit first navigate opens a fresh tab (no adopt path —
+      // Firefox tabs aren't shared across abandoned tasks the way CDP ones are).
+      const result = await this.navigate(taskName, opts.url, effectiveKey);
+      tabId = result.tabId;
+      firstOpen = { tabId: result.tabId, created: result.created, refreshed: result.refreshed, message: result.message };
+    } else if (opts.url && conn.backend !== 'arc-native' && conn.backend !== 'bidi' && !conn.electron && conn.browserType !== 'arc') {
       const adopted = opts.fresh ? undefined : await this.adoptTabShowing(conn, opts.url);
       const targetId =
         adopted ?? (await this.createPageTarget(conn, { url: opts.url })).targetId;
@@ -1156,6 +1207,17 @@ export class BrowserService {
           }
           await this.saveToHistory(task, Array.from(domains));
           await this.closeArcNativeTabs(conn, task);
+        } else if (conn.backend === 'bidi') {
+          try {
+            for (const tab of await this.listFirefoxTaskTabs(conn, task)) {
+              try {
+                const domain = new URL(tab.url).hostname.replace(/^www\./, '');
+                if (domain && domain !== 'blank') domains.add(domain);
+              } catch { /* invalid URL */ }
+            }
+          } catch { /* Firefox not responding */ }
+          await this.saveToHistory(task, Array.from(domains));
+          await this.closeFirefoxTabs(conn, task);
         } else {
           try {
             const { targetInfos } = (await conn.cdp.send('Target.getTargets')) as {
@@ -1211,7 +1273,10 @@ export class BrowserService {
         }).catch(() => { /* fail soft */ });
 
         if (conn.forkedFrom && conn.tasks.size === 0) {
-          if (conn.backend !== 'arc-native') {
+          if (conn.backend === 'bidi') {
+            conn.bidi.close();
+            if (conn.pid) killChrome(conn.pid);
+          } else if (conn.backend !== 'arc-native') {
             conn.cdp.close();
             killChrome(conn.pid);
           }
@@ -1265,6 +1330,17 @@ export class BrowserService {
         clearProfileRuntime(key);
         continue;
       }
+      // Firefox: close the BiDi socket and kill the Firefox WE launched (pid !=
+      // 0). An attached Firefox the user started (pid 0) is left running — the
+      // CLI does not own that process, same as Arc.
+      if (conn.backend === 'bidi') {
+        conn.bidi.close();
+        if (conn.pid) killChrome(conn.pid);
+        conn.cleanup?.();
+        this.connections.delete(key);
+        clearProfileRuntime(key);
+        continue;
+      }
       conn.cdp.close();
       killChrome(conn.pid);
       conn.cleanup?.();
@@ -1308,6 +1384,10 @@ export class BrowserService {
     // Native Arc backend (PHNX-2399): route through the native driver instead of CDP.
     if (conn.backend === 'arc-native') {
       return this.navigateArcNative(conn, task, url);
+    }
+    // Firefox BiDi backend (PHNX-4043).
+    if (conn.backend === 'bidi') {
+      return this.navigateFirefox(conn, task, url);
     }
     requireCdp(conn, 'navigate');
 
@@ -1431,6 +1511,9 @@ export class BrowserService {
     if (conn.backend === 'arc-native') {
       return this.navigateArcNative(conn, task, url, true);
     }
+    if (conn.backend === 'bidi') {
+      return this.navigateFirefox(conn, task, url, true);
+    }
     requireCdp(conn, 'createTab');
     if (conn.electron) {
       throw new Error('Electron apps do not support opening additional tabs');
@@ -1469,6 +1552,12 @@ export class BrowserService {
       });
       return { tabId: resolvedTabId };
     }
+    if (conn.backend === 'bidi') {
+      await bidiActivate(conn.bidi, this.firefoxContext(task, resolvedTabId));
+      task.currentTabId = resolvedTabId;
+      await this.saveTaskState(task.profile, conn.tasks);
+      return { tabId: resolvedTabId };
+    }
     task.currentTabId = resolvedTabId;
     await this.saveTaskState(task.profile, conn.tasks);
     return { tabId: resolvedTabId };
@@ -1478,6 +1567,11 @@ export class BrowserService {
     const { conn, task } = await this.findTask(taskId);
     if (conn.backend === 'arc-native') {
       return (await this.listArcTaskTabs(task)).map((tab) => ({ ...tab, current: tab.current === true }));
+    }
+    if (conn.backend === 'bidi') {
+      return (await this.listFirefoxTaskTabs(conn, task)).map((tab) => ({
+        id: tab.id, url: tab.url, title: tab.title, current: tab.current === true,
+      }));
     }
     requireCdp(conn, 'enumerate');
     const targets = (await conn.cdp.send('Target.getTargets')) as {
@@ -1513,6 +1607,8 @@ export class BrowserService {
     // Native Arc addresses owned tabs only by the task's stable short id. URL
     // and title are display data and must never become fallback identities.
     if (conn.backend === 'arc-native') throw new Error(`Tab "${hint}" not found`);
+    // Firefox tabs are addressed by the task's stable short id too.
+    if (conn.backend === 'bidi') throw new Error(`Tab "${hint}" not found`);
 
     // URL substring match
     const targets = (await conn.cdp.send('Target.getTargets')) as {
@@ -1550,6 +1646,7 @@ export class BrowserService {
     if (taskId) {
       const { conn, task } = await this.findTask(taskId, profileRef);
       if (conn.backend === 'arc-native') return this.listArcTaskTabs(task);
+      if (conn.backend === 'bidi') return this.listFirefoxTaskTabs(conn, task);
       return this.getTabsForTask(conn.cdp, task);
     }
 
@@ -1558,7 +1655,9 @@ export class BrowserService {
       for (const [, task] of conn.tasks) {
         const tabs = conn.backend === 'arc-native'
           ? await this.listArcTaskTabs(task)
-          : await this.getTabsForTask(conn.cdp, task);
+          : conn.backend === 'bidi'
+            ? await this.listFirefoxTaskTabs(conn, task)
+            : await this.getTabsForTask(conn.cdp, task);
         allTabs.push(...tabs);
       }
     }
@@ -1588,6 +1687,27 @@ export class BrowserService {
         }
         await this.saveTaskState(task.profile, conn.tasks);
       });
+      return;
+    }
+    if (conn.backend === 'bidi') {
+      const borrowed = new Set(task.borrowedTabs ?? []);
+      const ids = tabHint === undefined
+        ? Object.keys(task.tabs)
+        : [await this.resolveTabHint(conn, task, tabHint)];
+      for (const shortId of ids) {
+        const context = task.tabs[shortId];
+        // A borrowed tab is released, not closed — it outlives this task.
+        if (context && !borrowed.has(shortId)) {
+          try { await bidiCloseTab(conn.bidi, context); } catch { /* already closed */ }
+        }
+        delete task.tabs[shortId];
+        delete task.refDescriptors?.[shortId];
+        task.borrowedTabs = (task.borrowedTabs ?? []).filter((id) => id !== shortId);
+      }
+      if (!task.currentTabId || ids.includes(task.currentTabId)) {
+        task.currentTabId = Object.keys(task.tabs).at(-1);
+      }
+      await this.saveTaskState(task.profile, conn.tasks);
       return;
     }
     requireCdp(conn, 'closeTab');
@@ -1641,6 +1761,10 @@ export class BrowserService {
     // Native Arc backend (PHNX-2399): synchronous JS only, isolated world.
     if (conn.backend === 'arc-native') {
       return this.evaluateArcNative(conn, task, shortId, expression);
+    }
+    // Firefox BiDi backend (PHNX-4043): async-capable, isolated realm.
+    if (conn.backend === 'bidi') {
+      return this.evaluateFirefox(conn, task, shortId, expression);
     }
 
     const cdpTargetId = this.getCdpTargetId(task, shortId);
@@ -1701,6 +1825,11 @@ export class BrowserService {
           'This task still belongs to the Arc profile. ' +
           'Use a Chromium-family browser for screenshot capability.',
       );
+    }
+
+    // Firefox BiDi backend (PHNX-4043): captureScreenshot on the context.
+    if (conn.backend === 'bidi') {
+      return this.screenshotFirefox(conn, task, runtimeKey, tabHint, outputPath, quality);
     }
 
     const shortId = tabHint ? await this.resolveTabHint(conn, task, tabHint) : this.resolveCurrentTab(task);
@@ -2173,6 +2302,17 @@ export class BrowserService {
       await this.saveTaskState(task.profile, conn.tasks);
       return result;
     }
+    // Firefox BiDi (PHNX-4043): the same DOM-derived accessibility listing Arc
+    // uses, evaluated over BiDi. selector-based refs, no CDP accessibility tree.
+    if (conn.backend === 'bidi') {
+      const result = parseArcRefsResult(
+        await this.evaluateFirefox(conn, task, shortId, arcRefsExpression(opts)),
+        opts,
+      );
+      this.cacheRefDescriptors(task, shortId, result.nodeMap, result.opts);
+      await this.saveTaskState(task.profile, conn.tasks);
+      return result;
+    }
     requireCdp(conn, 'enumerate');
     const cdpTargetId = this.getCdpTargetId(task, shortId);
 
@@ -2258,6 +2398,21 @@ export class BrowserService {
       await this.evaluateArcNative(conn, task, shortId, arcClickExpression(selector));
       return healed ? { healed } : {};
     }
+    if (conn.backend === 'bidi') {
+      const snapshot = task.refDescriptors?.[shortId];
+      const buildOpts = snapshot?.opts ?? { interactive: true, limit: 500 };
+      const { nodeMap } = parseArcRefsResult(
+        await this.evaluateFirefox(conn, task, shortId, arcRefsExpression(buildOpts)),
+        buildOpts,
+      );
+      const { targetRef, healed } = this.resolveHealedRef(snapshot, nodeMap, ref);
+      const selector = nodeMap.get(targetRef)?.selector;
+      if (!selector) throw new Error(`Ref ${ref} has no DOM selector`);
+      const coords = await this.firefoxRefCoords(conn, task, shortId, selector);
+      const context = this.firefoxContext(task, shortId);
+      await bidiClickAt(conn.bidi, context, coords.x, coords.y);
+      return healed ? { healed } : {};
+    }
     requireCdp(conn, 'click');
     const cdpTargetId = this.getCdpTargetId(task, shortId);
     const target = await this.getTarget(conn, cdpTargetId);
@@ -2318,6 +2473,19 @@ export class BrowserService {
       const selector = nodeMap.get(targetRef)?.selector;
       if (!selector) throw new Error(`Ref ${ref} has no DOM selector`);
       await this.evaluateArcNative(conn, task, shortId, arcFillExpression(selector, text, clear ?? false));
+      return;
+    }
+    if (conn.backend === 'bidi') {
+      const snapshot = task.refDescriptors?.[shortId];
+      const buildOpts = snapshot?.opts ?? { interactive: true, limit: 500 };
+      const { nodeMap } = parseArcRefsResult(
+        await this.evaluateFirefox(conn, task, shortId, arcRefsExpression(buildOpts)),
+        buildOpts,
+      );
+      const { targetRef } = this.resolveHealedRef(snapshot, nodeMap, ref);
+      const selector = nodeMap.get(targetRef)?.selector;
+      if (!selector) throw new Error(`Ref ${ref} has no DOM selector`);
+      await this.evaluateFirefox(conn, task, shortId, arcFillExpression(selector, text, clear ?? false));
       return;
     }
     requireCdp(conn, 'type');
@@ -2384,6 +2552,10 @@ export class BrowserService {
     if (conn.backend === 'arc-native') {
       if (atX !== undefined || atY !== undefined) throw new ArcNativeCapabilityError('trustedInput');
       await this.evaluateArcNative(conn, task, shortId, arcScrollExpression(deltaX, deltaY));
+      return;
+    }
+    if (conn.backend === 'bidi') {
+      await this.evaluateFirefox(conn, task, shortId, arcScrollExpression(deltaX, deltaY));
       return;
     }
     requireCdp(conn, 'scroll');
@@ -3082,7 +3254,8 @@ export class BrowserService {
     }
 
     for (const [, conn] of this.connections) {
-      if (conn.backend !== 'arc-native') conn.cdp.close();
+      if (conn.backend === 'bidi') conn.bidi.close();
+      else if (conn.backend !== 'arc-native') conn.cdp.close();
       conn.cleanup?.();
     }
     this.connections.clear();
@@ -3162,6 +3335,12 @@ export class BrowserService {
   ): Promise<ProfileConnection> {
     const existingInfo = getRunningChromeInfo(key);
     const tunnelled = opts.persistRemote || target.startsWith('ssh:');
+    // Native Arc and Firefox BiDi speak their own transport, not CDP — never
+    // route them through the CDP reuse branch (which would probe /json/version
+    // and wipe the runtime meta the Firefox driver wrote). connectEndpoint owns
+    // their attach-or-launch decision.
+    const nativeTransport =
+      target.startsWith('arc-native:') || target.startsWith('firefox-bidi:');
 
     if (tunnelled) {
       // A leftover local chrome-data / pid file under this key is the
@@ -3172,7 +3351,7 @@ export class BrowserService {
       if (meta && meta.kind !== 'tunnel') {
         clearProfileRuntime(key);
       }
-    } else if (existingInfo) {
+    } else if (existingInfo && !nativeTransport) {
       try {
         const { wsUrl, browser } = await discoverBrowserWsUrl(
           existingInfo.port,
@@ -3300,6 +3479,42 @@ export class BrowserService {
       };
     }
 
+    // Firefox BiDi backend (PHNX-4043): `firefox-bidi://127.0.0.1:<port>` connects
+    // over a WebDriver BiDi WebSocket. The driver attaches to a Firefox already
+    // serving the port, else launches one headless bound to the pinned profile
+    // directory, else fails loud (Firefox is single-instance per profile).
+    if (url.protocol === 'firefox-bidi:') {
+      if (!profile.firefox) {
+        throw new Error(
+          `Firefox profile "${profile.name}" has no discovered profile metadata. ` +
+            `Re-select it with: agents browser use ${profile.name}`,
+        );
+      }
+      const profileDir = profile.userDataDir;
+      if (!profileDir) {
+        throw new Error(`Firefox profile "${profile.name}" has no profile directory.`);
+      }
+      const port = parseInt(url.port || '9600', 10);
+      const conn = await connectFirefox(profile, key, port, {
+        profileDir,
+        headless: profile.chrome?.headless,
+      });
+      return {
+        backend: 'bidi',
+        browserType: 'firefox',
+        bidi: conn.bidi,
+        firefoxProfile: profile.firefox,
+        sessionId: conn.sessionId,
+        profileDir,
+        port: conn.port,
+        pid: conn.pid,
+        electron: false,
+        targetFilter: profile.targetFilter,
+        tasks: this.loadTaskState(key),
+        sessionCache: new Map(),
+      };
+    }
+
     // Native Arc backend (PHNX-2399): `arc-native:` protocol connects through
     // Apple Events instead of CDP. No debugging port, no browser launch.
     if (url.protocol === 'arc-native:') {
@@ -3354,6 +3569,8 @@ export class BrowserService {
     if (conn.browserType === 'arc') {
       throw arcNotDrivableError(conn.profile);
     }
+    // Firefox opens tabs through the BiDi driver, never Target.createTarget.
+    requireCdp(conn, 'createTab');
     return (await conn.cdp.send('Target.createTarget', params)) as { targetId: string };
   }
 
@@ -3910,6 +4127,42 @@ export class BrowserService {
       };
     }
 
+    // Firefox BiDi endpoints (PHNX-4043): a daemon restart dropped the BiDi
+    // socket, but the Firefox we launched is still serving the port — reattach
+    // by opening a fresh session, then merge the disk tasks. connectFirefox
+    // attaches (never launches) when the port is already served. A failure
+    // returns null like the CDP path, so the caller falls through to disk
+    // reconcile instead of crashing.
+    if (resolved.target.startsWith('firefox-bidi:')) {
+      if (!profile.firefox || !profile.userDataDir) return null;
+      const port = parseEndpointUrl(resolved.target)?.port ?? 9600;
+      try {
+        const ff = await connectFirefox(profile, key, port, { profileDir: profile.userDataDir });
+        const tasks = this.loadTaskState(key);
+        for (const [k, t] of diskTasks) {
+          if (!tasks.has(k)) tasks.set(k, t);
+        }
+        return {
+          backend: 'bidi',
+          browserType: 'firefox',
+          bidi: ff.bidi,
+          firefoxProfile: profile.firefox,
+          sessionId: ff.sessionId,
+          profileDir: profile.userDataDir,
+          port: ff.port,
+          pid: ff.pid,
+          electron: false,
+          targetFilter: profile.targetFilter,
+          key,
+          profile: bare,
+          tasks,
+          sessionCache: new Map(),
+        };
+      } catch {
+        return null;
+      }
+    }
+
     const existingInfo = getRunningChromeInfo(key);
     const parsed = parseEndpointUrl(resolved.target);
     const port = existingInfo?.port ?? parsed?.port;
@@ -4025,8 +4278,10 @@ export class BrowserService {
       try { conn.cleanup(); } catch { /* best effort — the winner stays live */ }
     } else {
       // Shared/borrowed tunnel (or a local connection with no tunnel): close
-      // only our own CDP client; killing the tunnel would break the winner.
-      if (conn.backend !== 'arc-native') {
+      // only our own client; killing the tunnel would break the winner.
+      if (conn.backend === 'bidi') {
+        try { conn.bidi.close(); } catch { /* best effort */ }
+      } else if (conn.backend !== 'arc-native') {
         try { conn.cdp.close(); } catch { /* best effort */ }
       }
     }
@@ -4064,7 +4319,7 @@ export class BrowserService {
       const registered = this.registerRehydratedConnection(key, conn);
       if (registered !== conn) continue;
       try {
-        if (conn.backend !== 'arc-native') await this.applyDefaultDownloadBehavior(conn, key);
+        if (conn.backend !== 'arc-native' && conn.backend !== 'bidi') await this.applyDefaultDownloadBehavior(conn, key);
       } catch {
         // Non-fatal for rehydrate.
       }
@@ -4128,7 +4383,7 @@ export class BrowserService {
         conn = this.registerRehydratedConnection(key, attached);
         if (conn === attached) {
           try {
-            if (conn.backend !== 'arc-native') await this.applyDefaultDownloadBehavior(conn, key);
+            if (conn.backend !== 'arc-native' && conn.backend !== 'bidi') await this.applyDefaultDownloadBehavior(conn, key);
           } catch {
             // Non-fatal.
           }
@@ -4201,6 +4456,40 @@ export class BrowserService {
         running: await isArcRunning(),
         port: 0,
         pid: 0,
+        tasks,
+      };
+    }
+
+    if (conn.backend === 'bidi') {
+      const tasks: TaskStatus[] = [];
+      for (const task of conn.tasks.values()) {
+        let tabs: TabInfo[] = [];
+        try { tabs = await this.listFirefoxTaskTabs(conn, task); } catch { /* Firefox down */ }
+        const domains = tabs.flatMap((tab) => {
+          try {
+            const domain = new URL(tab.url).hostname.replace(/^www\./, '');
+            return domain && domain !== 'blank' ? [domain] : [];
+          } catch { return []; }
+        });
+        tasks.push({
+          id: task.id,
+          name: task.name,
+          label: task.label ?? task.name,
+          tabCount: Object.keys(task.tabs).length,
+          currentTabId: task.currentTabId,
+          createdAt: task.createdAt,
+          tabs: tabs.length ? tabs.map((t) => ({ id: t.id, url: t.url, title: t.title, current: t.current })) : undefined,
+          domains: domains.length ? [...new Set(domains)] : undefined,
+        });
+      }
+      const parsed = parseConnectionKey(key);
+      return {
+        name: conn.profile ?? parsed.profile,
+        endpoint: parsed.endpoint,
+        key,
+        running: conn.bidi.isOpen,
+        port: conn.port,
+        pid: conn.pid,
         tasks,
       };
     }
@@ -4452,7 +4741,9 @@ export class BrowserService {
     const conn = this.connections.get(key);
     if (!conn) return undefined;
     if (await isConnHealthy(conn)) return conn;
-    if (conn.backend !== 'arc-native') {
+    if (conn.backend === 'bidi') {
+      try { conn.bidi.close(); } catch { /* already closed */ }
+    } else if (conn.backend !== 'arc-native') {
       try { conn.cdp.close(); } catch { /* already closed */ }
     }
     conn.cleanup?.();
@@ -4722,6 +5013,219 @@ export class BrowserService {
     });
   }
 
+  // ---------------------------------------------------------------------------
+  // Firefox WebDriver BiDi backend helpers (PHNX-4043)
+  // ---------------------------------------------------------------------------
+
+  /** The BiDi browsing-context id a task owns for `shortId`. */
+  private firefoxContext(task: Task, shortId: string): string {
+    const context = task.tabs[shortId];
+    if (!context) throw new Error(`Tab ${shortId} not found`);
+    return context;
+  }
+
+  /** The context ids currently live in this Firefox (a killed tab drops out). */
+  private async firefoxLiveContexts(conn: FirefoxProfileConnection): Promise<Set<string>> {
+    const contexts = await bidiTopLevelContexts(conn.bidi);
+    return new Set(contexts.map((c) => c.context));
+  }
+
+  /**
+   * Same-task reopen for Firefox (mirrors {@link reopenOwnedTab}): the URL is
+   * already live in one of this task's own tabs → reload THAT tab in place and
+   * keep its id, rather than opening a duplicate. Borrowed tabs are excluded —
+   * Firefox never borrows, but the guard keeps parity. Returns the retained
+   * short id, or undefined when nothing matches.
+   */
+  private async reopenOwnedFirefoxTab(
+    conn: FirefoxProfileConnection,
+    task: Task,
+    url: string,
+  ): Promise<{ tabId: string } | undefined> {
+    const borrowed = new Set(task.borrowedTabs ?? []);
+    const live = await this.firefoxLiveContexts(conn);
+    const wanted = canonicalTabUrl(url);
+    for (const [shortId, context] of Object.entries(task.tabs)) {
+      if (borrowed.has(shortId)) continue;
+      if (!live.has(context)) continue;
+      const current = await bidiEvaluate(conn.bidi, context, 'location.href');
+      if (canonicalTabUrl(String(current)) === wanted) {
+        await bidiReload(conn.bidi, context);
+        task.currentTabId = shortId;
+        await this.saveTaskState(task.profile, conn.tasks);
+        return { tabId: shortId };
+      }
+    }
+    return undefined;
+  }
+
+  private async navigateFirefox(
+    conn: FirefoxProfileConnection,
+    task: Task,
+    url: string,
+    addTab = false,
+  ): Promise<{ tabId: string; url: string; created: boolean; refreshed: boolean; message?: string }> {
+    if (!addTab) {
+      const reopened = await this.reopenOwnedFirefoxTab(conn, task, url);
+      if (reopened) {
+        emit('browser.navigate', { profile: parseConnectionKey(task.profile).profile, task: task.name, url, tabId: reopened.tabId, created: false });
+        return { tabId: reopened.tabId, url, created: false, refreshed: true, message: 'Tab already open—refreshed' };
+      }
+      // Reuse the current tab when there is one — navigate() semantics.
+      const currentShortId = task.currentTabId;
+      if (currentShortId && task.tabs[currentShortId]) {
+        const context = task.tabs[currentShortId];
+        const live = await this.firefoxLiveContexts(conn);
+        if (live.has(context)) {
+          await bidiNavigate(conn.bidi, context, url);
+          await this.saveTaskState(task.profile, conn.tasks);
+          emit('browser.navigate', { profile: parseConnectionKey(task.profile).profile, task: task.name, url, tabId: currentShortId, created: false });
+          return { tabId: currentShortId, url, created: false, refreshed: false };
+        }
+      }
+    } else {
+      const reopened = await this.reopenOwnedFirefoxTab(conn, task, url);
+      if (reopened) {
+        return { tabId: reopened.tabId, url, created: false, refreshed: true, message: 'Tab already open—refreshed' };
+      }
+    }
+    // Open a fresh tab.
+    const context = await bidiCreateTab(conn.bidi);
+    await bidiNavigate(conn.bidi, context, url);
+    const shortId = generateShortId();
+    task.tabs[shortId] = context;
+    task.currentTabId = shortId;
+    await this.saveTaskState(task.profile, conn.tasks);
+    emit('browser.navigate', { profile: parseConnectionKey(task.profile).profile, task: task.name, url, tabId: shortId, created: true });
+    return { tabId: shortId, url, created: true, refreshed: false };
+  }
+
+  private async evaluateFirefox(
+    conn: FirefoxProfileConnection,
+    task: Task,
+    shortId: string,
+    expression: string,
+  ): Promise<unknown> {
+    const context = this.firefoxContext(task, shortId);
+    const live = await this.firefoxLiveContexts(conn);
+    if (!live.has(context)) throw new Error(`Tab ${shortId} is no longer open in Firefox.`);
+    return bidiEvaluate(conn.bidi, context, expression);
+  }
+
+  private async listFirefoxTaskTabs(conn: FirefoxProfileConnection, task: Task): Promise<TabInfo[]> {
+    const live = await bidiTopLevelContexts(conn.bidi);
+    const byId = new Map(live.map((c) => [c.context, c]));
+    const tabs: TabInfo[] = [];
+    for (const [shortId, context] of Object.entries(task.tabs)) {
+      const info = byId.get(context);
+      if (!info) continue; // tab closed out from under the task — drop it silently.
+      let title = '';
+      try {
+        title = String(await bidiEvaluate(conn.bidi, context, 'document.title'));
+      } catch {
+        /* about: pages or a mid-navigation context — url is enough */
+      }
+      tabs.push({ id: shortId, url: info.url, title, task: task.name, current: shortId === task.currentTabId });
+    }
+    return tabs;
+  }
+
+  /**
+   * Close every non-borrowed tab a Firefox task owns. Never kills the Firefox
+   * process (that is `stopProfile`'s job) — a killed browser would take the
+   * user's other tabs with it. A tab already gone is skipped.
+   */
+  private async closeFirefoxTabs(conn: FirefoxProfileConnection, task: Task): Promise<void> {
+    const borrowed = new Set(task.borrowedTabs ?? []);
+    const live = await this.firefoxLiveContexts(conn);
+    for (const [shortId, context] of Object.entries(task.tabs)) {
+      if (borrowed.has(shortId)) continue;
+      if (live.has(context)) {
+        try { await bidiCloseTab(conn.bidi, context); } catch { /* already closed */ }
+      }
+    }
+  }
+
+  /**
+   * Viewport-center coordinates of a selector-addressed element in a Firefox
+   * tab, scrolled into view first — the (x, y) `input.performActions` clicks.
+   * Throws when the element is gone or has zero size (off-screen / display:none).
+   */
+  private async firefoxRefCoords(
+    conn: FirefoxProfileConnection,
+    task: Task,
+    shortId: string,
+    selector: string,
+  ): Promise<{ x: number; y: number }> {
+    const expr = `(() => {
+      const el = document.querySelector(${JSON.stringify(selector)});
+      if (!el) throw new Error('DOM ref is missing');
+      el.scrollIntoView({ block: 'center', inline: 'center' });
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 && r.height === 0) throw new Error('DOM ref has no layout box');
+      return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+    })()`;
+    const raw = await this.evaluateFirefox(conn, task, shortId, expr);
+    const parsed = JSON.parse(String(raw)) as { x: number; y: number };
+    return parsed;
+  }
+
+  /**
+   * Screenshot a Firefox tab over BiDi. Same output contract as the CDP path:
+   * `raw` is a pixel-faithful PNG; the default is JPEG iteratively downscaled
+   * under 100 KB so chat-injected screenshots stay token-cheap.
+   */
+  private async screenshotFirefox(
+    conn: FirefoxProfileConnection,
+    task: Task,
+    runtimeKey: ConnectionKey,
+    tabHint: string | undefined,
+    outputPath: string | undefined,
+    quality: 'compressed' | 'raw',
+  ): Promise<{ path: string; bytes: number; width: number; height: number }> {
+    const shortId = tabHint ? await this.resolveTabHint(conn, task, tabHint) : this.resolveCurrentTab(task);
+    const context = this.firefoxContext(task, shortId);
+    const live = await this.firefoxLiveContexts(conn);
+    if (!live.has(context)) throw new Error(`Tab ${shortId} is no longer open in Firefox.`);
+
+    let buffer: Buffer;
+    let extension: string;
+    if (quality === 'raw') {
+      buffer = await bidiScreenshot(conn.bidi, context, { type: 'image/png' });
+      extension = 'png';
+    } else {
+      buffer = await bidiScreenshot(conn.bidi, context, { type: 'image/jpeg', quality: 0.7 });
+      const MAX_SIZE = 100 * 1024;
+      let q = 0.5;
+      while (buffer.length > MAX_SIZE && q > 0.1) {
+        buffer = await bidiScreenshot(conn.bidi, context, { type: 'image/jpeg', quality: q });
+        q -= 0.1;
+      }
+      extension = 'jpg';
+    }
+
+    const sessionsDir = getProfileSessionsDir(runtimeKey, task.name);
+    const automaticPath = path.join(sessionsDir, `${Date.now()}.${extension}`);
+    const finalPath = resolveScreenshotOutputPath(outputPath, automaticPath);
+    await fs.promises.mkdir(path.dirname(finalPath), { recursive: true });
+    await fs.promises.writeFile(finalPath, buffer);
+
+    const dims =
+      (extension === 'png' ? readPngDimensions(buffer) : readJpegDimensions(buffer)) ??
+      { width: 0, height: 0 };
+    emit('browser.screenshot', {
+      profile: parseConnectionKey(runtimeKey).profile,
+      task: task.name,
+      tabId: shortId,
+      path: finalPath,
+      bytes: buffer.length,
+      width: dims.width,
+      height: dims.height,
+      quality,
+    });
+    return { path: finalPath, bytes: buffer.length, width: dims.width, height: dims.height };
+  }
+
   /** Connect a profile at `target`, register it under `key`, and arm downloads. */
   private async openConnection(
     profile: BrowserProfile,
@@ -4734,8 +5238,8 @@ export class BrowserService {
     conn.key = key;
     conn.profile = profileName;
     this.connections.set(key, conn);
-    // Download behavior configuration is CDP-specific; skip for native Arc.
-    if (conn.backend !== 'arc-native') {
+    // Download behavior configuration is CDP-specific; skip for native Arc + Firefox.
+    if (conn.backend !== 'arc-native' && conn.backend !== 'bidi') {
       await this.applyDefaultDownloadBehavior(conn, key);
     }
     return conn;
@@ -4792,6 +5296,13 @@ export class BrowserService {
       throw new ArcNativeCapabilityError(
         'show',
         'Task-less viewer tabs are unavailable for native Arc because creation intent cannot be bound to an owning task.',
+      );
+    }
+    if (conn.backend === 'bidi') {
+      throw new FirefoxCapabilityError(
+        'show',
+        'Task-less viewer tabs are unavailable for a headless-automation Firefox profile. ' +
+          'Use a Chromium-family profile, or open the URL in your OS browser.',
       );
     }
 
