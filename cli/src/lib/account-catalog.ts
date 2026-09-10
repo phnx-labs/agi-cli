@@ -226,6 +226,8 @@ export interface AccountListEntryJson {
   provisioning: AccountProvisioning;
   verdict: AccountVerdict;
   checkedAt: string | null;
+  /** Evidence from the device producing this listing, never a fleet aggregate. */
+  local?: Pick<AccountDeviceVerdict, 'verdict' | 'checkedAt'>;
   devices: Array<{
     device: string;
     authMode: AccountDeviceVerdict['authMode'];
@@ -505,6 +507,7 @@ function providerListEntry(
     provisioning: 'portable',
     verdict: row.verdict,
     checkedAt: null,
+    local: { verdict: row.verdict },
     devices: [],
     usage: null,
     fix: row.fix,
@@ -546,6 +549,7 @@ export function accountListJson(
         provisioning: row.provisioning,
         verdict: row.verdict,
         checkedAt: row.checkedAt,
+        local: row.devices.find((device) => device.device === machineId()),
         devices: row.devices.map(({ device, authMode, verdict }) => ({ device, authMode, verdict })),
         usage: row.usage,
         fix: row.fix,

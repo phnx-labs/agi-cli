@@ -14,7 +14,7 @@ import type { Host } from './types.js';
 import { hostIdentityArgs, sshTargetFor } from './types.js';
 import { remoteShellFor, buildWindowsAgentsCommand, encodePowershell, powershellQuote, POWERSHELL_PROGRESS_SILENCE } from './remote-cmd.js';
 import { resolveRemoteOsSync } from './remote-os.js';
-import { AUTH_PROBE_MAX_AGE_MS, isDeadVerdict, type AuthVerdict } from '../auth-health.js';
+import { AUTH_PROBE_MAX_AGE_MS } from '../auth-health.js';
 import { USAGE_STALE_REFUSAL_MAX_AGE_MS } from '../accounting/rotate.js';
 
 /** Resolve this CLI's own version by walking up to the nearest package.json. */
@@ -238,66 +238,35 @@ export function missingPinnedVersionMessage(
 
 /** Account eligibility extracted from one device's `agents view --json`. */
 export interface ViewAgentAccountEligibility {
+  /** Eligible target-local selectors; no filesystem paths or credentials. */
+  accounts?: string[];
   /** At least one account can launch immediately. */
   signedIn: boolean | undefined;
   /** At least one account can launch immediately or enter the harness login flow. */
   pickerEligible: boolean | undefined;
 }
 
-/**
- * Read the two account gates automatic placement needs from `agents view
- * --json`. A picker may route to a signed-out version because launching it is
- * the login flow, but it must not route to a device whose every signed-in
- * account is throttled.
- *
- * The sign-in gate reads the per-version `launchable` field — the strict
- * per-version launch truth (`isLaunchableSignedIn`) — so a remote box is judged
- * by the SAME launchability the local candidate uses (`collectRunCandidates` →
- * `isLaunchableSignedIn`), not the display `signedIn` that inherits the
- * active/global HOME login and passes a box that dies at spawn (PHNX-3466). An
- * older remote CLI omits `launchable`, so it falls back to `signedIn` — the
- * pre-fix behavior, so a rolling fleet does not regress.
- */
+/** Read target-local account slots; binary versions never establish identity. */
 export function viewAgentAccountEligibility(view: string, agent: string, now: number = Date.now()): ViewAgentAccountEligibility {
   try {
-    const rows = JSON.parse(view) as Array<{
-      agent?: string;
-      versions?: Array<{
-        signedIn?: boolean;
-        launchable?: boolean;
-        authVerdict?: AuthVerdict | null;
-        authCheckedAt?: number | null;
-        usageStatus?: 'available' | 'rate_limited' | 'out_of_credits' | null;
-        usageCapturedAt?: string | null;
-      }>;
-    }>;
+    const rows = JSON.parse(view) as Array<{ agent?: string; accounts?: import('../account-catalog.js').AccountListEntryJson[] }>;
     const row = rows.find((candidate) => candidate.agent?.toLowerCase() === agent.toLowerCase());
-    if (!row) return { signedIn: undefined, pickerEligible: undefined };
-    const verdicts = (row.versions ?? []).flatMap((version) => {
-      if (typeof version.signedIn !== 'boolean') return [];
-      // Prefer the strict per-version launch signal; fall back to the display
-      // `signedIn` for an older remote CLI that does not emit `launchable`.
-      const launchable = typeof version.launchable === 'boolean' ? version.launchable : version.signedIn;
-      const usageCapturedAt = version.usageCapturedAt ? Date.parse(version.usageCapturedAt) : Number.NaN;
-      const usageFresh = Number.isFinite(usageCapturedAt)
-        ? now - usageCapturedAt <= USAGE_STALE_REFUSAL_MAX_AGE_MS
-        : version.usageCapturedAt === undefined;
-      const authFresh = typeof version.authCheckedAt === 'number'
-        ? now - version.authCheckedAt <= AUTH_PROBE_MAX_AGE_MS
-        : version.authCheckedAt === undefined;
-      const throttled = usageFresh
-        && (version.usageStatus === 'rate_limited' || version.usageStatus === 'out_of_credits');
-      const authBlocked = version.authVerdict !== null
-        && version.authVerdict !== undefined
-        && authFresh
-        && isDeadVerdict(version.authVerdict);
-      const freshnessKnown = version.usageCapturedAt !== undefined || version.authCheckedAt !== undefined;
-      const fresh = !freshnessKnown || (usageFresh && authFresh);
-      const ready = launchable && fresh && !authBlocked && !throttled;
-      return [{ ready, pickerEligible: ready || !launchable || authBlocked }];
+    if (!row?.accounts) return { signedIn: undefined, pickerEligible: undefined };
+    const verdicts = row.accounts.filter((account) => account.harness === agent).map((account) => {
+      const local = account.local;
+      const signedIn = !!local && ['live', 'ready', 'unverified', 'rate_limited'].includes(local.verdict);
+      const checkedAt = local?.checkedAt ? Date.parse(local.checkedAt) : NaN;
+      const authFresh = local?.checkedAt == null || (Number.isFinite(checkedAt) && now - checkedAt <= AUTH_PROBE_MAX_AGE_MS);
+      const usage = account.usage;
+      const capturedAt = usage?.capturedAt ? Date.parse(usage.capturedAt) : NaN;
+      const usageFresh = !usage || (Number.isFinite(capturedAt) && now - capturedAt <= USAGE_STALE_REFUSAL_MAX_AGE_MS);
+      const throttled = local?.verdict === 'rate_limited'
+        || (usageFresh && (usage?.status === 'rate_limited' || usage?.status === 'out_of_credits'));
+      const ready = signedIn && authFresh && usageFresh && !throttled;
+      return { ready, pickerEligible: ready || !signedIn, id: account.id };
     });
-    if (verdicts.length === 0) return { signedIn: undefined, pickerEligible: undefined };
     return {
+      accounts: verdicts.filter((verdict) => verdict.ready).map((verdict) => verdict.id),
       signedIn: verdicts.some((verdict) => verdict.ready),
       pickerEligible: verdicts.some((verdict) => verdict.pickerEligible),
     };
@@ -312,6 +281,7 @@ export function viewAgentSignedIn(view: string, agent: string): boolean | undefi
 
 export interface EnsureReadyOptions {
   agent: string;
+  account?: string;
   /**
    * Explicit version pin (e.g. `"0.145.0"`). Concrete pins fail loud when the
    * remote does not have that version installed so a detached `--no-follow`
@@ -334,6 +304,16 @@ export function evaluateHostAgentInstall(
   hostName: string,
 ): { warnings: string[] } {
   const warnings: string[] = [];
+  if (opts.account) {
+    let account: import('../account-catalog.js').AccountListEntryJson | undefined;
+    try {
+      const rows = JSON.parse(view) as Array<{ agent: string; accounts?: import('../account-catalog.js').AccountListEntryJson[] }>;
+      account = rows.find((row) => row.agent === opts.agent)?.accounts?.find((row) => row.id === opts.account || row.name === opts.account);
+    } catch { /* An unverified remote cannot prove provisioning. */ }
+    if (!account?.local || account.local.verdict === 'missing') {
+      throw new Error(`Account '${opts.account}' is not provisioned for ${opts.agent} on '${hostName}'. Provision that account on the target device before dispatch.`);
+    }
+  }
   if (isConcreteVersionPin(opts.version)) {
     const version = opts.version!.trim();
     const installed = viewAgentVersions(view, opts.agent);
