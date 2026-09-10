@@ -62,6 +62,21 @@ describe('discoverFirefoxProfilesAt', () => {
     expect(result.ok).toBe(false);
   });
 
+  it('reports invalid (not not-installed) when profiles.ini exists but has no [Profile] entries', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ff-disco-empty-'));
+    fs.copyFileSync(path.join(testdata, 'profiles-empty.ini'), path.join(root, 'profiles.ini'));
+    try {
+      const result = discoverFirefoxProfilesAt([root]);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.kind).toBe('invalid');
+        expect(result.reason).toContain('No [Profile] entries');
+      }
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('discovers profiles from a real profiles.ini laid out in a temp root', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ff-disco-'));
     fs.copyFileSync(path.join(testdata, 'profiles-valid.ini'), path.join(root, 'profiles.ini'));

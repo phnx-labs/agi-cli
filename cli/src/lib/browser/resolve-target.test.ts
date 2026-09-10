@@ -83,6 +83,16 @@ describe('sshEndpointForDeclaration', () => {
     };
     expect(sshEndpointForDeclaration('zion', config)).toBe('arc-native://local');
   });
+
+  it('does not manufacture an SSH/CDP endpoint for a Firefox BiDi profile', async () => {
+    const { sshEndpointForDeclaration } = await import('./resolve-target.js');
+    const config = {
+      browser: 'firefox' as const,
+      endpoints: { bidi: { target: 'firefox-bidi://127.0.0.1:9652' } },
+      firefox: { profileName: 'default', iniPath: '/home/u/.mozilla/firefox/profiles.ini', isDefault: true },
+    };
+    expect(sshEndpointForDeclaration('yosemite-s0', config)).toBe('firefox-bidi://127.0.0.1:9652');
+  });
 });
 
 describe('resolveBrowserTarget', () => {
@@ -106,6 +116,29 @@ describe('resolveBrowserTarget', () => {
       target: 'arc-native://local',
       commandDispatch: true,
       profile: { arc: config.arc },
+    });
+  });
+
+  it('marks a remote Firefox BiDi declaration for whole-command dispatch', async () => {
+    const config = {
+      browser: 'firefox' as const,
+      endpoints: { bidi: { target: 'firefox-bidi://127.0.0.1:9652' } },
+      defaultEndpoint: 'bidi',
+      firefox: { profileName: 'default', iniPath: '/home/u/.mozilla/firefox/profiles.ini', isDefault: true },
+    };
+    writeYaml(deviceFile('yosemite-s0'), { browser: { 'firefox-default': config } });
+
+    const { resolveBrowserTarget } = await import('./resolve-target.js');
+    const routed = resolveBrowserTarget('firefox-default', {
+      here: 'yosemite-s1',
+      probe: () => ({ reachable: true, os: 'Linux' }),
+    });
+    expect(routed).toMatchObject({
+      local: false,
+      device: 'yosemite-s0',
+      target: 'firefox-bidi://127.0.0.1:9652',
+      commandDispatch: true,
+      profile: { firefox: config.firefox },
     });
   });
 

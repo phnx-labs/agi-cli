@@ -97,7 +97,6 @@ import {
   bidiActivate,
   bidiEvaluate,
   bidiScreenshot,
-  bidiSetViewport,
   bidiClickAt,
 } from './drivers/firefox.js';
 import {
@@ -5043,13 +5042,20 @@ export class BrowserService {
     url: string,
   ): Promise<{ tabId: string } | undefined> {
     const borrowed = new Set(task.borrowedTabs ?? []);
-    const live = await this.firefoxLiveContexts(conn);
+    // Read each live tab's URL from browsingContext.getTree metadata rather than
+    // evaluating location.href per tab: the same source the CDP path reads
+    // (Target.getTargets), so a mid-navigation or just-closed sibling tab can
+    // never throw a BiDi "no such frame" and fail an unrelated navigate. A tab
+    // absent from the tree is simply not a reopen candidate.
+    const liveUrlByContext = new Map(
+      (await bidiTopLevelContexts(conn.bidi)).map((c) => [c.context, c.url]),
+    );
     const wanted = canonicalTabUrl(url);
     for (const [shortId, context] of Object.entries(task.tabs)) {
       if (borrowed.has(shortId)) continue;
-      if (!live.has(context)) continue;
-      const current = await bidiEvaluate(conn.bidi, context, 'location.href');
-      if (canonicalTabUrl(String(current)) === wanted) {
+      const liveUrl = liveUrlByContext.get(context);
+      if (liveUrl === undefined) continue; // registered but gone from the browser
+      if (canonicalTabUrl(liveUrl) === wanted) {
         await bidiReload(conn.bidi, context);
         task.currentTabId = shortId;
         await this.saveTaskState(task.profile, conn.tasks);
