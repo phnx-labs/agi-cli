@@ -50,11 +50,15 @@ describe('native logout home safety', () => {
   });
 
   it('honors the account default and never silently substitutes the installation default', async () => {
-    const { commands, state } = await setup();
+    const { commands, state, dir } = await setup();
     const meta = state.readMeta();
     state.updateMeta({ accounts: { ...meta.accounts, defaults: { codex: 'work' } } });
     await expect(commands.resolveLogoutTarget('codex')).rejects.toThrow(/no installed/);
-    await expect(commands.resolveLogoutTarget('codex@personal')).resolves.toEqual({ agent: 'codex', version: 'personal' });
+    // An explicit installation label resolves to THAT version home (PHNX-3940:
+    // the target now carries the resolved home + its source, not just a label).
+    await expect(commands.resolveLogoutTarget('codex@personal')).resolves.toEqual({
+      agent: 'codex', version: 'personal', home: dir, source: 'legacy-home',
+    });
   });
 
   it('rejects empty explicit selectors before any account can be selected', async () => {

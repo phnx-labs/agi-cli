@@ -688,20 +688,16 @@ async function defaultAddRunners(): Promise<AddRunners> {
     import('../exec.js'),
   ]);
   const { ensureHarnessInstallation, getBinaryPath, readInstallation } = store;
-  const { agentConfigDirName, getAccountInfo } = agentsMod;
+  const { getAccountInfo } = agentsMod;
   const { buildExecEnv } = execMod;
   const { runNativeAccountCommand } = await import('../installations/native-command.js');
 
-  // A slot is HOME-shaped; the harness's config dir lives directly inside it.
-  const slotConfigDir = (agent: AgentId, home: string): string => path.join(home, agentConfigDirName(agent));
-
   const loginEnv = (agent: AgentId, installLabel: string, home: string): NodeJS.ProcessEnv => {
-    const env = buildExecEnv({ agent, version: installLabel, configVersion: installLabel, interactive: true, mode: 'auto', effort: 'auto', cwd: process.cwd() });
-    // HOME = slot; the harness's slotEnv (CLAUDE_CONFIG_DIR / CODEX_HOME / …)
-    // pins its config dir inside the slot so the login lands there.
+    const env = buildExecEnv({ agent, version: installLabel, execHome: home, interactive: true, mode: 'auto', effort: 'auto', cwd: process.cwd() });
+    // `execHome` routes through the harness adapter, including OpenCode/Muse's
+    // distinct XDG config/data roots; HOME still gives HOME-only harnesses the
+    // same account-owned destination.
     env.HOME = home;
-    const pin = harnessAuth(agent).slotEnv;
-    if (pin) env[pin] = slotConfigDir(agent, home);
     // Strip any ambient provider API-key / setup-token env so the native login
     // authenticates as the human's OAuth identity, not an injected credential
     // that would impersonate a different account into this slot.
@@ -738,8 +734,13 @@ async function defaultAddRunners(): Promise<AddRunners> {
       const flow = MINT_FLOWS[agent];
       if (!flow || flow.auth !== 'setup-token') throw new Error(`No setup-token mint flow for ${agent}.`);
       const install = await ensureHarnessInstallation(agent, {});
+      // Pin the harness config-dir env (CLAUDE_CONFIG_DIR / …) to the slot
+      // through the same adapter `buildExecEnv` uses for a slot launch, so the
+      // mint writes into the account slot rather than the version home.
+      const slotEnv = harnessAuth(agent).slotEnv;
+      const execEnv = buildExecEnv({ agent, version: install.installation.label, execHome: home, interactive: true, mode: 'auto', effort: 'auto', cwd: process.cwd() });
       const command = buildMintCommand(flow, getBinaryPath(agent, install.installation.label), home, {
-        ...(harnessAuth(agent).slotEnv ? { [harnessAuth(agent).slotEnv!]: slotConfigDir(agent, home) } : {}),
+        ...(slotEnv && execEnv[slotEnv] ? { [slotEnv]: execEnv[slotEnv]! } : {}),
       });
       const driven = await driveSetupTokenMint(command, flow, {
         readCode: async () => {

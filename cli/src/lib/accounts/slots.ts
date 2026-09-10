@@ -17,9 +17,9 @@ import { agentConfigDirName } from '../agents.js';
 import { harnessAuth, harnessWorkerIsPerDevice } from '../harness-auth-capabilities.js';
 import { getGlobalDefault, getVersionHomePath, listInstalledVersions } from '../installations/store.js';
 import { carryForwardSettings } from '../settings-manifest.js';
-import { getHistoryDir, updateMeta } from '../state.js';
-import { ALL_RESOURCE_KINDS, getDetector, getWriter, kindToCapability } from '../staleness/registry.js';
-import { supports } from '../capabilities.js';
+import { getHistoryDir, readMeta, updateMeta } from '../state.js';
+import { syncResourcesToHome, type SyncResourcesOptions } from '../installations/versions.js';
+import type { ResourceSelection, SyncResult } from '../installations/versions.js';
 import type { AccountAuthMode, AgentId, DeviceAccountSlot, Meta } from '../types.js';
 import { isAgentId } from '../types.js';
 
@@ -63,20 +63,41 @@ function sourceVersion(harness: AgentId): string | null {
   return getGlobalDefault(harness) ?? listInstalledVersions(harness)[0] ?? null;
 }
 
-function projectResources(harness: AgentId, version: string, destHome: string, fromHome: string): void {
-  const cwd = process.cwd();
-  for (const kind of ALL_RESOURCE_KINDS) {
-    if (!supports(harness, kindToCapability(kind), version).ok) continue;
-    const writer = getWriter(kind, harness);
-    if (!writer) continue;
-    if (kind === 'rules') {
-      writer.write({ version, versionHome: destHome, selection: { preset: 'default' }, cwd });
-      continue;
-    }
-    const names = getDetector(kind, harness)?.list({ version, versionHome: fromHome, cwd }) ?? [];
-    if (names.length === 0) continue;
-    writer.write({ version, versionHome: destHome, selection: names, cwd });
+/** Project resources into one account slot through the installation writer. */
+export function syncResourcesToSlot(
+  harness: AgentId,
+  version: string,
+  home: string,
+  selection?: ResourceSelection,
+  options: SyncResourcesOptions = {},
+): SyncResult {
+  return syncResourcesToHome(harness, version, home, selection, options);
+}
+
+/** Reconcile every materialized account slot for one harness. */
+export function syncResourcesToAccountSlots(
+  harness: AgentId,
+  version: string,
+  selection?: ResourceSelection,
+  options: SyncResourcesOptions = {},
+): Array<{ accountId: string; result: SyncResult }> {
+  const meta = readMeta();
+  const slots = readSlots(meta);
+  const results: Array<{ accountId: string; result: SyncResult }> = [];
+  const accounts = [
+    ...Object.values(meta.accounts?.native ?? {}),
+    ...Object.values(meta.deviceAccounts?.native ?? {}),
+  ];
+  for (const account of accounts) {
+    if (account.agent !== harness) continue;
+    const slot = slots[account.id];
+    if (!slot || !fs.existsSync(slot.slotDir)) continue;
+    results.push({
+      accountId: account.id,
+      result: syncResourcesToSlot(harness, version, slot.slotDir, selection, options),
+    });
   }
+  return results;
 }
 
 /**
@@ -96,7 +117,7 @@ export function ensureSlot(harness: AgentId, accountId: string): DeviceAccountSl
     const fromHome = getVersionHomePath(harness, version);
     if (fs.existsSync(fromHome)) {
       carryForwardSettings(harness, fromHome, dir);
-      projectResources(harness, version, dir, fromHome);
+      syncResourcesToSlot(harness, version, dir, undefined, { force: true });
     }
   }
 

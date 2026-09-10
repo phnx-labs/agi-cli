@@ -8,7 +8,7 @@ import { fileURLToPath } from 'url';
 import { confirm, select } from '@inquirer/prompts';
 import type { AgentId } from '../types.js';
 import { IS_WINDOWS, prependToWindowsUserPath } from '../platform/index.js';
-import { getShimsDir, getVersionsDir, getBackupsDir, getHistoryDir, ensureAgentsDir } from '../state.js';
+import { getShimsDir, getVersionsDir, getBackupsDir, getHistoryDir, ensureAgentsDir, readMeta } from '../state.js';
 export { getShimsDir };
 import { AGENTS, agentConfigDirName, readAuthAccountIdentity } from '../agents.js';
 import { acquireAuthOperationLock } from '../accounts/auth-operation-lock.js';
@@ -1654,6 +1654,18 @@ export function readAuthFileIdentity(agent: AgentId, configDir: string): string 
 
 /** Carry the freshest existing account credential into `toConfigDir` so version switches don't log out file-auth agents. */
 export function carryForwardAuthFiles(agent: AgentId, toConfigDir: string): void {
+  const meta = readMeta();
+  const nativeRows = [
+    ...Object.values(meta.accounts?.native ?? {}),
+    ...Object.values(meta.deviceAccounts?.native ?? {}),
+  ];
+  const slots = meta.deviceAccounts?.slots ?? {};
+  if (nativeRows.some((account) => account.agent === agent && slots[account.id] && fs.existsSync(slots[account.id]!.slotDir))) {
+    // Once this harness has adopted account slots, credentials are account-owned.
+    // Keep the old carry path only for devices whose version homes have not yet
+    // migrated; switching a binary must never refresh version-owned auth again.
+    return;
+  }
   const authFiles = AGENTS[agent].authFiles;
   if (!authFiles || authFiles.length === 0) return;
 
