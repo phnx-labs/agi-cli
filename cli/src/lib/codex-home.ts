@@ -25,6 +25,14 @@
  * the TS resolver for `agents run`/`agents exec`; `shims.ts` emits the bash
  * equivalent (`codexHomeShimBash`) into the generated codex shims. Keep the two
  * in lockstep.
+ *
+ * The short home is keyed by the ORIGIN it relocates, never by the version
+ * alone. An account slot (`~/.agents/.history/accounts/codex/<id>/.codex`) is
+ * long enough to overflow too, and keying it by version handed every
+ * `agents run codex#<account>` on macOS the default version's short home —
+ * whichever login that happened to hold. `codexShortKey` derives the key; a
+ * short home that is not the resolved link target of its origin is refused
+ * rather than reused.
  */
 import * as fs from 'fs';
 import * as path from 'path';
@@ -44,62 +52,102 @@ export function codexHomeOverflowsSunLen(home: string): boolean {
 }
 
 /**
- * The short, per-version codex home used when the versioned home overflows.
- * `~/.agents/.codex-homes/<version>/.codex` keeps the socket path well under
- * SUN_LEN while staying stable across reboots (unlike $TMPDIR) and per-version
- * isolated.
+ * The short codex home used when an origin home overflows.
+ * `~/.agents/.codex-homes/<key>/.codex` keeps the socket path well under
+ * SUN_LEN while staying stable across reboots (unlike $TMPDIR) and isolated
+ * per origin.
  */
-export function shortCodexHome(agentsUserDir: string, version: string): string {
-  return path.join(agentsUserDir, '.codex-homes', version, '.codex');
+export function shortCodexHome(agentsUserDir: string, key: string): string {
+  return path.join(agentsUserDir, '.codex-homes', key, '.codex');
 }
 
 /**
- * Resolve a macOS SUN_LEN-safe CODEX_HOME for the given versioned home,
- * migrating the home to a short real path (once, idempotently) when needed.
+ * The short-home key for a codex config home: the version for a version home,
+ * `a-<accountId prefix>` for an account slot under `<historyDir>/accounts/codex/`.
+ * Twelve hex characters keep the socket path under SUN_LEN for any home dir
+ * (`~/.agents/.codex-homes/a-XXXXXXXXXXXX/.codex` + suffix = 99 bytes on a
+ * `/Users/<user>` prefix); the origin-link check in {@link resolveCodexHome}
+ * is what rules out two accounts sharing a prefix.
+ */
+export function codexShortKey(home: string, version: string, historyDir: string): string {
+  const slotsRoot = path.resolve(historyDir, 'accounts', 'codex');
+  const resolved = path.resolve(home);
+  if (!resolved.startsWith(slotsRoot + path.sep)) return version;
+  const accountId = resolved.slice(slotsRoot.length + 1).split(path.sep)[0] ?? '';
+  if (!accountId) return version;
+  return `a-${accountId.slice(0, 12)}`;
+}
+
+function isSymlinkOnto(link: string, target: string): boolean {
+  try {
+    if (!fs.lstatSync(link).isSymbolicLink()) return false;
+    return fs.realpathSync(link) === fs.realpathSync(target);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Resolve a macOS SUN_LEN-safe CODEX_HOME for the given origin home, migrating
+ * the home to a short real path (once, idempotently) when needed. `key` is the
+ * short-home key from {@link codexShortKey}.
  *
- * On non-darwin platforms, or when the versioned home already fits, the
- * versioned home is returned unchanged. If migration fails for any reason the
- * versioned home is returned (no worse than the pre-fix behavior).
+ * On non-darwin platforms, or when the origin already fits, the origin is
+ * returned unchanged. A short home is returned only when the origin is (or has
+ * just become) a symlink onto it; a short home already claimed by a different
+ * origin is refused loudly — returning it would run codex as another login.
+ * If migration itself fails the origin is returned (no worse than the pre-fix
+ * behavior).
  */
 export function resolveCodexHome(
-  versionedHome: string,
+  originHome: string,
   agentsUserDir: string,
-  version: string,
+  key: string,
   platform: NodeJS.Platform = process.platform,
 ): string {
-  if (platform !== 'darwin') return versionedHome;
-  if (!codexHomeOverflowsSunLen(versionedHome)) return versionedHome;
+  if (platform !== 'darwin') return originHome;
+  if (!codexHomeOverflowsSunLen(originHome)) return originHome;
 
-  const short = shortCodexHome(agentsUserDir, version);
+  const short = shortCodexHome(agentsUserDir, key);
+  if (isSymlinkOnto(originHome, short)) return short;
+
+  const origin = fs.lstatSync(originHome, { throwIfNoEntry: false });
+  if (fs.existsSync(short) && origin) {
+    throw new Error(
+      `Refusing to run codex from ${short}: it is not the short home of ${originHome} `
+      + `(the origin is a real directory, not a link onto it). Another codex home owns that path; `
+      + `move it aside or pick a different account.`,
+    );
+  }
+
   try {
-    if (!fs.existsSync(short)) {
-      fs.mkdirSync(path.dirname(short), { recursive: true });
-      const st = fs.lstatSync(versionedHome, { throwIfNoEntry: false });
-      if (st && st.isDirectory() && !st.isSymbolicLink()) {
-        // Migrate the existing deep home so config/auth/state stay intact,
-        // then leave a symlink so anything referencing the versioned path
-        // still resolves.
-        fs.renameSync(versionedHome, short);
-        fs.symlinkSync(short, versionedHome);
-      } else if (!st) {
-        // Fresh install: create the short home and link the versioned path to it.
-        fs.mkdirSync(short, { recursive: true });
-        fs.symlinkSync(short, versionedHome);
-      }
-      // If versionedHome is already a symlink (migrated by a prior run or the
-      // shim), leave it; `short` will be populated below.
+    fs.mkdirSync(path.dirname(short), { recursive: true });
+    if (origin && origin.isDirectory() && !origin.isSymbolicLink()) {
+      // Migrate the existing deep home so config/auth/state stay intact,
+      // then leave a symlink so anything referencing the origin path still
+      // resolves (session discovery, the slot record, the shim).
+      fs.renameSync(originHome, short);
+      fs.symlinkSync(short, originHome);
+    } else if (!origin) {
+      // Fresh origin: create (or adopt) the short home and link the origin to it.
+      fs.mkdirSync(short, { recursive: true });
+      fs.mkdirSync(path.dirname(originHome), { recursive: true });
+      fs.symlinkSync(short, originHome);
     }
   } catch {
     // Migration lost a race or hit a permission error. Fall back to the
-    // versioned home rather than crash the invocation.
-    if (!fs.existsSync(short)) return versionedHome;
+    // origin rather than crash the invocation.
+    return originHome;
   }
-  return fs.existsSync(short) ? short : versionedHome;
+  return isSymlinkOnto(originHome, short) ? short : originHome;
 }
 
 /**
  * Emit the bash block that a generated codex shim uses to export a
- * SUN_LEN-safe CODEX_HOME. Mirrors {@link resolveCodexHome}.
+ * SUN_LEN-safe CODEX_HOME. Mirrors {@link resolveCodexHome} for the one origin
+ * a shim ever sees, the version home: an account-slot launch reaches the shim
+ * with CODEX_HOME already pinned by `buildExecEnv`, and the block below keeps a
+ * caller-provided CODEX_HOME, so the slot key never has to be derived in bash.
  *
  * @param homeExpr      shell expression for the versioned codex home
  *                      (e.g. `$VERSION_DIR/home/.codex`)
