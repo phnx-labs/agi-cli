@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "sidebar": {
+    "containers": [{
+      "spaces": [
+        "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        { "id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "title": "Home", "profile": { "default": true } },
+        "11111111-2222-3333-4444-555555555555",
+        { "id": "11111111-2222-3333-4444-555555555555", "title": "Work", "profile": { "custom": { "_0": { "directoryBasename": "Profile 1", "machineID": "REDACTED" } } } },
+        "ffffffff-aaaa-bbbb-cccc-dddddddddddd",
+        { "id": "ffffffff-aaaa-bbbb-cccc-dddddddddddd", "title": "Reading", "profile": { "default": true } }
+      ]
+    }]
+  }
+}

@@ -22,6 +22,8 @@ export interface RefNode {
   name: string;
   attrs: string[];
   backendNodeId?: number;
+  /** Stable selector used by non-CDP DOM backends such as native Arc. */
+  selector?: string;
   editor?: string;
 }
 
@@ -64,6 +66,7 @@ export function describeRefs(nodeMap: Map<number, RefNode>): RefDescriptor[] {
     role: n.role,
     name: n.name,
     attrs: n.attrs.slice(),
+    selector: n.selector,
   }));
 }
 
@@ -118,7 +121,7 @@ export function healRef(
     // Lexicographic key, all "higher is better":
     //   [ DOM-backed, attribute similarity, -distance-to-original-ref ].
     const key: [number, number, number] = [
-      node.backendNodeId !== undefined ? 1 : 0,
+      node.backendNodeId !== undefined || node.selector !== undefined ? 1 : 0,
       attrScore(node),
       -Math.abs(node.ref - ref),
     ];

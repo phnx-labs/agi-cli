@@ -1,4 +1,59 @@
+import type { ArcNativeTabRef } from './drivers/arc.js';
+
+export type { ArcNativeTabRef } from './drivers/arc.js';
+
 export type BrowserType = 'chrome' | 'comet' | 'chromium' | 'brave' | 'edge' | 'arc' | 'custom';
+
+/**
+ * The transport backend a live browser connection uses (PHNX-2399).
+ *   - `cdp` — Chrome DevTools Protocol (the existing path for all Chromium-family browsers).
+ *   - `arc-native` — Apple Events via `osascript` (the native Arc path, no CDP port required).
+ *
+ * Load-bearing: every action method on `BrowserService` that calls `conn.cdp.send()`
+ * must check `conn.backend` and route to the native driver instead when it is
+ * `arc-native`. Unsupported native verbs throw `ArcNativeCapabilityError`.
+ */
+export type BackendKind = 'cdp' | 'arc-native';
+
+/**
+ * Stable native identity carried by an Arc profile declaration (PHNX-2399).
+ * One agents-cli profile is one Arc Space: the Space already carries its Arc
+ * profile (cookies, logins), so agents never learn a second "space" concept.
+ */
+export interface ArcNativeProfileIdentity {
+  /** Arc's profile directory basename the Space belongs to. Authoritative id. */
+  profileId: string;
+  /** Display-only Arc profile name from Local State. Never used for addressing. */
+  profileName: string;
+  /** Stable Space id used for every native operation. */
+  spaceId: string;
+  /** Display-only Space title. */
+  spaceTitle: string;
+}
+
+/** A crash-safe native create intent persisted before Arc is asked to mutate. */
+export interface ArcNativeCreateIntent {
+  tabId: string;
+  markerUrl: string;
+  targetUrl: string;
+  createdAt: number;
+  /** Active tab before creation, restored only if the owned tab stayed active. */
+  previousTabId?: string;
+  /** Written immediately after the driver returns, before final navigation. */
+  ref?: ArcNativeTabRef;
+}
+
+/** Durable Arc state owned by one browser task. */
+export interface ArcNativeTaskState {
+  profileId: string;
+  /** Original Arc window id. A tab moved elsewhere is never adopted. */
+  windowId: string;
+  spaceId: string;
+  /** Display-only snapshot for status output. */
+  spaceTitle: string;
+  tabs: Record<string, ArcNativeTabRef>;
+  createIntents?: Record<string, ArcNativeCreateIntent>;
+}
 
 /**
  * The user-facing name of a profile — what `agents browser profiles list`
@@ -163,6 +218,8 @@ export interface BrowserProfile {
   logDir?: string;
   /** Optional SSH host where logDir lives, e.g. "user@remote-host". */
   logHost?: string;
+  /** Native Arc identity. Present only for an `arc-native:` profile. */
+  arc?: ArcNativeProfileIdentity;
 }
 
 /** Parsed form of `BrowserProfile.targetFilter`. */
@@ -198,11 +255,12 @@ export interface Task {
    * {@link parseConnectionKey} to get the user-facing name out of it.
    */
   profile: ConnectionKey;
-  tabs: Record<string, string>; // shortId (8 chars) -> CDP targetId
+  /** shortId -> CDP target id, or native tab id mirrored from arcNative.tabs. */
+  tabs: Record<string, string>;
   /**
    * Tabs this task DRIVES but did not create, by shortId — a tab that already
    * existed in the browser and was reused because the browser cannot open new
-   * ones (Arc: `Target.createTarget` crashes it, #2778/#2786). Every close path
+   * ones (legacy CDP Arc is one example). Every close path
    * skips these: the task never opened the tab, so closing it on `done` would
    * take away something that was there first. Same rule `adoptTabShowing`
    * states for unowned pages, kept when reuse is unavoidable rather than
@@ -257,6 +315,8 @@ export interface Task {
    * it. See RefSnapshot / RefDescriptor.
    */
   refDescriptors?: Record<string, import('./refs.js').RefSnapshot>;
+  /** Durable stable native ids and crash-intent ledger for an Arc task. */
+  arcNative?: ArcNativeTaskState;
 }
 
 export interface TabInfo {
