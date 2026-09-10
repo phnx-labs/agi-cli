@@ -4,8 +4,11 @@
     <!--
       Load-counter page for the same-task reopen live test (PHNX-2399). Its key is
       the `?p=<name>` query param, so ONE file serves distinct pages (A/B/C/D) that
-      each count their own loads in localStorage — a real Page.reload of the SAME
-      tab bumps the count, and a fresh in-document `window.__sentinel` proves the
+      each count their own loads. localStorage carries the count across reloads and
+      is per ORIGIN, so every tab showing the same page shares it; `window.__loads`
+      is the count THIS document was loaded with, so a test that must prove one tab
+      was left alone reads that, not the shared key. A real Page.reload of the SAME
+      tab bumps both, and a fresh in-document `window.__sentinel` proves the
       document was genuinely reloaded rather than reported refreshed on stale state.
     -->
     <meta charset="utf-8" />
@@ -15,6 +18,7 @@
       var n = Number(localStorage.getItem(key) || '0') + 1;
       localStorage.setItem(key, String(n));
       document.title = name + ' loads=' + n;
+      window.__loads = n;
       window.__sentinel = undefined; // reset on every document load
     </script>
   </head>

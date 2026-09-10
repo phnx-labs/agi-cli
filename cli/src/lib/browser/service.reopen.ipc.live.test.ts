@@ -261,10 +261,10 @@ d('same-task reopen over the real IPC socket + real Chromium (PHNX-2399)', () =>
       .toBe(persisted[task].tabs[String(opened.tabId)]);
   }, 40_000);
 
-  // Read a tab's persisted load counter, waiting until the page's own script ran.
+  // Read the document's own load count, waiting until the page's own script ran.
   const waitLoads = async (task: string, tabId: string, name: string) => {
     for (let i = 0; i < 80; i++) {
-      const v = await service.evaluate(task, tabId, `localStorage.getItem('loads-${name}')`);
+      const v = await service.evaluate(task, tabId, 'window.__loads ?? null');
       if (v != null) return String(v);
       await new Promise((r) => setTimeout(r, 50));
     }
@@ -284,7 +284,7 @@ d('same-task reopen over the real IPC socket + real Chromium (PHNX-2399)', () =>
     expect(s2.created).not.toBe(true);
     expect(String(s2.message ?? '')).toContain('Reused existing task');
     // No Page.reload happened, so the counter did not advance.
-    expect(await service.evaluate(task, String(s1.tabId), "localStorage.getItem('loads-N')")).toBe(before);
+    expect(await service.evaluate(task, String(s1.tabId), 'String(window.__loads)')).toBe(before);
   }, 40_000);
 
   it('a named retry to a DIFFERENT url reuses the task but is NOT a refresh', async () => {
