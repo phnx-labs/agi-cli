@@ -278,9 +278,30 @@ describe('reconcileLocalWorkerSlots', () => {
       accounts: { native: Object.fromEntries(rows.map((r) => [r.id, r])) },
       deviceAccounts: { slots: { a1: { accountId: 'a1', slotDir: '/x', authMode: 'durable', verdict: 'unverified' } } },
     }) as Pick<Meta, 'accounts' | 'deviceAccounts'>;
-    const res = reconcileLocalWorkerSlots({ selfRole: 'worker', readMetaFn: withSlot, hasLocalKey: () => true, provision: () => { throw new Error('should not re-provision'); } });
+    const res = reconcileLocalWorkerSlots({ selfRole: 'worker', readMetaFn: withSlot, hasLocalKey: () => true, slotSeeded: () => true, provision: () => { throw new Error('should not re-provision'); } });
     expect(res.provisioned).toEqual([]);
     expect(res.skipped[0]).toMatchObject({ accountId: 'a1', reason: expect.stringContaining('already provisioned') });
+  });
+
+  it('re-provisions a durable claude slot that predates onboarding seeding so it converges', () => {
+    // Every slot on the workers was provisioned before hasCompletedOnboarding was
+    // seeded; a tick must repair them without an operator re-adding accounts.
+    const withSlot = () => ({
+      accounts: { native: Object.fromEntries(rows.map((r) => [r.id, r])) },
+      deviceAccounts: { slots: { a1: { accountId: 'a1', slotDir: '/x', authMode: 'durable', verdict: 'unverified' } } },
+    }) as Pick<Meta, 'accounts' | 'deviceAccounts'>;
+    const provisioned: string[] = [];
+    const asked: Array<[string, string]> = [];
+    const res = reconcileLocalWorkerSlots({
+      selfRole: 'worker',
+      readMetaFn: withSlot,
+      hasLocalKey: () => true,
+      slotSeeded: (harness, slotDir) => { asked.push([harness, slotDir]); return false; },
+      provision: (a) => provisioned.push(a.id),
+    });
+    expect(asked).toEqual([['claude', '/x']]);
+    expect(provisioned).toEqual(['a1']);
+    expect(res.provisioned).toEqual(['a1']);
   });
 
   // The mac-mini 2026-09-06 gap: every registered claude row predated T1 (no

@@ -611,6 +611,17 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
     result.AGENTS_CWD = options.cwd;
   }
 
+  // An account-slot launch (PHNX-3940 T5) tells the versioned alias which
+  // HOME-shaped dir owns this run's config, so the alias's version-home pin
+  // (claude: CLAUDE_CONFIG_DIR) yields to the slot instead of overriding the
+  // adapter's pin above. Set only for a slot launch and cleared otherwise, so a
+  // run spawned from inside a slot session never inherits its parent's slot.
+  if (options.execHome) {
+    result.AGENTS_EXEC_HOME = options.execHome;
+  } else {
+    delete result.AGENTS_EXEC_HOME;
+  }
+
   // Export the run's durable name (companion to AGENT_SESSION_ID) so a
   // SessionStart hook / the agent can associate its transcript with the handle
   // the user gave the run. Only set when --name was passed.

@@ -110,6 +110,26 @@ describe('generateVersionedAliasScript', () => {
     expect(script).toContain('export AGENT_CLI_CREDENTIAL_STORE="file"');
   });
 
+  it('yields the claude config-dir pin to an account-slot launch and consumes the marker', () => {
+    // A slot launch (PHNX-3940 T5) pins CLAUDE_CONFIG_DIR to the slot in
+    // buildExecEnv and stamps the slot in AGENTS_EXEC_HOME; the alias used to
+    // re-export the version home unconditionally, so on yosemite-m1 (2026-09-10)
+    // a run picked as one account onboarded from scratch and wrote its history
+    // into the shared version home. The block below is the generated one, run for real.
+    const script = generateVersionedAliasScript('claude', '2.1.196');
+    const start = script.indexOf('# Claude stores OAuth credentials');
+    const end = script.indexOf('# Managed installs are pinned', start);
+    expect(start).toBeGreaterThan(0);
+    expect(end).toBeGreaterThan(start);
+    const block = script.slice(start, end);
+    const run = (env: Record<string, string>) => spawnSync('bash', ['-c', `VERSION_DIR=/v\n${block}\nprintf '%s|%s' "$CLAUDE_CONFIG_DIR" "\${AGENTS_EXEC_HOME:-unset}"`], {
+      env: { PATH: process.env.PATH ?? '/usr/bin:/bin', ...env },
+      encoding: 'utf-8',
+    }).stdout;
+    expect(run({ AGENTS_EXEC_HOME: '/slots/claude/acct-1' })).toBe('/slots/claude/acct-1/.claude|unset');
+    expect(run({})).toBe('/v/home/.claude|unset');
+  });
+
   it('keeps the same real-home anchor and lease order for a claude@version alias', () => {
     const script = generateVersionedAliasScript('claude', '2.1.196');
     expect(script).toContain('BINARY="$AGENTS_REAL_HOME/.agents/.history/versions/claude/2.1.196/node_modules/.bin/claude"');

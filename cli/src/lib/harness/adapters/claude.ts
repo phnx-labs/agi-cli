@@ -97,8 +97,20 @@ export const claudeAdapter: HarnessAdapter = {
     return `
 # Claude stores OAuth credentials in the macOS keychain. Scope them to the
 # selected version's config directory so switching versions also switches the
-# live Claude account.
-export CLAUDE_CONFIG_DIR="$VERSION_DIR/home/${ctx.configDirName}"
+# live Claude account. An account-slot launch (PHNX-3940 T5) has already chosen
+# the config dir: \`agents run\` hands the HOME-shaped slot in AGENTS_EXEC_HOME,
+# and the version-home pin yields to it — the same way the cursor alias's HOME
+# swap yields to a spawner-chosen HOME. Without this the alias re-pinned every
+# slot launch onto the shared version home, so a worker run picked as one
+# account onboarded and kept its history in another account's home. The marker
+# is consumed here so the launched harness never inherits it into a nested
+# launch; a bare \`claude@<version>\` from a terminal still gets the version home.
+if [ -n "\${AGENTS_EXEC_HOME:-}" ]; then
+  export CLAUDE_CONFIG_DIR="$AGENTS_EXEC_HOME/${ctx.configDirName}"
+  unset AGENTS_EXEC_HOME
+else
+  export CLAUDE_CONFIG_DIR="$VERSION_DIR/home/${ctx.configDirName}"
+fi
 # Managed installs are pinned in a per-version dir; Claude Code's background
 # auto-updater would rewrite the pinned binary in place. Disable it so a pin
 # stays a pin. An explicit user value always wins.

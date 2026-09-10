@@ -214,6 +214,26 @@ describe('buildExecEnv — AGENTS_MAILBOX_DIR wiring (mailbox loop-closer)', () 
   });
 });
 
+describe('buildExecEnv — AGENTS_EXEC_HOME (account-slot launch marker)', () => {
+  it('stamps the slot dir for a slot launch so the versioned alias yields its config-dir pin', () => {
+    const slot = path.join(os.tmpdir(), 'agents-exec-home-slot');
+    const env = buildExecEnv(execOpts({ agent: 'claude', execHome: slot }));
+    expect(env.AGENTS_EXEC_HOME).toBe(slot);
+    expect(env.CLAUDE_CONFIG_DIR).toBe(path.join(slot, '.claude'));
+  });
+
+  it('clears an inherited marker for a launch without a slot (a nested run never borrows its parent slot)', () => {
+    const prev = process.env.AGENTS_EXEC_HOME;
+    process.env.AGENTS_EXEC_HOME = '/parent/slot';
+    try {
+      const env = buildExecEnv(execOpts({ agent: 'claude' }));
+      expect(env.AGENTS_EXEC_HOME).toBeUndefined();
+    } finally {
+      if (prev === undefined) delete process.env.AGENTS_EXEC_HOME; else process.env.AGENTS_EXEC_HOME = prev;
+    }
+  });
+});
+
 describe('buildExecEnv — custom harness identity (PHNX-2935)', () => {
   it('stamps AGENTS_AGENT_NAME with the profile name, not the host CLI', () => {
     // The bug: `agents run deepseek` resolved the host to claude and then
