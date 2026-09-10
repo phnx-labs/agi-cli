@@ -1,11 +1,5 @@
 # Changelog
 
-## Unreleased
-
-- **Docs: secrets live in `@phnx-labs/secrets-cli`; install via `agents clis install secrets` (PHNX-3989).** README, `cli/docs/secrets.md`, `cli/docs/secrets-agent-process-model.md`, and `skills/secrets/SKILL.md` no longer describe an in-repo engine or a daemon-hosted broker. The broker is `secrets _agent-run` on macOS. Source: those files.
-
-- **`agents setup secrets` installs the published secrets CLI instead of only printing a hint (PHNX-3989).** A missing `secrets` binary tries `agents clis install secrets` (system `clis/secrets.yaml`) then a pinned `npm i -g @phnx-labs/secrets-cli@0.1.2`, then hands off to `secrets migrate`. Users do not set extra env vars. The engine stays out of this repo (DIST-1); the passthrough and process client are unchanged. Source: `cli/src/commands/setup-secrets.ts`.
-
 ## 1.22.98
 
 - `agents run codex#<account>` on macOS now runs as that account. The SUN_LEN short-home relocation keyed `CODEX_HOME` by version alone, so an account slot (long enough to overflow too) was silently redirected to the default version's `~/.agents/.codex-homes/<version>/.codex` and its login — `agents run codex#getrush` opened the gmail session while the banner still said `getrush`. The short home is now keyed by the origin (`a-<account id>` for a slot). A version/account reinstall that recreates a fresh `.codex` adopts its existing short home (which holds the login) instead of failing, and a slot mis-linked onto a foreign home by the old layout is repointed to its own home rather than run as the wrong account.
