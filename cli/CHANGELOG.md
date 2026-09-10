@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.22.95
+
+- **Firefox automation over WebDriver BiDi (PHNX-4043).** `agents browser` now drives
+  Firefox, which dropped the Chrome DevTools Protocol in 129. Every Firefox profile in
+  `profiles.ini` is discovered read-only as a `firefox-<name>` browser profile
+  (`firefox-default`, `firefox-default-release`, …) pinned to that profile directory;
+  agents launch it headless with a debug port (or attach to a running one, failing loud
+  when a portless Firefox already holds the profile). Supported verbs: start, navigate,
+  tab add, tabs, evaluate, refs, click, fill/type, scroll, screenshot, done — with the
+  same same-task reopen semantics as the rest of the service. A trusted pointer click
+  goes through `input.performActions`. Network capture, upload, and PDF fail loud with a
+  structured error naming a Chromium-family profile. Source: `apps/cli/src/lib/browser/drivers/firefox.ts`,
+  `apps/cli/src/lib/browser/firefox-discovery.ts`, `apps/cli/src/lib/browser/service.ts`.
+
+- **Comet's own profiles are browser profiles, and discovered profiles reach the whole fleet (PHNX-4042).** On a Mac, `agents browser profiles list` now shows one profile per entry in Comet's profile menu (`comet-work`, ...), read from Comet's `Local State` and pinned to Comet's real user-data dir and `--profile-directory`, next to the `arc-*` rows for Arc Spaces. Agents and you share one Comet window per profile: agents attach when it runs with remote debugging on the profile's port, launch Comet on your own store when it is not running (over a TCP port, so the instance outlives a daemon restart and the ownership guard can verify it), and fail loud with the relaunch command when it runs without a port. The daemon's fleet-sync tick publishes every discovered profile into this device's declaration, so other boxes list it with `WHERE=<device>` and `--profile arc-gmail` from a worker routes to the Mac that owns it. `AGENTS_COMET_DIR` points discovery at another store. Source: `cli/src/lib/browser/chromium-discovery.ts`, `cli/src/lib/browser/profiles.ts`, `cli/src/lib/browser/chrome.ts`, `cli/src/lib/browser/drivers/local.ts`, `cli/src/lib/daemon/usage-sync-service.ts`.
+
 ## 1.22.94
 
 - **Agents drive your running Arc, one profile per Arc Space (PHNX-2399, macOS).** On a Mac with Arc, `agents browser profiles list` shows every Arc Space as a profile — `arc-gmail`, `arc-work`, `arc-dev`, named after the Space title — discovered read-only from Arc's `User Data/Local State` and `StorableSidebar.json`. A Space already carries its Arc profile's logins, so it is the browser profile agents pick with `--profile`; there is no separate Space flag and nothing to create. `agents browser use arc-gmail` makes it the default. Tabs are created, navigated, evaluated, and closed through Apple Events against the Arc you already have open — no debug port, no relaunch, never a second Arc. Agents only ever touch the tabs they created: durable task state addresses them by stable window, Space, and tab ids, a crash-safe marker intent guards creation, and closing a task removes only its own tabs. Creating a tab makes Arc select it for about 100 ms before the tab you had selected is restored; navigate, evaluate, and close are silent. Native refs, click, fill/type, scroll, and `tab focus` work; screenshots, promise evaluation, trusted input, network/console capture, uploads/downloads, and PDF fail with `ArcNativeCapabilityError` and point at a Chromium-family profile. Source: `cli/src/lib/browser/arc-discovery.ts`, `cli/src/lib/browser/drivers/arc.ts`, `cli/src/lib/browser/arc-dom.ts`, `cli/src/lib/browser/profiles.ts`, `cli/src/lib/browser/service.ts`, `cli/src/commands/browser.ts`.
