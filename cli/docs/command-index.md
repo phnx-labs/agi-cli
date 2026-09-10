@@ -709,7 +709,7 @@ agents setup mine init <name>                 Mint your own branded CLI that run
 agents setup mine list                        Show your brands and what each has turned off
 agents setup mine remove <name>               Remove a brand (its shim + config)
 agents setup mine toggle <name>               Enable/disable features for a brand
-agents setup secrets                          Install guidance for the standalone `secrets` CLI, then run its own `secrets migrate` onboarding.
+agents setup secrets                          Install the standalone `secrets` CLI if missing, then run its own `secrets migrate` onboarding.
 agents setup status                           Show setup readiness for core, browser, computer, secrets, accounts, fleet, share, watchdog, and preferences.
 agents setup url-scheme                       Register/unregister/status the agents:// OS URL-scheme handler for artifact session deep links.
 agents setup url-scheme register              Register the agents:// URL scheme with the OS so artifact links resume sessions (idempotent).

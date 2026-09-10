@@ -10,11 +10,11 @@ import {
 import { _resetSecretsClientForTest } from '../lib/secrets-client.js';
 
 /**
- * `agents setup secrets` no longer runs its own backend/policy wizard against
- * an in-repo engine (PHNX-3989) — it is install guidance for the standalone
- * `secrets` CLI, then a hand-off to that CLI's own `secrets migrate`. DIST-1:
- * agents-cli never rebundles the engine, so a missing executable is the
- * expected, always-testable path (no real dependency needed).
+ * `agents setup secrets` installs the standalone `secrets` CLI when missing
+ * (declared host-CLI manifest, else the pinned npm package), then hands off to
+ * `secrets migrate`. DIST-1: agents-cli never rebundles the engine. A PATH with
+ * no `secrets` and no npm is the always-testable miss — install fails loud
+ * rather than throwing or writing setup prefs.
  */
 describe('agents setup secrets', () => {
   const saved: Record<string, string | undefined> = {};
@@ -42,8 +42,26 @@ describe('agents setup secrets', () => {
     expect(isSecretsCliInstalled()).toBe(false);
   });
 
-  it('prints install guidance and returns false rather than throwing', async () => {
-    expect(await runSecretsSetupWizard()).toBe(false);
+  it('attempts install and returns false rather than throwing when npm is also missing', async () => {
+    const logs: string[] = [];
+    const origLog = console.log;
+    const origErr = console.error;
+    console.log = (...args: unknown[]) => {
+      logs.push(args.map(String).join(' '));
+    };
+    console.error = (...args: unknown[]) => {
+      logs.push(args.map(String).join(' '));
+    };
+    try {
+      expect(await runSecretsSetupWizard()).toBe(false);
+    } finally {
+      console.log = origLog;
+      console.error = origErr;
+    }
+    const text = logs.join('\n');
+    expect(text).toMatch(/not installed/i);
+    expect(text).toMatch(/Failed to install @phnx-labs\/secrets-cli@0\.1\.2/);
+    expect(text).toMatch(/npm i -g @phnx-labs\/secrets-cli@0\.1\.2/);
   });
 
   it('reports installed once $SECRETS_BIN points at a real executable', () => {

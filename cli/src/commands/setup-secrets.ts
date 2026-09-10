@@ -1,13 +1,10 @@
 /**
- * `agents setup secrets` — install guidance for the standalone `secrets` CLI,
- * then a pass-through to its own `secrets migrate` onboarding (PHNX-3989).
+ * `agents setup secrets` — install the standalone `secrets` CLI if missing,
+ * then hand off to its own `secrets migrate` onboarding (PHNX-3989).
  *
- * The wizard that used to pick a default backend/policy and delegate imports
- * lived entirely against the in-repo secrets engine. That engine is extracted
- * to `@phnx-labs/secrets-cli`, which owns its own interactive onboarding
- * (`secrets migrate`) — agents-cli never rebundles it (DIST-1), so there is no
- * in-process fallback when it isn't installed: this command names the install
- * command and stops.
+ * Prefers a declared host-CLI manifest (`agents clis install secrets`); otherwise
+ * installs the pinned `@phnx-labs/secrets-cli`. Never rebundles the engine
+ * (DIST-1) and never writes a `secrets` alias shim (agi-cli#3532).
  */
 
 import type { Command } from 'commander';
@@ -17,8 +14,8 @@ import * as path from 'path';
 import { spawnSync } from 'node:child_process';
 import { getHistoryDir } from '../lib/state.js';
 import { resolveSecretsBin, invocation, SecretsClientError } from '../lib/secrets-client.js';
-
-const INSTALL_HINT = 'npm i -g @phnx-labs/secrets-cli';
+import { SECRETS_CLI_INSTALL_HINT, SECRETS_CLI_SPEC, isSecretsPresent } from '../lib/secrets-cli.js';
+import { installSecretsCli } from '../lib/secrets-cli-install.js';
 
 export function setupSecretsPrefsPath(): string {
   return path.join(getHistoryDir(), 'setup', 'secrets.json');
@@ -42,15 +39,26 @@ function recordSetupComplete(): void {
 }
 
 /**
- * Print install guidance when the standalone is missing, else hand off to its
- * own interactive `secrets migrate`. Returns whether setup is now complete
- * (installed, and — when it ran — `migrate` exited 0).
+ * Install the standalone if missing, then hand off to its interactive
+ * `secrets migrate`. Returns whether setup is now complete (installed, and —
+ * when it ran — `migrate` exited 0).
  */
 export async function runSecretsSetupWizard(): Promise<boolean> {
   if (!isSecretsCliInstalled()) {
     console.log(chalk.yellow('The standalone `secrets` CLI is not installed.'));
-    console.log(chalk.gray('Install it, then re-run `agents setup secrets`:'));
-    console.log(chalk.cyan(`  ${INSTALL_HINT}`));
+    const result = installSecretsCli({ cwd: process.cwd() });
+    if (!result.ok) {
+      console.error(chalk.red(result.error ?? 'Install failed.'));
+      console.error(chalk.gray('Install it, then re-run `agents setup secrets`:'));
+      console.error(chalk.cyan(`  ${SECRETS_CLI_INSTALL_HINT}`));
+      return false;
+    }
+    const via = result.method === 'clis' ? 'declared host CLI manifest' : SECRETS_CLI_SPEC;
+    console.log(chalk.green(`Installed ${via}.`));
+  }
+  if (!isSecretsPresent()) {
+    console.error(chalk.red('The standalone `secrets` CLI is still missing after install.'));
+    console.error(chalk.cyan(`  ${SECRETS_CLI_INSTALL_HINT}`));
     return false;
   }
   const bin = resolveSecretsBin();
@@ -65,7 +73,7 @@ export async function runSecretsSetupWizard(): Promise<boolean> {
 export function registerSetupSecretsCommand(setupCmd: Command): void {
   setupCmd
     .command('secrets')
-    .description('Install guidance for the standalone `secrets` CLI, then run its own `secrets migrate` onboarding.')
+    .description('Install the standalone `secrets` CLI if missing, then run its own `secrets migrate` onboarding.')
     .action(async () => {
       if (!(await runSecretsSetupWizard())) process.exitCode = 1;
     });

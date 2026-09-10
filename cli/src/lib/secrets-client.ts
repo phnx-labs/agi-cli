@@ -49,6 +49,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import type { Readable, Writable } from 'node:stream';
 import { findInPath } from './agent-spec/agents.js';
+import { SECRETS_CLI_INSTALL_HINT } from './secrets-cli.js';
 import { getUserAgentsDir } from './state.js';
 import type {
   SecretsBundle,
@@ -264,8 +265,8 @@ export function resolveSecretsBin(): string {
     throw new SecretsClientError(
       'SECRETS_BIN_MISSING',
       'The standalone `secrets` CLI was not found. Install it with:\n' +
-        '  npm i -g @phnx-labs/secrets-cli\n' +
-        'or point $SECRETS_BIN at its executable.',
+        `  ${SECRETS_CLI_INSTALL_HINT}\n` +
+        'or run `agents setup secrets`.',
     );
   }
   cachedBin = resolved;
@@ -560,9 +561,14 @@ export function secretsRequestSync<T = unknown>(
   return serveOnceSync(op, args, context) as T;
 }
 
+/** Drop the memoized executable so the next resolve re-walks PATH / `$SECRETS_BIN`. */
+export function forgetResolvedSecretsBin(): void {
+  cachedBin = undefined;
+}
+
 /** Test hook: forget the cached binary + handshake so a new env is re-resolved. */
 export function _resetSecretsClientForTest(): void {
-  cachedBin = undefined;
+  forgetResolvedSecretsBin();
   handshakeReady = false;
   handshakePromise = null;
   requestCounter = 0;
