@@ -464,6 +464,16 @@ export interface ActiveSession {
    * off this so an idle-but-old session doesn't read as freshly active.
    */
   lastActivityMs?: number;
+  /**
+   * The transcript's own cursor — the harness stamp on the last meaningful event
+   * (message / tool call / tool result), from {@link SessionState.lastEventMs}.
+   * Unlike {@link lastActivityMs} it does not move when a hook-firing record is
+   * appended, so the attention reconciler uses it to decide whether the agent
+   * worked past a hook-raised prompt (PHNX-3999). Absent when the harness stamps
+   * no times, when no transcript was parsed, and on rows from a peer running an
+   * older CLI.
+   */
+  lastEventMs?: number;
   status: ActiveStatus;
   /**
    * Coarse lifecycle bucket derived once from {@link status} (see {@link SessionPhase}).
@@ -1246,72 +1256,85 @@ function parseTailEventsForKind(agent: SessionAgentId, sessionFile: string): Ses
 }
 
 /**
- * Process-local memo for {@link computeLiveSignals}. The menu-bar / `--active`
- * poll re-reads every live session on a ~30s tick (#2047). When a transcript's
- * mtime (and pidAlive / kind / cwd) are unchanged, re-parsing the tail yields
- * the same signals — skip the parse. Bound the map so a long-lived daemon that
- * sees thousands of sessions over its life cannot retain them forever.
+ * Process-local memo of the PARSED TAIL for {@link computeLiveSignals}. The
+ * menu-bar / `--active` poll re-reads every live session on a ~30s tick (#2047),
+ * and while a transcript's mtime is unchanged its bytes are unchanged — so the
+ * parse (the expensive half) is memoized on mtime. The CLASSIFICATION is not:
+ * `inferSessionState` is re-run on every call against the current clock and the
+ * current `pidAlive`, because a time-based verdict (the 30-minute prose-question
+ * decay) must expire on schedule even while the bytes sit still — a memo keyed
+ * on mtime froze that verdict for as long as nobody typed (PHNX-3999). Bound the
+ * map so a long-lived daemon that sees thousands of sessions cannot retain them
+ * forever.
  */
-const LIVE_SIGNALS_CACHE_MAX = 512;
-const liveSignalsCache = new Map<string, {
+const LIVE_TAIL_CACHE_MAX = 512;
+interface LiveTail {
   mtimeMs: number | undefined;
-  pidAlive: boolean;
-  signals: LiveSignals;
-}>();
+  events: SessionEvent[];
+  /** Output-token throughput, a pure function of the tail bytes (Claude/Codex only). */
+  tokPerSec?: number;
+}
+const liveTailCache = new Map<string, LiveTail>();
 
-/** Test seam: drop the in-process live-signals memo. */
+/** Test seam: drop the in-process parsed-tail memo. */
 export function clearLiveSignalsCacheForTest(): void {
-  liveSignalsCache.clear();
+  liveTailCache.clear();
+}
+
+/**
+ * Parse the transcript tail for one harness. Claude/Codex take the fast bounded
+ * byte-tail ({@link readSessionTailWithRaw}) — the hot path, and the only two
+ * that also yield throughput (their raw lines carry usage the event model drops).
+ * EVERY OTHER tracked harness (grok, droid, rush, gemini, kimi, hermes, opencode,
+ * antigravity, cursor) is parsed with its own parser. An opaque/untracked kind
+ * yields no events.
+ */
+function parseLiveTail(kind: string, sessionFile: string, mtimeMs: number | undefined): LiveTail {
+  if (kind === 'claude' || kind === 'codex') {
+    const { events, content } = readSessionTailWithRaw(sessionFile, kind);
+    const tokPerSec = events.length > 0 ? computeTokPerSec(content, kind) : 0;
+    return { mtimeMs, events, tokPerSec: tokPerSec > 0 ? tokPerSec : undefined };
+  }
+  if (isSessionTrackedAgent(kind)) return { mtimeMs, events: parseTailEventsForKind(kind, sessionFile) };
+  return { mtimeMs, events: [] };
 }
 
 /**
  * Derive the inferred state (working / waiting / idle + preview/badges) and, for
  * the two harnesses whose raw lines carry it, the output-token throughput.
  *
- * Claude/Codex take the fast bounded byte-tail ({@link readSessionTailWithRaw}) —
- * the hot path, and the only two that also yield throughput (their raw lines
- * carry usage the event model drops). EVERY OTHER tracked harness (grok, droid,
- * rush, gemini, kimi, hermes, opencode, antigravity, cursor) is parsed with its own
- * parser and run through the SAME {@link inferSessionState}, so a live
- * non-claude/codex agent gets a real working/waiting/idle instead of the blanket
- * `unknown` it used to fall through to. An opaque/untracked kind or an
+ * Every tracked harness runs through the SAME {@link inferSessionState}, so a
+ * live non-claude/codex agent gets a real working/waiting/idle instead of the
+ * blanket `unknown` it used to fall through to. An opaque/untracked kind or an
  * unreadable/empty transcript yields an empty signal set, and the caller's
  * {@link resolveFallbackStatus} reports the honest live floor (`running`).
  *
- * Unchanged-mtime hits reuse the previous result (see {@link liveSignalsCache})
- * so a 30s active-session poll does not re-tail every quiet transcript.
+ * An unchanged-mtime call reuses the parsed tail (see {@link liveTailCache}) so a
+ * 30s active-session poll does not re-tail every quiet transcript — but it always
+ * re-classifies against `nowMs`, so an elapsed-time verdict is never frozen.
  */
-export function computeLiveSignals(kind: string, sessionFile: string | undefined, cwd: string | undefined, pidAlive: boolean): LiveSignals {
+export function computeLiveSignals(
+  kind: string,
+  sessionFile: string | undefined,
+  cwd: string | undefined,
+  pidAlive: boolean,
+  nowMs: number = Date.now(),
+): LiveSignals {
   if (!sessionFile) return {};
   let mtimeMs: number | undefined;
   try { mtimeMs = fs.statSync(sessionFile).mtimeMs; } catch { /* vanished between calls */ }
 
   const cacheKey = `${kind}\0${sessionFile}\0${cwd ?? ''}`;
-  const cached = liveSignalsCache.get(cacheKey);
-  if (cached && cached.mtimeMs === mtimeMs && cached.pidAlive === pidAlive) {
-    return cached.signals;
+  let tail = liveTailCache.get(cacheKey);
+  if (!tail || tail.mtimeMs !== mtimeMs) {
+    tail = parseLiveTail(kind, sessionFile, mtimeMs);
+    if (liveTailCache.size >= LIVE_TAIL_CACHE_MAX) liveTailCache.clear();
+    liveTailCache.set(cacheKey, tail);
   }
+  if (tail.events.length === 0) return {};
 
-  const ctx = { cwd, pidAlive, mtimeMs, activeWindowMs: ACTIVE_MTIME_WINDOW_MS };
-  let signals: LiveSignals = {};
-
-  if (kind === 'claude' || kind === 'codex') {
-    const { events, content } = readSessionTailWithRaw(sessionFile, kind);
-    if (events.length > 0) {
-      const state = inferSessionState(events, ctx);
-      const tokPerSec = computeTokPerSec(content, kind);
-      signals = { state, tokPerSec: tokPerSec > 0 ? tokPerSec : undefined };
-    }
-  } else if (isSessionTrackedAgent(kind)) {
-    const events = parseTailEventsForKind(kind, sessionFile);
-    if (events.length > 0) {
-      signals = { state: inferSessionState(events, ctx) };
-    }
-  }
-
-  if (liveSignalsCache.size >= LIVE_SIGNALS_CACHE_MAX) liveSignalsCache.clear();
-  liveSignalsCache.set(cacheKey, { mtimeMs, pidAlive, signals });
-  return signals;
+  const state = inferSessionState(tail.events, { cwd, pidAlive, mtimeMs, activeWindowMs: ACTIVE_MTIME_WINDOW_MS, nowMs });
+  return { state, tokPerSec: tail.tokPerSec };
 }
 
 /** Map inferred activity onto the coarse ActiveStatus used by the renderer and counts. */
@@ -1341,6 +1364,7 @@ function applyState(base: Omit<ActiveSession, 'status'>, state: SessionState | u
     activity: state.activity,
     awaitingReason: state.awaitingReason,
     question: state.question,
+    lastEventMs: state.lastEventMs,
     plan: state.plan,
     todos: state.todos,
     tail: state.tail,

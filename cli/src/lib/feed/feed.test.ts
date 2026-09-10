@@ -444,15 +444,34 @@ describe('feed store', () => {
     expect(listBlocks(feedDir)).toEqual([]);
   });
 
-  it.runIf(hasPython)('real hook clears an idle notification when the user resumes', () => {
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-resume-clear-'));
+  it.runIf(hasPython)('real hook publishes nothing for an idle_prompt — a finished turn is not a request (PHNX-3999)', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-idle-'));
     const feedDir = path.join(home, '.agents', '.history', 'feed');
     const publish = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
       input: JSON.stringify({
         session_id: 'session-idle',
         hook_event_name: 'Notification',
         notification_type: 'idle_prompt',
-        message: 'Claude is waiting for your next prompt',
+        message: 'Claude is waiting for your input',
+      }),
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+    expect(publish.status).toBe(0);
+    expect(listBlocks(feedDir)).toEqual([]);
+    // The ask ledger is untouched too: an idle reminder is not an ask.
+    expect(fs.existsSync(path.join(feedDir, 'asks'))).toBe(false);
+  });
+
+  it.runIf(hasPython)('real hook clears a permission notification when the user answers in the terminal', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-resume-clear-'));
+    const feedDir = path.join(home, '.agents', '.history', 'feed');
+    const publish = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
+      input: JSON.stringify({
+        session_id: 'session-perm',
+        hook_event_name: 'Notification',
+        notification_type: 'permission_prompt',
+        message: 'Claude needs your permission to use Bash',
       }),
       env: { ...process.env, HOME: home },
       encoding: 'utf-8',
@@ -461,7 +480,7 @@ describe('feed store', () => {
     expect(listBlocks(feedDir)).toHaveLength(1);
 
     const clear = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
-      input: JSON.stringify({ session_id: 'session-idle', hook_event_name: 'UserPromptSubmit' }),
+      input: JSON.stringify({ session_id: 'session-perm', hook_event_name: 'UserPromptSubmit' }),
       env: { ...process.env, HOME: home },
       encoding: 'utf-8',
     });
@@ -497,14 +516,14 @@ describe('feed store', () => {
     }
     expect(listBlocks(feedDir).filter(b => b.kind === 'declared')).toHaveLength(1);
 
-    // Contrast: a notification block (harness idle prompt) STILL clears on Stop --
-    // the fix is scoped to declared blocks, not a blanket "never clear on Stop".
+    // Contrast: a notification block (harness permission prompt) STILL clears on
+    // Stop -- the fix is scoped to declared blocks, not a blanket "never clear on Stop".
     spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
       input: JSON.stringify({
         session_id: 'session-notif',
         hook_event_name: 'Notification',
-        notification_type: 'idle_prompt',
-        message: 'Claude is waiting for your next prompt',
+        notification_type: 'permission_prompt',
+        message: 'Claude needs your permission to use Bash',
       }),
       env: { ...process.env, HOME: home },
       encoding: 'utf-8',

@@ -7,8 +7,11 @@
  * banner carries the category, the attention key, the session id, and the
  * answerable choices, so the macOS companion can offer Approve / Approve for
  * session / Deny (permission), the options plus a typed reply (question),
- * Approve / Send back (plan review), or Open terminal (a stall/failure), and
- * route the answer back through `agents feed answer <key> --choice <id>`.
+ * Approve / Send back (plan review), or Open terminal (a stall/failure, or a
+ * request the CLI could not verify is still pending), and route the answer back
+ * through `agents feed answer <key> --choice <id>`. The kind — and so the button
+ * set — is the reconciler's verdict from explicit harness evidence; an idle
+ * reminder never reaches here as a permission (PHNX-3999).
  *
  * Idempotency is a filesystem ledger, not memory: one sidecar file per notified
  * key under `~/.agents/.history/feed/notified/`, so a daemon restart never
@@ -51,6 +54,10 @@ const BANNER_KINDS: Partial<Record<AttentionKind, { category: NonNullable<Deskto
   plan_review: { category: 'plan_review', label: 'Plan review' },
   stall: { category: 'failure', label: 'Failed' },
   failure: { category: 'failure', label: 'Failed' },
+  // A request record the CLI could not confirm is still pending: the `failure`
+  // category is the companion's one button set with no approval action — just
+  // Open terminal — which is exactly the honest offer here.
+  unverified: { category: 'failure', label: 'Could not verify request' },
 };
 
 function shorten(text: string, max = BODY_MAX): string {

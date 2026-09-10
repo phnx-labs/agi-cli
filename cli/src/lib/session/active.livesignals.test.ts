@@ -55,15 +55,39 @@ describe('computeLiveSignals wires every tracked harness into real state', () =>
     expect(computeLiveSignals('grok', undefined, '/tmp', true)).toEqual({});
   });
 
-  it('reuses signals when the transcript mtime is unchanged (#2047)', () => {
+  it('re-classifies from the cached parse when the transcript mtime is unchanged (#2047, PHNX-3999)', () => {
     const file = freshCopy('grok-working/chat_history.jsonl', 'chat_history.jsonl');
     const cwd = path.dirname(file);
     const first = computeLiveSignals('grok', file, cwd, true);
     expect(first.state?.activity).toBe('working');
-    // Same path + mtime + pidAlive → identical object from the process memo
-    // (not a deep clone). A second parse would allocate a new state object.
+    // Same path + mtime: the parsed tail is reused and the classification is
+    // recomputed. Replacing the bytes with an unparseable line while pinning the
+    // mtime back proves the second call never re-read the file — only the
+    // memoized events could have produced this state.
+    const { mtime, atime } = fs.statSync(file);
+    fs.writeFileSync(file, 'not json\n');
+    fs.utimesSync(file, atime, mtime);
     const second = computeLiveSignals('grok', file, cwd, true);
-    expect(second).toBe(first);
+    expect(second.state?.activity).toBe('working');
+    expect(second.state?.preview).toEqual(first.state?.preview);
+  });
+
+  it('a time-based classification expires without an mtime change: the cache holds the parse, not the verdict (PHNX-3999)', () => {
+    const file = freshCopy('../../feed/testdata/claude-prose-question.jsonl', 'prose.jsonl');
+    const cwd = path.dirname(file);
+    // The fixture's turn ended on a free-text question stamped 10:00:06Z; pin the
+    // mtime just after it so the stamp is transcript evidence.
+    const askedMs = Date.parse('2026-09-10T10:00:06.000Z');
+    fs.utimesSync(file, new Date(askedMs + 2_000), new Date(askedMs + 2_000));
+    const live = computeLiveSignals('claude', file, cwd, true, askedMs + 10 * 60_000);
+    expect(live.state?.activity).toBe('waiting_input');
+    expect(live.state?.awaitingReason).toBe('question');
+    expect(live.state?.lastEventMs).toBe(askedMs);
+    // Nothing on disk changes; 31 minutes pass. The mtime-keyed memo used to hand
+    // back the frozen "waiting" verdict here for as long as nobody typed.
+    const later = computeLiveSignals('claude', file, cwd, true, askedMs + 31 * 60_000);
+    expect(later.state?.activity).toBe('idle');
+    expect(later.state?.question).toBeUndefined();
   });
 
   it('recomputes when the transcript mtime advances', () => {

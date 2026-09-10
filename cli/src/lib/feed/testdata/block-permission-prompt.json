@@ -1,0 +1,21 @@
+{
+  "blockId": "block-fixture-permission-pending",
+  "sessionId": "fixture-permission-pending",
+  "mailboxId": "fixture-permission-pending",
+  "host": "zion",
+  "runtime": "claude",
+  "ts": "2026-09-10T10:00:05.250000+00:00",
+  "sourceCursor": {
+    "lastActivityMs": 1789034405250
+  },
+  "questions": [
+    {
+      "text": "Claude needs your permission to use Bash",
+      "header": "Permission needed",
+      "multiSelect": false
+    }
+  ],
+  "kind": "notification",
+  "project": "repo",
+  "notificationType": "permission_prompt"
+}

@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { AttentionNotifyService, buildAttentionNotification } from './attention-notify-service.js';
+import { blockIdForSession, publishBlock } from '../feed/feed.js';
 import type { AttentionItem } from '../feed/attention.js';
 import type { ActiveSession } from '../session/active.js';
 import type { DaemonContext } from './service.js';
@@ -81,6 +82,14 @@ describe('buildAttentionNotification', () => {
     expect(n!.choices).toEqual([{ id: 'open-terminal', label: 'Open terminal' }]);
   });
 
+  it('a request the CLI could not verify offers only Open terminal — never an approval button (PHNX-3999)', () => {
+    const n = buildAttentionNotification({ ...base, kind: 'unverified', choices: undefined, question: { text: 'Claude needs your permission to use Bash' } }, session({}));
+    expect(n!.category).toBe('failure');
+    expect(n!.title).toBe('sess-1 · Could not verify request');
+    expect(n!.body).toBe('Claude needs your permission to use Bash');
+    expect(n!.choices).toEqual([{ id: 'open-terminal', label: 'Open terminal' }]);
+  });
+
   it('produces no banner for a done/declared/review kind', () => {
     expect(buildAttentionNotification({ ...base, kind: 'declared' }, session({}))).toBeUndefined();
     expect(buildAttentionNotification({ ...base, kind: 'review' }, session({}))).toBeUndefined();
@@ -106,13 +115,16 @@ describe('AttentionNotifyService — ledger idempotency', () => {
   });
 
   function makeService() {
-    const waiting = session({
-      sessionId: 'sess-perm',
-      awaitingReason: 'permission',
-      activity: 'waiting_input',
-      question: { text: 'Approve running the release?', reason: 'permission' },
-      lastActivityMs: 4000,
-    });
+    // A live Claude row parked on a real permission prompt: the hook's block is in
+    // the feed store with the subtype recorded, and the row's last transcript event
+    // (the tool call) precedes the block's write-time cursor.
+    const feedRoot = path.join(tmp, 'feed');
+    publishBlock({
+      blockId: blockIdForSession('sess-perm'), sessionId: 'sess-perm', mailboxId: 'sess-perm', host: 'zion', runtime: 'claude',
+      ts: '1970-01-01T00:00:05.000Z', sourceCursor: { lastActivityMs: 5_000 },
+      kind: 'notification', notificationType: 'permission_prompt', questions: [{ text: 'Approve running the release?' }],
+    }, feedRoot);
+    const waiting = session({ sessionId: 'sess-perm', activity: 'working', pidAlive: true, lastEventMs: 4_000, lastActivityMs: 5_100 });
     return new AttentionNotifyService({
       getSessions: async () => [waiting],
       notify: (n) => posts.push(n),

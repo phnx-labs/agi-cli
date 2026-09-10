@@ -91,6 +91,19 @@ runs the stage on the release home base and pulls the result back.
   the helper renders stable (see `docs/specifications.md` §Sessions), and must
   never build the helper — there is no source here to build from, and a
   rebuild-on-release is exactly what owner requirement R3 forbids.
+- **Attention is the CLI's verdict; the helper renders only the actions the
+  record carries (PHNX-3999, spec SES-40f).** The `AttentionItem` on
+  `agents feed watch --json` and the banner the `attention-notify` daemon posts
+  through `"AGI Menu" --notify --category …` are the same record, classified
+  from explicit harness evidence: `permission` exists only for a recorded
+  `permission_prompt` the transcript corroborates and carries its choices;
+  Claude's `idle_prompt` is never a request; a record the CLI could not confirm
+  is `kind: unverified` — no `choices`, no `safeDefault`, posted on the `failure`
+  category with `open-terminal` only, and refused by `agents feed answer`. The
+  helper must not add approval controls a record does not carry, must not
+  colour a resolved generation as needing you from its own phase fallback, and
+  must not treat a dismissed banner as an answer — the record clears when the
+  transcript moves past it.
 
 ## Commands
 

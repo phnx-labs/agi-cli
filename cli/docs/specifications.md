@@ -833,6 +833,36 @@ SSH access (§7); rendering sessions that no harness produced.
   parked until the device registry changes or the capped delay elapses. Abort
   listeners MUST NOT accumulate across reconnects
   (`lib/session/remote/peer-stream.ts`; `lib/session/remote/peer-stream.test.ts`).
+- **SES-40f (MUST).** An attention item's `kind` MUST be classified from
+  explicit harness evidence, never from the fact that a hook fired or from
+  elapsed time (PHNX-3999). A `notification` block is a `permission` only when
+  its recorded `notificationType` is `permission_prompt` (Claude's Notification
+  event, or a Codex `PermissionRequest`); `elicitation_dialog` is a `question`
+  with no invented choices; `idle_prompt` — "the turn ended and the operator has
+  been idle" — MUST NOT be published by the feed-publish hook and, when an older
+  hook left one on disk, MUST yield no request, so the session's lifecycle
+  (a finished turn, or a trailing prose question) speaks for itself; a
+  notification with no recorded subtype is `unverified`. The state engine MUST
+  NOT report `awaitingReason: permission` from a transcript — a tool call with
+  no result is `working` while the process is alive, however long it has run —
+  and a lifecycle `permission` claim from an older peer MUST project as
+  `unverified`. One unresolved record exists per `host/session/generation`; a
+  hook-raised block MUST be resolved by later evidence — a transcript event
+  (`lastEventMs`, the harness stamp on the last meaningful event, never the file
+  mtime a hook firing advances) stamped after the block's `sourceCursor`, or a
+  dead process — and a dismissed banner MUST NOT resolve it. A `permission`
+  block the session offers no cursor to check MUST be trusted only for
+  `UNVERIFIED_PROMPT_AGE_MS` (30 min), then read as `unverified`. An
+  `unverified` item MUST carry no choices and no `safeDefault`; every consumer
+  (the `feed watch` projection, the `attention-notify` daemon banner, `feed
+  answer`) MUST render it as "could not verify request" with an open-session
+  action only, and `feed answer` MUST refuse it. Time-based verdicts — the
+  30-minute prose-question decay and the unverified age — MUST be recomputed
+  against the current clock from cached parse output, never memoized with the
+  transcript's mtime (`lib/feed/attention.ts`; `lib/session/state.ts`;
+  `lib/session/active.ts` `computeLiveSignals`; `lib/feed/feed.ts`
+  `FEED_PUBLISH_HOOK_SCRIPT`; tests `lib/feed/attention.truth.test.ts`,
+  `lib/feed/attention.test.ts`, `lib/session/active.livesignals.test.ts`).
 
 - **SES-41 (MUST).** `agents sessions watch --json` MUST emit newline-delimited,
   versioned envelopes carrying `streamId`, a strictly increasing `sequence`, and
@@ -1713,6 +1743,39 @@ Then the session is re-extracted (same mtime/size, different stored version)
 and its assistant text is searchable again, and the ledger's
 `extractor_version` reads the current `CONTENT_INDEX_VERSION` afterward
 (`lib/session/discover.assistant-content.test.ts`).
+
+**GWT-22 — An idle reminder after a finished turn is not a permission request.**
+Given a Claude transcript whose last meaningful event is the assistant's
+"pong" to "reply with exactly: pong", followed a minute later by an
+`idle_prompt` notification block the feed-publish hook wrote; When the row is
+reconciled, the `attention-notify` daemon ticks, and `feed watch --json`
+projects the row; Then the row reads `idle`, the reconciler yields no item, no
+banner is posted, the notified ledger stays empty, and the stream emits
+`attention.remove` (`lib/feed/attention.truth.test.ts`; fixtures
+`lib/feed/testdata/claude-trivial-done.jsonl`, `block-idle-prompt.json`).
+
+**GWT-23 — A real permission prompt is a permission with the harness choices
+until the transcript moves past it.**
+Given a Claude transcript ending in a `Bash` tool call with no result and a
+`permission_prompt` block stamped 2 s after it; When reconciled; Then the item
+is `permission`, keyed `<host>/<session>/<block ts>`, with `approve` /
+`approve-session` / `deny`, the daemon posts exactly one such banner across two
+ticks, and the stream emits `attention.upsert`. When the operator's approval
+appends the tool result (stamped after the block) and the block file is left
+untouched; Then the reconciler yields nothing and the stream emits
+`attention.remove`; and When the operator merely dismisses the banner; Then the
+record is still open ten minutes later (`lib/feed/attention.truth.test.ts`;
+`claude-permission-pending.jsonl`, `block-permission-prompt.json`,
+`claude-permission-approved-tail.jsonl`).
+
+**GWT-24 — A time-based inference expires while the bytes sit still.**
+Given a Claude transcript whose turn ended on a free-text question stamped
+10:00:06 with the file mtime pinned just after it; When `computeLiveSignals`
+runs at 10:10 and again at 10:31 with no change on disk; Then the first call is
+`waiting_input` / `question` (an inferred ask with no choices) and the second is
+`idle` with no item — the parsed tail is reused, the verdict is not
+(`lib/session/active.livesignals.test.ts`; `lib/feed/attention.truth.test.ts`;
+`claude-prose-question.jsonl`).
 
 ---
 

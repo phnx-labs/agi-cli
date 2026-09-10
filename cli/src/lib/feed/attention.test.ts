@@ -5,6 +5,7 @@ import * as path from 'path';
 import {
   reconcileAttention,
   attentionFingerprint,
+  UNVERIFIED_PROMPT_AGE_MS,
   type PullRequestAttentionSignal,
 } from './attention.js';
 import {
@@ -54,13 +55,14 @@ function openQuestionBlock(partial: Partial<OpenBlock> = {}): OpenBlock {
 
 describe('reconcileAttention', () => {
   it.each([
-    ['Claude question', 'claude', 'question', [{ label: 'A' }], 'lifecycle'],
-    ['Claude notification', 'claude', 'permission', undefined, 'lifecycle'],
-    ['Codex permission', 'codex', 'permission', undefined, 'lifecycle'],
-    ['plan review', 'gemini', 'plan_review', undefined, 'lifecycle'],
-    ['prose fallback', 'opencode', 'question', undefined, 'heuristic'],
-    ['no hook event', 'kimi', 'question', [{ label: 'Continue' }], 'lifecycle'],
-  ] as const)('%s uses the shared lifecycle projection', (_fixture, kind, reason, options, source) => {
+    ['Claude question', 'claude', 'question', [{ label: 'A' }], 'lifecycle', 'question'],
+    ['plan review', 'gemini', 'plan_review', undefined, 'lifecycle', 'plan_review'],
+    ['prose fallback', 'opencode', 'question', undefined, 'heuristic', 'question'],
+    ['no hook event', 'kimi', 'question', [{ label: 'Continue' }], 'lifecycle', 'question'],
+    // A lifecycle `permission` is a claim only an older peer's state engine still
+    // makes (from elapsed time, not a harness event): unverified, never approvable.
+    ['older-peer permission claim', 'claude', 'permission', undefined, 'heuristic', 'unverified'],
+  ] as const)('%s uses the shared lifecycle projection', (_fixture, kind, reason, options, source, expectedKind) => {
     const item = reconcileAttention({
       session: session({
         kind, sessionId: `fixture-${kind}-${reason}`, activity: 'waiting_input', awaitingReason: reason,
@@ -68,7 +70,88 @@ describe('reconcileAttention', () => {
       }),
       nowMs: 10_000,
     });
-    expect(item).toMatchObject({ source, state: 'open' });
+    expect(item).toMatchObject({ source, state: 'open', kind: expectedKind });
+    if (expectedKind === 'unverified') expect(item!.choices).toBeUndefined();
+  });
+
+  describe('a notification block is classified by its recorded subtype, never by the fact that it fired (PHNX-3999)', () => {
+    const notification = (partial: Partial<OpenBlock>): OpenBlock => ({
+      blockId: blockIdForSession('sess-n'), sessionId: 'sess-n', mailboxId: 'sess-n', host: 'zion', runtime: 'claude',
+      ts: '2026-09-10T10:00:05.250Z', sourceCursor: { lastActivityMs: Date.parse('2026-09-10T10:00:05.250Z') },
+      kind: 'notification', questions: [{ text: 'Claude needs your permission to use Bash', header: 'Permission needed' }],
+      ...partial,
+    });
+    /** A live Claude row whose last transcript event (the tool call) precedes the block. */
+    const pending = (partial: Partial<ActiveSession> = {}) => session({
+      sessionId: 'sess-n', activity: 'working', pidAlive: true,
+      lastEventMs: Date.parse('2026-09-10T10:00:03.000Z'), lastActivityMs: Date.parse('2026-09-10T10:00:05.400Z'), ...partial,
+    });
+    const now = Date.parse('2026-09-10T10:00:30.000Z');
+
+    it('permission_prompt with an unadvanced transcript is a confirmed permission with the harness choices', () => {
+      const item = reconcileAttention({ block: notification({ notificationType: 'permission_prompt' }), session: pending(), nowMs: now });
+      expect(item).toMatchObject({ kind: 'permission', source: 'hook', state: 'open', key: 'zion/sess-n/2026-09-10T10:00:05.250Z' });
+      expect(item!.choices?.map((c) => c.id)).toEqual(['approve', 'approve-session', 'deny']);
+    });
+
+    it('idle_prompt is not a request: the block yields nothing and the finished turn reads as nothing to do', () => {
+      const block = notification({ notificationType: 'idle_prompt', questions: [{ text: 'Claude is waiting for your input', header: 'Idle Prompt' }] });
+      expect(reconcileAttention({ block, session: pending({ activity: 'idle' }), nowMs: now })).toBeUndefined();
+    });
+
+    it('idle_prompt falls through to the lifecycle, so a real trailing question is still surfaced as inferred', () => {
+      const block = notification({ notificationType: 'idle_prompt' });
+      const item = reconcileAttention({
+        block,
+        session: pending({ activity: 'waiting_input', awaitingReason: 'question', question: { text: 'Which data directory should I use?', reason: 'question' } }),
+        nowMs: now,
+      });
+      expect(item).toMatchObject({ kind: 'question', source: 'heuristic' });
+      expect(item!.choices).toBeUndefined();
+    });
+
+    it('a transcript event stamped after the block resolves a hook-raised prompt (the tool ran, the dialog is gone)', () => {
+      const approved = pending({ lastEventMs: Date.parse('2026-09-10T10:00:41.000Z') });
+      expect(reconcileAttention({ block: notification({ notificationType: 'permission_prompt' }), session: approved, nowMs: now })).toBeUndefined();
+    });
+
+    it('a dead process resolves a hook-raised prompt — nothing can be showing a dialog', () => {
+      expect(reconcileAttention({ block: notification({ notificationType: 'permission_prompt' }), session: pending({ pidAlive: false }), nowMs: now })).toBeUndefined();
+    });
+
+    it('later evidence never resolves a declared block — the agent said it is stuck until someone answers', () => {
+      const declared = notification({ kind: 'declared', notificationType: undefined, questions: [{ text: 'npm token expired' }] });
+      const advanced = pending({ lastEventMs: Date.parse('2026-09-10T10:05:00.000Z') });
+      expect(reconcileAttention({ block: declared, session: advanced, nowMs: now })).toMatchObject({ kind: 'declared' });
+    });
+
+    it('with no transcript cursor to check, a fresh permission_prompt is trusted on the hook\'s word', () => {
+      const cloud = pending({ lastEventMs: undefined, pidAlive: undefined });
+      const item = reconcileAttention({ block: notification({ notificationType: 'permission_prompt' }), session: cloud, nowMs: now });
+      expect(item).toMatchObject({ kind: 'permission' });
+    });
+
+    it('with no transcript cursor to check, a stale permission_prompt is "could not verify": findable, no approval buttons, no safe default', () => {
+      const cloud = pending({ lastEventMs: undefined, pidAlive: undefined });
+      const stale = Date.parse('2026-09-10T10:00:05.250Z') + UNVERIFIED_PROMPT_AGE_MS + 1;
+      const item = reconcileAttention({ block: notification({ notificationType: 'permission_prompt', safeDefault: 'deny' }), session: cloud, nowMs: stale });
+      expect(item).toMatchObject({ kind: 'unverified', source: 'hook', key: 'zion/sess-n/2026-09-10T10:00:05.250Z' });
+      expect(item!.choices).toBeUndefined();
+      expect(item!.safeDefault).toBeUndefined();
+      expect(item!.question?.text).toBe('Claude needs your permission to use Bash');
+    });
+
+    it('a notification whose writer recorded no subtype cannot be answered from a banner', () => {
+      const item = reconcileAttention({ block: notification({ notificationType: undefined }), session: pending(), nowMs: now });
+      expect(item).toMatchObject({ kind: 'unverified' });
+      expect(item!.choices).toBeUndefined();
+    });
+
+    it('an elicitation dialog is a question with no invented choices', () => {
+      const item = reconcileAttention({ block: notification({ notificationType: 'elicitation_dialog', questions: [{ text: 'The server needs a value for region' }] }), session: pending(), nowMs: now });
+      expect(item).toMatchObject({ kind: 'question', source: 'hook' });
+      expect(item!.choices).toBeUndefined();
+    });
   });
   it('block wins: an open block is authoritative even when the session reports working', () => {
     const item = reconcileAttention({
@@ -89,16 +172,19 @@ describe('reconcileAttention', () => {
     ]);
   });
 
+  /** The permission_prompt block the harness hook writes, with its write-time cursor. */
+  function permissionBlock(sessionId: string, runtime: string): OpenBlock {
+    return {
+      blockId: blockIdForSession(sessionId), sessionId, mailboxId: sessionId, host: 'zion', runtime,
+      ts: '2026-09-07T10:00:05.000Z', sourceCursor: { lastActivityMs: 5_000 },
+      kind: 'notification', notificationType: 'permission_prompt', questions: [{ text: 'Permission — run tests' }],
+    };
+  }
+
   it('a permission item exposes exactly approve / approve-session / deny for Claude', () => {
     const item = reconcileAttention({
-      session: session({
-        kind: 'claude',
-        sessionId: 'perm-1',
-        activity: 'waiting_input',
-        awaitingReason: 'permission',
-        question: { text: 'Permission — run tests', reason: 'permission', options: [{ label: 'Approve', key: '1' }, { label: 'Deny', key: 'esc' }] },
-        lastActivityMs: 4000,
-      }),
+      block: permissionBlock('perm-1', 'claude'),
+      session: session({ kind: 'claude', sessionId: 'perm-1', activity: 'working', pidAlive: true, lastEventMs: 4_000, lastActivityMs: 5_100 }),
       nowMs: 10_000,
     });
     expect(item!.kind).toBe('permission');
@@ -111,16 +197,11 @@ describe('reconcileAttention', () => {
 
   it('a non-Claude permission item omits approve-session', () => {
     const item = reconcileAttention({
-      session: session({
-        kind: 'codex',
-        sessionId: 'perm-2',
-        activity: 'waiting_input',
-        awaitingReason: 'permission',
-        question: { text: 'Permission', reason: 'permission' },
-        lastActivityMs: 4000,
-      }),
+      block: permissionBlock('perm-2', 'codex'),
+      session: session({ kind: 'codex', sessionId: 'perm-2', activity: 'working', pidAlive: true, lastEventMs: 4_000, lastActivityMs: 5_100 }),
       nowMs: 10_000,
     });
+    expect(item!.kind).toBe('permission');
     expect(item!.choices?.map((c) => c.id)).toEqual(['approve', 'deny']);
   });
 

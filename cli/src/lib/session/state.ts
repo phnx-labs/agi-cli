@@ -28,6 +28,16 @@ import { LINEAR_KEY_DENYLIST, linearIssueKeys } from './linear.js';
 export type { TodoItem, TodoProgress };
 
 export type SessionActivity = 'working' | 'waiting_input' | 'idle';
+/**
+ * Why a session is `waiting_input`. The state engine produces `question` and
+ * `plan_review` from transcript structure. `permission` is NOT inferred from a
+ * transcript any more (PHNX-3999): a tool call with no result looks the same
+ * whether the tool is still running or a permission dialog is up, and only the
+ * harness's own `permission_prompt` hook event (the feed block) can tell them
+ * apart. The value stays in the union because a row from a peer running an older
+ * CLI can still carry it; the attention reconciler treats such a row as an
+ * unverified claim, never as an approvable request.
+ */
 export type AwaitingReason = 'question' | 'plan_review' | 'permission';
 
 /** One discrete choice the agent offered the user. */
@@ -132,6 +142,15 @@ export interface SessionState {
   /** Last few assistant turns (most-recent last), one line each — panel context. */
   tail?: string[];
   lastActivityMs?: number;
+  /**
+   * Timestamp (ms) of the last meaningful transcript event — a message, tool
+   * call, tool result, thinking block, or error — when the harness stamped one
+   * (PHNX-3999). This is the transcript's own cursor: unlike the file mtime it does
+   * not move when the harness appends a hook-firing record or other bookkeeping
+   * line, so it is the evidence that the agent did (or did not) work past a given
+   * moment — what the attention reconciler compares a hook-raised prompt against.
+   */
+  lastEventMs?: number;
   pr?: DetectedPr;
   worktree?: DetectedWorktree;
   ticket?: DetectedTicket;
@@ -152,6 +171,13 @@ export interface StateContext {
   pidAlive?: boolean;
   /** Override the running window (defaults to 2 min, matching active.ts). */
   activeWindowMs?: number;
+  /**
+   * The clock every elapsed-time signal is measured against (default `Date.now()`).
+   * Injected so a cached parse can be re-classified against the CURRENT time — a
+   * time-based verdict (the prose-question decay) must expire even when the
+   * transcript bytes have not changed (PHNX-3999).
+   */
+  nowMs?: number;
 }
 
 /** A healthy live session writes several times a minute; 2 min ⇒ "recently active". */
@@ -513,10 +539,10 @@ export function structuredQuestionFromAsk(args?: Record<string, any>): Structure
 }
 
 /**
- * Canonical approve/deny choices for an interactive prompt that carries no
- * agent-supplied option list: Claude's plan-review and permission dialogs. Approve
- * is reliably option 1; deny/keep-planning maps to ESC, which cancels the prompt in
- * every variant (2- or 3-option) — safer than guessing a digit that could differ.
+ * Canonical approve/send-back choices for Claude's plan-review dialog, which
+ * carries no agent-supplied option list. Approve is reliably option 1; keep-planning
+ * maps to ESC, which cancels the prompt in every variant (2- or 3-option) — safer
+ * than guessing a digit that could differ.
  */
 function planReviewQuestion(): StructuredQuestion {
   return {
@@ -528,15 +554,20 @@ function planReviewQuestion(): StructuredQuestion {
     ],
   };
 }
-function permissionQuestion(preview?: string): StructuredQuestion {
-  return {
-    text: preview ? `Permission — ${preview}` : 'Waiting on a permission prompt',
-    reason: 'permission',
-    options: [
-      { label: 'Approve', key: '1' },
-      { label: 'Deny', key: 'esc' },
-    ],
-  };
+
+/**
+ * The harness's own stamp on an event, as ms — or undefined when the event carries
+ * none. A stamp LATER than the file's last write cannot have come from the
+ * transcript (a parser that finds no stamp fills the field with its own parse
+ * time), so it is rejected rather than read as "just happened": the mtime is the
+ * physical upper bound on when any transcript line was written.
+ */
+function eventStampMs(e: SessionEvent | undefined, mtimeMs?: number): number | undefined {
+  if (!e?.timestamp) return undefined;
+  const ms = Date.parse(e.timestamp);
+  if (!Number.isFinite(ms)) return undefined;
+  if (mtimeMs != null && ms > mtimeMs) return undefined;
+  return ms;
 }
 
 /** Does an assistant message read as a question directed at the user? */
@@ -571,7 +602,8 @@ function lastOf(events: SessionEvent[], pred: (e: SessionEvent) => boolean): Ses
  */
 export function inferActivity(events: SessionEvent[], ctx: StateContext = {}): SessionState {
   const windowMs = ctx.activeWindowMs ?? ACTIVE_WINDOW_MS;
-  const fresh = ctx.mtimeMs != null && Date.now() - ctx.mtimeMs < windowMs;
+  const nowMs = ctx.nowMs ?? Date.now();
+  const fresh = ctx.mtimeMs != null && nowMs - ctx.mtimeMs < windowMs;
   // A non-live process (pidAlive === false) can never be "working"; the strongest
   // it gets is "waiting on you" (a dangling question) or "idle".
   const canWork = ctx.pidAlive !== false && (ctx.pidAlive === true || fresh);
@@ -611,6 +643,7 @@ export function inferActivity(events: SessionEvent[], ctx: StateContext = {}): S
     lastRole: lastMsg?.role,
     lastEventKind: last?.type,
     lastActivityMs: ctx.mtimeMs,
+    lastEventMs: eventStampMs(last, ctx.mtimeMs),
     preview: previewSource ? describeEvent(previewSource) : undefined,
     todos,
     tail: tail.length ? tail : undefined,
@@ -636,12 +669,17 @@ export function inferActivity(events: SessionEvent[], ctx: StateContext = {}): S
     return { ...base, activity: 'waiting_input', awaitingReason: 'question', preview: question.text, question };
   }
 
-  // Pending tool call (tool_use with no following tool_result): mid-turn.
+  // Pending tool call (tool_use with no following tool_result): the call is in
+  // flight for as long as the process is alive. A command that has run for ten
+  // minutes and a permission dialog that has sat for ten minutes leave the SAME
+  // transcript — a tool_use with no result and a quiet file — so elapsed time is
+  // not evidence of a request, and this engine never labels one `permission`
+  // (PHNX-3999: the "is the user idle?" reminder and the two-minute mark were both
+  // being rendered with Approve/Deny). The harness's own `permission_prompt` hook
+  // event, carried by the feed block, is the only evidence a dialog is up; the
+  // attention reconciler confirms it against `lastEventMs`.
   if (last.type === 'tool_use') {
-    if (canWork && fresh) return { ...base, activity: 'working' };
-    // Alive but the file hasn't moved — likely blocked on a permission prompt.
-    if (ctx.pidAlive) return { ...base, activity: 'waiting_input', awaitingReason: 'permission', question: permissionQuestion(base.preview) };
-    return { ...base, activity: 'idle' };
+    return { ...base, activity: canWork ? 'working' : 'idle' };
   }
 
   // Thinking or a tool result just landed → agent is mid-turn if recently active.
@@ -659,12 +697,16 @@ export function inferActivity(events: SessionEvent[], ctx: StateContext = {}): S
     // A prose question takes a free-text reply (no select-list), so no options/keys.
     // Unlike the structural plan/ask signals above, the prose heuristic DECAYS: a
     // question nobody answered within PROSE_QUESTION_FRESH_MS is a session that
-    // ended, not one that needs you (RUSH-1522). A prose "?" is only "waiting on
-    // you" while the file is DEMONSTRABLY fresh — with no mtime signal at all we
-    // cannot assert freshness, so the heuristic must not fire (an unknown-age
-    // prose question is a session that ended, closing RUSH-1522's null-mtime hole
-    // where a null mtime kept the question forever).
-    const questionFresh = ctx.mtimeMs != null && Date.now() - ctx.mtimeMs < PROSE_QUESTION_FRESH_MS;
+    // ended, not one that needs you (RUSH-1522). The question's age is the
+    // assistant message's own stamp when the harness wrote one — the exact moment
+    // it was asked — and the file's last write when it did not; the age is measured
+    // against `ctx.nowMs`, never a clock frozen at parse time, so the verdict
+    // expires on schedule even while the bytes sit still (PHNX-3999). With no age
+    // evidence at all the heuristic must not fire (an unknown-age prose question is
+    // a session that ended, closing RUSH-1522's null-mtime hole where a null mtime
+    // kept the question forever).
+    const askedAtMs = eventStampMs(last, ctx.mtimeMs) ?? ctx.mtimeMs;
+    const questionFresh = askedAtMs != null && nowMs - askedAtMs < PROSE_QUESTION_FRESH_MS;
     if (questionFresh && looksLikeQuestion(last.content ?? '')) {
       const text = oneLine(last.content ?? '');
       return { ...base, activity: 'waiting_input', awaitingReason: 'question', question: { text, reason: 'question' } };

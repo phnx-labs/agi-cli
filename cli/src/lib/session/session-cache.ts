@@ -148,6 +148,7 @@ export const LIVE_STATUS_KEYS = [
   'todos',
   'tail',
   'lastActivityMs',
+  'lastEventMs',
   'hostLink',
   'presence',
   'pidAlive',
