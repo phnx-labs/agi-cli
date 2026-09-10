@@ -1073,6 +1073,10 @@ export class BrowserIPCServer {
         if (!request.task) {
           return { ok: false, error: 'Task required' };
         }
+        if (request.all) {
+          const tabs = await this.service.profileTabs(request.task);
+          return { ok: true, tabs: tabs.map(t => ({ id: t.id, url: t.url, title: t.title, current: t.current, task: t.task })) };
+        }
         const tabs = await this.service.tabList(request.task);
         // Carry `current` through — it is the one field a caller needs to show
         // which tab URL-less verbs act on, and dropping it here left `agents

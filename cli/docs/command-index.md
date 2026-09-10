@@ -129,7 +129,7 @@ agents browser tab                            Manage tabs
 agents browser tab add                        Open URL in new tab (becomes current)
 agents browser tab close [tabId]              Close tab(s) — omit tabId to close all
 agents browser tab focus <tabId>              Switch to tab (by ID, prefix, or URL substring)
-agents browser tabs                           List tabs open for the current task
+agents browser tabs                           List tabs open for the current task; --all shows every tab open in the profile browser, yours included
 agents browser tasks                          List all browser tasks
 agents browser type <ref>                     Type text into an element by ref
 agents browser upload                         Upload file(s) — supports hidden file inputs, drag-drop targets, and OS chooser interception

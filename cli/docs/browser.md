@@ -742,7 +742,7 @@ environment would refuse every later *local* drive on the machine.
 | Command | Description |
 |---------|-------------|
 | `agents browser navigate [url]` | Navigate current tab (positional or `--url`; alias `goto`). Creates a task when none resolves for this caller. `--json` for machine output |
-| `agents browser tabs` | List open tabs (`*` marks the current tab; `--json`) |
+| `agents browser tabs` | List the task's open tabs (`*` marks the current tab; `--json`). `--all` lists every tab open in the profile browser, yours included: OWNER names the owning task, or `you` for a tab no task owns; read-only on Chromium, Arc (the Space's tabs), and Firefox |
 | `agents browser tab add --url <url>` | Open URL in a new tab. `--json` for machine output |
 | `agents browser tab focus <tabId>` | Switch to tab by ID, prefix, or URL substring |
 | `agents browser tab close [tabId]` | Close a tab; omit to close all |

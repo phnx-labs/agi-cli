@@ -241,4 +241,22 @@ d('same-task page reopen against real Chromium (PHNX-2399)', () => {
     expect(await service.evaluate('borrowtask', a.tabId, 'window.__sentinel ?? null')).toBe('E-borrowed-doc');
     expect(await loadsOf('borrowtask', a.tabId, 'E')).toBe('1');
   }, 40_000);
+  it('tabs --all lists every page target in the profile, the owner\'s next to the task\'s (profileTabs)', async () => {
+    seedTask('all');
+    const mine = await service.tabAdd('all', urlFor('agent'));
+    await settle('all', mine.tabId, 'agent');
+    // A page nobody's task owns, opened straight through CDP as the owner would.
+    const { targetId: foreign } = (await cdp.send('Target.createTarget', { url: urlFor('owner') })) as { targetId: string };
+
+    const rows = await service.profileTabs('all');
+    expect(rows.find((r: { id: string }) => r.id === mine.tabId)).toMatchObject({ task: 'all', url: urlFor('agent') });
+    const ownerRow = rows.find((r: { id: string }) => r.id === foreign);
+    expect(ownerRow).toMatchObject({ url: urlFor('owner') });
+    expect(ownerRow.task).toBeUndefined();
+    expect(rows.every((r: { id: string }) => r.id.length > 0)).toBe(true);
+    // Read-only: the task still owns exactly its own tab.
+    expect((await service.tabs('all')).map((t: { id: string }) => t.id)).toEqual([mine.tabId]);
+    await cdp.send('Target.closeTarget', { targetId: foreign });
+    await service.tabClose('all');
+  });
 });

@@ -4815,7 +4815,7 @@
           "name": "tabs",
           "path": "browser tabs",
           "aliases": [],
-          "description": "List tabs open for the current task",
+          "description": "List tabs open for the current task; --all shows every tab open in the profile browser, yours included",
           "args": [],
           "options": [
             {
@@ -4832,6 +4832,15 @@
               "description": "Not valid here — bind the device at `agents browser start --device`",
               "long": "--device",
               "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--all",
+              "description": "Every tab open in the profile browser, not only this task's: OWNER names the owning task, or \"you\" for a tab no task owns",
+              "long": "--all",
+              "required": false,
               "optional": false,
               "variadic": false,
               "negate": false
