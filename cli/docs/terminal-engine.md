@@ -188,8 +188,9 @@ agents run claude --terminal            # detect from live sessions
 agents run claude --terminal ghostty    # force
 ```
 
-This is what the menu bar's **New Session** now shells
-(`menubar/Sources/MenubarHelper/AgentsCLI.swift` → `newSession`).
+This is what the menu bar's **New Session** now shells (AGI Menu's
+`Sources/MenubarHelper/AgentsCLI.swift` → `newSession`, in
+[phnx-labs/agi-menu](https://github.com/phnx-labs/agi-menu)).
 
 ## Interactive login shell
 

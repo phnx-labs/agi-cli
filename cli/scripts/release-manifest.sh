@@ -6,12 +6,21 @@
 # their complete inputs. Missing or changed inputs fail closed. Rebuild and
 # notarization live outside this path.
 #
+# What counts as a helper's input differs by where its source lives:
+#   computer-mac  the Swift source in this repo (native/computer-mac).
+#   menubar       NOT source -- AGI Menu lives in phnx-labs/agi-menu (PHNX-4036)
+#                 and this repo only pins which published build it uses. Its
+#                 input is src/lib/helper-versions.ts, the file that holds the
+#                 `menubar` floor; its asset is the published MenubarHelper.app.zip
+#                 on menubar/v<floor>, staged by scripts/stage-menubar-helper.sh.
+#
 # Usage:
 #   release-manifest.sh new --cli-version VER --cli-tree TREE
 #   release-manifest.sh input-digest --repo-root DIR --helper NAME
 #   release-manifest.sh put --file MANIFEST.json --helper NAME --input-digest D \
 #                           --asset-digest D --helper-version VER [--asset-url U]
 #                           [--asset-path P] [--signer-team T] [--arch A] [--platform P]
+#                           [--source JSON]
 #   release-manifest.sh verify --file MANIFEST.json
 #   release-manifest.sh resolve --file MANIFEST.json --helper NAME
 #   release-manifest.sh reuse --file MANIFEST.json --helper NAME --input-digest D
@@ -64,6 +73,7 @@ ASSET_PATH=""
 SIGNER_TEAM="2HTP252L87"
 ARCH="universal"
 PLATFORM=""
+SOURCE_JSON=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -80,6 +90,7 @@ while [[ $# -gt 0 ]]; do
     --signer-team) SIGNER_TEAM="$2"; shift 2 ;;
     --arch) ARCH="$2"; shift 2 ;;
     --platform) PLATFORM="$2"; shift 2 ;;
+    --source) SOURCE_JSON="$2"; shift 2 ;;
     -h|--help) usage ;;
     *) die "unknown flag: $1" ;;
   esac
@@ -111,10 +122,11 @@ helper_paths() {
         "$root/native/computer-mac/Package.swift"
       ;;
     menubar)
-      printf '%s\n' \
-        "$root/cli/menubar/Sources" \
-        "$root/cli/menubar/scripts/build.sh" \
-        "$root/cli/menubar/Package.swift"
+      # No source here (phnx-labs/agi-menu). The input that selects the published
+      # build is the floor table; a floor bump is the only thing that changes
+      # which MenubarHelper.app.zip the CLI installs, and it re-records from that
+      # published release -- never a rebuild.
+      printf '%s\n' "$root/cli/src/lib/helper-versions.ts"
       ;;
   esac
 }
@@ -197,6 +209,14 @@ put_helper() {
   fi
   local plat
   plat="${PLATFORM:-darwin}"
+  # Provenance of a helper published from another repo (menubar-source.txt on
+  # the release: repo/commit/tag/version). Optional -- releases cut before the
+  # sidecar existed have none -- but when given it must be a JSON object, so a
+  # reader never has to guess the shape.
+  local source
+  source="${SOURCE_JSON:-null}"
+  jq -e 'type == "object" or . == null' <<<"$source" >/dev/null 2>&1 \
+    || die "put --source must be a JSON object (got: $SOURCE_JSON)"
   local tmp
   tmp="$(mktemp)"
   jq --arg n "$HELPER" \
@@ -208,7 +228,8 @@ put_helper() {
      --arg team "$SIGNER_TEAM" \
      --arg arch "$ARCH" \
      --arg plat "$plat" \
-     '.helpers[$n] = {
+     --argjson source "$source" \
+     '.helpers[$n] = ({
         helperVersion: $hv,
         inputDigest: $id,
         assetDigest: $ad,
@@ -217,7 +238,7 @@ put_helper() {
         signerTeam: $team,
         architecture: $arch,
         platform: $plat
-      }' "$FILE" > "$tmp"
+      } + (if $source == null then {} else {source: $source} end))' "$FILE" > "$tmp"
   mv "$tmp" "$FILE"
   printf '%s\n' "$FILE"
 }
@@ -279,7 +300,7 @@ copy_asset() {
   src="$(jq -r '.assetPath // empty' <<<"$rec")"
   name="$(jq -r --arg n "$HELPER" '
       if $n == "computer-mac" then "ComputerHelper.app.zip"
-      elif $n == "menubar" then "MenubarHelper.app"
+      elif $n == "menubar" then "MenubarHelper.app.zip"
       else $n end' <<<"$rec")"
   if [[ -z "$src" || ! -f "$src" ]]; then
     die "helper $HELPER asset is not on disk -- no fallback rebuild"

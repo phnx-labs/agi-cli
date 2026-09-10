@@ -1577,6 +1577,11 @@ duplicate icon. `agents menubar setup` is the recovery command when a machine is
 already wrong -- it ends any duplicate, installs the bundle, wires the login
 item, and verifies exactly one helper came back up.
 
+The helper itself is AGI Menu, developed in
+[phnx-labs/agi-menu](https://github.com/phnx-labs/agi-menu) and published as a
+signed, notarized build on this repo's `menubar/v<x.y.z>` releases; the CLI
+downloads and verifies it on demand, so nothing is built on your machine.
+
 The dropdown surfaces a **NEEDS YOU** queue (agents waiting on a question, a plan review, or a permission prompt), the running roster, and a routines summary -- the same live state as `agents sessions --active`, one click away.
 
 ### Quick-issue bar (⌘⇧O)

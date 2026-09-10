@@ -16,6 +16,7 @@ const TEST_SCRIPT = path.resolve(__dirname, 'test.sh');
 const PRODUCE_SCRIPT = path.resolve(__dirname, 'release-attestation-produce.sh');
 const ATTEST_SCRIPT = path.resolve(__dirname, 'release-attestation.sh');
 const MANIFEST_SCRIPT = path.resolve(__dirname, 'release-manifest.sh');
+const STAGE_SCRIPT = path.resolve(__dirname, 'stage-menubar-helper.sh');
 const roots: string[] = [];
 
 function tmp(prefix: string): string {
@@ -506,12 +507,14 @@ describe('release-attestation-produce.sh', () => {
 });
 
 // Extends the base fixture with a real (copied, not faked) release-manifest.sh
-// plus minimal source trees for both known helpers -- computer-mac at repo
-// root, menubar under cli -- so the producer's helper-manifest
-// step (RUSH-2766) has real inputs to hash. menubar's "signed" asset
-// is a plain placeholder file standing in for what the Darwin-only sign block
-// would have built; the manifest step only checks the file exists and hashes
-// it, so this is enough to exercise it on Linux CI without a real signing box.
+// and stage-menubar-helper.sh plus the inputs each helper is keyed on:
+// computer-mac's minimal source tree at repo root, and the menubar floor table
+// (cli/src/lib/helper-versions.ts -- the menubar's source lives in
+// phnx-labs/agi-menu, so that pin IS its input, PHNX-4036). The menubar's
+// published release is modelled by a fixture directory served through a fake
+// `curl` on the fixture PATH (the same way `gh` is stubbed for computer-mac):
+// the real stage script still does the sha256 verification, the provenance
+// parse, and the JSON report against those real bytes.
 /**
  * A prior release's `release-manifest.json`, built with the shipped generator
  * so the seed fixture matches what a real GitHub release carries.
@@ -551,8 +554,69 @@ function priorReleaseManifest(root: string, computerMacDigest: string): string {
   return fs.readFileSync(file, 'utf-8').trim();
 }
 
-function buildManifestFixture(root: string): ReturnType<typeof buildFixture> & {
+/**
+ * A published menubar/v1.0.0 release as a directory: the zip, its .sha256 (the
+ * publisher's `<hex>  <name>` format), and optionally the menubar-source.txt
+ * provenance sidecar agi-menu's release.sh uploads. `wrongSha` publishes a
+ * checksum that does not match the bytes (a corrupt or tampered asset).
+ */
+function publishMenubarRelease(
+  dir: string,
+  opts: { sidecar?: boolean; wrongSha?: boolean; empty?: boolean } = {},
+): { zipSha: string } {
+  fs.mkdirSync(dir, { recursive: true });
+  if (opts.empty) return { zipSha: '' };
+  const zip = Buffer.from('PK published menubar helper bytes\n');
+  const zipSha = createHash('sha256').update(zip).digest('hex');
+  fs.writeFileSync(path.join(dir, 'MenubarHelper.app.zip'), zip);
+  fs.writeFileSync(
+    path.join(dir, 'MenubarHelper.app.zip.sha256'),
+    `${opts.wrongSha ? 'e'.repeat(64) : zipSha}  MenubarHelper.app.zip\n`,
+  );
+  if (opts.sidecar !== false) {
+    fs.writeFileSync(
+      path.join(dir, 'menubar-source.txt'),
+      'repo=phnx-labs/agi-menu\ncommit=abcdef0123456789abcdef0123456789abcdef01\ntag=v1.0.0\nversion=1.0.0\n',
+    );
+  }
+  return { zipSha };
+}
+
+/**
+ * A `curl` that serves the fixture release dir: answers the exact invocation
+ * shape stage-menubar-helper.sh's fetch() makes (`-o <out> -w '%{http_code}'
+ * <url>`), copying the file named by the URL's basename and printing 200, or
+ * printing 404 for an asset the release does not carry.
+ */
+function installFakeCurl(fakebin: string, releaseDir: string) {
+  fs.writeFileSync(
+    path.join(fakebin, 'curl'),
+    [
+      '#!/usr/bin/env bash',
+      'out=""; url=""',
+      'while [[ $# -gt 0 ]]; do',
+      '  case "$1" in',
+      '    -o) out="$2"; shift 2 ;;',
+      '    -w|--retry|--connect-timeout) shift 2 ;;',
+      '    -*) shift ;;',
+      '    *) url="$1"; shift ;;',
+      '  esac',
+      'done',
+      `dir=${JSON.stringify(releaseDir)}`,
+      'name="$(basename "$url")"',
+      'if [[ -f "$dir/$name" ]]; then cp "$dir/$name" "$out"; printf 200; else : > "$out"; printf 404; fi',
+      '',
+    ].join('\n'),
+  );
+  fs.chmodSync(path.join(fakebin, 'curl'), 0o755);
+}
+
+function buildManifestFixture(
+  root: string,
+  menubarRelease: { sidecar?: boolean; wrongSha?: boolean; empty?: boolean } = {},
+): ReturnType<typeof buildFixture> & {
   manifestDigests: Record<'computer-mac' | 'menubar', string>;
+  menubarZipSha: string;
 } {
   const fx = buildFixture(root);
   const { caller } = fx;
@@ -579,15 +643,13 @@ function buildManifestFixture(root: string): ReturnType<typeof buildFixture> & {
 
   fs.copyFileSync(MANIFEST_SCRIPT, path.join(caller, 'cli/scripts/release-manifest.sh'));
   fs.chmodSync(path.join(caller, 'cli/scripts/release-manifest.sh'), 0o755);
+  fs.copyFileSync(STAGE_SCRIPT, path.join(caller, 'cli/scripts/stage-menubar-helper.sh'));
+  fs.chmodSync(path.join(caller, 'cli/scripts/stage-menubar-helper.sh'), 0o755);
 
-  fs.mkdirSync(path.join(caller, 'cli/menubar/Sources'), { recursive: true });
-  fs.mkdirSync(path.join(caller, 'cli/menubar/scripts'), { recursive: true });
-  fs.writeFileSync(path.join(caller, 'cli/menubar/Sources/dummy.swift'), '// dummy\n');
-  fs.writeFileSync(path.join(caller, 'cli/menubar/scripts/build.sh'), '#!/usr/bin/env bash\n');
-  fs.writeFileSync(path.join(caller, 'cli/menubar/Package.swift'), '// swift package\n');
-
-  fs.mkdirSync(path.join(caller, 'cli/bin/MenubarHelper.app/Contents/MacOS'), { recursive: true });
-  fs.writeFileSync(path.join(caller, 'cli/bin/MenubarHelper.app/Contents/MacOS/AGI Menu'), 'fake-menubar-binary\n');
+  // The published menubar/v1.0.0 release the producer records the helper from.
+  const releaseDir = path.join(root, 'menubar-release');
+  const { zipSha } = publishMenubarRelease(releaseDir, menubarRelease);
+  installFakeCurl(fx.fakebin, releaseDir);
 
   git(caller, 'add', '-A');
   git(caller, 'commit', '-q', '-m', 'add helper manifest fixture');
@@ -609,6 +671,7 @@ function buildManifestFixture(root: string): ReturnType<typeof buildFixture> & {
       'computer-mac': digestFor('computer-mac'),
       menubar: digestFor('menubar'),
     },
+    menubarZipSha: zipSha,
   };
 }
 
@@ -654,8 +717,8 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
     const fx = buildManifestFixture(root);
     // Pre-seed only computer-mac, matching its current digest -- it must be
     // carried forward untouched (this producer never rebuilds it). menubar
-    // has no prior record, so it must be freshly recorded from
-    // the "signed" asset committed into the fixture.
+    // has no prior record, so it must be freshly recorded from its PUBLISHED
+    // release (PHNX-4036) -- nothing in this tree can build it.
     seedManifest(fx.store, { 'computer-mac': { inputDigest: fx.manifestDigests['computer-mac'] } });
 
     const result = runProduceWithHelpers(fx);
@@ -670,16 +733,27 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
     expect(manifest.helpers['computer-mac'].helperVersion).toBe('prev-1.0.0');
     expect(manifest.helpers['computer-mac'].inputDigest).toBe(fx.manifestDigests['computer-mac']);
 
-    // menubar: freshly recorded against the committed placeholder
-    // "signed" binary, keyed by the SAME digest a second, independent
-    // checkout computes (proving the RUSH-2766 relative-path fix: the
-    // producer hashed inside a throwaway $WT, the test hashed the caller
-    // clone -- different absolute paths, same relative tree).
-    for (const helper of ['menubar'] as const) {
-      expect(manifest.helpers[helper].inputDigest).toBe(fx.manifestDigests[helper]);
-      expect(manifest.helpers[helper].assetDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
-      expect(manifest.helpers[helper].helperVersion).toBe('9.9.9');
-    }
+    // menubar: freshly recorded from the published release, keyed by the SAME
+    // input digest a second, independent checkout computes (proving the
+    // RUSH-2766 relative-path fix: the producer hashed inside a throwaway $WT,
+    // the test hashed the caller clone -- different absolute paths, same
+    // relative tree). The asset digest is the sha256 of the published zip's
+    // bytes, the version is the helper's FLOOR (never the CLI's version), and
+    // the provenance sidecar rides along as `source`.
+    expect(result.stdout + result.stderr).toContain('Recorded menubar from published menubar/v1.0.0');
+    const menubar = manifest.helpers.menubar;
+    expect(menubar.inputDigest).toBe(fx.manifestDigests.menubar);
+    expect(menubar.assetDigest).toBe(`sha256:${fx.menubarZipSha}`);
+    expect(menubar.helperVersion).toBe('1.0.0');
+    expect(menubar.assetUrl).toBe(
+      'https://github.com/phnx-labs/agi-cli/releases/download/menubar/v1.0.0/MenubarHelper.app.zip',
+    );
+    expect(menubar.source).toEqual({
+      repo: 'phnx-labs/agi-menu',
+      commit: 'abcdef0123456789abcdef0123456789abcdef01',
+      tag: 'v1.0.0',
+      version: '1.0.0',
+    });
 
     // The actual consumer: release-manifest.sh require must accept what the
     // producer wrote, against the SAME caller checkout used to compute the
@@ -740,6 +814,49 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
     for (const helper of ['menubar'] as const) {
       expect(manifest.helpers[helper].inputDigest).toBe(fx.manifestDigests[helper]);
     }
+  });
+
+  // PHNX-4036: the menu-bar helper's source is in phnx-labs/agi-menu, so the
+  // producer can only ever record its PUBLISHED release. A release that is
+  // missing or whose bytes do not match its own .sha256 must fail closed naming
+  // the agi-menu publish step -- never fall back to a rebuild (there is nothing
+  // to build) and never record unverified bytes.
+  it('records menubar without provenance when the published release predates the sidecar', () => {
+    const root = tmp('attest-produce-mb-nosidecar-');
+    const fx = buildManifestFixture(root, { sidecar: false });
+    seedManifest(fx.store, { 'computer-mac': { inputDigest: fx.manifestDigests['computer-mac'] } });
+    const result = runProduceWithHelpers(fx);
+    const out = result.stdout + result.stderr;
+    expect(result.status, out).toBe(0);
+    expect(out).toContain('release carries no menubar-source.txt');
+    const manifest = JSON.parse(fs.readFileSync(path.join(fx.store, 'release-manifest.json'), 'utf-8'));
+    expect(manifest.helpers.menubar.assetDigest).toBe(`sha256:${fx.menubarZipSha}`);
+    expect(manifest.helpers.menubar).not.toHaveProperty('source');
+  });
+
+  it('fails closed when the published menubar asset does not match its .sha256', () => {
+    const root = tmp('attest-produce-mb-badsha-');
+    const fx = buildManifestFixture(root, { wrongSha: true });
+    seedManifest(fx.store, { 'computer-mac': { inputDigest: fx.manifestDigests['computer-mac'] } });
+    const result = runProduceWithHelpers(fx);
+    const out = result.stdout + result.stderr;
+    expect(result.status, out).not.toBe(0);
+    expect(out).toContain('sha256 mismatch');
+    expect(out).toContain('phnx-labs/agi-menu');
+    expect(fs.existsSync(path.join(fx.store, 'release-manifest.json')) &&
+      JSON.parse(fs.readFileSync(path.join(fx.store, 'release-manifest.json'), 'utf-8')).helpers.menubar,
+    ).toBeFalsy();
+  });
+
+  it('fails closed when the floor names a menubar release that was never published', () => {
+    const root = tmp('attest-produce-mb-missing-');
+    const fx = buildManifestFixture(root, { empty: true });
+    seedManifest(fx.store, { 'computer-mac': { inputDigest: fx.manifestDigests['computer-mac'] } });
+    const result = runProduceWithHelpers(fx);
+    const out = result.stdout + result.stderr;
+    expect(result.status, out).not.toBe(0);
+    expect(out).toContain('no MenubarHelper.app.zip.sha256 on release menubar/v1.0.0');
+    expect(out).toContain('scripts/release.sh');
   });
 
   /**
@@ -966,25 +1083,10 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
     fs.chmodSync(signer, 0o755);
     // headless-sign-context.sh is sourced before signing; a no-op stand-in.
     fs.writeFileSync(path.join(fx.caller, 'cli/scripts/headless-sign-context.sh'), ': \n');
-    // The second `agents secrets exec` call builds + signs the helper .apps. Stub
-    // the pieces it shells out to, so a --with-helpers run RUNS TO COMPLETION and
-    // the test can assert status 0 -- otherwise the run dies after the signer and
-    // the test's title ("cutting a helper release still works") overclaims.
-    fs.mkdirSync(path.join(fx.caller, 'cli/menubar/scripts'), { recursive: true });
-    // The real build.sh EMITS menubar/dist/MenubarHelper.app, which the block then
-    // copies into bin/. Emit it here too rather than pre-creating the directory:
-    // git does not track empty dirs, so a pre-created one would not exist in the
-    // isolated worktree the producer actually runs in.
-    fs.writeFileSync(
-      path.join(fx.caller, 'cli/menubar/scripts/build.sh'),
-      '#!/usr/bin/env bash\nmkdir -p menubar/dist/MenubarHelper.app bin\n',
-    );
-    fs.chmodSync(path.join(fx.caller, 'cli/menubar/scripts/build.sh'), 0o755);
-    // codesign/stapler/shasum run against the .app the stubbed build would emit.
-    for (const b of ['codesign', 'xcrun', 'shasum']) {
-      fs.writeFileSync(path.join(fx.fakebin, b), '#!/usr/bin/env bash\nexit 0\n');
-      fs.chmodSync(path.join(fx.fakebin, b), 0o755);
-    }
+    // The sign block signs ONLY the CLI binary: the menu-bar helper is never
+    // built here any more (its source is phnx-labs/agi-menu, PHNX-4036), so
+    // there is no build/codesign/stapler to stub -- a --with-helpers run reaches
+    // completion on the signer alone.
     // The producer runs against an ISOLATED WORKTREE checked out at the commit, so
     // uncommitted fixture files simply do not exist there — which is how the first
     // version of this test silently never reached the sign branch at all.
@@ -1018,6 +1120,9 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
     const out = (result.stdout + result.stderr).replace(/\[[0-9;]*m/g, '');
     expect(out).toContain('Signing + notarizing');
     expect(fs.existsSync(fx.marker), 'the signer must run for a helper release').toBe(true);
+    // ...and it signs the CLI binary only: no helper build ran (PHNX-4036).
+    expect(out).not.toContain('swift build');
+    expect(fs.existsSync(path.join(fx.caller, 'cli/bin/MenubarHelper.app'))).toBe(false);
     // Status, so the title is earned: the run COMPLETES, not merely starts.
     expect(result.status, out).toBe(0);
   });

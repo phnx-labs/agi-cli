@@ -33,7 +33,7 @@ const SAMPLE_SPEC: HelperSpec = {
   cacheSubdir: ['menubar', 'mac-helper'],
   expectedTeamId: EXPECTED_TEAM_ID,
   expectedBundleId: 'com.phnx-labs.agents-menubar',
-  localBuildHint: 'menubar/scripts/build.sh release',
+  localBuildHint: 'scripts/stage-menubar-helper.sh',
 };
 
 describe('menu-bar helper release-asset URLs', () => {

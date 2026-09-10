@@ -224,7 +224,7 @@ export async function downloadHelperApp(spec: HelperSpec, version: string): Prom
     new Error(
       `no ${spec.assetName} release asset for tag ${tag} (HTTP ${status} on ${url}). ` +
         `The macOS helper ships as a GitHub release asset on its own helper tag; ` +
-        `from a repo checkout you can build it locally instead: ${spec.localBuildHint}`,
+        `from a repo checkout you can stage it locally instead: ${spec.localBuildHint}`,
     );
 
   // Checksum first: it is tiny and 404s fast when the tag has no assets.

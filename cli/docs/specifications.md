@@ -3528,8 +3528,8 @@ readiness/context fields RT-1..RT-8 describe.
   (a user click invoking the CLI), but it MUST NOT hold a cron, countdown, or
   readiness loop of its own. This is SING-2/SING-5 applied to the menu bar; the timer
   bound in the helper is a cached *refresher* of read-only views, never an executor
-  (`cli/menubar/…` `ChildProcess` cached refreshers; `cli/CLAUDE.md`
-  §menu-bar). Status: **Current**.
+  (`ChildProcess` cached refreshers in phnx-labs/agi-menu, the helper's own repo
+  since PHNX-4036; `cli/docs/menubar.md` is the contract). Status: **Current**.
 
 ### 6. Given/When/Then scenarios
 

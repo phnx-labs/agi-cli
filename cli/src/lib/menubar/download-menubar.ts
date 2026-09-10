@@ -47,7 +47,10 @@ export const MENUBAR_HELPER_SPEC: HelperSpec = {
   cacheSubdir: ['menubar', 'mac-helper'],
   expectedTeamId: EXPECTED_TEAM_ID,
   expectedBundleId: MENUBAR_HELPER_BUNDLE_ID,
-  localBuildHint: 'menubar/scripts/build.sh release, then cp -R menubar/dist/MenubarHelper.app bin/MenubarHelper.app',
+  // No local build exists in this repo: the source is phnx-labs/agi-menu. The
+  // staging script downloads + verifies the same published asset into
+  // bin/MenubarHelper.app, which the installer resolves from a checkout.
+  localBuildHint: 'scripts/stage-menubar-helper.sh (stages the published menubar/v<floor> asset into bin/MenubarHelper.app; source: https://github.com/phnx-labs/agi-menu)',
 };
 
 /** Release-asset URLs for the menu-bar helper zip + its checksum at `v<version>`. */
