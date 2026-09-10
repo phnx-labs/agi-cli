@@ -416,6 +416,9 @@ export function registerBrowserCommand(program: Command): void {
       agents browser navigate https://example.com
       agents browser screenshot
 
+      # Every tab open in the profile browser, yours next to the task's (OWNER column)
+      agents browser tabs --all
+
       # Keep one process and browser-service socket warm for repeated actions
       agents browser stream --task "$AGENTS_BROWSER_TASK"
 
@@ -445,9 +448,10 @@ export function registerBrowserCommand(program: Command): void {
       Most agent workflows should use the 'browser' skill instead of raw subcommands.
       The skill wraps profile selection, snapshotting, and tunneling.
 
-      Browser support: Chromium-family only (Chrome, Comet, Chromium, Brave, Edge, Arc).
-      Safari and Firefox are not supported — they don't speak the Chrome DevTools
-      Protocol the way agents browser expects. On Windows, Edge is the default
+      Browser support: Chromium-family over the Chrome DevTools Protocol (Chrome,
+      Comet, Chromium, Brave, Edge), Arc natively (one profile per Space), and
+      Firefox over WebDriver BiDi (one profile per profiles.ini entry; Firefox 129+
+      dropped CDP). Safari is not supported. On Windows, Edge is the default
       because it's preinstalled. On macOS and Linux, Chrome is preferred when
       installed; otherwise the first Chromium-family binary on disk wins.
     `,

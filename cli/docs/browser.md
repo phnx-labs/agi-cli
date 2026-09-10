@@ -446,6 +446,7 @@ browser operations:
 | DOM click, fill, scroll via evaluate | Supported (events are `isTrusted: false`) |
 | Close owned tabs | Supported, silent |
 | Explicit `tab focus` | Supported; this is the only routine that keeps a tab selected |
+| `tabs --all` (every tab in the Space, the owner's next to the task's) | Supported; fails loud if the Space is not open in its original window |
 | Screenshot and PDF | Unsupported |
 | Async/promise evaluation | Unsupported |
 | Network/console capture | Unsupported |
@@ -534,6 +535,7 @@ operations:
 | Profile discovery from `profiles.ini`, one profile per entry | Supported |
 | Launch headless (or attach to a running debug port) | Supported |
 | Start, navigate, tab add, tabs, tab focus, done | Supported |
+| `tabs --all` (every top-level tab in the profile, the owner's next to the task's) | Supported (`browsingContext.getTree`) |
 | Same-task reopen (navigate to an owned URL refreshes it, no duplicate) | Supported |
 | Evaluate JavaScript (async/promise capable) | Supported (`script.evaluate`) |
 | `refs` accessibility listing, `click`, `fill`/`type`, `scroll` | Supported |

@@ -1,0 +1,1 @@
+- `agents browser --help` and the `agents setup browser` install hint no longer claim Firefox is unsupported: they now state Chromium-family over CDP, Arc natively, and Firefox over WebDriver BiDi (Safari stays unsupported). `tabs --all` gains a help example and rows in the Arc and Firefox capability tables.
