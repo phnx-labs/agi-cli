@@ -46,11 +46,16 @@ describe('readSessionTail', () => {
 
   it('feeds inferSessionState to a waiting verdict on a trailing question', () => {
     const events = readSessionTail(FIXTURE, 'claude');
+    // The fixture's trailing question is stamped 2026-06-30T10:00:12Z; the file
+    // was written just after it and the clock is 20 minutes on — inside the
+    // 30-minute decay, measured from the message's own stamp (PHNX-3999).
+    const askedMs = Date.parse('2026-06-30T10:00:12.000Z');
     const state = inferSessionState(events, {
       cwd: '/home/u/repo/.agents/worktrees/tree-view',
       gitBranch: 'agents/tree-view',
       pidAlive: true,
-      mtimeMs: Date.now() - 20 * 60_000,
+      mtimeMs: askedMs + 1_000,
+      nowMs: askedMs + 20 * 60_000,
     });
     expect(state.activity).toBe('waiting_input');
     expect(state.awaitingReason).toBe('question');

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as path from 'path';
 import { parseSession } from './parse.js';
 import { inferSessionState, type SessionActivity } from './state.js';
-import type { SessionAgentId } from './types.js';
+import type { SessionAgentId, SessionEvent } from './types.js';
 
 const TESTDATA = path.join(import.meta.dirname, 'testdata');
 
@@ -24,6 +24,19 @@ const CASES: Array<{ agent: SessionAgentId; fixture: string; expect: SessionActi
   { agent: 'gemini', fixture: 'gemini-idle.json', expect: 'idle' },
 ];
 
+/**
+ * The live-scan context for a fixture: the transcript was just written (mtime a
+ * second after its last stamped event) and the clock sits a few seconds later.
+ * The fixtures carry real, fixed stamps, and the engine measures a question's
+ * age from the message's own stamp (PHNX-3999), so "fresh" has to be expressed
+ * against that stamp rather than against `Date.now()`.
+ */
+function liveContext(events: SessionEvent[]) {
+  const stamps = events.map((e) => Date.parse(e.timestamp)).filter(Number.isFinite);
+  const lastMs = stamps.length ? Math.max(...stamps) : Date.now();
+  return { pidAlive: true, mtimeMs: lastMs + 1_000, nowMs: lastMs + 5_000 };
+}
+
 describe('inferSessionState across harnesses (real transcript fixtures)', () => {
   for (const c of CASES) {
     it(`${c.agent} → ${c.expect}`, () => {
@@ -32,7 +45,7 @@ describe('inferSessionState across harnesses (real transcript fixtures)', () => 
       // Live process, freshly written — the state-engine context the active scan
       // passes. A trailing tool_use ⇒ working; a trailing prose question ⇒
       // waiting_input; a trailing plain assistant message ⇒ idle.
-      const state = inferSessionState(events, { pidAlive: true, mtimeMs: Date.now() });
+      const state = inferSessionState(events, liveContext(events));
       expect(state.activity).toBe(c.expect);
     });
   }
@@ -40,8 +53,8 @@ describe('inferSessionState across harnesses (real transcript fixtures)', () => 
   it('the waiting states are the actionable "needs you" case, distinct from idle', () => {
     const waiting = parseSession(path.join(TESTDATA, 'grok-waiting/chat_history.jsonl'), 'grok');
     const idle = parseSession(path.join(TESTDATA, 'grok-idle/chat_history.jsonl'), 'grok');
-    const w = inferSessionState(waiting, { pidAlive: true, mtimeMs: Date.now() });
-    const i = inferSessionState(idle, { pidAlive: true, mtimeMs: Date.now() });
+    const w = inferSessionState(waiting, liveContext(waiting));
+    const i = inferSessionState(idle, liveContext(idle));
     expect(w.activity).toBe('waiting_input');
     expect(w.awaitingReason).toBe('question');
     expect(i.activity).toBe('idle');
