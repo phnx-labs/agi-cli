@@ -1250,7 +1250,7 @@ Merge order: profile env < `--secrets` < `--env K=V`. A missing keychain item ab
 ### Cross-machine sync
 
 Secrets are provided by the standalone [`@phnx-labs/secrets-cli`](https://github.com/phnx-labs/secrets-cli)
-engine (`agents setup secrets` checks whether it's installed). Its `push`/`pull`
+engine (`agents setup secrets` installs it if missing). Its `push`/`pull`
 verbs move a bundle between machines by encrypting it and round-tripping it
 through `api.prix.dev` — no copy-paste, no `.env` files emailed to yourself:
 

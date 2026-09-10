@@ -43,7 +43,25 @@ describe('agents setup secrets', () => {
   });
 
   it('attempts install and returns false rather than throwing when npm is also missing', async () => {
-    expect(await runSecretsSetupWizard()).toBe(false);
+    const logs: string[] = [];
+    const origLog = console.log;
+    const origErr = console.error;
+    console.log = (...args: unknown[]) => {
+      logs.push(args.map(String).join(' '));
+    };
+    console.error = (...args: unknown[]) => {
+      logs.push(args.map(String).join(' '));
+    };
+    try {
+      expect(await runSecretsSetupWizard()).toBe(false);
+    } finally {
+      console.log = origLog;
+      console.error = origErr;
+    }
+    const text = logs.join('\n');
+    expect(text).toMatch(/not installed/i);
+    expect(text).toMatch(/Failed to install @phnx-labs\/secrets-cli@0\.1\.2/);
+    expect(text).toMatch(/npm i -g @phnx-labs\/secrets-cli@0\.1\.2/);
   });
 
   it('reports installed once $SECRETS_BIN points at a real executable', () => {
