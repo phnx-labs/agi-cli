@@ -1329,7 +1329,7 @@ export interface HostEntry {
 /** Browser profile definition stored in agents.yaml. */
 export interface BrowserProfileConfig {
   description?: string;
-  browser: 'chrome' | 'comet' | 'chromium' | 'brave' | 'edge' | 'arc' | 'custom';
+  browser: 'chrome' | 'comet' | 'chromium' | 'brave' | 'edge' | 'arc' | 'firefox' | 'custom';
   binary?: string;
   electron?: boolean;
   /**
@@ -1392,6 +1392,12 @@ export interface BrowserProfileConfig {
     profileName: string;
     spaceId: string;
     spaceTitle: string;
+  };
+  /** The `profiles.ini` entry a discovered Firefox profile is pinned to (PHNX-4043); the dir is `userDataDir`. */
+  firefox?: {
+    profileName: string;
+    iniPath: string;
+    isDefault: boolean;
   };
 }
 

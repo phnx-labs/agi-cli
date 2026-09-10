@@ -163,6 +163,12 @@ export async function resolveViewer(opts: ShowOptions = {}): Promise<'os' | { pr
     console.error(`[viewer] "${resolved}" is Arc, which cannot open a new viewer tab — using the OS browser.`);
     return 'os';
   }
+  if (profile.browser === 'firefox') {
+    // agents drives Firefox headless over BiDi for its own read-back; a page a
+    // human is meant to read goes to the visible OS browser, not the headless one.
+    console.error(`[viewer] "${resolved}" is a headless-automation Firefox profile — using the OS browser.`);
+    return 'os';
+  }
   if (!isProfileLaunchableHere(profile)) {
     console.error(`[viewer] "${resolved}" cannot launch on this machine — using the OS browser.`);
     return 'os';

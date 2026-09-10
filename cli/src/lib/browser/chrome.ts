@@ -30,6 +30,10 @@ const BROWSER_PATHS: Record<string, Record<BrowserType, string[]>> = {
     brave: ['/Applications/Brave Browser.app/Contents/MacOS/Brave Browser'],
     edge: ['/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'],
     arc: ['/Applications/Arc.app/Contents/MacOS/Arc'],
+    firefox: [
+      '/Applications/Firefox.app/Contents/MacOS/firefox',
+      '/Applications/Firefox Developer Edition.app/Contents/MacOS/firefox',
+    ],
     custom: [],
   },
   linux: {
@@ -40,6 +44,10 @@ const BROWSER_PATHS: Record<string, Record<BrowserType, string[]>> = {
     edge: ['/usr/bin/microsoft-edge'],
     // Arc has no Linux build (macOS + Windows only).
     arc: [],
+    // `/usr/bin/firefox` on Ubuntu is the snap wrapper script: it execs the snap
+    // in place, so the pid survives and `--remote-debugging-port` works through
+    // it. The driver reads the real pid from the BiDi handshake anyway.
+    firefox: ['/usr/bin/firefox', '/snap/bin/firefox', '/usr/lib/firefox/firefox', '/opt/firefox/firefox'],
     custom: [],
   },
   win32: {
@@ -69,6 +77,11 @@ const BROWSER_PATHS: Record<string, Record<BrowserType, string[]>> = {
     // Arc ships a Windows build, but its install path is not yet verified here;
     // leave unlisted (undetected) rather than guess a path that false-positives.
     arc: [],
+    firefox: [
+      `${WIN_PROGRAMFILES}\\Mozilla Firefox\\firefox.exe`,
+      `${WIN_PROGRAMFILES_X86}\\Mozilla Firefox\\firefox.exe`,
+      `${WIN_LOCALAPPDATA}\\Mozilla Firefox\\firefox.exe`,
+    ],
     custom: [],
   },
 };

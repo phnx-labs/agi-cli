@@ -18,6 +18,7 @@ import {
 import { findBrowserPath, isPortInUse } from './chrome.js';
 import { arcSpaceProfiles, discoverArcProfiles } from './arc-discovery.js';
 import { discoverChromiumProfiles, discoverableChromiumBrowsers } from './chromium-discovery.js';
+import { firefoxDiscoveredProfiles, discoverFirefoxProfiles } from './firefox-discovery.js';
 
 export type { BrowserProfile } from './types.js';
 export {
@@ -167,6 +168,7 @@ function configToProfile(
     logDir: config.logDir,
     logHost: config.logHost,
     arc: config.arc,
+    firefox: config.firefox,
     devices,
   };
 }
@@ -191,6 +193,7 @@ function profileToConfig(profile: BrowserProfile): BrowserProfileConfig {
   if (profile.logDir) config.logDir = profile.logDir;
   if (profile.logHost) config.logHost = profile.logHost;
   if (profile.arc) config.arc = profile.arc;
+  if (profile.firefox) config.firefox = profile.firefox;
   return config;
 }
 
@@ -263,6 +266,30 @@ export function discoverNativeProfiles(): DiscoveredProfiles {
         devices: [machineId()],
       });
     }
+  }
+  // Firefox (PHNX-4043): one profiles.ini entry is one `firefox-<slug>` profile,
+  // pinned to that directory and a stable WebDriver BiDi port. Firefox dropped
+  // CDP in 129, so these use a `firefox-bidi:` endpoint, not `cdp://`.
+  const firefox = discoverFirefoxProfiles();
+  if (firefox.ok) {
+    for (const entry of firefoxDiscoveredProfiles(firefox)) {
+      profiles.push({
+        name: entry.name,
+        description: `Firefox profile "${entry.profileName}"${entry.isDefault ? ' (default)' : ''}`,
+        browser: 'firefox',
+        endpoints: { bidi: { target: `firefox-bidi://127.0.0.1:${entry.port}` } },
+        defaultEndpoint: 'bidi',
+        userDataDir: entry.profileDir,
+        firefox: {
+          profileName: entry.profileName,
+          iniPath: entry.iniPath,
+          isDefault: entry.isDefault,
+        },
+        devices: [machineId()],
+      });
+    }
+  } else if (firefox.kind === 'invalid') {
+    errors.firefox = `Cannot discover Firefox profiles: ${firefox.reason}`;
   }
   return { profiles, errors };
 }
@@ -419,6 +446,21 @@ export function isProfileLaunchableHere(profile: BrowserProfile): boolean {
     return !!profile.arc && discoverNativeProfiles().profiles.some(
       (candidate) => candidate.arc?.spaceId === profile.arc?.spaceId,
     );
+  }
+  const bidi = Object.values(getEndpointPresets(profile)).some(
+    (preset) => preset.target.startsWith('firefox-bidi:'),
+  );
+  if (bidi) {
+    // Launchable here only when Firefox is installed AND this box holds the
+    // pinned profile directory (a synced-in firefox- profile from another box
+    // has that box's path, so it command-dispatches instead).
+    if (!profile.userDataDir || !fs.existsSync(profile.userDataDir)) return false;
+    try {
+      findBrowserPath('firefox', profile.binary);
+      return true;
+    } catch {
+      return false;
+    }
   }
   const remote = Object.values(getEndpointPresets(profile)).some((preset) =>
     preset.target.startsWith('ssh://')
@@ -762,6 +804,12 @@ export async function createProfile(profile: BrowserProfile): Promise<void> {
   );
   if (nativeArc && (!profile.arc || profile.browser !== 'arc')) {
     throw new Error('An arc-native profile requires stable Arc Space metadata. Pick a discovered one from `agents browser profiles list`.');
+  }
+  const firefoxBidi = Object.values(getEndpointPresets(profile)).some(
+    (preset) => preset.target.startsWith('firefox-bidi:'),
+  );
+  if (firefoxBidi && (!profile.firefox || profile.browser !== 'firefox')) {
+    throw new Error('A firefox-bidi profile requires a discovered Firefox profile. Pick one from `agents browser profiles list`.');
   }
   // A discovered profile is pinned to a browser store on this disk
   // (`userDataDir` + `profileDirectory`) and is published unattended by the

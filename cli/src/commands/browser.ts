@@ -617,7 +617,7 @@ function registerProfilesCommands(browser: Command): void {
           allProfiles.map((profile) => ({
             ...profile,
             devices: profile.devices,
-            kind: profile.arc ? 'identity' : profileKind(profile.name),
+            kind: profile.arc || profile.firefox ? 'identity' : profileKind(profile.name),
             isConfiguredDefault: profile.name === configuredDefault,
           })),
           null,
@@ -1106,6 +1106,10 @@ function registerProfilesCommands(browser: Command): void {
         console.log(`Arc Space: ${profile.arc.spaceTitle} (${profile.arc.spaceId})`);
         console.log(`Arc profile: ${profile.arc.profileName} (${profile.arc.profileId})`);
       }
+      if (profile.firefox) {
+        console.log(`Firefox profile: ${profile.firefox.profileName}${profile.firefox.isDefault ? ' (default)' : ''}`);
+        if (profile.userDataDir) console.log(`Profile directory: ${profile.userDataDir}`);
+      }
       const presets = getEndpointPresets(profile);
       const defaultName = profile.defaultEndpoint && presets[profile.defaultEndpoint]
         ? profile.defaultEndpoint
@@ -1128,7 +1132,7 @@ function registerProfilesCommands(browser: Command): void {
 
       // Login state per known service: live session + account identity + whether
       // login creds are declared in the profile's secrets bundle.
-      if (profile.arc) return;
+      if (profile.arc || profile.firefox) return;
       const active = await loginsForProfile(profile.name);
       const accounts = await accountsForProfile(profile.name);
       const lines: string[] = [];
@@ -1310,7 +1314,7 @@ function registerProfilesCommands(browser: Command): void {
         process.exit(1);
       }
 
-      if (profile.arc && !isFleetRemoteInvocation()) {
+      if ((profile.arc || profile.firefox) && !isFleetRemoteInvocation()) {
         const routed = resolveBrowserTarget(profile.name);
         if (!routed.local && routed.commandDispatch) {
           const result = await dispatchBrowserToDevice(

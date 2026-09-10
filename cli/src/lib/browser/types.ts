@@ -2,18 +2,21 @@ import type { ArcNativeTabRef } from './drivers/arc.js';
 
 export type { ArcNativeTabRef } from './drivers/arc.js';
 
-export type BrowserType = 'chrome' | 'comet' | 'chromium' | 'brave' | 'edge' | 'arc' | 'custom';
+export type BrowserType = 'chrome' | 'comet' | 'chromium' | 'brave' | 'edge' | 'arc' | 'firefox' | 'custom';
 
 /**
  * The transport backend a live browser connection uses (PHNX-2399).
  *   - `cdp` — Chrome DevTools Protocol (the existing path for all Chromium-family browsers).
  *   - `arc-native` — Apple Events via `osascript` (the native Arc path, no CDP port required).
+ *   - `bidi` — WebDriver BiDi over a WebSocket (Firefox, PHNX-4043; Firefox 129+
+ *     ships no CDP at all).
  *
  * Load-bearing: every action method on `BrowserService` that calls `conn.cdp.send()`
  * must check `conn.backend` and route to the native driver instead when it is
- * `arc-native`. Unsupported native verbs throw `ArcNativeCapabilityError`.
+ * `arc-native` or `bidi`. Unsupported verbs throw `ArcNativeCapabilityError` /
+ * `FirefoxCapabilityError`.
  */
-export type BackendKind = 'cdp' | 'arc-native';
+export type BackendKind = 'cdp' | 'arc-native' | 'bidi';
 
 /**
  * Stable native identity carried by an Arc profile declaration (PHNX-2399).
@@ -222,6 +225,27 @@ export interface BrowserProfile {
   logHost?: string;
   /** Native Arc identity. Present only for an `arc-native:` profile. */
   arc?: ArcNativeProfileIdentity;
+  /**
+   * The Firefox profile this agents-cli profile is pinned to (PHNX-4043).
+   * Present only for a `bidi:` profile discovered from `profiles.ini`; the
+   * directory itself is {@link userDataDir}, which is what Firefox is launched
+   * with (`--profile <dir>`).
+   */
+  firefox?: FirefoxProfileIdentity;
+}
+
+/**
+ * Stable identity of a Firefox profile discovered from `profiles.ini` (PHNX-4043).
+ * One agents-cli profile is one Firefox profile: it already carries the cookies
+ * and logins, so agents never learn a second concept.
+ */
+export interface FirefoxProfileIdentity {
+  /** The `Name=` of the `[ProfileN]` section. Display + slug source only. */
+  profileName: string;
+  /** The `profiles.ini` the entry was read from. Display only. */
+  iniPath: string;
+  /** Whether `profiles.ini` marks the entry `Default=1`. Display only. */
+  isDefault: boolean;
 }
 
 /** Parsed form of `BrowserProfile.targetFilter`. */
