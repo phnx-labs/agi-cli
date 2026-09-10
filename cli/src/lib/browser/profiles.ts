@@ -241,6 +241,9 @@ export function discoverNativeProfiles(): DiscoveredProfiles {
   } else if (arc.kind === 'invalid') {
     errors.arc = `Cannot discover Arc Spaces: ${arc.reason}`;
   }
+  // Ports handed out earlier in this pass: two unpublished profiles must never
+  // derive the same port before either is declared.
+  const reserved = new Set<number>();
   for (const browser of discoverableChromiumBrowsers()) {
     const found = discoverChromiumProfiles(browser);
     if (!found.ok) {
@@ -248,11 +251,13 @@ export function discoverNativeProfiles(): DiscoveredProfiles {
       continue;
     }
     for (const native of found.profiles) {
+      const port = nativeChromiumPort(native.name, reserved);
+      reserved.add(port);
       profiles.push({
         name: native.name,
         description: `${browser} profile "${native.displayName}" (${native.profileDirectory})`,
         browser,
-        endpoints: [`cdp://127.0.0.1:${nativeChromiumPort(native.name)}`],
+        endpoints: [`cdp://127.0.0.1:${port}`],
         userDataDir: native.userDataDir,
         profileDirectory: native.profileDirectory,
         devices: [machineId()],
@@ -264,15 +269,16 @@ export function discoverNativeProfiles(): DiscoveredProfiles {
 
 /**
  * The CDP port a discovered Chromium profile attaches on. Once the profile is
- * declared its port lives in the declaration; before that, the port is derived
- * from the name so every listing agrees, starting at the canonical Comet port
- * (9333, PHNX-3967) and stepping past ports other local declarations hold.
+ * declared its port lives in the declaration; before that, the port is the
+ * first free one from the canonical Comet port (9333, PHNX-3967), stepping
+ * past ports other local declarations hold and past `reserved`, the ports
+ * already given to sibling profiles in the same discovery pass.
  */
-function nativeChromiumPort(name: string): number {
+function nativeChromiumPort(name: string, reserved: ReadonlySet<number>): number {
   const declared = localDeclaration(name)?.config;
   const declaredPort = declared ? parseEndpointPort(declared) : undefined;
   if (declaredPort) return declaredPort;
-  const taken = new Set<number>();
+  const taken = new Set<number>(reserved);
   for (const [other, declarations] of profileRegistry()) {
     if (other === name) continue;
     for (const declaration of declarations) {
@@ -757,7 +763,13 @@ export async function createProfile(profile: BrowserProfile): Promise<void> {
   if (nativeArc && (!profile.arc || profile.browser !== 'arc')) {
     throw new Error('An arc-native profile requires stable Arc Space metadata. Pick a discovered one from `agents browser profiles list`.');
   }
-  if (!hasSshEndpoint(profile.endpoints) && !nativeArc) {
+  // A discovered profile is pinned to a browser store on this disk
+  // (`userDataDir` + `profileDirectory`) and is published unattended by the
+  // daemon tick. Its binary is resolved where it is launched (`launchBrowser`),
+  // so an app that was removed after its store fails loud at `start` instead of
+  // blocking every other discovered row from publishing.
+  const storePinned = !!profile.userDataDir && !!profile.profileDirectory;
+  if (!hasSshEndpoint(profile.endpoints) && !nativeArc && !storePinned) {
     findBrowserPath(profile.browser, profile.binary);
   }
 
