@@ -2212,6 +2212,11 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
       let accountEnv: Record<string, string> | undefined;
       let accountConfigVersion: string | undefined;
       let execHome: string | undefined;
+      // The candidate a local strategy/picker branch selected, and its resolved
+      // safe identity. One canonical account resolution preserves the selected
+      // account's slot/credential through to spawn and failover (PHNX-3940).
+      let selectedCandidate: import('../lib/accounting/rotate.js').RotateCandidate | undefined;
+      let resolvedLaunchAccount: import('../lib/accounting/account-launch.js').ResolvedLaunchAccount | undefined;
       let profileProvider: string | undefined;
       let fromProfile = false;
       let profileName: string | undefined;
@@ -2895,12 +2900,16 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
                 json: options.json === true,
               });
               if (decision === 'launch') {
-                const { pickSignInLaunchVersion } = await import('./run-account-picker.js');
-                const signInVersion = await pickSignInLaunchVersion(agent, recoverable, !!options.quiet);
+                const { pickSignInLaunchCandidate } = await import('./run-account-picker.js');
+                const signInPick = await pickSignInLaunchCandidate(agent, recoverable, !!options.quiet);
                 // A cancelled prompt launches nothing — same contract as the
                 // trailing-@ account picker above.
-                if (!signInVersion) return;
-                version = signInVersion;
+                if (!signInPick) return;
+                version = signInPick.version;
+                // Launch that exact account's home/slot so the login lands in the
+                // right place, not the binary's version home (PHNX-3940). The
+                // canonical resolver below keys off this candidate.
+                selectedCandidate = signInPick;
                 // We just told the user this account is logged out and why we're
                 // launching it, so suppress the downstream login preflight — it
                 // would print a second, near-identical "looks logged out" warning.
@@ -2938,6 +2947,11 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
                 // trailing-@ account picker and the sign-in launch above.
                 if (!selected) return;
                 version = selected.version;
+                // Preserve the selected account's identity + slot through to the
+                // spawn: the canonical resolver below keys off this candidate, so
+                // a stale-usage pick launches the chosen account's home, not the
+                // binary's version home (PHNX-3940).
+                selectedCandidate = selected;
                 // Source the run.launch verdict from the account the user ACTUALLY
                 // picked — the picker may deliberately return a logged-out one
                 // (RUSH-2334), so it can differ from rotationResult.picked.
@@ -2966,21 +2980,12 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
               if (resolved.rotation) {
                 launchSignedIn = resolved.rotation.picked.signedIn;
                 launchEmail = resolved.rotation.picked.email;
-              }
-              // A balanced/available pick of a PROVIDER account (setup-token /
-              // API-key) carries `providerAccount`. Resolve its env through the
-              // same `resolveSpawnAccount` path an explicit `--account` uses, so
-              // exec injects the credential; a native pick has no providerAccount
-              // and runs from its own version home unchanged (RUSH-3182).
-              const pickedProviderAccount = resolved.rotation?.picked.providerAccount;
-              if (pickedProviderAccount) {
-                try {
-                  const picked = resolveSpawnAccount(pickedProviderAccount, agent, resolved.version, readMeta(), { useDefault: false });
-                  if (picked?.kind === 'provider') accountEnv = picked.env;
-                } catch (err) {
-                  console.error(chalk.red((err as Error).message));
-                  process.exit(1);
-                }
+                // Carry the picked account through the canonical resolver below:
+                // a native slot launches its own home, a provider account
+                // (setup-token / API-key) materializes its credential env — both
+                // resolved once at the local spawn boundary (PHNX-3940, RUSH-3182),
+                // never dropped back to the binary's version home.
+                selectedCandidate = resolved.rotation.picked;
               }
               if (resolved.rotation && !options.quiet) {
                 const banner = formatRotationBanner(resolved.rotation, strategy);
@@ -2996,6 +3001,31 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
               process.stderr.write(chalk.yellow(`[agents] strategy ${strategy} skipped: ${(err as Error).message}\n`));
             }
           }
+        }
+      }
+
+      // One canonical account resolution for the local selection branches that
+      // do NOT route through the explicit `--account` block above — the
+      // stale-usage picker and the automatic rotation pick (PHNX-3940). Each
+      // selected a candidate; resolving it here preserves that exact account's
+      // identity and its slot / provider credential through to spawn, instead of
+      // keeping only the binary version and launching the version home. The
+      // version still selects the executable only; the account owns the home.
+      if (selectedCandidate) {
+        try {
+          const { resolveLocalAccountLaunch } = await import('../lib/accounting/account-launch.js');
+          const launch = await resolveLocalAccountLaunch({
+            agent,
+            executableVersion: version ?? selectedCandidate.version,
+            candidate: selectedCandidate,
+          });
+          if (launch.execHome) execHome = launch.execHome;
+          if (launch.configVersion) accountConfigVersion = launch.configVersion;
+          if (Object.keys(launch.env).length > 0) accountEnv = { ...accountEnv, ...launch.env };
+          resolvedLaunchAccount = launch.account ?? undefined;
+        } catch (err) {
+          console.error(chalk.red((err as Error).message));
+          process.exit(1);
         }
       }
 
@@ -3111,8 +3141,12 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         if (preflight) {
           try {
             const { getAccountInfo } = await import('../lib/agents.js');
+            // Probe the account that will ACTUALLY spawn: the resolved slot home
+            // when this launch has one, else the version home (PHNX-3940).
+            // Attributing to the version home mis-reads a slot account's login.
             const authVersion = accountConfigVersion ?? version;
-            const info = await getAccountInfo(agent, authVersion ? getVersionHomePath(agent, authVersion) : undefined);
+            const authHome = execHome ?? (authVersion ? getVersionHomePath(agent, authVersion) : undefined);
+            const info = await getAccountInfo(agent, authHome);
             // Claude authenticates interactively from a per-version setup-token on a
             // keychain-less worker (the shim's .oauth_token fallback), which the
             // native-credential probe above can't see — so don't warn "logged out" when
@@ -3322,6 +3356,13 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         version,
         configVersion: accountConfigVersion,
         execHome,
+        // Safe identity + selected candidate for this attempt, so the spawn and
+        // any rate-limit failover attribute the account that actually ran, never
+        // the binary version (PHNX-3940). The explicit `--account` path carries
+        // its account through execHome above; these cover the rotation/picker
+        // branches and seed the failover chain's primary entry.
+        account: resolvedLaunchAccount,
+        accountCandidate: selectedCandidate,
         prompt,
         interactive: options.interactive || forceInteractive,
         mode: requestedMode,
@@ -3461,7 +3502,10 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           resumeCheckpoint: !!options.resumeCheckpoint,
         })
       ) {
-        const failover = rotationFailoverChain(rotationResult!, version!);
+        // Exclude the account that ACTUALLY launched — the interactive picker
+        // may have chosen one other than rotation.picked (PHNX-3940) — so the
+        // failover net never re-tries the primary account.
+        const failover = rotationFailoverChain(rotationResult!, selectedCandidate ?? version!);
         if (failover.length > 0) {
           fallback.unshift(...failover);
           if (!options.quiet) {

@@ -448,9 +448,15 @@ export function signInRecoverableCandidates(candidates: RotateCandidate[]): Rota
  * account on its own, and a profile injects its own auth (a different account
  * than the version home carries), so neither is checkable here.
  */
-export async function checkRunAccountReadiness(agent: AgentId, version: string): Promise<AccountReadiness> {
+export async function checkRunAccountReadiness(
+  agent: AgentId,
+  version: string,
+  accountKey?: string,
+): Promise<AccountReadiness> {
   const candidates = await collectRunCandidates(agent);
-  const candidate = candidates.find((c) => c.version === version);
+  const candidate = accountKey
+    ? candidates.find((c) => candidateAccountKey(c) === accountKey)
+    : candidates.find((c) => c.version === version);
   if (!candidate) return { ready: true };
   return readinessFromCandidate(candidate);
 }
@@ -1188,10 +1194,10 @@ export async function selectAvailableVersion(
  * Writes a stamp file per agent — lightweight, no locking needed since
  * a torn write just means the next reader sees a stale timestamp (harmless).
  */
-function recordRotationPick(agent: AgentId, version: string): void {
+function recordRotationPick(agent: AgentId, accountKey: string): void {
   const stampPath = path.join(getRotateDir(), `stamp-${agent}.json`);
   try {
-    fs.writeFileSync(stampPath, JSON.stringify({ version, ts: Date.now() }), 'utf-8');
+    fs.writeFileSync(stampPath, JSON.stringify({ accountKey, ts: Date.now() }), 'utf-8');
   } catch { /* best effort — doesn't block the run */ }
 }
 
@@ -1202,8 +1208,10 @@ function recordRotationPick(agent: AgentId, version: string): void {
 function readRotationStamp(agent: AgentId): string | null {
   const stampPath = path.join(getRotateDir(), `stamp-${agent}.json`);
   try {
-    const raw = JSON.parse(fs.readFileSync(stampPath, 'utf-8')) as { version: string; ts: number };
-    if (Date.now() - raw.ts < 60_000) return raw.version;
+    const raw = JSON.parse(fs.readFileSync(stampPath, 'utf-8')) as { accountKey?: string; ts?: number };
+    if (typeof raw.accountKey === 'string' && typeof raw.ts === 'number' && Date.now() - raw.ts < 60_000) {
+      return raw.accountKey;
+    }
   } catch { /* missing or corrupt — treat as no stamp */ }
   return null;
 }
@@ -1463,11 +1471,12 @@ export async function resolveRunVersion(
     // distributes naturally across healthy accounts.
     if (strategy === 'available') {
       const recentPick = readRotationStamp(agent);
-      if (recentPick === rotation.picked.version && rotation.healthy.length > 1) {
-        const alt = rotation.healthy.find(c => c.version !== recentPick);
+      const pickedKey = candidateAccountKey(rotation.picked);
+      if (recentPick === pickedKey && rotation.healthy.length > 1) {
+        const alt = rotation.healthy.find(c => candidateAccountKey(c) !== recentPick);
         if (alt) rotation.picked = alt;
       }
-      recordRotationPick(agent, rotation.picked.version);
+      recordRotationPick(agent, candidateAccountKey(rotation.picked));
     }
     emitRotationDecision('rotation.resolved', rotation, agent, strategy);
     return { version: rotation.picked.version, rotation };
@@ -1505,17 +1514,35 @@ export const DEFAULT_ROTATION_FAILOVER_LIMIT = 3;
  * Returns `[]` when there is no rotation (pinned strategy) or the picked account
  * is the only healthy one — so single-account users and non-rotation runs are
  * completely unchanged.
+ *
+ * The primary is identified by ACCOUNT, not version (PHNX-3940): pass the exact
+ * selected {@link RotateCandidate} so the account the user actually launched —
+ * which the interactive picker may pick DIFFERENTLY from `rotation.picked` — is
+ * the one excluded. A bare version string stays accepted for legacy callers and
+ * resolves to the healthy candidate carrying it, falling back to the auto-pick.
  */
 export function rotationFailoverChain(
   rotation: RotateResult | null,
-  pickedVersion: string,
+  picked: RotateCandidate | string,
   limit: number = DEFAULT_ROTATION_FAILOVER_LIMIT,
 ): FallbackEntry[] {
   if (!rotation || limit <= 0) return [];
   const chain: FallbackEntry[] = [];
+  const primary = typeof picked === 'string'
+    ? (rotation.healthy.find((c) => c.version === picked) ?? rotation.picked)
+    : picked;
+  const seen = new Set<string>([candidateAccountKey(primary)]);
   for (const candidate of rotation.healthy) {
-    if (candidate.version === pickedVersion) continue; // the primary account
-    chain.push({ agent: candidate.agent, version: candidate.version });
+    const key = candidateAccountKey(candidate);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    chain.push({
+      agent: candidate.agent,
+      version: candidate.version,
+      accountSelector: candidate.nativeAccount ?? candidate.providerAccount ?? candidate.email ?? candidate.accountKey ?? undefined,
+      accountKey: key,
+      accountCandidate: candidate,
+    });
     if (chain.length >= limit) break;
   }
   return chain;

@@ -5,12 +5,35 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { Meta } from '../types.js';
 import { resolveLocalAccountLaunch } from './account-launch.js';
 import { candidateAccountKey, type RotateCandidate } from './rotate.js';
+import { getVersionDir, getVersionHomePath } from '../installations/store.js';
 
 const roots: string[] = [];
+const plantedVersionDirs: string[] = [];
 
 afterEach(() => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
+  for (const dir of plantedVersionDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
+
+/** A pre-T5 login with no slot and no registered account — only a version home. */
+function legacyCandidate(version: string): RotateCandidate {
+  return {
+    agent: 'codex',
+    version,
+    accountKey: null,
+    accountLabel: '',
+    email: `legacy-${version}@example.test`,
+    usageKey: null,
+    usageStatus: null,
+    usageSnapshot: null,
+    usageError: null,
+    usageMinutesToLimit: null,
+    plan: null,
+    signedIn: true,
+    authVerdict: 'live',
+    lastActive: null,
+  };
+}
 
 function slotCandidate(name: string, id: string, version: string, slotDir: string): RotateCandidate {
   return {
@@ -97,5 +120,41 @@ describe('resolveLocalAccountLaunch', () => {
     expect(resolved.executableVersion).toBe('new-binary');
     expect(resolved.execHome).toBe(slotDir);
     expect(resolved.account).toMatchObject({ id: 'acct-work', name: 'work' });
+  });
+
+  it('resolves a pre-T5 version-home login to that home without scanning for identity', async () => {
+    // A login with no slot and no registered account is a compatibility case:
+    // the candidate IS the identity decision, the label only locates its exact
+    // local config home (never an identity comparison across homes).
+    const label = `98.0.0-acct-launch-legacy-${process.pid}-${Date.now()}`;
+    const home = getVersionHomePath('codex', label);
+    fs.mkdirSync(home, { recursive: true });
+    plantedVersionDirs.push(getVersionDir('codex', label));
+    const selected = legacyCandidate(label);
+
+    const resolved = await resolveLocalAccountLaunch({
+      agent: 'codex',
+      executableVersion: label,
+      candidate: selected,
+      meta: { accounts: undefined, deviceAccounts: undefined },
+    });
+
+    expect(resolved.execHome).toBe(home);
+    expect(resolved.configVersion).toBe(label);
+    expect(resolved.account).toMatchObject({ kind: 'legacy-native' });
+    // The env is never materialized for a legacy home — auth lives in the home.
+    expect(resolved.env).toEqual({});
+  });
+
+  it('fails loud when a selected legacy login has no local home', async () => {
+    const selected = legacyCandidate(`99.0.0-acct-launch-missing-${process.pid}-${Date.now()}`);
+    await expect(
+      resolveLocalAccountLaunch({
+        agent: 'codex',
+        executableVersion: selected.version,
+        candidate: selected,
+        meta: { accounts: undefined, deviceAccounts: undefined },
+      }),
+    ).rejects.toThrow(/no local account home/);
   });
 });

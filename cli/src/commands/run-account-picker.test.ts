@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { RotateCandidate } from '../lib/accounting/rotate.js';
 import type { UsageSnapshot, UsageWindowKey } from '../lib/accounting/usage.js';
-import { buildRunAccountChoices, buildSwitchAccountChoices, formatAccountLimits, noVerifiedUsageDecision, pickSignInLaunchVersion, signInLaunchDecision } from './run-account-picker.js';
+import { buildRunAccountChoices, buildSwitchAccountChoices, formatAccountLimits, noVerifiedUsageDecision, pickSignInLaunchCandidate, signInLaunchDecision } from './run-account-picker.js';
 
 function snapshot(windows: Array<[UsageWindowKey, number]>, plan: string | null = null): UsageSnapshot {
   return {
@@ -203,7 +203,7 @@ describe('buildSwitchAccountChoices', () => {
   });
 });
 
-describe('pickSignInLaunchVersion (RUSH-2334)', () => {
+describe('pickSignInLaunchCandidate (RUSH-2334, PHNX-3940)', () => {
   afterEach(() => vi.restoreAllMocks());
 
   function captureStderr(): { lines: () => string } {
@@ -215,13 +215,13 @@ describe('pickSignInLaunchVersion (RUSH-2334)', () => {
     return { lines: () => chunks.join('') };
   }
 
-  it('a single logged-out account launches WITHOUT a prompt — a one-item picker decides nothing', async () => {
+  it('a single logged-out account returns the CANDIDATE (not a bare version) so the caller launches its own home', async () => {
     const stderr = captureStderr();
-    const version = await pickSignInLaunchVersion(
+    const picked = await pickSignInLaunchCandidate(
       'claude',
       [candidate({ version: '2.1.0', signedIn: false, usageSnapshot: null })],
     );
-    expect(version).toBe('2.1.0');
+    expect(picked?.version).toBe('2.1.0');
     expect(stderr.lines()).toContain('launching claude@2.1.0 so you can sign in');
     // The message must name the actual login command, not just say "logged out".
     expect(stderr.lines()).toContain('claude, then /login');
@@ -229,27 +229,27 @@ describe('pickSignInLaunchVersion (RUSH-2334)', () => {
 
   it('a single revoked account says the token was rejected, not that you are logged out', async () => {
     const stderr = captureStderr();
-    const version = await pickSignInLaunchVersion(
+    const picked = await pickSignInLaunchCandidate(
       'claude',
       [candidate({ version: '2.1.0', authVerdict: 'revoked' })],
     );
-    expect(version).toBe('2.1.0');
+    expect(picked?.version).toBe('2.1.0');
     expect(stderr.lines()).toContain('the server rejected its token');
   });
 
-  it('--quiet launches the same version but prints nothing', async () => {
+  it('--quiet returns the same candidate but prints nothing', async () => {
     const stderr = captureStderr();
-    const version = await pickSignInLaunchVersion(
+    const picked = await pickSignInLaunchCandidate(
       'claude',
       [candidate({ version: '2.1.0', signedIn: false, usageSnapshot: null })],
       true,
     );
-    expect(version).toBe('2.1.0');
+    expect(picked?.version).toBe('2.1.0');
     expect(stderr.lines()).toBe('');
   });
 
   it('no recoverable candidate returns null so the caller falls back to failing loud', async () => {
-    expect(await pickSignInLaunchVersion('claude', [])).toBeNull();
+    expect(await pickSignInLaunchCandidate('claude', [])).toBeNull();
   });
 });
 
