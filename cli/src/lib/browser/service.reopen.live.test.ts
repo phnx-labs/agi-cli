@@ -68,8 +68,10 @@ d('same-task page reopen against real Chromium (PHNX-2399)', () => {
     }
     throw new Error(`page ${name} never reached loads=${wantLoads ?? 'any'}`);
   };
-  const loadsOf = (task: string, tabId: string, name: string) =>
-    service.evaluate(task, tabId, `localStorage.getItem('loads-${name}')`);
+  // The document's OWN load count. localStorage would read the per-origin key,
+  // which another tab showing the same page also bumps.
+  const loadsOf = (task: string, tabId: string) =>
+    service.evaluate(task, tabId, 'String(window.__loads)');
 
   function seedTask(name: string) {
     const now = Date.now();
@@ -174,11 +176,11 @@ d('same-task page reopen against real Chromium (PHNX-2399)', () => {
     expect((await pageTargets()).length).toBe(before); // no extra target
 
     await settle('reopentask', a.tabId, 'A', 2); // the reopen really reloaded A
-    expect(await loadsOf('reopentask', a.tabId, 'A')).toBe('2');
+    expect(await loadsOf('reopentask', a.tabId)).toBe('2');
     // A genuinely reloaded → its in-document sentinel is gone.
     expect(await service.evaluate('reopentask', a.tabId, 'window.__sentinel ?? null')).toBeNull();
     // B never reloaded → its sentinel and load count survive, id unchanged.
-    expect(await loadsOf('reopentask', b.tabId, 'B')).toBe('1');
+    expect(await loadsOf('reopentask', b.tabId)).toBe('1');
     expect(await service.evaluate('reopentask', b.tabId, 'window.__sentinel ?? null')).toBe('B-doc-1');
     expect(task.tabs[b.tabId]).toBe(targetIdB);
   }, 40_000);
@@ -239,7 +241,7 @@ d('same-task page reopen against real Chromium (PHNX-2399)', () => {
     // in-document sentinel, load counter still 1 (no Page.reload ran on it).
     expect(task.tabs[a.tabId]).toBe(aTargetId);
     expect(await service.evaluate('borrowtask', a.tabId, 'window.__sentinel ?? null')).toBe('E-borrowed-doc');
-    expect(await loadsOf('borrowtask', a.tabId, 'E')).toBe('1');
+    expect(await loadsOf('borrowtask', a.tabId)).toBe('1');
   }, 40_000);
   it('tabs --all lists every page target in the profile, the owner\'s next to the task\'s (profileTabs)', async () => {
     seedTask('all');
