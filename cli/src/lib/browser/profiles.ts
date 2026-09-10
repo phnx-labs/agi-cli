@@ -195,40 +195,52 @@ function profileToConfig(profile: BrowserProfile): BrowserProfileConfig {
  * Every Arc Space on this Mac as an agents-cli profile (PHNX-2399). A Space
  * already carries its Arc profile's cookies and logins, so it IS the browser
  * profile agents pick with `--profile` — no second concept.
+ *
+ * Discovery reads files Arc rewrites on every Space or tab change, so a torn
+ * read is an ordinary event, not corruption. It is reported as `error` rather
+ * than thrown: the profile store serves every browser on this machine, and a
+ * momentary Arc read must never take the Comet or Chrome rows down with it.
+ * The error surfaces where an Arc profile is actually asked for by name.
  */
-function nativeArcProfiles(): BrowserProfileWithDeclarations[] {
+function discoverArcSpaceProfiles(): { profiles: BrowserProfileWithDeclarations[]; error?: string } {
   const discovered = discoverArcProfiles();
   if (!discovered.ok) {
-    if (discovered.kind === 'unsupported' || discovered.kind === 'not-installed') return [];
-    throw new Error(`Cannot discover Arc Spaces: ${discovered.reason}`);
+    if (discovered.kind === 'unsupported' || discovered.kind === 'not-installed') return { profiles: [] };
+    return { profiles: [], error: `Cannot discover Arc Spaces: ${discovered.reason}` };
   }
-  return arcSpaceProfiles(discovered).map((space) => ({
-    name: space.name,
-    description: `Arc Space "${space.spaceTitle}" (${space.profileName})`,
-    browser: 'arc',
-    endpoints: { native: { target: 'arc-native://local' } },
-    defaultEndpoint: 'native',
-    launchPolicy: 'attach-only',
-    arc: {
-      profileId: space.profileId,
-      profileName: space.profileName,
-      spaceId: space.spaceId,
-      spaceTitle: space.spaceTitle,
-    },
-    devices: [machineId()],
-  }));
+  return {
+    profiles: arcSpaceProfiles(discovered).map((space) => ({
+      name: space.name,
+      description: `Arc Space "${space.spaceTitle}" (${space.profileName})`,
+      browser: 'arc',
+      endpoints: { native: { target: 'arc-native://local' } },
+      defaultEndpoint: 'native',
+      launchPolicy: 'attach-only',
+      arc: {
+        profileId: space.profileId,
+        profileName: space.profileName,
+        spaceId: space.spaceId,
+        spaceTitle: space.spaceTitle,
+      },
+      devices: [machineId()],
+    })),
+  };
 }
 
-function refreshLocalArcProfile(profile: BrowserProfileWithDeclarations): BrowserProfileWithDeclarations {
+/**
+ * Bring a persisted Arc alias up to date with the live Space (title renames).
+ * A Space that is no longer discoverable leaves the alias as stored: listing
+ * still works, and using the profile fails loud in `resolveArcSpace` with the
+ * Space that is missing from Arc's visible windows.
+ */
+function refreshLocalArcProfile(
+  profile: BrowserProfileWithDeclarations,
+  live: BrowserProfileWithDeclarations[],
+): BrowserProfileWithDeclarations {
   if (!profile.arc || !profile.devices.includes(machineId())) return profile;
-  const live = nativeArcProfiles().find((candidate) => candidate.arc?.spaceId === profile.arc?.spaceId);
-  if (!live) {
-    throw new Error(
-      `Arc Space ${JSON.stringify(profile.arc.spaceTitle)} (${profile.arc.spaceId}) is no longer present in Arc. ` +
-        `Remove the profile with: agents browser profiles remove ${profile.name}`,
-    );
-  }
-  return { ...profile, arc: live.arc, description: profile.description ?? live.description };
+  const current = live.find((candidate) => candidate.arc?.spaceId === profile.arc?.spaceId);
+  if (!current) return profile;
+  return { ...profile, arc: current.arc, description: profile.description ?? current.description };
 }
 
 function selectedDeclaration(declarations: ProfileDeclaration[]): ProfileDeclaration {
@@ -245,31 +257,38 @@ export function isProfileDeclaredHere(name: string): boolean {
 }
 
 export async function listProfiles(): Promise<BrowserProfileWithDeclarations[]> {
+  const native = discoverArcSpaceProfiles();
   const configured = [...profileRegistry()].map(([name, declarations]) => {
     const selected = selectedDeclaration(declarations);
     return refreshLocalArcProfile(
       configToProfile(name, selected.config, declarations.map((declaration) => declaration.device)),
+      native.profiles,
     );
   });
   const names = new Set(configured.map((profile) => profile.name));
-  return [...configured, ...nativeArcProfiles().filter((profile) => !names.has(profile.name))];
+  return [...configured, ...native.profiles.filter((profile) => !names.has(profile.name))];
 }
 
 export async function getProfile(name: string): Promise<BrowserProfileWithDeclarations | null> {
+  const native = discoverArcSpaceProfiles();
   const declarations = profileRegistry().get(name);
   if (declarations?.length) {
     const selected = selectedDeclaration(declarations);
     return refreshLocalArcProfile(
       configToProfile(name, selected.config, declarations.map((declaration) => declaration.device)),
+      native.profiles,
     );
   }
-  return nativeArcProfiles().find((profile) => profile.name === name) ?? null;
+  const discovered = native.profiles.find((profile) => profile.name === name) ?? null;
+  // Only an Arc profile asked for by name pays for a failed Arc read.
+  if (!discovered && native.error && name.startsWith('arc-')) throw new Error(native.error);
+  return discovered;
 }
 
 /** Persist only the agents-cli alias for an auto-discovered Arc profile. */
 export async function persistDiscoveredArcProfile(name: string): Promise<void> {
   if (localDeclaration(name)) return;
-  const profile = nativeArcProfiles().find((candidate) => candidate.name === name);
+  const profile = discoverArcSpaceProfiles().profiles.find((candidate) => candidate.name === name);
   if (!profile) return;
   await createProfile(profile);
 }
@@ -289,7 +308,7 @@ export function isProfileLaunchableHere(profile: BrowserProfile): boolean {
     (preset) => preset.target.startsWith('arc-native:'),
   );
   if (nativeArc) {
-    return !!profile.arc && nativeArcProfiles().some(
+    return !!profile.arc && discoverArcSpaceProfiles().profiles.some(
       (candidate) => candidate.arc?.spaceId === profile.arc?.spaceId,
     );
   }
