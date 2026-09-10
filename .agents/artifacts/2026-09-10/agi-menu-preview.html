@@ -1,0 +1,272 @@
+<div id="agi-menu-preview" aria-label="Proposed AGI menu with illustrative data">
+  <style>
+    #agi-menu-preview { color-scheme: light dark; --agi-bg: light-dark(#f7f7f8,#24252b); --agi-text: light-dark(#202126,#f2f2f5); --agi-muted: light-dark(#61636c,#b2b4be); --agi-line: light-dark(#d8d9df,#454650); --agi-hover: light-dark(#e6e7ed,#373944); --agi-blue: light-dark(#0758bc,#8cbcff); --agi-green: light-dark(#197844,#6ed7a0); --agi-amber: light-dark(#825400,#f4cf73); --agi-selected: light-dark(#dce9ff,#394b68); font: 13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; color:var(--agi-text); }
+    #agi-menu-preview * { box-sizing:border-box; }
+    #agi-menu-preview .agi-window { background:var(--agi-bg); border:1px solid var(--agi-line); border-radius:13px; max-width:570px; margin:4px auto 12px; overflow:hidden; }
+    #agi-menu-preview button, #agi-menu-preview select { font:inherit; color:inherit; }
+    #agi-menu-preview button { cursor:pointer; }
+    #agi-menu-preview .agi-bar { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:13px 16px 9px; }
+    #agi-menu-preview strong { font-weight:500; }
+    #agi-menu-preview .agi-button { border:1px solid var(--agi-line); background:var(--agi-hover); border-radius:6px; padding:5px 9px; }
+    #agi-menu-preview .agi-quiet { background:none; border:0; padding:5px 0; color:var(--agi-blue); text-align:left; }
+    #agi-menu-preview .agi-tabs { display:flex; flex-wrap:wrap; gap:3px; padding:3px 10px 10px; border-bottom:1px solid var(--agi-line); }
+    #agi-menu-preview .agi-tabs button { flex:1 0 auto; border:0; background:none; border-radius:6px; padding:7px 8px; color:var(--agi-muted); }
+    #agi-menu-preview .agi-tabs button[aria-selected="true"] { background:var(--agi-selected); color:var(--agi-text); }
+    #agi-menu-preview .agi-count { color:var(--agi-amber); margin-left:3px; }
+    #agi-menu-preview .agi-content { padding:3px 15px 12px; }
+    #agi-menu-preview .agi-section-title { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:12px 0 7px; color:var(--agi-muted); }
+    #agi-menu-preview .agi-row { border-bottom:1px solid var(--agi-line); padding:10px 0; }
+    #agi-menu-preview .agi-title { border:0; padding:0; background:none; text-align:left; display:flex; align-items:baseline; gap:8px; width:100%; }
+    #agi-menu-preview .agi-title:hover, #agi-menu-preview .agi-quiet:hover { color:var(--agi-blue); }
+    #agi-menu-preview .agi-dot { width:7px; height:7px; background:var(--agi-green); border-radius:50%; flex:0 0 auto; align-self:center; }
+    #agi-menu-preview .agi-meta { color:var(--agi-muted); margin:3px 0 0 15px; font-size:12px; }
+    #agi-menu-preview .agi-preview { margin:5px 0 6px 15px; color:var(--agi-muted); overflow-wrap:anywhere; }
+    #agi-menu-preview .agi-links { display:flex; flex-wrap:wrap; align-items:center; gap:6px 14px; margin-left:15px; }
+    #agi-menu-preview a { color:var(--agi-blue); text-decoration:none; }
+    #agi-menu-preview a:hover { text-decoration:underline; }
+    #agi-menu-preview details { padding:10px 0; }
+    #agi-menu-preview summary { cursor:pointer; }
+    #agi-menu-preview .agi-alert { color:var(--agi-amber); }
+    #agi-menu-preview .agi-subtle { color:var(--agi-muted); }
+    #agi-menu-preview .agi-footer { border-top:1px solid var(--agi-line); padding:7px 15px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:4px 14px; }
+    #agi-menu-preview .agi-footer button { border:0; background:none; color:var(--agi-muted); padding:5px 0; }
+    #agi-menu-preview .agi-pref { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; padding:10px 0; }
+    #agi-menu-preview select { background:var(--agi-hover); border:1px solid var(--agi-line); border-radius:5px; padding:6px; max-width:100%; }
+    #agi-menu-preview .agi-project { border-bottom:1px solid var(--agi-line); padding:8px 0; }
+    #agi-menu-preview .agi-project-head { display:flex; justify-content:space-between; gap:8px; align-items:center; }
+    #agi-menu-preview .agi-project-head button { border:0; background:none; color:var(--agi-blue); padding:5px 0 5px 7px; }
+    #agi-menu-preview .agi-milestone { margin-left:12px; padding:7px 0; }
+    #agi-menu-preview .agi-progress { appearance:none; width:100%; height:4px; display:block; margin:9px 0 5px; border:0; background:var(--agi-line); border-radius:2px; }
+    #agi-menu-preview .agi-progress::-webkit-progress-bar { background:var(--agi-line); border-radius:2px; }
+    #agi-menu-preview .agi-progress::-webkit-progress-value { background:var(--agi-green); border-radius:2px; }
+    #agi-menu-preview .agi-progress::-moz-progress-bar { background:var(--agi-green); border-radius:2px; }
+    #agi-menu-preview .agi-task { display:flex; justify-content:space-between; gap:10px; padding:7px 0; }
+    #agi-menu-preview .agi-device { display:flex; justify-content:space-between; gap:14px; padding:10px 0; border-bottom:1px solid var(--agi-line); }
+    #agi-menu-preview .agi-prompt { border-left:2px solid var(--agi-amber); margin:8px 0 12px; padding:1px 0 2px 12px; }
+    #agi-menu-preview .agi-prompt p { margin:5px 0 9px; }
+    #agi-menu-preview .agi-actions { display:flex; flex-wrap:wrap; gap:8px; }
+    #agi-menu-preview .agi-detail { padding:10px 0 10px 15px; }
+    #agi-menu-preview .agi-detail p { margin:6px 0; }
+    #agi-menu-preview .agi-input { font:inherit; color:var(--agi-text); background:var(--agi-hover); border:1px solid var(--agi-line); padding:7px; border-radius:5px; width:100%; margin:6px 0; }
+    #agi-menu-preview .agi-section-edit { border-bottom:1px solid var(--agi-line); padding:9px 0; }
+    #agi-menu-preview .agi-section-edit[draggable="true"] { cursor:grab; }
+    #agi-menu-preview .agi-edit-row { display:flex; align-items:center; gap:8px; }
+    #agi-menu-preview .agi-edit-row label { flex:1; display:flex; align-items:center; gap:8px; }
+    #agi-menu-preview .agi-edit-row button { border:0; border-radius:4px; background:var(--agi-hover); padding:4px 7px; }
+    #agi-menu-preview .agi-panel-option { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:7px; padding:6px 0; }
+    #agi-menu-preview .agi-drop { background:var(--agi-selected); }
+    #agi-menu-preview [hidden] { display:none !important; }
+    #agi-menu-preview .agi-feedback:empty { display:none; }
+    #agi-menu-preview .agi-feedback { color:var(--agi-muted); padding:7px 15px; border-top:1px solid var(--agi-line); }
+    @media (pointer:coarse) { #agi-menu-preview button,#agi-menu-preview select,#agi-menu-preview summary { min-height:44px; } #agi-menu-preview .agi-links a { padding:10px 0; } }
+    @media (max-width:400px) { #agi-menu-preview .agi-content { padding-right:12px; padding-left:12px; } #agi-menu-preview .agi-tabs button { padding:7px 6px; } #agi-menu-preview .agi-meta { margin-left:15px; } }
+  </style>
+  <div class="agi-subtle">Layout example · session, request and milestone counts are illustrative</div>
+  <div class="agi-window">
+    <div class="agi-bar"><strong>AGI</strong><button class="agi-button" type="button" data-action="new-task">New task…</button></div>
+    <div class="agi-tabs" role="tablist" aria-label="AGI sections">
+      <button type="button" role="tab" id="agi-tab-sessions" aria-controls="agi-sessions" aria-selected="true" data-tab="sessions">Sessions</button>
+      <button type="button" role="tab" id="agi-tab-projects" aria-controls="agi-projects" aria-selected="false" data-tab="projects">Projects</button>
+      <button type="button" role="tab" id="agi-tab-notifications" aria-controls="agi-notifications" aria-selected="false" data-tab="notifications">Notifications <span class="agi-count" data-needs-count>2</span></button>
+      <button type="button" role="tab" id="agi-tab-devices" aria-controls="agi-devices" aria-selected="false" data-tab="devices">Devices</button>
+      <button type="button" role="tab" id="agi-tab-routines" aria-controls="agi-routines" aria-selected="false" data-tab="routines" hidden>Routines</button>
+      <button type="button" role="tab" id="agi-tab-browser" aria-controls="agi-browser" aria-selected="false" data-tab="browser" hidden>Browser</button>
+    </div>
+    <div class="agi-content">
+      <section id="agi-sessions" role="tabpanel" aria-labelledby="agi-tab-sessions">
+        <div class="agi-section-title"><strong>Working · 4</strong><span>Across all projects</span></div>
+        <div id="agi-working-rows">
+          <article class="agi-row" data-working-row>
+            <button class="agi-title" type="button" data-detail="session-one" aria-expanded="false"><span class="agi-dot"></span><strong>Reconcile session previews</strong></button>
+            <div class="agi-meta">Agents CLI · Codex · Working · just now</div>
+            <div class="agi-preview">Checking the latest agent message against the session shown in the menu.</div>
+            <div class="agi-links"><a href="https://github.com/phnx-labs/agi-cli/pull/3497" target="_blank" rel="noopener noreferrer">PR #3497 ↗</a><a href="https://linear.app/getrush/issue/PHNX-3939" target="_blank" rel="noopener noreferrer">PHNX-3939 ↗</a></div>
+            <div class="agi-detail" id="agi-session-one" hidden><strong>Session details</strong><p class="agi-subtle">Request: show the correct live preview for each session.</p><p>Latest action: checking local and remote session identity.</p><button type="button" class="agi-button" data-action="open-session">Open full session</button></div>
+          </article>
+          <article class="agi-row" data-working-row>
+            <button class="agi-title" type="button" data-detail="session-two" aria-expanded="false"><span class="agi-dot"></span><strong>Simplify account selection</strong></button>
+            <div class="agi-meta">Agents CLI · Claude · Working · 1 min ago</div>
+            <div class="agi-preview">Verifying that the selected account is used when the agent starts.</div>
+            <div class="agi-links"><a href="https://github.com/phnx-labs/agi-cli/pull/3512" target="_blank" rel="noopener noreferrer">PR #3512 ↗</a><a href="https://linear.app/getrush/issue/PHNX-3940" target="_blank" rel="noopener noreferrer">PHNX-3940 ↗</a></div>
+            <div class="agi-detail" id="agi-session-two" hidden><strong>Session details</strong><p>Checking account selection across devices.</p><button type="button" class="agi-button" data-action="open-session">Open full session</button></div>
+          </article>
+          <article class="agi-row" data-working-row>
+            <button class="agi-title" type="button" data-detail="session-three" aria-expanded="false"><span class="agi-dot"></span><strong>Verify container output</strong></button>
+            <div class="agi-meta">Client runtime · Codex · Working · 2 min ago</div>
+            <div class="agi-preview">Running the example container and checking its captured output.</div>
+            <div class="agi-detail" id="agi-session-three" hidden><strong>Session details</strong><p class="agi-subtle">No linked pull request or ticket yet.</p><button type="button" class="agi-button" data-action="open-session">Open full session</button></div>
+          </article>
+          <article class="agi-row" data-working-row hidden>
+            <button class="agi-title" type="button" data-detail="session-four" aria-expanded="false"><span class="agi-dot"></span><strong>Check documentation examples</strong></button>
+            <div class="agi-meta">Research · Claude · Working · 3 min ago</div><div class="agi-preview">Comparing the setup steps with a fresh installation.</div>
+            <div class="agi-detail" id="agi-session-four" hidden><strong>Session details</strong><p>Checking the published instructions.</p><button type="button" class="agi-button" data-action="open-session">Open full session</button></div>
+          </article>
+        </div>
+        <button class="agi-quiet" type="button" id="agi-show-working" aria-expanded="false">Show 1 more working session</button>
+        <details><summary class="agi-subtle">Idle · 2</summary><div class="agi-meta">Documentation review · idle 14 min</div><div class="agi-meta">Menu validation · idle 7 min</div></details>
+        <details><summary class="agi-subtle">Previous sessions</summary><div class="agi-meta">Completed and older sessions stay here.</div><button class="agi-quiet" type="button" data-action="open-history">Open session history →</button></details>
+      </section>
+      <section id="agi-projects" role="tabpanel" aria-labelledby="agi-tab-projects" hidden>
+        <div id="agi-project-overview">
+        <div class="agi-pref"><label for="agi-default-project">My default project</label><select id="agi-default-project"><option value="cli">Agents CLI</option><option value="runtime">Client runtime</option><option value="research">Research</option></select></div>
+        <div class="agi-subtle">New tasks start here. Your order applies across your devices.</div>
+        <div class="agi-section-title"><strong>My project order</strong><span>Milestones</span></div>
+        <div id="agi-project-list">
+          <article class="agi-project" data-project="cli"><div class="agi-project-head"><strong>Agents CLI <span class="agi-subtle" data-default-label="cli">· Default</span></strong><button type="button" data-prioritize="cli">Move to top</button></div>
+            <details class="agi-milestone" open><summary>Native menu · 3 of 5 tasks done</summary><progress class="agi-progress" value="3" max="5" aria-label="Native menu milestone: three of five tasks complete"></progress><div class="agi-subtle">Target Sep 14 · updated just now</div><details class="agi-milestone"><summary>2 remaining tasks</summary><div class="agi-task"><a href="https://linear.app/getrush/issue/PHNX-3999" target="_blank" rel="noopener noreferrer">Dispatch and sessions ↗</a><span class="agi-subtle">Doing</span></div><div class="agi-task"><a href="https://linear.app/getrush/issue/PHNX-4007" target="_blank" rel="noopener noreferrer">Release validation ↗</a><span class="agi-subtle">Doing</span></div></details><button class="agi-quiet" type="button" data-milestone-tasks>View all 5 tasks →</button></details>
+            <details class="agi-milestone"><summary>Session reliability · 1 of 3 done</summary><div class="agi-task"><span>Correct status transitions</span><span class="agi-subtle">Doing</span></div></details>
+            <details class="agi-milestone"><summary>No milestone · 1 ticket</summary><div class="agi-task"><a href="https://linear.app/getrush/issue/PHNX-3939" target="_blank" rel="noopener noreferrer">Live session previews ↗</a><span class="agi-subtle">Doing</span></div></details>
+            <details class="agi-milestone" data-completed-milestone hidden><summary>App foundation · 3 of 3 done</summary><div class="agi-subtle">Completed milestone</div></details>
+          </article>
+          <article class="agi-project" data-project="runtime"><div class="agi-project-head"><strong>Client runtime <span class="agi-subtle" data-default-label="runtime"></span></strong><button type="button" data-prioritize="runtime">Move to top</button></div><details class="agi-milestone"><summary>Container execution · 2 of 4 done</summary><div class="agi-task"><span>Capture container output</span><span class="agi-subtle">Doing</span></div><div class="agi-task"><span>Verify tenant separation</span><span class="agi-subtle">Todo</span></div></details></article>
+          <article class="agi-project" data-project="research"><div class="agi-project-head"><strong>Research <span class="agi-subtle" data-default-label="research"></span></strong><button type="button" data-prioritize="research">Move to top</button></div><div class="agi-milestone agi-subtle">No tracker linked</div></article>
+        </div>
+        </div>
+        <div id="agi-milestone-detail" hidden>
+        <button class="agi-quiet" type="button" id="agi-project-back">← All projects</button>
+        <div class="agi-section-title"><strong>Agents CLI › Native menu</strong><span>5 tickets</span></div>
+        <article class="agi-row"><a href="https://linear.app/getrush/issue/PHNX-3999" target="_blank" rel="noopener noreferrer">PHNX-3999 · Native dispatch and sessions ↗</a><div class="agi-subtle">Doing · Native menu</div></article>
+        <article class="agi-row"><a href="https://linear.app/getrush/issue/PHNX-4007" target="_blank" rel="noopener noreferrer">PHNX-4007 · Release validation ↗</a><div class="agi-subtle">Doing · Native menu</div></article>
+        <article class="agi-row"><strong>Native app shell</strong><div class="agi-subtle">Done</div></article>
+        <article class="agi-row"><strong>Session detail view</strong><div class="agi-subtle">Done</div></article>
+        <article class="agi-row"><strong>Notification reply routing</strong><div class="agi-subtle">Done</div></article>
+        </div>
+      </section>
+      <section id="agi-notifications" role="tabpanel" aria-labelledby="agi-tab-notifications" hidden>
+        <div class="agi-section-title"><strong>Needs your input · <span data-needs-count>2</span></strong><span>Unresolved</span></div>
+        <article class="agi-prompt" data-request="plan"><strong>Build verification · Command permission</strong><p>Allow this session to run <code>scripts/build.sh</code>?</p><div class="agi-actions"><button class="agi-button" type="button" data-resolve="plan">Allow once</button><button class="agi-button" type="button" data-resolve="plan">Deny</button></div><p class="agi-subtle">These choices come from the pending permission request.</p></article>
+        <article class="agi-prompt" data-request="question"><strong>Documentation · Question</strong><p>Which setup example should be the default?</p><div class="agi-actions"><button class="agi-button" type="button" data-resolve="question">Local setup</button><button class="agi-button" type="button" data-resolve="question">Cloud setup</button></div></article>
+        <div id="agi-no-requests" class="agi-subtle" hidden>No requests need your input.</div>
+        <details open><summary>Could not verify · 1</summary><div class="agi-prompt"><strong>Release check · Session unavailable</strong><p class="agi-subtle">The last request could not be checked. It is excluded from the confirmed request count.</p><button class="agi-button" type="button" data-action="open-session">Open session</button></div></details>
+        <details data-notification-history><summary class="agi-subtle">Notification history</summary><div id="agi-notification-history" class="agi-subtle">Resolved requests and informational updates.</div></details>
+      </section>
+      <section id="agi-devices" role="tabpanel" aria-labelledby="agi-tab-devices" hidden>
+        <div class="agi-section-title"><strong>Devices</strong><span>Updated just now</span></div>
+        <div class="agi-device"><div><strong>This Mac</strong><div class="agi-subtle">macOS · Online</div></div><span class="agi-alert">High load · 79%</span></div>
+        <div class="agi-device"><div><strong>Build worker</strong><div class="agi-subtle">Linux · Online</div></div><span class="agi-subtle">Light load</span></div>
+        <div class="agi-device" data-offline-device><div><strong>Mac worker</strong><div class="agi-subtle">macOS · Offline</div></div><span class="agi-subtle">Last seen 2h ago</span></div>
+        <details><summary>More devices</summary><div class="agi-device"><span>Worker 2</span><span class="agi-subtle">Online</span></div></details>
+      </section>
+      <section id="agi-routines" role="tabpanel" aria-labelledby="agi-tab-routines" hidden><div class="agi-section-title"><strong>Routines</strong></div><details open><summary class="agi-alert">Failing · 2</summary><div class="agi-row">Nightly verification · Last run failed</div><div class="agi-row">Weekly digest · Connection unavailable</div></details><details data-paused-routines><summary>Paused · 3</summary><div class="agi-subtle">Paused routines remain available here.</div></details></section>
+      <section id="agi-browser" role="tabpanel" aria-labelledby="agi-tab-browser" hidden><div class="agi-section-title"><strong>Browser tasks</strong></div><div class="agi-row">Documentation review · 1 tab</div><div class="agi-row">Release check · 2 tabs</div></section>
+      <section id="agi-customize" hidden>
+        <div class="agi-section-title"><strong>Customize view</strong><button class="agi-button" type="button" id="agi-customize-done">Done</button></div>
+        <p class="agi-subtle">Show the sections you use. Drag to reorder, or use the arrow buttons.</p>
+        <div id="agi-section-order"></div>
+        <div class="agi-section-title"><strong>Panel options</strong></div>
+        <details open><summary>Sessions</summary><label class="agi-panel-option" for="agi-row-limit">Working sessions shown<select id="agi-row-limit"><option value="2">2</option><option value="3" selected>3</option><option value="4">4</option></select></label><label class="agi-panel-option"><span>Show latest previews</span><input type="checkbox" data-option="previewLines" checked></label></details>
+        <details><summary>Projects</summary><label class="agi-panel-option"><span>Show completed milestones</span><input type="checkbox" data-option="completedMilestones"></label><p class="agi-subtle">Tickets without a milestone stay under “No milestone.”</p></details>
+        <details><summary>Notifications</summary><label class="agi-panel-option"><span>Show notification history</span><input type="checkbox" data-option="notificationHistory" checked></label><p class="agi-subtle">Hiding this section leaves native notifications enabled.</p></details>
+        <details><summary>Devices</summary><label class="agi-panel-option"><span>Show offline devices</span><input type="checkbox" data-option="offlineDevices" checked></label></details>
+        <details><summary>Routines</summary><label class="agi-panel-option"><span>Show paused routines</span><input type="checkbox" data-option="pausedRoutines" checked></label></details>
+        <button class="agi-quiet" type="button" id="agi-view-reset">Restore default view</button>
+      </section>
+      <div class="agi-subtle" id="agi-empty-view" hidden>No sections shown. Open Customize to choose your view.</div>
+      <section id="agi-auxiliary" hidden></section>
+    </div>
+    <div class="agi-footer"><button type="button" data-aux="tools">Tools</button><button type="button" id="agi-open-customize">Customize…</button><button type="button" data-aux="settings">Settings</button><button type="button" data-aux="about">About</button></div>
+    <div id="agi-feedback" class="agi-feedback" role="status" aria-live="polite"></div>
+  </div>
+  <script>
+  (() => {
+    const root = document.getElementById('agi-menu-preview');
+    const initialOrder=['sessions','projects','notifications','devices','routines','browser'];
+    const labels={sessions:'Sessions',projects:'Projects',notifications:'Notifications',devices:'Devices',routines:'Routines',browser:'Browser'};
+    const state = { visibleRows:3, previewLines:true, completedMilestones:false, notificationHistory:true, offlineDevices:true, pausedRoutines:true, defaultProject:'cli', expanded:false, active:'sessions', editing:false, order:[...initialOrder], enabled:new Set(initialOrder.slice(0,4)), pending:new Set(['plan','question']) };
+    const names = { cli:'Agents CLI', runtime:'Client runtime', research:'Research' };
+    const feedback = root.querySelector('#agi-feedback');
+    const say = text => { feedback.textContent=text; };
+    function tab(name) {
+      name=state.enabled.has(name)?name:state.order.find(key=>state.enabled.has(key));
+      state.active=name;
+      state.editing=false;
+      root.querySelectorAll('[role="tabpanel"]').forEach(el => { el.hidden = el.id !== 'agi-'+name; });
+      root.querySelectorAll('[role="tab"]').forEach(el => { el.setAttribute('aria-selected',String(el.dataset.tab === name)); });
+      root.querySelector('#agi-auxiliary').hidden = true;
+      root.querySelector('#agi-customize').hidden=true;
+      root.querySelector('#agi-empty-view').hidden=!!name;
+      feedback.textContent='';
+    }
+    function renderSectionOrder() {
+      root.querySelector('#agi-section-order').innerHTML=state.order.map((key,i)=>'<div class="agi-section-edit" draggable="true" data-section="'+key+'"><div class="agi-edit-row"><span class="agi-subtle" aria-hidden="true">⠿</span><label><input type="checkbox" data-section-toggle="'+key+'" '+(state.enabled.has(key)?'checked':'')+'>'+labels[key]+'</label><button type="button" data-move="'+key+'" data-direction="-1" aria-label="Move '+labels[key]+' up" '+(i===0?'disabled':'')+'>↑</button><button type="button" data-move="'+key+'" data-direction="1" aria-label="Move '+labels[key]+' down" '+(i===state.order.length-1?'disabled':'')+'>↓</button></div></div>').join('');
+    }
+    function reorder(source,target) {
+      if(source===target||!state.order.includes(source)||!state.order.includes(target)) return;
+      const next=[...state.order]; const destination=next.indexOf(target); next.splice(next.indexOf(source),1); next.splice(destination,0,source); state.order=next;
+      renderSectionOrder(); render(); say('Preview: '+labels[source]+' moved. Your section order is personal.');
+    }
+    function customize() {
+      state.editing=true;
+      root.querySelectorAll('[role="tabpanel"]').forEach(el=>{el.hidden=true;});
+      root.querySelectorAll('[role="tab"]').forEach(el=>el.setAttribute('aria-selected','false'));
+      root.querySelector('#agi-customize').hidden=false;
+      root.querySelector('#agi-auxiliary').hidden=true;
+      root.querySelector('#agi-empty-view').hidden=true;
+      renderSectionOrder(); feedback.textContent='';
+    }
+    function render() {
+      const nav=root.querySelector('.agi-tabs');
+      state.order.forEach(key=>{const button=root.querySelector('[data-tab="'+key+'"]'); button.hidden=!state.enabled.has(key); nav.append(button);});
+      root.querySelectorAll('[data-working-row]').forEach((el,i) => { el.hidden = !state.expanded && i >= state.visibleRows; });
+      root.querySelectorAll('.agi-preview').forEach(el => { el.hidden = !state.previewLines; });
+      const more = root.querySelector('#agi-show-working');
+      more.hidden = state.visibleRows >= 4;
+      more.textContent = state.expanded ? 'Show fewer working sessions' : 'Show '+(4-state.visibleRows)+' more working '+(4-state.visibleRows===1?'session':'sessions');
+      more.setAttribute('aria-expanded',String(state.expanded));
+      root.querySelectorAll('[data-needs-count]').forEach(el => { el.textContent=String(state.pending.size); });
+      root.querySelectorAll('[data-request]').forEach(el => { el.hidden = !state.pending.has(el.dataset.request); });
+      root.querySelector('#agi-no-requests').hidden = state.pending.size !== 0;
+      root.querySelectorAll('[data-default-label]').forEach(el => { el.textContent = el.dataset.defaultLabel === state.defaultProject ? '· Default' : ''; });
+      root.querySelectorAll('[data-completed-milestone]').forEach(el=>{el.hidden=!state.completedMilestones;});
+      root.querySelector('[data-notification-history]').hidden=!state.notificationHistory;
+      root.querySelector('[data-offline-device]').hidden=!state.offlineDevices;
+      root.querySelector('[data-paused-routines]').hidden=!state.pausedRoutines;
+      root.querySelector('#agi-row-limit').value=String(state.visibleRows);
+      root.querySelectorAll('[data-option]').forEach(el=>{el.checked=state[el.dataset.option];});
+    }
+    root.querySelectorAll('[data-tab]').forEach(el => el.addEventListener('click',() => tab(el.dataset.tab)));
+    root.querySelectorAll('[data-go]').forEach(el => el.addEventListener('click',() => tab(el.dataset.go)));
+    root.querySelector('#agi-show-working').addEventListener('click',() => { state.expanded=!state.expanded; render(); });
+    root.querySelectorAll('[data-detail]').forEach(el => el.addEventListener('click',() => { const detail=root.querySelector('#agi-'+el.dataset.detail); detail.hidden=!detail.hidden; el.setAttribute('aria-expanded',String(!detail.hidden)); }));
+    root.querySelector('#agi-default-project').addEventListener('change',event => { state.defaultProject=event.target.value; render(); say('Preview: new tasks now default to '+names[state.defaultProject]+'.'); });
+    root.querySelectorAll('[data-prioritize]').forEach(el => el.addEventListener('click',() => { const row=root.querySelector('[data-project="'+el.dataset.prioritize+'"]'); root.querySelector('#agi-project-list').prepend(row); say('Preview: '+names[el.dataset.prioritize]+' is now first in your project order.'); }));
+    root.querySelectorAll('[data-resolve]').forEach(el => el.addEventListener('click',() => { state.pending.delete(el.dataset.resolve); render(); const line=document.createElement('div'); line.textContent=(el.dataset.resolve==='plan'?'Build verification':'Documentation')+' · '+el.textContent+' · Resolved in preview'; root.querySelector('#agi-notification-history').append(line); say('Preview only: the request is resolved and the Notifications badge updates.'); }));
+    root.querySelector('[data-milestone-tasks]').addEventListener('click',() => { root.querySelector('#agi-project-overview').hidden=true; root.querySelector('#agi-milestone-detail').hidden=false; });
+    root.querySelector('#agi-project-back').addEventListener('click',()=>{root.querySelector('#agi-project-overview').hidden=false; root.querySelector('#agi-milestone-detail').hidden=true;});
+    root.querySelector('#agi-open-customize').addEventListener('click',customize);
+    root.querySelector('#agi-customize-done').addEventListener('click',()=>tab(state.active));
+    root.querySelector('#agi-row-limit').addEventListener('change',event=>{state.visibleRows=Number(event.target.value); state.expanded=false; render();});
+    root.querySelectorAll('[data-option]').forEach(el=>el.addEventListener('change',()=>{state[el.dataset.option]=el.checked; render();}));
+    root.querySelector('#agi-view-reset').addEventListener('click',()=>{state.order=[...initialOrder]; state.enabled=new Set(initialOrder.slice(0,4)); state.visibleRows=3; state.previewLines=true; state.completedMilestones=false; state.notificationHistory=true; state.offlineDevices=true; state.pausedRoutines=true; renderSectionOrder(); render(); say('Preview: default view restored. Project preferences are unchanged.');});
+    const sectionOrder=root.querySelector('#agi-section-order');
+    sectionOrder.addEventListener('change',event=>{const key=event.target.dataset.sectionToggle; if(!key)return; event.target.checked?state.enabled.add(key):state.enabled.delete(key); render();});
+    sectionOrder.addEventListener('click',event=>{const button=event.target.closest('[data-move]'); if(!button)return; const source=button.dataset.move; const target=state.order[state.order.indexOf(source)+Number(button.dataset.direction)]; reorder(source,target);});
+    let dragged=null;
+    sectionOrder.addEventListener('dragstart',event=>{const row=event.target.closest('[data-section]'); if(!row)return; dragged=row.dataset.section; event.dataTransfer.setData('text/plain',dragged); event.dataTransfer.effectAllowed='move';});
+    sectionOrder.addEventListener('dragover',event=>{const row=event.target.closest('[data-section]'); if(!row)return; event.preventDefault(); sectionOrder.querySelectorAll('.agi-drop').forEach(el=>el.classList.remove('agi-drop')); row.classList.add('agi-drop');});
+    sectionOrder.addEventListener('drop',event=>{const row=event.target.closest('[data-section]'); if(!row)return; event.preventDefault(); reorder(dragged||event.dataTransfer.getData('text/plain'),row.dataset.section); dragged=null; sectionOrder.querySelectorAll('.agi-drop').forEach(el=>el.classList.remove('agi-drop'));});
+    sectionOrder.addEventListener('dragend',()=>{dragged=null; sectionOrder.querySelectorAll('.agi-drop').forEach(el=>el.classList.remove('agi-drop'));});
+    root.querySelectorAll('[data-action]').forEach(el => el.addEventListener('click',() => {
+      if(el.dataset.action==='new-task') {
+        root.querySelector('#agi-customize').hidden=true; root.querySelector('#agi-empty-view').hidden=true;
+        root.querySelectorAll('[role="tabpanel"]').forEach(panel=>{panel.hidden=true;});
+        const aux=root.querySelector('#agi-auxiliary'); aux.hidden=false;
+        aux.innerHTML='<div class="agi-section-title"><strong>New task</strong></div><label for="agi-task-prompt">What should the agent work on?</label><textarea class="agi-input" id="agi-task-prompt" rows="3"></textarea><div class="agi-subtle">Project: '+names[state.defaultProject]+'</div><p class="agi-subtle">Dispatch preview · no agent is launched.</p>';
+      } else say('Preview: this opens the existing '+(el.dataset.action==='open-history'?'session history':'full session window')+'.');
+    }));
+    root.querySelectorAll('[data-aux]').forEach(el => el.addEventListener('click',() => {
+      root.querySelectorAll('[role="tabpanel"]').forEach(panel=>{panel.hidden=true;});
+      root.querySelector('#agi-customize').hidden=true; root.querySelector('#agi-empty-view').hidden=true;
+      const aux=root.querySelector('#agi-auxiliary'); aux.hidden=false;
+      const content={about:'<div class="agi-section-title"><strong>About AGI</strong></div><p>Agents CLI 1.22.92</p><p class="agi-subtle">Version and update information lives here.</p>',tools:'<div class="agi-section-title"><strong>Tools</strong></div><details open><summary>Routines</summary><p class="agi-alert">9 failing · 2 skipped</p></details><details><summary>Browser tasks</summary><p class="agi-subtle">Active browser tasks and their tabs.</p></details><details><summary>System diagnostics</summary><p class="agi-subtle">Health checks and recovery actions.</p></details>',settings:'<div class="agi-section-title"><strong>Settings</strong></div><p>Project defaults and order are personal.</p><p class="agi-subtle">Open Projects to change them. Device diagnostics stay in Devices.</p>'};
+      aux.innerHTML=content[el.dataset.aux]; feedback.textContent='';
+    }));
+    render();
+    if(globalThis.Tweak) {
+      const tweak=new Tweak({container:root,onChange:render});
+      tweak.addSlider(state,'visibleRows',{label:'Working rows shown initially',min:2,max:4,step:1});
+      tweak.addToggle(state,'previewLines',{label:'Show latest-action previews'});
+    }
+  })();
+  </script>
+</div>
