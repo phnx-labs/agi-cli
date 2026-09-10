@@ -190,10 +190,9 @@ function questionChoices(question?: BlockQuestion, structured?: StructuredQuesti
 /**
  * Harness-native keystrokes for a permission prompt's canonical choices. Claude
  * Code's permission prompt is a numbered select-list — option 1 is "Yes", option
- * 2 is "Yes, and don't ask again for this session", and Esc is "No". The state
- * detector's {@link permissionQuestion} (`session/state.ts`) models only the
- * option-1 approve and the Esc deny; the session-scoped option 2 is added here
- * from the live prompt ordering. A harness whose permission prompt exposes no
+ * 2 is "Yes, and don't ask again for this session", and Esc is "No". The
+ * session-scoped option 2 is added here from the live prompt ordering; the
+ * state detector no longer models permission prompts itself (PHNX-3999). A harness whose permission prompt exposes no
  * verified session-scoped option omits `approve-session`.
  *
  * ASSUMPTION — `approve-session`'s `deliveryKey: '2'` is asserted for every Claude
