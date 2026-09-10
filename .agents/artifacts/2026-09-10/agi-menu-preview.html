@@ -15,7 +15,14 @@
     #agi-menu-preview .agi-count { color:var(--agi-amber); margin-left:3px; }
     #agi-menu-preview .agi-content { padding:3px 15px 12px; }
     #agi-menu-preview .agi-section-title { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:12px 0 7px; color:var(--agi-muted); }
+    #agi-menu-preview .agi-section-title .agi-title-tools { display:flex; align-items:center; gap:10px; }
+    #agi-menu-preview .agi-options-toggle { border:1px solid var(--agi-line); background:none; border-radius:5px; padding:3px 8px; color:var(--agi-muted); font-size:12px; }
+    #agi-menu-preview .agi-options-toggle[aria-expanded="true"] { background:var(--agi-selected); color:var(--agi-text); }
+    #agi-menu-preview .agi-options { border:1px solid var(--agi-line); border-radius:8px; padding:4px 12px 8px; margin:0 0 8px; background:var(--agi-hover); }
+    #agi-menu-preview .agi-options-head { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:7px 0 3px; }
+    #agi-menu-preview .agi-options-head .agi-subtle { font-size:12px; }
     #agi-menu-preview .agi-row { border-bottom:1px solid var(--agi-line); padding:10px 0; }
+    #agi-menu-preview .agi-group { color:var(--agi-muted); font-size:12px; padding:9px 0 0; }
     #agi-menu-preview .agi-title { border:0; padding:0; background:none; text-align:left; display:flex; align-items:baseline; gap:8px; width:100%; }
     #agi-menu-preview .agi-title:hover, #agi-menu-preview .agi-quiet:hover { color:var(--agi-blue); }
     #agi-menu-preview .agi-dot { width:7px; height:7px; background:var(--agi-green); border-radius:50%; flex:0 0 auto; align-self:center; }
@@ -32,9 +39,12 @@
     #agi-menu-preview .agi-footer button { border:0; background:none; color:var(--agi-muted); padding:5px 0; }
     #agi-menu-preview .agi-pref { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; padding:10px 0; }
     #agi-menu-preview select { background:var(--agi-hover); border:1px solid var(--agi-line); border-radius:5px; padding:6px; max-width:100%; }
+    #agi-menu-preview .agi-options select { background:var(--agi-bg); }
     #agi-menu-preview .agi-project { border-bottom:1px solid var(--agi-line); padding:8px 0; }
     #agi-menu-preview .agi-project-head { display:flex; justify-content:space-between; gap:8px; align-items:center; }
     #agi-menu-preview .agi-project-head button { border:0; background:none; color:var(--agi-blue); padding:5px 0 5px 7px; }
+    #agi-menu-preview .agi-priority { display:inline-block; border:1px solid var(--agi-line); border-radius:4px; padding:0 5px; margin-left:6px; font-size:11px; color:var(--agi-muted); vertical-align:1px; }
+    #agi-menu-preview .agi-priority[data-level="urgent"], #agi-menu-preview .agi-priority[data-level="high"] { color:var(--agi-amber); border-color:var(--agi-amber); }
     #agi-menu-preview .agi-milestone { margin-left:12px; padding:7px 0; }
     #agi-menu-preview .agi-progress { appearance:none; width:100%; height:4px; display:block; margin:9px 0 5px; border:0; background:var(--agi-line); border-radius:2px; }
     #agi-menu-preview .agi-progress::-webkit-progress-bar { background:var(--agi-line); border-radius:2px; }
@@ -54,6 +64,10 @@
     #agi-menu-preview .agi-edit-row label { flex:1; display:flex; align-items:center; gap:8px; }
     #agi-menu-preview .agi-edit-row button { border:0; border-radius:4px; background:var(--agi-hover); padding:4px 7px; }
     #agi-menu-preview .agi-panel-option { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:7px; padding:6px 0; }
+    #agi-menu-preview .agi-panel-option .agi-hint { flex-basis:100%; color:var(--agi-muted); font-size:12px; margin-top:-3px; }
+    #agi-menu-preview .agi-empty { border:1px dashed var(--agi-line); border-radius:8px; padding:12px; margin:8px 0; }
+    #agi-menu-preview .agi-empty p { margin:0 0 8px; }
+    #agi-menu-preview .agi-chip { display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; background:var(--agi-selected); border-radius:6px; padding:6px 10px; margin:6px 0; }
     #agi-menu-preview .agi-drop { background:var(--agi-selected); }
     #agi-menu-preview [hidden] { display:none !important; }
     #agi-menu-preview .agi-feedback:empty { display:none; }
@@ -61,7 +75,7 @@
     @media (pointer:coarse) { #agi-menu-preview button,#agi-menu-preview select,#agi-menu-preview summary { min-height:44px; } #agi-menu-preview .agi-links a { padding:10px 0; } }
     @media (max-width:400px) { #agi-menu-preview .agi-content { padding-right:12px; padding-left:12px; } #agi-menu-preview .agi-tabs button { padding:7px 6px; } #agi-menu-preview .agi-meta { margin-left:15px; } }
   </style>
-  <div class="agi-subtle">Layout example · session, request and milestone counts are illustrative</div>
+  <div class="agi-subtle">Layout example · session, request, project and milestone counts are illustrative</div>
   <div class="agi-window">
     <div class="agi-bar"><strong>AGI</strong><button class="agi-button" type="button" data-action="new-task">New task…</button></div>
     <div class="agi-tabs" role="tablist" aria-label="AGI sections">
@@ -74,53 +88,59 @@
     </div>
     <div class="agi-content">
       <section id="agi-sessions" role="tabpanel" aria-labelledby="agi-tab-sessions">
-        <div class="agi-section-title"><strong>Working · 4</strong><span>Across all projects</span></div>
+        <div class="agi-section-title"><strong>Working · 4</strong><span class="agi-title-tools"><span id="agi-sessions-scope">Across all projects</span><button type="button" class="agi-options-toggle" data-panel-options="sessions" aria-expanded="false" aria-controls="agi-options-sessions">Options</button></span></div>
+        <div class="agi-options" id="agi-options-sessions" data-options-host="sessions" hidden></div>
         <div id="agi-working-rows">
-          <article class="agi-row" data-working-row>
+          <article class="agi-row" data-working-row data-project="cli">
             <button class="agi-title" type="button" data-detail="session-one" aria-expanded="false"><span class="agi-dot"></span><strong>Reconcile session previews</strong></button>
             <div class="agi-meta">Agents CLI · Codex · Working · just now</div>
             <div class="agi-preview">Checking the latest agent message against the session shown in the menu.</div>
             <div class="agi-links"><a href="https://github.com/phnx-labs/agi-cli/pull/3497" target="_blank" rel="noopener noreferrer">PR #3497 ↗</a><a href="https://linear.app/getrush/issue/PHNX-3939" target="_blank" rel="noopener noreferrer">PHNX-3939 ↗</a></div>
             <div class="agi-detail" id="agi-session-one" hidden><strong>Session details</strong><p class="agi-subtle">Request: show the correct live preview for each session.</p><p>Latest action: checking local and remote session identity.</p><button type="button" class="agi-button" data-action="open-session">Open full session</button></div>
           </article>
-          <article class="agi-row" data-working-row>
+          <article class="agi-row" data-working-row data-project="cli">
             <button class="agi-title" type="button" data-detail="session-two" aria-expanded="false"><span class="agi-dot"></span><strong>Simplify account selection</strong></button>
             <div class="agi-meta">Agents CLI · Claude · Working · 1 min ago</div>
             <div class="agi-preview">Verifying that the selected account is used when the agent starts.</div>
             <div class="agi-links"><a href="https://github.com/phnx-labs/agi-cli/pull/3512" target="_blank" rel="noopener noreferrer">PR #3512 ↗</a><a href="https://linear.app/getrush/issue/PHNX-3940" target="_blank" rel="noopener noreferrer">PHNX-3940 ↗</a></div>
             <div class="agi-detail" id="agi-session-two" hidden><strong>Session details</strong><p>Checking account selection across devices.</p><button type="button" class="agi-button" data-action="open-session">Open full session</button></div>
           </article>
-          <article class="agi-row" data-working-row>
+          <article class="agi-row" data-working-row data-project="runtime">
             <button class="agi-title" type="button" data-detail="session-three" aria-expanded="false"><span class="agi-dot"></span><strong>Verify container output</strong></button>
             <div class="agi-meta">Client runtime · Codex · Working · 2 min ago</div>
             <div class="agi-preview">Running the example container and checking its captured output.</div>
             <div class="agi-detail" id="agi-session-three" hidden><strong>Session details</strong><p class="agi-subtle">No linked pull request or ticket yet.</p><button type="button" class="agi-button" data-action="open-session">Open full session</button></div>
           </article>
-          <article class="agi-row" data-working-row hidden>
+          <article class="agi-row" data-working-row data-project="research" hidden>
             <button class="agi-title" type="button" data-detail="session-four" aria-expanded="false"><span class="agi-dot"></span><strong>Check documentation examples</strong></button>
             <div class="agi-meta">Research · Claude · Working · 3 min ago</div><div class="agi-preview">Comparing the setup steps with a fresh installation.</div>
             <div class="agi-detail" id="agi-session-four" hidden><strong>Session details</strong><p>Checking the published instructions.</p><button type="button" class="agi-button" data-action="open-session">Open full session</button></div>
           </article>
         </div>
         <button class="agi-quiet" type="button" id="agi-show-working" aria-expanded="false">Show 1 more working session</button>
-        <details><summary class="agi-subtle">Idle · 2</summary><div class="agi-meta">Documentation review · idle 14 min</div><div class="agi-meta">Menu validation · idle 7 min</div></details>
+        <details data-idle-sessions><summary class="agi-subtle">Idle · 2</summary><div class="agi-meta">Documentation review · idle 14 min</div><div class="agi-meta">Menu validation · idle 7 min</div></details>
         <details><summary class="agi-subtle">Previous sessions</summary><div class="agi-meta">Completed and older sessions stay here.</div><button class="agi-quiet" type="button" data-action="open-history">Open session history →</button></details>
       </section>
       <section id="agi-projects" role="tabpanel" aria-labelledby="agi-tab-projects" hidden>
         <div id="agi-project-overview">
+        <div class="agi-section-title"><strong>Projects</strong><span class="agi-title-tools"><span id="agi-projects-scope">All priorities</span><button type="button" class="agi-options-toggle" data-panel-options="projects" aria-expanded="false" aria-controls="agi-options-projects">Options</button></span></div>
+        <div class="agi-options" id="agi-options-projects" data-options-host="projects" hidden></div>
         <div class="agi-pref"><label for="agi-default-project">My default project</label><select id="agi-default-project"><option value="cli">Agents CLI</option><option value="runtime">Client runtime</option><option value="research">Research</option></select></div>
-        <div class="agi-subtle">New tasks start here. Your order applies across your devices.</div>
+        <div class="agi-subtle">New tasks start here. Your order and filter apply across your devices; they never change the tracker.</div>
+        <div class="agi-chip" id="agi-filter-override" hidden><span>Showing all projects for now</span><button type="button" class="agi-quiet" id="agi-filter-restore">Back to my filter</button></div>
         <div class="agi-section-title"><strong>My project order</strong><span>Milestones</span></div>
         <div id="agi-project-list">
-          <article class="agi-project" data-project="cli"><div class="agi-project-head"><strong>Agents CLI <span class="agi-subtle" data-default-label="cli">· Default</span></strong><button type="button" data-prioritize="cli">Move to top</button></div>
+          <article class="agi-project" data-project="cli" data-priority="high"><div class="agi-project-head"><strong>Agents CLI<span class="agi-priority" data-level="high">High</span> <span class="agi-subtle" data-default-label="cli">· Default</span></strong><button type="button" data-prioritize="cli">Move to top</button></div>
             <details class="agi-milestone" open><summary>Native menu · 3 of 5 tasks done</summary><progress class="agi-progress" value="3" max="5" aria-label="Native menu milestone: three of five tasks complete"></progress><div class="agi-subtle">Target Sep 14 · updated just now</div><details class="agi-milestone"><summary>2 remaining tasks</summary><div class="agi-task"><a href="https://linear.app/getrush/issue/PHNX-3999" target="_blank" rel="noopener noreferrer">Dispatch and sessions ↗</a><span class="agi-subtle">Doing</span></div><div class="agi-task"><a href="https://linear.app/getrush/issue/PHNX-4007" target="_blank" rel="noopener noreferrer">Release validation ↗</a><span class="agi-subtle">Doing</span></div></details><button class="agi-quiet" type="button" data-milestone-tasks>View all 5 tasks →</button></details>
             <details class="agi-milestone"><summary>Session reliability · 1 of 3 done</summary><div class="agi-task"><span>Correct status transitions</span><span class="agi-subtle">Doing</span></div></details>
             <details class="agi-milestone"><summary>No milestone · 1 ticket</summary><div class="agi-task"><a href="https://linear.app/getrush/issue/PHNX-3939" target="_blank" rel="noopener noreferrer">Live session previews ↗</a><span class="agi-subtle">Doing</span></div></details>
             <details class="agi-milestone" data-completed-milestone hidden><summary>App foundation · 3 of 3 done</summary><div class="agi-subtle">Completed milestone</div></details>
           </article>
-          <article class="agi-project" data-project="runtime"><div class="agi-project-head"><strong>Client runtime <span class="agi-subtle" data-default-label="runtime"></span></strong><button type="button" data-prioritize="runtime">Move to top</button></div><details class="agi-milestone"><summary>Container execution · 2 of 4 done</summary><div class="agi-task"><span>Capture container output</span><span class="agi-subtle">Doing</span></div><div class="agi-task"><span>Verify tenant separation</span><span class="agi-subtle">Todo</span></div></details></article>
-          <article class="agi-project" data-project="research"><div class="agi-project-head"><strong>Research <span class="agi-subtle" data-default-label="research"></span></strong><button type="button" data-prioritize="research">Move to top</button></div><div class="agi-milestone agi-subtle">No tracker linked</div></article>
+          <article class="agi-project" data-project="runtime" data-priority="medium"><div class="agi-project-head"><strong>Client runtime<span class="agi-priority" data-level="medium">Medium</span> <span class="agi-subtle" data-default-label="runtime"></span></strong><button type="button" data-prioritize="runtime">Move to top</button></div><details class="agi-milestone"><summary>Container execution · 2 of 4 done</summary><div class="agi-task"><span>Capture container output</span><span class="agi-subtle">Doing</span></div><div class="agi-task"><span>Verify tenant separation</span><span class="agi-subtle">Todo</span></div></details></article>
+          <article class="agi-project" data-project="research" data-priority="low" data-unlinked-project><div class="agi-project-head"><strong>Research<span class="agi-priority" data-level="low">Low</span> <span class="agi-subtle" data-default-label="research"></span></strong><button type="button" data-prioritize="research">Move to top</button></div><div class="agi-milestone agi-subtle">No tracker linked</div></article>
         </div>
+        <div class="agi-empty" id="agi-projects-empty" hidden><p><strong>No projects match your filter.</strong></p><p class="agi-subtle" id="agi-projects-empty-reason"></p><div class="agi-actions"><button type="button" class="agi-button" id="agi-filter-show-all">Show all projects</button><button type="button" class="agi-button" data-panel-options="projects">Change filter</button></div></div>
+        <div class="agi-subtle" id="agi-projects-hidden-note" hidden></div>
         </div>
         <div id="agi-milestone-detail" hidden>
         <button class="agi-quiet" type="button" id="agi-project-back">← All projects</button>
@@ -133,32 +153,31 @@
         </div>
       </section>
       <section id="agi-notifications" role="tabpanel" aria-labelledby="agi-tab-notifications" hidden>
-        <div class="agi-section-title"><strong>Needs your input · <span data-needs-count>2</span></strong><span>Unresolved</span></div>
-        <article class="agi-prompt" data-request="plan"><strong>Build verification · Command permission</strong><p>Allow this session to run <code>scripts/build.sh</code>?</p><div class="agi-actions"><button class="agi-button" type="button" data-resolve="plan">Allow once</button><button class="agi-button" type="button" data-resolve="plan">Deny</button></div><p class="agi-subtle">These choices come from the pending permission request.</p></article>
-        <article class="agi-prompt" data-request="question"><strong>Documentation · Question</strong><p>Which setup example should be the default?</p><div class="agi-actions"><button class="agi-button" type="button" data-resolve="question">Local setup</button><button class="agi-button" type="button" data-resolve="question">Cloud setup</button></div></article>
+        <div class="agi-section-title"><strong>Needs your input · <span data-needs-count>2</span></strong><span class="agi-title-tools"><span>Unresolved</span><button type="button" class="agi-options-toggle" data-panel-options="notifications" aria-expanded="false" aria-controls="agi-options-notifications">Options</button></span></div>
+        <div class="agi-options" id="agi-options-notifications" data-options-host="notifications" hidden></div>
+        <article class="agi-prompt" data-request="plan" data-request-origin="local"><strong>Build verification · Command permission</strong><p>Allow this session to run <code>scripts/build.sh</code>?</p><div class="agi-actions"><button class="agi-button" type="button" data-resolve="plan">Allow once</button><button class="agi-button" type="button" data-resolve="plan">Deny</button></div><p class="agi-subtle">These choices come from the pending permission request · This Mac.</p></article>
+        <article class="agi-prompt" data-request="question" data-request-origin="remote"><strong>Documentation · Question</strong><p>Which setup example should be the default?</p><div class="agi-actions"><button class="agi-button" type="button" data-resolve="question">Local setup</button><button class="agi-button" type="button" data-resolve="question">Cloud setup</button></div><p class="agi-subtle">Asked on Build worker · delivered to this Mac.</p></article>
         <div id="agi-no-requests" class="agi-subtle" hidden>No requests need your input.</div>
-        <details open><summary>Could not verify · 1</summary><div class="agi-prompt"><strong>Release check · Session unavailable</strong><p class="agi-subtle">The last request could not be checked. It is excluded from the confirmed request count.</p><button class="agi-button" type="button" data-action="open-session">Open session</button></div></details>
+        <div id="agi-remote-note" class="agi-subtle" hidden></div>
+        <details open data-unverified-requests><summary>Could not verify · 1</summary><div class="agi-prompt"><strong>Release check · Session unavailable</strong><p class="agi-subtle">The last request could not be checked. It is excluded from the confirmed request count.</p><button class="agi-button" type="button" data-action="open-session">Open session</button></div></details>
         <details data-notification-history><summary class="agi-subtle">Notification history</summary><div id="agi-notification-history" class="agi-subtle">Resolved requests and informational updates.</div></details>
       </section>
       <section id="agi-devices" role="tabpanel" aria-labelledby="agi-tab-devices" hidden>
-        <div class="agi-section-title"><strong>Devices</strong><span>Updated just now</span></div>
-        <div class="agi-device"><div><strong>This Mac</strong><div class="agi-subtle">macOS · Online</div></div><span class="agi-alert">High load · 79%</span></div>
+        <div class="agi-section-title"><strong>Devices</strong><span class="agi-title-tools"><span>Updated just now</span><button type="button" class="agi-options-toggle" data-panel-options="devices" aria-expanded="false" aria-controls="agi-options-devices">Options</button></span></div>
+        <div class="agi-options" id="agi-options-devices" data-options-host="devices" hidden></div>
+        <div class="agi-device"><div><strong>This Mac</strong><div class="agi-subtle">macOS · Online</div></div><span data-load-warning class="agi-alert">High load · 79%</span></div>
         <div class="agi-device"><div><strong>Build worker</strong><div class="agi-subtle">Linux · Online</div></div><span class="agi-subtle">Light load</span></div>
         <div class="agi-device" data-offline-device><div><strong>Mac worker</strong><div class="agi-subtle">macOS · Offline</div></div><span class="agi-subtle">Last seen 2h ago</span></div>
         <details><summary>More devices</summary><div class="agi-device"><span>Worker 2</span><span class="agi-subtle">Online</span></div></details>
       </section>
-      <section id="agi-routines" role="tabpanel" aria-labelledby="agi-tab-routines" hidden><div class="agi-section-title"><strong>Routines</strong></div><details open><summary class="agi-alert">Failing · 2</summary><div class="agi-row">Nightly verification · Last run failed</div><div class="agi-row">Weekly digest · Connection unavailable</div></details><details data-paused-routines><summary>Paused · 3</summary><div class="agi-subtle">Paused routines remain available here.</div></details></section>
+      <section id="agi-routines" role="tabpanel" aria-labelledby="agi-tab-routines" hidden><div class="agi-section-title"><strong>Routines</strong><span class="agi-title-tools"><button type="button" class="agi-options-toggle" data-panel-options="routines" aria-expanded="false" aria-controls="agi-options-routines">Options</button></span></div><div class="agi-options" id="agi-options-routines" data-options-host="routines" hidden></div><details open><summary class="agi-alert">Failing · 2</summary><div class="agi-row">Nightly verification · Last run failed</div><div class="agi-row">Weekly digest · Connection unavailable</div></details><details data-paused-routines><summary>Paused · 3</summary><div class="agi-subtle">Paused routines remain available here.</div></details></section>
       <section id="agi-browser" role="tabpanel" aria-labelledby="agi-tab-browser" hidden><div class="agi-section-title"><strong>Browser tasks</strong></div><div class="agi-row">Documentation review · 1 tab</div><div class="agi-row">Release check · 2 tabs</div></section>
       <section id="agi-customize" hidden>
         <div class="agi-section-title"><strong>Customize view</strong><button class="agi-button" type="button" id="agi-customize-done">Done</button></div>
         <p class="agi-subtle">Show the sections you use. Drag to reorder, or use the arrow buttons.</p>
         <div id="agi-section-order"></div>
-        <div class="agi-section-title"><strong>Panel options</strong></div>
-        <details open><summary>Sessions</summary><label class="agi-panel-option" for="agi-row-limit">Working sessions shown<select id="agi-row-limit"><option value="2">2</option><option value="3" selected>3</option><option value="4">4</option></select></label><label class="agi-panel-option"><span>Show latest previews</span><input type="checkbox" data-option="previewLines" checked></label></details>
-        <details><summary>Projects</summary><label class="agi-panel-option"><span>Show completed milestones</span><input type="checkbox" data-option="completedMilestones"></label><p class="agi-subtle">Tickets without a milestone stay under “No milestone.”</p></details>
-        <details><summary>Notifications</summary><label class="agi-panel-option"><span>Show notification history</span><input type="checkbox" data-option="notificationHistory" checked></label><p class="agi-subtle">Hiding this section leaves native notifications enabled.</p></details>
-        <details><summary>Devices</summary><label class="agi-panel-option"><span>Show offline devices</span><input type="checkbox" data-option="offlineDevices" checked></label></details>
-        <details><summary>Routines</summary><label class="agi-panel-option"><span>Show paused routines</span><input type="checkbox" data-option="pausedRoutines" checked></label></details>
+        <div class="agi-section-title"><strong>Panel options</strong><span>Same options as each panel's Options button</span></div>
+        <div id="agi-customize-options"></div>
         <button class="agi-quiet" type="button" id="agi-view-reset">Restore default view</button>
       </section>
       <div class="agi-subtle" id="agi-empty-view" hidden>No sections shown. Open Customize to choose your view.</div>
@@ -172,10 +191,55 @@
     const root = document.getElementById('agi-menu-preview');
     const initialOrder=['sessions','projects','notifications','devices','routines','browser'];
     const labels={sessions:'Sessions',projects:'Projects',notifications:'Notifications',devices:'Devices',routines:'Routines',browser:'Browser'};
-    const state = { visibleRows:3, previewLines:true, completedMilestones:false, notificationHistory:true, offlineDevices:true, pausedRoutines:true, defaultProject:'cli', expanded:false, active:'sessions', editing:false, order:[...initialOrder], enabled:new Set(initialOrder.slice(0,4)), pending:new Set(['plan','question']) };
     const names = { cli:'Agents CLI', runtime:'Client runtime', research:'Research' };
+    // Linear project priority: 1 urgent · 2 high · 3 medium · 4 low · 0 none. A filter keeps this level and above.
+    const priorityRank={urgent:1,high:2,medium:3,low:4,none:5};
+    const priorityFilters={all:{label:'All priorities',max:5},urgent:{label:'Urgent only',max:1},high:{label:'High and above',max:2},medium:{label:'Medium and above',max:3}};
+    // One option spec feeds both each panel's Options button and Customize → Panel options.
+    const OPTIONS={
+      sessions:[
+        {key:'visibleRows',type:'select',label:'Working sessions shown first',choices:[['2','2'],['3','3'],['4','4']],hint:'The rest stay behind Show more.'},
+        {key:'previewLines',type:'toggle',label:'Show latest-action previews'},
+        {key:'groupByProject',type:'toggle',label:'Group working sessions by project'},
+        {key:'showIdle',type:'toggle',label:'Show idle sessions',hint:'Idle unfinished work stays in the Notifications count either way.'}
+      ],
+      projects:[
+        {key:'priorityFilter',type:'select',label:'Show projects with priority',choices:Object.entries(priorityFilters).map(([value,f])=>[value,f.label]),hint:'Saved as your default view. Uses the tracker’s project priority; it never changes it.'},
+        {key:'completedMilestones',type:'toggle',label:'Show completed milestones'},
+        {key:'unlinkedProjects',type:'toggle',label:'Show projects without a tracker',hint:'Tickets without a milestone always stay under “No milestone.”'}
+      ],
+      notifications:[
+        {key:'fleetRequests',type:'toggle',label:'Include requests from other devices',hint:'Off keeps the badge to this Mac and notes how many wait elsewhere.'},
+        {key:'unverifiedRequests',type:'toggle',label:'Show requests that could not be verified'},
+        {key:'notificationHistory',type:'toggle',label:'Show notification history',hint:'Hiding this section leaves native notifications enabled.'}
+      ],
+      devices:[
+        {key:'offlineDevices',type:'toggle',label:'Show offline devices'},
+        {key:'loadWarnings',type:'toggle',label:'Highlight high load',hint:'Load is a diagnostic; it never counts as a request.'}
+      ],
+      routines:[
+        {key:'pausedRoutines',type:'toggle',label:'Show paused routines'}
+      ]
+    };
+    const defaults={ visibleRows:'3', previewLines:true, groupByProject:false, showIdle:true, priorityFilter:'all', completedMilestones:false, unlinkedProjects:true, fleetRequests:true, unverifiedRequests:true, notificationHistory:true, offlineDevices:true, loadWarnings:true, pausedRoutines:true };
+    const state = { ...defaults, defaultProject:'cli', expanded:false, active:'sessions', editing:false, openOptions:null, filterOverride:false, order:[...initialOrder], enabled:new Set(initialOrder.slice(0,4)), pending:new Set(['plan','question']) };
     const feedback = root.querySelector('#agi-feedback');
     const say = text => { feedback.textContent=text; };
+    function optionMarkup(panel) {
+      return OPTIONS[panel].map(option => {
+        const control = option.type==='select'
+          ? '<select data-option="'+option.key+'" aria-label="'+option.label+'">'+option.choices.map(([value,text])=>'<option value="'+value+'">'+text+'</option>').join('')+'</select>'
+          : '<input type="checkbox" data-option="'+option.key+'">';
+        return '<label class="agi-panel-option"><span>'+option.label+'</span>'+control+(option.hint?'<span class="agi-hint">'+option.hint+'</span>':'')+'</label>';
+      }).join('');
+    }
+    function renderOptions() {
+      root.querySelectorAll('[data-options-host]').forEach(host => {
+        const panel=host.dataset.optionsHost;
+        host.innerHTML='<div class="agi-options-head"><strong>'+labels[panel]+' options</strong><span class="agi-subtle">Saved to your view</span></div>'+optionMarkup(panel);
+      });
+      root.querySelector('#agi-customize-options').innerHTML=Object.keys(OPTIONS).map(panel=>'<details'+(panel==='sessions'?' open':'')+'><summary>'+labels[panel]+'</summary>'+optionMarkup(panel)+'</details>').join('');
+    }
     function tab(name) {
       name=state.enabled.has(name)?name:state.order.find(key=>state.enabled.has(key));
       state.active=name;
@@ -202,42 +266,103 @@
       root.querySelector('#agi-customize').hidden=false;
       root.querySelector('#agi-auxiliary').hidden=true;
       root.querySelector('#agi-empty-view').hidden=true;
-      renderSectionOrder(); feedback.textContent='';
+      renderSectionOrder(); render(); feedback.textContent='';
+    }
+    function renderSessions() {
+      const list=root.querySelector('#agi-working-rows');
+      const visibleRows=Number(state.visibleRows);
+      list.querySelectorAll('.agi-group').forEach(el=>el.remove());
+      const rows=[...list.querySelectorAll('[data-working-row]')];
+      if(state.groupByProject) {
+        rows.sort((a,b)=>Object.keys(names).indexOf(a.dataset.project)-Object.keys(names).indexOf(b.dataset.project));
+        let last=null;
+        rows.forEach(row=>{ list.append(row); });
+        rows.forEach(row=>{ if(row.dataset.project!==last){ const group=document.createElement('div'); group.className='agi-group'; group.dataset.groupFor=row.dataset.project; group.textContent=names[row.dataset.project]; list.insertBefore(group,row); last=row.dataset.project; } });
+      } else {
+        rows.sort((a,b)=>Number(a.dataset.order)-Number(b.dataset.order)).forEach(row=>list.append(row));
+      }
+      rows.forEach((el,i) => { el.hidden = !state.expanded && i >= visibleRows; });
+      list.querySelectorAll('.agi-group').forEach(group=>{ group.hidden=![...list.querySelectorAll('[data-working-row][data-project="'+group.dataset.groupFor+'"]')].some(row=>!row.hidden); });
+      root.querySelector('#agi-sessions-scope').textContent=state.groupByProject?'Grouped by project':'Across all projects';
+      root.querySelectorAll('.agi-preview').forEach(el => { el.hidden = !state.previewLines; });
+      const more = root.querySelector('#agi-show-working');
+      more.hidden = visibleRows >= 4;
+      more.textContent = state.expanded ? 'Show fewer working sessions' : 'Show '+(4-visibleRows)+' more working '+(4-visibleRows===1?'session':'sessions');
+      more.setAttribute('aria-expanded',String(state.expanded));
+      root.querySelector('[data-idle-sessions]').hidden=!state.showIdle;
+    }
+    function renderProjects() {
+      const filter=priorityFilters[state.priorityFilter];
+      const projects=[...root.querySelectorAll('.agi-project')];
+      const matches=project=>(state.filterOverride||priorityRank[project.dataset.priority]<=filter.max)&&(state.unlinkedProjects||!project.hasAttribute('data-unlinked-project'));
+      let shown=0; const hiddenByPriority=[];
+      projects.forEach(project=>{ const visible=matches(project); project.hidden=!visible; if(visible) shown++; else if(priorityRank[project.dataset.priority]>filter.max) hiddenByPriority.push(project); });
+      root.querySelector('#agi-projects-scope').textContent=state.filterOverride?'All priorities (temporary)':filter.label;
+      root.querySelector('#agi-filter-override').hidden=!state.filterOverride;
+      root.querySelector('#agi-filter-restore').textContent='Back to my filter · '+filter.label;
+      const empty=root.querySelector('#agi-projects-empty');
+      empty.hidden=shown!==0;
+      if(shown===0) {
+        const levels=projects.map(project=>names[project.dataset.project]+' is '+project.querySelector('.agi-priority').textContent).join(', ');
+        root.querySelector('#agi-projects-empty-reason').textContent='Your filter is '+filter.label+'. '+levels+'. Your default project and new tasks are unaffected.';
+      }
+      const note=root.querySelector('#agi-projects-hidden-note');
+      note.hidden=shown===0||hiddenByPriority.length===0||state.filterOverride;
+      note.textContent=hiddenByPriority.length+' project'+(hiddenByPriority.length===1?'':'s')+' hidden by your filter ('+filter.label+').';
+      root.querySelectorAll('[data-default-label]').forEach(el => { el.textContent = el.dataset.defaultLabel === state.defaultProject ? '· Default' : ''; });
+      root.querySelectorAll('[data-completed-milestone]').forEach(el=>{el.hidden=!state.completedMilestones;});
+    }
+    function renderNotifications() {
+      const requests=[...root.querySelectorAll('[data-request]')];
+      let counted=0, elsewhere=0;
+      requests.forEach(el=>{ const pending=state.pending.has(el.dataset.request); const remote=el.dataset.requestOrigin==='remote'; const visible=pending&&(state.fleetRequests||!remote); el.hidden=!visible; if(pending&&visible) counted++; if(pending&&!visible) elsewhere++; });
+      root.querySelectorAll('[data-needs-count]').forEach(el => { el.textContent=String(counted); });
+      root.querySelector('#agi-no-requests').hidden = counted !== 0;
+      const remoteNote=root.querySelector('#agi-remote-note');
+      remoteNote.hidden=elsewhere===0;
+      remoteNote.textContent=elsewhere+' more request'+(elsewhere===1?'':'s')+' waiting on other devices. Turn on “Include requests from other devices” to answer here.';
+      root.querySelector('[data-unverified-requests]').hidden=!state.unverifiedRequests;
+      root.querySelector('[data-notification-history]').hidden=!state.notificationHistory;
+    }
+    function renderDevices() {
+      root.querySelector('[data-offline-device]').hidden=!state.offlineDevices;
+      const load=root.querySelector('[data-load-warning]');
+      load.className=state.loadWarnings?'agi-alert':'agi-subtle';
+      root.querySelector('[data-paused-routines]').hidden=!state.pausedRoutines;
     }
     function render() {
       const nav=root.querySelector('.agi-tabs');
       state.order.forEach(key=>{const button=root.querySelector('[data-tab="'+key+'"]'); button.hidden=!state.enabled.has(key); nav.append(button);});
-      root.querySelectorAll('[data-working-row]').forEach((el,i) => { el.hidden = !state.expanded && i >= state.visibleRows; });
-      root.querySelectorAll('.agi-preview').forEach(el => { el.hidden = !state.previewLines; });
-      const more = root.querySelector('#agi-show-working');
-      more.hidden = state.visibleRows >= 4;
-      more.textContent = state.expanded ? 'Show fewer working sessions' : 'Show '+(4-state.visibleRows)+' more working '+(4-state.visibleRows===1?'session':'sessions');
-      more.setAttribute('aria-expanded',String(state.expanded));
-      root.querySelectorAll('[data-needs-count]').forEach(el => { el.textContent=String(state.pending.size); });
-      root.querySelectorAll('[data-request]').forEach(el => { el.hidden = !state.pending.has(el.dataset.request); });
-      root.querySelector('#agi-no-requests').hidden = state.pending.size !== 0;
-      root.querySelectorAll('[data-default-label]').forEach(el => { el.textContent = el.dataset.defaultLabel === state.defaultProject ? '· Default' : ''; });
-      root.querySelectorAll('[data-completed-milestone]').forEach(el=>{el.hidden=!state.completedMilestones;});
-      root.querySelector('[data-notification-history]').hidden=!state.notificationHistory;
-      root.querySelector('[data-offline-device]').hidden=!state.offlineDevices;
-      root.querySelector('[data-paused-routines]').hidden=!state.pausedRoutines;
-      root.querySelector('#agi-row-limit').value=String(state.visibleRows);
-      root.querySelectorAll('[data-option]').forEach(el=>{el.checked=state[el.dataset.option];});
+      renderSessions(); renderProjects(); renderNotifications(); renderDevices();
+      root.querySelectorAll('[data-options-host]').forEach(host=>{ host.hidden=host.dataset.optionsHost!==state.openOptions; });
+      root.querySelectorAll('.agi-options-toggle[data-panel-options]').forEach(el=>el.setAttribute('aria-expanded',String(el.dataset.panelOptions===state.openOptions)));
+      root.querySelectorAll('[data-option]').forEach(el=>{ if(el.type==='checkbox') el.checked=!!state[el.dataset.option]; else el.value=String(state[el.dataset.option]); });
     }
+    [...root.querySelectorAll('[data-working-row]')].forEach((row,i)=>{ row.dataset.order=String(i); });
+    renderOptions();
     root.querySelectorAll('[data-tab]').forEach(el => el.addEventListener('click',() => tab(el.dataset.tab)));
-    root.querySelectorAll('[data-go]').forEach(el => el.addEventListener('click',() => tab(el.dataset.go)));
     root.querySelector('#agi-show-working').addEventListener('click',() => { state.expanded=!state.expanded; render(); });
     root.querySelectorAll('[data-detail]').forEach(el => el.addEventListener('click',() => { const detail=root.querySelector('#agi-'+el.dataset.detail); detail.hidden=!detail.hidden; el.setAttribute('aria-expanded',String(!detail.hidden)); }));
-    root.querySelector('#agi-default-project').addEventListener('change',event => { state.defaultProject=event.target.value; render(); say('Preview: new tasks now default to '+names[state.defaultProject]+'.'); });
-    root.querySelectorAll('[data-prioritize]').forEach(el => el.addEventListener('click',() => { const row=root.querySelector('[data-project="'+el.dataset.prioritize+'"]'); root.querySelector('#agi-project-list').prepend(row); say('Preview: '+names[el.dataset.prioritize]+' is now first in your project order.'); }));
+    root.querySelector('#agi-default-project').addEventListener('change',event => { state.defaultProject=event.target.value; render(); say('Preview: new tasks now default to '+names[state.defaultProject]+'. The list filter is unchanged.'); });
+    root.querySelectorAll('[data-prioritize]').forEach(el => el.addEventListener('click',() => { const row=root.querySelector('[data-project="'+el.dataset.prioritize+'"].agi-project'); root.querySelector('#agi-project-list').prepend(row); say('Preview: '+names[el.dataset.prioritize]+' is now first in your project order. Tracker priority is unchanged.'); }));
     root.querySelectorAll('[data-resolve]').forEach(el => el.addEventListener('click',() => { state.pending.delete(el.dataset.resolve); render(); const line=document.createElement('div'); line.textContent=(el.dataset.resolve==='plan'?'Build verification':'Documentation')+' · '+el.textContent+' · Resolved in preview'; root.querySelector('#agi-notification-history').append(line); say('Preview only: the request is resolved and the Notifications badge updates.'); }));
     root.querySelector('[data-milestone-tasks]').addEventListener('click',() => { root.querySelector('#agi-project-overview').hidden=true; root.querySelector('#agi-milestone-detail').hidden=false; });
     root.querySelector('#agi-project-back').addEventListener('click',()=>{root.querySelector('#agi-project-overview').hidden=false; root.querySelector('#agi-milestone-detail').hidden=true;});
     root.querySelector('#agi-open-customize').addEventListener('click',customize);
     root.querySelector('#agi-customize-done').addEventListener('click',()=>tab(state.active));
-    root.querySelector('#agi-row-limit').addEventListener('change',event=>{state.visibleRows=Number(event.target.value); state.expanded=false; render();});
-    root.querySelectorAll('[data-option]').forEach(el=>el.addEventListener('change',()=>{state[el.dataset.option]=el.checked; render();}));
-    root.querySelector('#agi-view-reset').addEventListener('click',()=>{state.order=[...initialOrder]; state.enabled=new Set(initialOrder.slice(0,4)); state.visibleRows=3; state.previewLines=true; state.completedMilestones=false; state.notificationHistory=true; state.offlineDevices=true; state.pausedRoutines=true; renderSectionOrder(); render(); say('Preview: default view restored. Project preferences are unchanged.');});
+    root.querySelectorAll('[data-panel-options]').forEach(el=>el.addEventListener('click',()=>{ const panel=el.dataset.panelOptions; state.openOptions=state.openOptions===panel&&el.classList.contains('agi-options-toggle')?null:panel; render(); if(state.openOptions) root.querySelector('#agi-options-'+panel).scrollIntoView({block:'nearest'}); }));
+    root.querySelector('#agi-filter-show-all').addEventListener('click',()=>{ state.filterOverride=true; render(); say('Preview: showing all projects until you close the menu. Your saved filter stays '+priorityFilters[state.priorityFilter].label+'.'); });
+    root.querySelector('#agi-filter-restore').addEventListener('click',()=>{ state.filterOverride=false; render(); });
+    root.addEventListener('change',event=>{
+      const key=event.target.dataset.option; if(!key) return;
+      const option=Object.values(OPTIONS).flat().find(item=>item.key===key);
+      state[key]=event.target.type==='checkbox'?event.target.checked:event.target.value;
+      if(key==='visibleRows') state.expanded=false;
+      if(key==='priorityFilter') state.filterOverride=false;
+      render();
+      say('Preview: “'+option.label+'” saved to your view on every device.');
+    });
+    root.querySelector('#agi-view-reset').addEventListener('click',()=>{state.order=[...initialOrder]; state.enabled=new Set(initialOrder.slice(0,4)); Object.assign(state,defaults); state.filterOverride=false; state.expanded=false; renderSectionOrder(); render(); say('Preview: default view restored. Project preferences are unchanged.');});
     const sectionOrder=root.querySelector('#agi-section-order');
     sectionOrder.addEventListener('change',event=>{const key=event.target.dataset.sectionToggle; if(!key)return; event.target.checked?state.enabled.add(key):state.enabled.delete(key); render();});
     sectionOrder.addEventListener('click',event=>{const button=event.target.closest('[data-move]'); if(!button)return; const source=button.dataset.move; const target=state.order[state.order.indexOf(source)+Number(button.dataset.direction)]; reorder(source,target);});
@@ -258,7 +383,7 @@
       root.querySelectorAll('[role="tabpanel"]').forEach(panel=>{panel.hidden=true;});
       root.querySelector('#agi-customize').hidden=true; root.querySelector('#agi-empty-view').hidden=true;
       const aux=root.querySelector('#agi-auxiliary'); aux.hidden=false;
-      const content={about:'<div class="agi-section-title"><strong>About AGI</strong></div><p>Agents CLI 1.22.92</p><p class="agi-subtle">Version and update information lives here.</p>',tools:'<div class="agi-section-title"><strong>Tools</strong></div><details open><summary>Routines</summary><p class="agi-alert">9 failing · 2 skipped</p></details><details><summary>Browser tasks</summary><p class="agi-subtle">Active browser tasks and their tabs.</p></details><details><summary>System diagnostics</summary><p class="agi-subtle">Health checks and recovery actions.</p></details>',settings:'<div class="agi-section-title"><strong>Settings</strong></div><p>Project defaults and order are personal.</p><p class="agi-subtle">Open Projects to change them. Device diagnostics stay in Devices.</p>'};
+      const content={about:'<div class="agi-section-title"><strong>About AGI</strong></div><p>Agents CLI 1.22.92</p><p class="agi-subtle">Version and update information lives here.</p>',tools:'<div class="agi-section-title"><strong>Tools</strong></div><details open><summary>Routines</summary><p class="agi-alert">9 failing · 2 skipped</p></details><details><summary>Browser tasks</summary><p class="agi-subtle">Active browser tasks and their tabs.</p></details><details><summary>System diagnostics</summary><p class="agi-subtle">Health checks and recovery actions.</p></details>',settings:'<div class="agi-section-title"><strong>Settings</strong></div><p>Project defaults, order and filter are personal.</p><p class="agi-subtle">Open Projects to change them. Device diagnostics stay in Devices.</p>'};
       aux.innerHTML=content[el.dataset.aux]; feedback.textContent='';
     }));
     render();
