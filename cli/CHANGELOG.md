@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.22.98
+
+- `agents run codex#<account>` on macOS now runs as that account. The SUN_LEN short-home relocation keyed `CODEX_HOME` by version alone, so an account slot (long enough to overflow too) was silently redirected to the default version's `~/.agents/.codex-homes/<version>/.codex` and its login — `agents run codex#getrush` opened the gmail session while the banner still said `getrush`. The short home is now keyed by the origin (`a-<account id>` for a slot). A version/account reinstall that recreates a fresh `.codex` adopts its existing short home (which holds the login) instead of failing, and a slot mis-linked onto a foreign home by the old layout is repointed to its own home rather than run as the wrong account.
+
+- **A Firefox task no longer parks the browser-task reaper, and `record` on Firefox says "recording" (PHNX-4043).** The daemon's idle reaper asks every live task for its recording status before closing it; on a Firefox (or native Arc) task that query threw a capability error, so one Firefox task failed every reap tick and the `browser-task-reap` service parked after three failures, leaving abandoned tabs open for every profile on that box. Recording status on a backend that cannot record is now a truthful "not recording". `agents browser record start`/`stop` and `start --record` on a Firefox profile still fail loud, now naming `recording` instead of `screenshot` (screenshots do work on Firefox). Source: `cli/src/lib/browser/service.ts` `recordStart`/`recordStop`/`recordStatus`.
+
 ## 1.22.97
 
 - `agents browser --help` and the `agents setup browser` install hint no longer claim Firefox is unsupported: they now state Chromium-family over CDP, Arc natively, and Firefox over WebDriver BiDi (Safari stays unsupported). `tabs --all` gains a help example and rows in the Arc and Firefox capability tables.
