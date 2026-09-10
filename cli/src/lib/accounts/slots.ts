@@ -17,7 +17,7 @@ import { agentConfigDirName } from '../agents.js';
 import { harnessAuth, harnessWorkerIsPerDevice } from '../harness-auth-capabilities.js';
 import { getGlobalDefault, getVersionHomePath, listInstalledVersions } from '../installations/store.js';
 import { carryForwardSettings } from '../settings-manifest.js';
-import { getHistoryDir, updateMeta } from '../state.js';
+import { getHistoryDir, readMeta, updateMeta } from '../state.js';
 import { ALL_RESOURCE_KINDS, getDetector, getWriter, kindToCapability } from '../staleness/registry.js';
 import { supports } from '../capabilities.js';
 import type { AccountAuthMode, AgentId, DeviceAccountSlot, Meta } from '../types.js';
@@ -77,6 +77,71 @@ function projectResources(harness: AgentId, version: string, destHome: string, f
     if (names.length === 0) continue;
     writer.write({ version, versionHome: destHome, selection: names, cwd });
   }
+}
+
+export interface SlotProjection {
+  accountId: string;
+  /** Account name as registered (`agents accounts list`). */
+  name: string;
+  slotDir: string;
+  /** The version home the slot was projected from. */
+  from: string;
+  /** `<kind>/<name>` artifacts removed because the source no longer has them. */
+  pruned: string[];
+}
+
+/**
+ * Remove slot artifacts whose source name is gone. Only the name-keyed kinds
+ * that implement `remove` (commands, skills, hooks) are pruned; wholesale kinds
+ * (rules, permissions) are rewritten by the projection itself.
+ */
+function pruneSlotResources(harness: AgentId, version: string, slotHome: string, fromHome: string): string[] {
+  const cwd = process.cwd();
+  const pruned: string[] = [];
+  for (const kind of ALL_RESOURCE_KINDS) {
+    if (!supports(harness, kindToCapability(kind), version).ok) continue;
+    const writer = getWriter(kind, harness);
+    const detector = getDetector(kind, harness);
+    if (!writer?.remove || !detector) continue;
+    const source = new Set(detector.list({ version, versionHome: fromHome, cwd }));
+    for (const name of detector.list({ version, versionHome: slotHome, cwd })) {
+      if (source.has(name)) continue;
+      if (writer.remove({ version, versionHome: slotHome, name, cwd }).removed) pruned.push(`${kind}/${name}`);
+    }
+  }
+  return pruned;
+}
+
+/**
+ * Re-project settings and resources into every account slot this device holds
+ * for `harness`, from the harness's default version home. `ensureSlot` does
+ * this once at `agents accounts add`; every reconcile calls this so a slot
+ * never lags the version home it was cloned from (PHNX-3940). Credentials are
+ * never touched: `carryForwardSettings` and the resource writers exclude them.
+ * A slot whose directory is gone is skipped, not recreated.
+ */
+export function projectAccountSlots(harness: AgentId): SlotProjection[] {
+  const version = sourceVersion(harness);
+  if (!version) return [];
+  const fromHome = getVersionHomePath(harness, version);
+  if (!fs.existsSync(fromHome)) return [];
+  const meta = readMeta();
+  const slots = readSlots(meta);
+  const native = { ...meta.accounts?.native, ...meta.deviceAccounts?.native };
+  const projected: SlotProjection[] = [];
+  for (const account of Object.values(native)) {
+    if (account.agent !== harness) continue;
+    // The slot record is device-local and written after identity capture; a
+    // slot dir minted by an earlier build, or an add that stopped short of
+    // recording, is still the HOME an account run uses — project it too.
+    const dir = slots[account.id]?.slotDir ?? slotDir(harness, account.id);
+    if (!fs.existsSync(path.join(dir, agentConfigDirName(harness)))) continue;
+    carryForwardSettings(harness, fromHome, dir);
+    const pruned = pruneSlotResources(harness, version, dir, fromHome);
+    projectResources(harness, version, dir, fromHome);
+    projected.push({ accountId: account.id, name: account.name, slotDir: dir, from: version, pruned });
+  }
+  return projected;
 }
 
 /**

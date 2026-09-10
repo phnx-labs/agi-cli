@@ -20,6 +20,7 @@ import type { AgentId } from './types.js';
 import { AGENTS, ALL_AGENT_IDS } from './agents.js';
 import chalk from 'chalk';
 import { heal, healChangedAnything, type HealResult } from './heal.js';
+import { projectAccountSlots, type SlotProjection } from './accounts/slots.js';
 import {
   checkVersionHookWiring,
   registerHooksToSettings,
@@ -71,6 +72,13 @@ export interface RepairAfterSyncReport {
   hookRuntimeRepair: HookRuntimeRepairReport;
   /** Only populated on the umbrella (no-agent) path; null otherwise. */
   staleInstallPurge: RemediateStaleInstallsResult | null;
+  /**
+   * Account slots re-projected from their harness's default version home
+   * (PHNX-3940): one entry per slot, with the artifacts pruned because the
+   * source no longer carries them. Errors are per-harness sentences.
+   */
+  slotProjection: SlotProjection[];
+  slotProjectionErrors: string[];
 }
 
 /**
@@ -226,11 +234,27 @@ export async function repairAfterSync(opts: RepairAfterSyncOptions): Promise<Rep
     ? purgeStaleAgentsCliCopies(opts.purgeInjection)
     : null;
 
+  // Account slots follow the version home (PHNX-3940). `agents accounts add`
+  // projects a slot once; without this every later sync would update the
+  // version home and leave each slot on the resources it was cloned with.
+  const slotProjection: SlotProjection[] = [];
+  const slotProjectionErrors: string[] = [];
+  const slotAgents = opts.agent ? [opts.agent] : ALL_AGENT_IDS.filter((a) => listInstalledVersions(a).length > 0);
+  for (const agent of slotAgents) {
+    try {
+      slotProjection.push(...projectAccountSlots(agent));
+    } catch (err) {
+      slotProjectionErrors.push(`${agent}: ${(err as Error).message}`);
+    }
+  }
+
   const report: RepairAfterSyncReport = {
     heal: healResult,
     hookRewire,
     hookRuntimeRepair,
     staleInstallPurge,
+    slotProjection,
+    slotProjectionErrors,
   };
 
   if (repairChangedAnything(report)) invalidateDoctorOverviewCache();
@@ -244,7 +268,9 @@ export function repairChangedAnything(report: RepairAfterSyncReport): boolean {
     report.hookRewire.some((r) => r.rewired > 0 || r.remaining > 0 || r.failure !== undefined) ||
     report.hookRuntimeRepair.attempts.length > 0 ||
     (report.staleInstallPurge !== null &&
-      (report.staleInstallPurge.removed.length > 0 || report.staleInstallPurge.failed.length > 0))
+      (report.staleInstallPurge.removed.length > 0 || report.staleInstallPurge.failed.length > 0)) ||
+    report.slotProjection.length > 0 ||
+    report.slotProjectionErrors.length > 0
   );
 }
 
@@ -281,6 +307,8 @@ export function repairAfterSyncJson(report: RepairAfterSyncReport): Record<strin
     hookRewire: report.hookRewire,
     hookRuntimeRepair: report.hookRuntimeRepair,
     staleInstallPurge: report.staleInstallPurge,
+    slotProjection: report.slotProjection,
+    slotProjectionErrors: report.slotProjectionErrors,
     hadFailures: repairHadFailures(report),
   };
 }
@@ -374,4 +402,15 @@ export function renderRepairAfterSync(
   renderHookRewireText(report.hookRewire, log);
   renderHookRuntimeRepairText(report.hookRuntimeRepair, log);
   if (report.staleInstallPurge) renderStaleInstallPurgeText(report.staleInstallPurge, log);
+  renderSlotProjectionText(report, log);
+}
+
+function renderSlotProjectionText(report: RepairAfterSyncReport, log: (s: string) => void): void {
+  for (const slot of report.slotProjection) {
+    const pruned = slot.pruned.length > 0 ? chalk.gray(` — removed ${slot.pruned.join(', ')}`) : '';
+    log(`  ${chalk.green('slot')}    account ${chalk.bold(slot.name)} ${chalk.gray(`← ${slot.from}`)}${pruned}`);
+  }
+  for (const err of report.slotProjectionErrors) {
+    log(`  ${chalk.yellow('slot')}    ${err}`);
+  }
 }

@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { addNativeAccount, readSlots, removeAccount } from '../account-registry.js';
 import { getGlobalDefault, getVersionHomePath, listInstalledVersions } from '../installations/store.js';
 import { getHistoryDir, readMeta, updateMeta } from '../state.js';
-import { ensureSlot, recordSlot, slotDir } from './slots.js';
+import { ensureSlot, projectAccountSlots, recordSlot, slotDir } from './slots.js';
 
 describe('slotDir', () => {
   it('is ~/.agents/.history/accounts/<harness>/<accountId>/', () => {
@@ -106,5 +107,90 @@ describe('recordSlot / readSlots device-doc round-trip', () => {
       authMode: 'native',
       verdict: 'unconfigured',
     })).toThrow(/mismatch/);
+  });
+});
+
+describe('projectAccountSlots (PHNX-3940: slots follow the version home)', () => {
+  const prevMid = process.env.AGENTS_SYNC_MACHINE_ID;
+  const VERSION = '9.9.9';
+  const versionHome = () => getVersionHomePath('claude', VERSION);
+  const clear = () => updateMeta((m) => ({
+    ...m,
+    accounts: { ...m.accounts, native: {} },
+    deviceAccounts: undefined,
+    agents: { ...m.agents, claude: undefined },
+  }));
+  // A managed Claude install the sandboxed HOME can call its default: the
+  // package.json + bin file listInstalledVersions checks, and a version home
+  // carrying one skill (`alpha`) as the projection source.
+  const seedManagedClaude = () => {
+    const versionDir = path.dirname(versionHome());
+    const pkgDir = path.join(versionDir, 'node_modules', '@anthropic-ai', 'claude-code');
+    fs.mkdirSync(path.join(pkgDir, 'bin'), { recursive: true });
+    fs.writeFileSync(path.join(pkgDir, 'package.json'), JSON.stringify({ name: '@anthropic-ai/claude-code', version: VERSION, bin: { claude: 'bin/claude' } }));
+    fs.writeFileSync(path.join(pkgDir, 'bin', 'claude'), '#!/bin/sh\n');
+    fs.chmodSync(path.join(pkgDir, 'bin', 'claude'), 0o755);
+    // The rules writer composes the `default` preset from the active layers;
+    // the sandboxed HOME has no system layer, so the user layer declares it.
+    const rulesDir = path.join(os.homedir(), '.agents', 'rules');
+    fs.mkdirSync(rulesDir, { recursive: true });
+    fs.writeFileSync(path.join(rulesDir, 'rules.yaml'), 'presets:\n  default:\n    subrules: []\n');
+    fs.mkdirSync(path.join(versionHome(), '.claude', 'skills', 'alpha'), { recursive: true });
+    fs.writeFileSync(path.join(versionHome(), '.claude', 'skills', 'alpha', 'SKILL.md'), '---\nname: alpha\n---\n');
+    updateMeta((m) => ({ ...m, agents: { ...m.agents, claude: VERSION } }));
+  };
+  beforeEach(() => {
+    process.env.AGENTS_SYNC_MACHINE_ID = 'slotbox';
+    clear();
+    seedManagedClaude();
+  });
+  afterEach(() => {
+    clear();
+    fs.rmSync(path.dirname(versionHome()), { recursive: true, force: true });
+    if (prevMid === undefined) delete process.env.AGENTS_SYNC_MACHINE_ID;
+    else process.env.AGENTS_SYNC_MACHINE_ID = prevMid;
+  });
+
+  it('re-projects every claude slot from the default version home and prunes a skill the source no longer has', () => {
+    expect(getGlobalDefault('claude')).toBe(VERSION);
+    const created = addNativeAccount('work', 'claude', 'claude:user=slot-2', 'work@example.com', 'version');
+    // Deliberately NOT recorded: a slot dir with no device-doc record (an add
+    // that stopped before recordSlot, or an older build) is still projected.
+    const slot = ensureSlot('claude', created.id);
+    expect(readSlots(readMeta())[created.id]).toBeUndefined();
+    try {
+      const skillsDir = path.join(slot.slotDir, '.claude', 'skills');
+      fs.mkdirSync(path.join(skillsDir, 'zz-stale-skill'), { recursive: true });
+      fs.writeFileSync(path.join(skillsDir, 'zz-stale-skill', 'SKILL.md'), '---\nname: zz-stale-skill\n---\n');
+
+      const projected = projectAccountSlots('claude');
+      const mine = projected.find((p) => p.accountId === created.id);
+      expect(mine).toBeDefined();
+      expect(mine!.name).toBe('work');
+      expect(mine!.slotDir).toBe(slot.slotDir);
+      expect(mine!.from).toBe(VERSION);
+      expect(mine!.pruned).toEqual(['skills/zz-stale-skill']);
+      expect(fs.existsSync(path.join(skillsDir, 'zz-stale-skill'))).toBe(false);
+      expect(fs.existsSync(path.join(slot.slotDir, '.claude', '.credentials.json'))).toBe(false);
+
+      // Idempotent: a second pass has nothing left to prune.
+      expect(projectAccountSlots('claude').find((p) => p.accountId === created.id)?.pruned).toEqual([]);
+    } finally {
+      removeAccount('work');
+      fs.rmSync(slot.slotDir, { recursive: true, force: true });
+    }
+  });
+
+  it('skips a slot whose directory is gone, and never touches a slot through another harness', () => {
+    const created = addNativeAccount('gone', 'claude', 'claude:user=slot-3', 'gone@example.com', 'version');
+    const slot = ensureSlot('claude', created.id);
+    recordSlot(created.id, slot);
+    try {
+      expect(projectAccountSlots('codex').some((p) => p.accountId === created.id)).toBe(false);
+      fs.rmSync(slot.slotDir, { recursive: true, force: true });
+      expect(projectAccountSlots('claude').some((p) => p.accountId === created.id)).toBe(false);
+    } finally {
+      removeAccount('gone');
+    }
   });
 });
