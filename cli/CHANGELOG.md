@@ -1,9 +1,5 @@
 # Changelog
 
-## Unreleased
-
-- **Agents drive your running Arc, one profile per Arc Space (PHNX-2399, macOS).** On a Mac with Arc, `agents browser profiles list` shows every Arc Space as a profile — `arc-personal`, `arc-work`, `arc-dev` — discovered read-only from Arc's `User Data/Local State` and `StorableSidebar.json`. A Space already carries its Arc profile's logins, so it is the browser profile agents pick with `--profile`; there is no separate Space flag and nothing to create. `agents browser use arc-personal` makes it the default. Tabs are created, navigated, evaluated, and closed through Apple Events against the Arc you already have open — no debug port, no relaunch, never a second Arc. Agents only ever touch the tabs they created: durable task state addresses them by stable window, Space, and tab ids, a crash-safe marker intent guards creation, and closing a task removes only its own tabs. Creating a tab makes Arc select it for about 100 ms before the tab you had selected is restored; navigate, evaluate, and close are silent. Native refs, click, fill/type, scroll, and `tab focus` work; screenshots, promise evaluation, trusted input, network/console capture, uploads/downloads, and PDF fail with `ArcNativeCapabilityError` and point at a Chromium-family profile. Source: `cli/src/lib/browser/arc-discovery.ts`, `cli/src/lib/browser/drivers/arc.ts`, `cli/src/lib/browser/arc-dom.ts`, `cli/src/lib/browser/profiles.ts`, `cli/src/lib/browser/service.ts`, `cli/src/commands/browser.ts`.
-
 ## 1.22.92
 
 - **AGI Menu 1.1.0 is the helper the CLI installs (PHNX-4007).** The menu-bar
