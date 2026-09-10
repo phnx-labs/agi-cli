@@ -1,3 +1,4 @@
+import type { RotateCandidate } from './accounting/rotate.js';
 import { describe, it, expect } from 'vitest';
 import { fireTimeAuthReadiness } from './routine-readiness.js';
 import { writeAuthHealthEntries, authCacheKey, type AuthVerdict } from './auth-health.js';
@@ -41,5 +42,14 @@ describe('fireTimeAuthReadiness (PHNX-3415 fire-time auth preflight)', () => {
 
   it('fails OPEN (null) when the cache has no entry for this (agent, version)', () => {
     expect(fireTimeAuthReadiness('claude', '0.0.0-never-probed')).toBeNull();
+  });
+});
+
+describe('selected account preflight', () => {
+  it('ignores the revoked legacy version cache for a healthy selected slot', () => {
+    const version = seed('revoked');
+    const candidate = { agent: 'claude', version, nativeAccount: 'second', accountKey: 'second', signedIn: true, authVerdict: 'live', authCheckedAt: Date.now(), usageStatus: null, usageSnapshot: null, email: null } as RotateCandidate;
+    expect(fireTimeAuthReadiness('claude', version, candidate)).toBeNull();
+    expect(fireTimeAuthReadiness('claude', version, { ...candidate, authVerdict: 'revoked' })?.repair).toBe('agents accounts login claude#second');
   });
 });

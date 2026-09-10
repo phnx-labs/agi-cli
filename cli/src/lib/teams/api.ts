@@ -79,6 +79,7 @@ export interface SpawnResult {
   started_at: string;
   version?: string | null;
   profile_name?: string | null;
+  account?: string | null;
   remote_session_id?: string | null;
   name?: string | null;
   after?: string[];
@@ -338,6 +339,7 @@ export async function handleSpawn(
   repoPath: string | null = null,
   /** The team's `--project`; grants resolve from it at launch. */
   project: string | null = null,
+  account: string | null = null,
 ): Promise<SpawnResult> {
   const defaultMode = manager.getDefaultMode();
   const resolvedMode = resolveMode(mode, defaultMode);
@@ -394,6 +396,7 @@ export async function handleSpawn(
     hostTarget,
     repoPath,
     project,
+    account,
   );
 
   debug(`[spawn] Spawned ${agentType} agent ${agent.agentId} for task "${taskName}"`);
@@ -406,6 +409,7 @@ export async function handleSpawn(
     started_at: agent.startedAt.toISOString(),
     version: agent.version,
     profile_name: agent.profileName,
+    account: agent.account,
     remote_session_id: agent.remoteSessionId,
     name: agent.name,
     after: agent.after,

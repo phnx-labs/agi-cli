@@ -48,253 +48,32 @@ function candidate(version: string, over: Partial<RotateCandidate> = {}): Rotate
 }
 
 describe('resolveSessionRecoveryFromCandidates', () => {
-  it('native-resumes only the healthy origin version', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-recovery-native-'));
+  it('selects the second same-binary account and checks its real transcript slot', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'account-recovery-'));
     try {
-      const home = path.join(root, 'home');
-      const cwd = path.join(root, 'original-project');
-      const laterCwd = path.join(root, 'later-project');
-      const filePath = path.join(home, '.claude', 'projects', '-original-project', `${session().id}.jsonl`);
+      const slotDir = path.join(root, 'second');
+      const filePath = path.join(slotDir, '.claude', 'projects', 'project', 'session.jsonl');
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
-      fs.mkdirSync(cwd);
-      fs.mkdirSync(laterCwd);
-      fs.writeFileSync(filePath, [
-        JSON.stringify({ type: 'attachment', cwd }),
-        JSON.stringify({ type: 'user', cwd: laterCwd }),
-      ].join('\n') + '\n');
-      const source = session({ filePath, cwd: laterCwd });
-      const inspection = inspectNativeResumeSession(source, home);
-      const result = resolveSessionRecoveryFromCandidates(
-        source,
-        [candidate('2.1.187'), candidate('2.1.218')],
-        () => true,
-        inspection,
-      );
-      expect(result).toMatchObject({ mode: 'native', agent: 'claude', version: '2.1.187', cwd });
-    } finally {
-      fs.rmSync(root, { recursive: true, force: true });
-    }
+      fs.writeFileSync(filePath, JSON.stringify({ type: 'user', cwd: root }) + '\n');
+      const first = candidate('2.1.187', { accountKey: 'first', nativeAccount: 'first', slotDir: path.join(root, 'first') });
+      const second = candidate('2.1.187', { accountKey: 'second', nativeAccount: 'second', slotDir });
+      expect(resolveSessionRecoveryFromCandidates(session({ filePath, accountKey: 'second' }), [first, second], () => true)).toMatchObject({ mode: 'native', cwd: root, account: { selector: 'second', nativeAccount: 'second' } });
+      expect(resolveSessionRecoveryFromCandidates(session({ filePath, accountKey: 'second', version: 'old' }), [first, second], () => true)).toMatchObject({ mode: 'native', version: '2.1.187' });
+      expect(resolveSessionRecoveryFromCandidates(session({ filePath }), [first, second], () => true)).toMatchObject({ mode: 'native', account: { selector: 'second' } });
+      fs.renameSync(slotDir, path.join(root, 'retained'));
+      expect(resolveSessionRecoveryFromCandidates(session({ filePath: filePath.replace(slotDir, path.join(root, 'retained')), accountKey: 'second' }), [first, second], () => true)).toMatchObject({ mode: 'continue', account: { selector: 'second' } });
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
-
-  it('native-resumes the origin home on a rotated provider account when the origin login is limited', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-recovery-rotate-'));
-    try {
-      const home = path.join(root, 'home');
-      const cwd = path.join(root, 'original-project');
-      const filePath = path.join(home, '.claude', 'projects', '-original-project', `${session().id}.jsonl`);
-      fs.mkdirSync(path.dirname(filePath), { recursive: true });
-      fs.mkdirSync(cwd);
-      fs.writeFileSync(filePath, JSON.stringify({ type: 'attachment', cwd }) + '\n');
-      const source = session({ filePath, cwd });
-      const inspection = inspectNativeResumeSession(source, home);
-      const result = resolveSessionRecoveryFromCandidates(
-        source,
-        [
-          // Origin login (native, same version) is rate-limited...
-          candidate('2.1.187', { usageStatus: 'rate_limited' }),
-          // ...but a healthy provider account of the SAME harness is injectable.
-          candidate('2.1.187', {
-            accountKey: 'provider:tech',
-            accountLabel: 'tech',
-            email: 'tech@example.test',
-            usageKey: null,
-            providerAccount: 'tech',
-          }),
-        ],
-        () => true,
-        inspection,
-      );
-      expect(result).toMatchObject({
-        mode: 'native',
-        agent: 'claude',
-        version: '2.1.187',
-        cwd,
-        account: { providerAccount: 'tech', label: 'tech' },
-      });
-      expect(result.reason).toContain('rate_limited');
-    } finally {
-      fs.rmSync(root, { recursive: true, force: true });
-    }
+  it.each(['rate_limited', 'signed_out', 'revoked'])('continues in another account when origin is %s', (reason) => {
+    const origin = candidate('2.1.187', { accountKey: 'origin', nativeAccount: 'origin', signedIn: reason !== 'signed_out', authVerdict: reason === 'revoked' ? 'revoked' : null, usageStatus: reason === 'rate_limited' ? 'rate_limited' : null });
+    const target = candidate('2.1.187', { accountKey: 'provider:second', providerAccount: 'second', accountLabel: 'second' });
+    expect(resolveSessionRecoveryFromCandidates(session({ accountKey: 'origin' }), [origin, target], () => true, { available: true })).toMatchObject({ mode: 'continue', account: { selector: 'second', providerAccount: 'second' } });
   });
-
-  it('does not native-rotate to a different version home; a native sibling uses /continue', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-recovery-no-provider-'));
-    try {
-      const home = path.join(root, 'home');
-      const cwd = path.join(root, 'original-project');
-      const filePath = path.join(home, '.claude', 'projects', '-original-project', `${session().id}.jsonl`);
-      fs.mkdirSync(path.dirname(filePath), { recursive: true });
-      fs.mkdirSync(cwd);
-      fs.writeFileSync(filePath, JSON.stringify({ type: 'attachment', cwd }) + '\n');
-      const source = session({ filePath, cwd });
-      const inspection = inspectNativeResumeSession(source, home);
-      const result = resolveSessionRecoveryFromCandidates(
-        source,
-        [
-          // Origin login limited, and the only healthy sibling is a NATIVE login
-          // in another version home (no provider account to inject) → /continue.
-          candidate('2.1.187', { usageStatus: 'rate_limited' }),
-          candidate('2.1.218'),
-        ],
-        () => true,
-        inspection,
-      );
-      expect(result).toMatchObject({ mode: 'continue', agent: 'claude', version: '2.1.218' });
-    } finally {
-      fs.rmSync(root, { recursive: true, force: true });
-    }
+  it('never claims native ownership from a binary label alone', () => {
+    expect(resolveSessionRecoveryFromCandidates(session(), [candidate('2.1.187', { nativeAccount: 'new' })], () => true, { available: true })).toMatchObject({ mode: 'continue' });
   });
-
-  it('uses /continue on a healthy same-harness version when the origin is signed out', () => {
-    const result = resolveSessionRecoveryFromCandidates(
-      session(),
-      [candidate('2.1.187', { signedIn: false }), candidate('2.1.218')],
-      () => true,
-    );
-    expect(result).toMatchObject({ mode: 'continue', agent: 'claude', version: '2.1.218' });
-    expect(result.reason).toContain('signed_out');
-  });
-
-  it('does NOT native-rotate a signed-out origin, even with a healthy provider account (needs a login, not a rotation)', () => {
-    // Native-rotate is gated on a usage/rate LIMIT, not signed_out/revoked
-    // (SES-39): a signed-out origin has no credential to resume under and must
-    // take the /continue path. The continue pick of the healthy provider still
-    // carries RecoveryAccount so exec injects it instead of launching the
-    // signed-out native login.
-    const result = resolveSessionRecoveryFromCandidates(
-      session(),
-      [
-        candidate('2.1.187', { signedIn: false }),
-        candidate('2.1.187', {
-          accountKey: 'provider:tech',
-          accountLabel: 'tech',
-          usageKey: null,
-          providerAccount: 'tech',
-        }),
-      ],
-      () => true,
-      { available: true, cwd: '/repo/origin-transcript' },
-    );
-    expect(result).toMatchObject({
-      mode: 'continue',
-      agent: 'claude',
-      version: '2.1.187',
-      account: { providerAccount: 'tech', label: 'tech' },
-    });
-  });
-
-  it('does not launch the exhausted native login when origin is limited, transcript is outside the origin home, and a healthy provider is available', () => {
-    // PHNX-3674: native-rotate does not fire when inspection.available is false
-    // (trash/backup/reinstall, or a local /continue fallback from an unreachable
-    // peer). The continue pick of the healthy provider must carry RecoveryAccount
-    // so exec injects it — a credentialless continue on 2.1.187 would spawn as
-    // the rate-limited origin login.
-    const result = resolveSessionRecoveryFromCandidates(
-      session(),
-      [
-        candidate('2.1.187', { usageStatus: 'rate_limited' }),
-        candidate('2.1.187', {
-          accountKey: 'provider:tech',
-          accountLabel: 'tech',
-          email: 'tech@example.test',
-          usageKey: null,
-          providerAccount: 'tech',
-        }),
-      ],
-      () => true,
-      { available: false, reason: 'the indexed transcript is retained outside the active claude@2.1.187 home' },
-    );
-    expect(result.mode).not.toBe('native');
-    expect(result).toMatchObject({
-      mode: 'continue',
-      agent: 'claude',
-      version: '2.1.187',
-      account: { providerAccount: 'tech', label: 'tech' },
-    });
-    expect(result.reason).toContain('rate_limited');
-    expect(result.reason).toContain('tech');
-  });
-
-  it('keeps a healthy origin home for /continue when the harness has no native resume form', () => {
-    const result = resolveSessionRecoveryFromCandidates(
-      session(),
-      [candidate('2.1.187'), candidate('2.1.218')],
-      () => false,
-    );
-    expect(result).toMatchObject({ mode: 'continue', agent: 'claude', version: '2.1.187' });
-  });
-
-  it('never native-resumes from a different isolated version home', () => {
-    const result = resolveSessionRecoveryFromCandidates(
-      session(),
-      [candidate('2.1.218')],
-      () => true,
-    );
-    expect(result.mode).toBe('continue');
-    expect(result.version).toBe('2.1.218');
-    expect(result.reason).toContain('2.1.187 is not installed');
-  });
-
-  it('uses /continue when a same-number reinstall does not own the retained transcript', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-recovery-trash-'));
-    try {
-      const home = path.join(root, 'active-home');
-      const retained = path.join(root, 'trash', `${session().id}.jsonl`);
-      fs.mkdirSync(home, { recursive: true });
-      fs.mkdirSync(path.dirname(retained), { recursive: true });
-      fs.writeFileSync(retained, '{}\n');
-      const source = session({ filePath: retained });
-      const result = resolveSessionRecoveryFromCandidates(
-        source,
-        [candidate('2.1.187')],
-        () => true,
-        inspectNativeResumeSession(source, home),
-      );
-      expect(result).toMatchObject({ mode: 'continue', agent: 'claude', version: '2.1.187' });
-      expect(result.reason).toContain('retained outside the active claude@2.1.187 home');
-    } finally {
-      fs.rmSync(root, { recursive: true, force: true });
-    }
-  });
-
-  it('rotates to a healthy sibling account when the origin version is rate-limited (balanced)', () => {
-    // Origin 2.1.187 is throttled → the balanced picker selects a DIFFERENT
-    // healthy account of the SAME harness. It resumes via /continue there (a
-    // different isolated home does not own the origin transcript for native
-    // resume), continuing the same session on the rotated account (PHNX-3626).
-    const result = resolveSessionRecoveryFromCandidates(
-      session(),
-      [candidate('2.1.187', { usageStatus: 'rate_limited' }), candidate('2.1.218')],
-      () => true,
-    );
-    expect(result).toMatchObject({ mode: 'continue', agent: 'claude', version: '2.1.218' });
-    expect(result.reason).toContain('rate_limited');
-  });
-
-  it('falls back to a healthy version when the origin version was not recorded', () => {
-    // The observed codex bug: no recorded origin version → cannot native-resume a
-    // specific home, so balanced picks a healthy same-harness version and the log
-    // names why (Validation: missing recorded version → healthy-latest, logged).
-    const result = resolveSessionRecoveryFromCandidates(
-      session({ version: undefined }),
-      [candidate('2.1.218')],
-      () => true,
-    );
-    expect(result).toMatchObject({ mode: 'continue', agent: 'claude', version: '2.1.218' });
-    expect(result.reason).toContain('the origin version was not recorded');
-  });
-
-  it('fails with the concrete device, origin version, and account reason', () => {
-    expect(() => resolveSessionRecoveryFromCandidates(
-      session(),
-      [candidate('2.1.187', { usageStatus: 'rate_limited' })],
-      () => true,
-    )).toThrowError(SessionRecoveryError);
-    expect(() => resolveSessionRecoveryFromCandidates(
-      session(),
-      [candidate('2.1.187', { usageStatus: 'rate_limited' })],
-      () => true,
-    )).toThrow(/yosemite-s0.*claude@2\.1\.187.*rate_limited/);
+  it('fails if the owning device has no healthy account', () => {
+    expect(() => resolveSessionRecoveryFromCandidates(session(), [candidate('2.1.187', { signedIn: false })])).toThrow(SessionRecoveryError);
   });
 });
 

@@ -655,18 +655,12 @@ export function buildJobCommand(config: JobConfig, resolvedPrompt: string, forwa
     return cmd;
   }
 
-  // Native slot accounts share one managed binary version, so the baked
-  // harness argv cannot identify which login to spawn. Dispatch through
-  // `agents run <agent>#<name>` (the same seam as resume/custom) so T5
-  // spawn-time resolution selects the slot. `--account` is an agents-cli
-  // flag; the harness binary would ignore or reject it.
-  // Provider/durable-pinned accounts stay on the harness argv + env-injection
-  // path: `#name` is a native selector and would not inject their bundle.
-  if (config.account && forwardAccount && !findAccount(config.account)) {
+  // The run resolver owns account configuration and credential materialization.
+  if (config.account && forwardAccount) {
     const spec = config.version
-      ? `${agent}@${config.version}#${config.account}`
-      : `${agent}#${config.account}`;
-    return ['agents', 'run', spec, resolvedPrompt, '--mode', config.mode];
+      ? `${agent}@${config.version}`
+      : `${agent}`;
+    return ['agents', 'run', spec, resolvedPrompt, '--mode', config.mode, '--account', config.account];
   }
 
   const template = bakeRoutineArgv(agent);
@@ -983,7 +977,7 @@ function readCommandExitCode(runDir: string): number | null {
 /** Pre-flight version/account selection for a routine job. */
 export interface RoutineLaunchPlan {
   /** Ordered attempts: primary first, then same-agent failover accounts. */
-  chain: FallbackEntry[];
+  chain: Array<FallbackEntry & { account?: string; candidate?: RotateCandidate }>;
   /** Full rotation result when strategy selected among healthy accounts; null when pinned. */
   rotation: RotateResult | null;
   /** True when `config.version` pinned the target (no rotation). */
@@ -994,25 +988,6 @@ export interface RoutineLaunchPlan {
    * treated as implied by the version. False only when the caller opts out.
    */
   forwardAccount?: boolean;
-}
-
-/** Claude's own local auth check; unlike account metadata it cannot mistake identity for a usable login. */
-export function claudeVersionIsAuthenticated(version: string): boolean {
-  if (!isVersionInstalled('claude', version)) return true; // synthetic/unit plans are validated at spawn
-  const binary = getBinaryPath('claude', version);
-  if (!binary) return false;
-  const home = getVersionHomePath('claude', version);
-  try {
-    const raw = execFileSync(binary, ['auth', 'status', '--json'], {
-      encoding: 'utf8',
-      timeout: 5_000,
-      env: { ...process.env, HOME: process.env.AGENTS_REAL_HOME || os.homedir(), CLAUDE_CONFIG_DIR: path.join(home, '.claude') },
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    return JSON.parse(raw).loggedIn === true;
-  } catch {
-    return false;
-  }
 }
 
 /**
@@ -1034,7 +1009,6 @@ export async function resolveRoutineLaunch(
     findCredentialAccount?: (name: string) => boolean;
     readMeta?: typeof readMeta;
     resolveCredentialAccount?: (name: string, host: AgentId) => { env: Record<string, string> };
-    claudeVersionIsAuthenticated?: typeof claudeVersionIsAuthenticated;
   } = {},
 ): Promise<RoutineLaunchPlan> {
   if (config.workflow) {
@@ -1080,17 +1054,13 @@ export async function resolveRoutineLaunch(
     const identity = unified?.kind === 'native' ? unified.identityKey : config.account;
     // Prefer the full candidate so a slot-sourced native account (shared
     // managed-install `version`) still carries its name for `--account`.
+    const candidate = deps.resolveAccountVersion ? undefined : await (deps.resolveAccountCandidate ?? resolveAccountCandidate)(agent, identity);
     const accountVersion = deps.resolveAccountVersion
       ? await deps.resolveAccountVersion(agent, identity)
-      : (await (deps.resolveAccountCandidate ?? resolveAccountCandidate)(agent, identity))?.version ?? null;
+      : candidate?.version ?? null;
     if (accountVersion) {
-      if (config.version && config.version !== accountVersion) {
-        throw new Error(
-          `Routine '${config.name}' account '${config.account}' is signed in at ${agent}@${accountVersion}, not pinned ${agent}@${config.version}.`,
-        );
-      }
       return {
-        chain: [{ agent, version: config.version ?? accountVersion }],
+        chain: [{ agent, version: config.version ?? accountVersion, ...(candidate ? { candidate, account: config.account } : {}) }],
         rotation: null,
         pinned: true,
         // Post-T5 every native slot on a harness shares the managed binary
@@ -1190,24 +1160,6 @@ export async function resolveRoutineLaunch(
   if (!version) {
     version = resolveVersion(agent, cwd) ?? undefined;
   }
-  if (agent === 'claude' && version) {
-    const checkClaudeAuth = deps.claudeVersionIsAuthenticated ?? claudeVersionIsAuthenticated;
-    const authenticatedHealthy = rotation?.healthy.filter((candidate) => checkClaudeAuth(candidate.version));
-    const authenticated = authenticatedHealthy?.find((candidate) => candidate.version === version) ?? authenticatedHealthy?.[0];
-    if (rotation && (!authenticated || authenticatedHealthy!.length === 0)) {
-      throw new Error(`Routine '${config.name}' found no authenticated Claude account; run \`claude /login\` for an installed version or pin a provider profile.`);
-    }
-    if (!rotation && !checkClaudeAuth(version)) {
-      throw new Error(`Routine '${config.name}' found no authenticated Claude account at claude@${version}; run \`claude /login\` for that version or remove the pin.`);
-    }
-    if (rotation && authenticated) {
-      const rejected = rotation.healthy.filter((candidate) => !authenticatedHealthy!.includes(candidate));
-      if (rejected.length > 0 || rotation.picked !== authenticated) {
-        rotation = { ...rotation, picked: authenticated, healthy: authenticatedHealthy!, excluded: [...rotation.excluded, ...rejected] };
-      }
-      version = authenticated.version;
-    }
-  }
 
   if (!version) {
     process.stderr.write(
@@ -1226,7 +1178,12 @@ export async function resolveRoutineLaunch(
   }
 
   return {
-    chain: [{ agent, version }, ...failover],
+    chain: rotation
+      ? [rotation.picked, ...rotation.healthy.filter((candidate) => candidate !== rotation!.picked)].map((candidate) => ({
+          agent: candidate.agent, version: candidate.version,
+          account: candidate.nativeAccount ?? candidate.providerAccount, candidate,
+        }))
+      : [{ agent, version }],
     rotation,
     pinned: false,
   };
@@ -1253,21 +1210,8 @@ export function pinJobBinary(cmd: string[], agent: AgentId, version: string | un
  * Such commands must NOT be binary-pinned (pinning rewrites cmd[0] to the agent binary,
  * producing a broken `<binary> run …`) and must not receive a version-pinned spawn env.
  */
-/**
- * Assert a routine's account can be dispatched to the resolved placement, BEFORE
- * any off-box dispatch (placement is resolved before {@link resolveRoutineLaunch}),
- * at the top of both the foreground and detached paths:
- *
- * - **native** account → rejected for host AND cloud: a native login is a
- *   device-local harness credential that cannot be forwarded off-box.
- * - **provider** account + **cloud** → rejected (fail loud): the cloud dispatch
- *   has no secure way to inject a device-local provider bundle yet.
- * - **provider** account + **host** → allowed: the host dispatch forwards the
- *   account NAME (the remote resolves its own local bundle — no secret copied).
- *
- * `account` is injectable so the guard is unit-tested for both modes without a
- * registry or a real dispatch.
- */
+/** SSH forwards an account selector for target-local resolution; cloud does not
+ * yet provide that provisioning boundary. Native OAuth never crosses devices. */
 export async function assertRoutineAccountLocalForPlacement(
   config: Pick<JobConfig, 'name' | 'account'>,
   mode: 'host' | 'cloud',
@@ -1282,7 +1226,7 @@ export async function assertRoutineAccountLocalForPlacement(
   if (!account) {
     throw new Error(`Routine '${config.name}' account '${config.account}' is unknown.`);
   }
-  if (account?.kind === 'native') {
+  if (mode === 'cloud' && account?.kind === 'native') {
     throw new Error(`Routine '${config.name}' account '${config.account}' is a device-local ${account.agent} login and cannot run on a ${mode} placement. Use a provider account, or place this routine on the device that holds the login.`);
   }
   if (mode === 'cloud' && account?.kind === 'provider') {
@@ -1321,6 +1265,8 @@ export function buildHostDispatchOptions(
 ): import('../hosts/run-target.js').HostPromptRun {
   return {
     agent: config.agent!,
+    version: config.version,
+    strategy: config.strategy,
     prompt: resolveJobPrompt(config),
     mode: normalizeMode(config.mode),
     effort: config.effort,
@@ -1339,7 +1285,7 @@ export function dispatchesViaAgentsRun(config: Pick<JobConfig, 'workflow' | 'res
     config.workflow
     || config.resume
     || (config.agent && isCustomHarnessName(config.agent))
-    || (config.account && config.agent && !findAccount(config.account)),
+    || (config.account && config.agent),
   );
 }
 
@@ -1375,6 +1321,7 @@ export function buildRoutineSpawnEnv(
   version: string | undefined,
   timezone?: string,
   overlayHome?: string,
+  candidate?: RotateCandidate,
 ): Record<string, string> {
   const execEnv = buildExecEnv({
     agent,
@@ -1382,6 +1329,7 @@ export function buildRoutineSpawnEnv(
     mode: 'plan',
     effort: 'auto',
     headless: true,
+    execHome: candidate?.slotDir,
     env: baseEnv,
   });
   const out: Record<string, string> = {};
@@ -1402,7 +1350,7 @@ export function buildRoutineSpawnEnv(
   // Authoritative: buildExecEnv injects the setup-token but then spreads the caller
   // env over it, so an ambient CLAUDE_CODE_OAUTH_TOKEN would win — re-assert here.
   const setupToken = agent === 'claude' && version
-    ? resolveClaudeSetupToken(getVersionHomePath('claude', version))
+    ? resolveClaudeSetupToken(candidate?.slotDir ?? getVersionHomePath('claude', version))
     : null;
   // A headed device (personal or desktop — the user's own interactive box or a
   // headed always-on box) uses the per-version login for EVERY run, routines
@@ -1424,7 +1372,7 @@ export function buildRoutineSpawnEnv(
     out.XDG_CONFIG_HOME = path.join(overlayHome, '.config');
   }
   if (overlayHome && agent === 'claude') out.HOME = process.env.AGENTS_REAL_HOME || os.homedir();
-  if (overlayHome && agent === 'codex') out.CODEX_HOME = path.join(overlayHome, '.codex');
+  if (overlayHome && agent === 'codex' && !candidate?.slotDir) out.CODEX_HOME = path.join(overlayHome, '.codex');
   if (timezone) out.TZ = timezone;
   return out;
 }
@@ -1592,6 +1540,7 @@ async function executeJobPlaced(config: JobConfig, deps: LoopDeps | undefined, a
   }
 
   const launch = await resolveRoutineLaunch(config);
+  if (launch.chain[0]?.account) config = { ...config, account: launch.chain[0].account, version: launch.chain[0].version };
   const primaryVersion = launch.chain[0]?.version ?? config.version;
 
   const timer = createTimer('agent.run', {
@@ -1676,7 +1625,7 @@ async function executeJobPlaced(config: JobConfig, deps: LoopDeps | undefined, a
   const preflightVersion = launch.chain[0]?.version;
   // Dynamic import breaks the routine-readiness -> scheduling/routines -> runner cycle.
   const { fireTimeAuthReadiness } = await import('../routine-readiness.js');
-  const authBlocker = preflightVersion ? fireTimeAuthReadiness(effectiveAgent, preflightVersion) : null;
+  const authBlocker = preflightVersion ? fireTimeAuthReadiness(effectiveAgent, preflightVersion, launch.chain[0]?.candidate) : null;
   if (authBlocker) {
     process.stderr.write(
       `[agents] routine ${config.name}: ${effectiveAgent}@${preflightVersion} ${authBlocker.code} — skipping run (${authBlocker.repair})\n`,
@@ -1693,10 +1642,14 @@ async function executeJobPlaced(config: JobConfig, deps: LoopDeps | undefined, a
 
   // Loop path: delegate to runLoop (same driver as `agents run --loop` / workflow loop:).
   if (config.loop) {
-    const spawnEnv = buildRoutineSpawnEnv(baseEnv, effectiveAgent, primaryVersion, config.timezone, overlayHome);
+    const spawnEnv = buildRoutineSpawnEnv(baseEnv, effectiveAgent, primaryVersion, config.timezone, overlayHome, launch.chain[0]?.candidate);
+    if (config.account && findUnifiedAccount(config.account, readMeta())?.kind === 'provider') {
+      Object.assign(spawnEnv, resolveCredentialAccount(config.account, effectiveAgent).env);
+    }
     const execOptions: ExecOptions = {
       agent: effectiveAgent,
       harnessName,
+      execHome: launch.chain[0]?.candidate?.slotDir,
       // Routine-supported self-updating CLIs (Cursor/Droid) use one global
       // binary; a versioned shim would point at a nonexistent isolated install.
       version: isSelfUpdatingAgent(effectiveAgent) ? undefined : primaryVersion,
@@ -1742,7 +1695,7 @@ async function executeJobPlaced(config: JobConfig, deps: LoopDeps | undefined, a
   // Truncate the log for a clean run; failover attempts append.
   fs.writeFileSync(stdoutPath, '', { mode: 0o600 });
 
-  const chain: FallbackEntry[] = launch.chain.length > 0
+  const chain: RoutineLaunchPlan['chain'] = launch.chain.length > 0
     ? launch.chain
     : [{ agent: effectiveAgent, version: primaryVersion }];
 
@@ -1766,10 +1719,11 @@ async function executeJobPlaced(config: JobConfig, deps: LoopDeps | undefined, a
     meta.version = attemptVersion;
     snapshotRoutineTranscriptBase(meta, runDir, overlayHome);
 
-    const viaAgentsRun = dispatchesViaAgentsRun(config);
+    const attemptConfig = { ...config, version: attemptVersion, account: entry.account ?? config.account };
+    const viaAgentsRun = dispatchesViaAgentsRun(attemptConfig);
     if (overlayHome) linkVersionAuth(overlayHome, attemptAgent, attemptVersion);
     const cmd = viaAgentsRun
-      ? baseCmd
+      ? buildJobCommand(attemptConfig, resolvedPrompt, launch.forwardAccount !== false)
       : pinJobBinary(baseCmd, attemptAgent, attemptVersion);
     const spawnEnv = viaAgentsRun
       ? (() => {
@@ -2194,6 +2148,7 @@ async function executeJobDetachedClaimed(config: JobConfig, attempt: RoutineAtte
   // into a credit-exhausted install. Detached cannot mid-run failover (no exit
   // wait); the next schedule tick re-selects if this attempt still fails.
   const launch = await resolveRoutineLaunch(config);
+  if (launch.chain[0]?.account) config = { ...config, account: launch.chain[0].account, version: launch.chain[0].version };
   const version = launch.chain[0]?.version ?? config.version;
 
   const timer = createTimer('agent.run', {
@@ -2284,7 +2239,7 @@ async function executeJobDetachedClaimed(config: JobConfig, attempt: RoutineAtte
   const preflightVersion = launch.chain[0]?.version;
   // Dynamic import breaks the routine-readiness -> scheduling/routines -> runner cycle.
   const { fireTimeAuthReadiness } = await import('../routine-readiness.js');
-  const authBlocker = preflightVersion ? fireTimeAuthReadiness(effectiveAgent, preflightVersion) : null;
+  const authBlocker = preflightVersion ? fireTimeAuthReadiness(effectiveAgent, preflightVersion, launch.chain[0]?.candidate) : null;
   if (authBlocker) {
     process.stderr.write(
       `[agents] routine ${config.name}: ${effectiveAgent}@${preflightVersion} ${authBlocker.code} — skipping run (${authBlocker.repair})\n`,

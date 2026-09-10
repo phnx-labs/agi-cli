@@ -1033,7 +1033,7 @@ describeSpawn('resolveRoutineLaunch — per-routine strategy override (RUSH-2719
       },
     });
     expect(seenStrategy).toBe('available');
-    expect(plan.chain[0]).toEqual({ agent: 'claude', version: '2.1.219' });
+    expect(plan.chain[0]).toMatchObject({ agent: 'claude', version: '2.1.219' });
   });
 
   it('an explicit version pin still short-circuits before any strategy resolution', async () => {
@@ -1098,21 +1098,19 @@ describeSpawn('resolveRoutineLaunch — zero-healthy accounts fail the routine l
     const plan = await resolveRoutineLaunch(baseConfig(), process.cwd(), {
       resolveRunVersion: async () => ({ version: '2.1.219', rotation }),
     });
-    expect(plan.chain[0]).toEqual({ agent: 'claude', version: '2.1.219' });
+    expect(plan.chain[0]).toMatchObject({ agent: 'claude', version: '2.1.219' });
     expect(plan.rotation).toBe(rotation);
   });
 
-  it('removes unauthenticated Claude accounts from both the primary and failover chain', async () => {
-    const stale = { ...acct('2.1.219'), usageStatus: 'available' as const };
-    const authenticated = { ...acct('2.1.220'), usageStatus: 'available' as const };
-    const rotation: RotateResult = { picked: stale, healthy: [stale, authenticated], excluded: [] };
+  it('retains both same-binary account slots without probing a legacy home', async () => {
+    const first = { ...acct('2.1.219'), nativeAccount: 'first', slotDir: '/slots/first' };
+    const second = { ...acct('2.1.219'), nativeAccount: 'second', slotDir: '/slots/second' };
+    const rotation: RotateResult = { picked: second, healthy: [first, second], excluded: [] };
     const plan = await resolveRoutineLaunch(baseConfig(), process.cwd(), {
-      resolveRunVersion: async () => ({ version: stale.version, rotation }),
-      claudeVersionIsAuthenticated: (version) => version === authenticated.version,
+      resolveRunVersion: async () => ({ version: second.version, rotation }),
     });
-    expect(plan.chain).toEqual([{ agent: 'claude', version: authenticated.version }]);
-    expect(plan.rotation?.healthy.map((candidate) => candidate.version)).toEqual([authenticated.version]);
-    expect(plan.rotation?.excluded.map((candidate) => candidate.version)).toContain(stale.version);
+    expect(plan.chain.map((entry) => entry.account)).toEqual(['second', 'first']);
+    expect(plan.chain[0].candidate).toBe(second);
   });
 
   it('a non-exhausted null rotation (pinned-shaped) proceeds with the resolved version — unchanged', async () => {
@@ -1241,7 +1239,8 @@ describe('native slot routine dispatch (PHNX-3940 T5)', () => {
     expect(plan.forwardAccount).toBe(true);
     expect(plan.chain[0]?.agent).toBe('claude');
     const cmd = buildJobCommand(config, 'do it', plan.forwardAccount !== false);
-    expect(cmd.slice(0, 3)).toEqual(['agents', 'run', `claude#${work.name}`]);
+    expect(cmd.slice(0, 3)).toEqual(['agents', 'run', 'claude']);
+    expect(cmd.slice(-2)).toEqual(['--account', work.name]);
     expect(cmd[2]).not.toContain(personal.name);
   });
 });
@@ -1263,19 +1262,20 @@ describe('provider-pinned routine keeps injected env (PHNX-3940 T5 seam / T7)', 
     try { removeAccount(name); } catch { /* already gone */ }
   });
 
-  it('does not re-enter agents run and still injects the provider credential env', () => {
+  it('delegates provider materialization to agents run', () => {
     addAccount(name, 'openrouter', 'api-key', 'sk-t7-provider-secret');
-    expect(dispatchesViaAgentsRun({ agent: 'claude', account: name })).toBe(false);
+    expect(dispatchesViaAgentsRun({ agent: 'claude', account: name })).toBe(true);
     expect(dispatchesViaAgentsRun({ agent: 'claude', account: `native-${name}` })).toBe(true);
 
     const cmd = buildJobCommand(baseConfig({ name: `job-${name}`, account: name }), 'do it');
-    expect(cmd[0]).not.toBe('agents');
+    expect(cmd[0]).toBe('agents');
+    expect(cmd.slice(-2)).toEqual(['--account', name]);
     expect(cmd.join(' ')).not.toContain(`#${name}`);
 
     const resolved = resolveCredentialAccount(name, 'claude');
     expect(resolved.env.ANTHROPIC_AUTH_TOKEN).toBe('sk-t7-provider-secret');
     const injected = mergeRoutineProviderEnv({ PATH: '/bin' }, { agent: 'claude', account: name }, 'claude');
-    expect(injected.ANTHROPIC_AUTH_TOKEN).toBe('sk-t7-provider-secret');
+    expect(injected.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
     expect(injected.PATH).toBe('/bin');
   });
 
@@ -1302,10 +1302,10 @@ describe('provider-pinned routine keeps injected env (PHNX-3940 T5 seam / T7)', 
 describe('assertRoutineAccountLocalForPlacement — native accounts never dispatch off-box', () => {
   // Called at the top of BOTH the foreground (executeJobPlaced) and detached
   // (executeJobDetachedClaimed) placement blocks, before host/cloud dispatch.
-  it('rejects a native routine account before a host dispatch', async () => {
+  it('allows a host to resolve its own provisioned native slot', async () => {
     await expect(
       assertRoutineAccountLocalForPlacement({ name: 'r', account: 'work' }, 'host', { account: { kind: 'native', id: 'n', name: 'work', agent: 'claude', identityKey: 'k', scope: 'version' } }),
-    ).rejects.toThrow('device-local claude login and cannot run on a host placement');
+    ).resolves.toBeUndefined();
   });
 
   it('rejects a native routine account before a cloud dispatch', async () => {

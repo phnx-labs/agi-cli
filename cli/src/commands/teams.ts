@@ -1,3 +1,4 @@
+import { parseAgentVersionSpec } from '../lib/agent-spec/agents.js';
 /**
  * Team management commands for organizing multi-agent collaboration.
  *
@@ -284,19 +285,23 @@ export function printFeedHint(team: string): void {
  * checks, and version pins keep working. `profileName` is set only when the
  * spec resolved through a profile.
  */
-function parseTeammate(spec: string): {
+export function parseTeammate(spec: string): {
   agent: AgentType;
   version: string | null;
   profileName: string | null;
+  account: string | null;
 } {
-  const [name, version] = spec.split('@');
+  const parsed = parseAgentVersionSpec(spec);
+  const name = 'error' in parsed ? spec : parsed.agent;
+  const version = 'error' in parsed ? undefined : parsed.version;
 
   if (VALID_AGENTS.includes(name as AgentType)) {
     const agent = name as AgentType;
     return {
       agent,
-      version: resolveVersionAlias(agent as AgentId, version) ?? null,
+      version: version ?? null,
       profileName: null,
+      account: 'error' in parsed ? null : parsed.label ?? null,
     };
   }
 
@@ -310,6 +315,7 @@ function parseTeammate(spec: string): {
         agent: profile.host.agent as AgentType,
         version: profile.host.version ?? null,
         profileName: profile.name,
+        account: null,
       };
     } catch (err) {
       dieFriction('teams', 'profile-malformed', `Profile '${name}' is malformed: ${(err as Error).message}`);
@@ -1962,6 +1968,7 @@ export function registerTeamsCommands(program: Command): void {
           const { warnings } = ensureHostReady(host, {
             agent: parsed.agent,
             version: parsed.version ?? undefined,
+            account: parsed.account ?? undefined,
           });
           for (const w of warnings) process.stderr.write(chalk.yellow(`[teams] warning: ${w}\n`));
         } catch (err) {
@@ -1996,7 +2003,7 @@ export function registerTeamsCommands(program: Command): void {
         hostName = host.name;
       }
 
-      const { agent, version, profileName } = parseTeammate(teammate);
+      const { agent, version, profileName, account } = parseTeammate(teammate);
       warnAgentDeprecated(agent);
       // Version-installed check is about the LOCAL machine — a distributed (--on)
       // teammate's agent/version lives on the host, verified by ensureHostReady.
@@ -2284,6 +2291,7 @@ export function registerTeamsCommands(program: Command): void {
           hostTarget,
           hostRepoPath,
           teamMeta?.project ?? null,
+          account,
         );
 
         emit('teams.add', { module: 'teams', team, agent, name: result.name, agent_id: result.agent_id, status: result.status });
