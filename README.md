@@ -1228,18 +1228,27 @@ replacement (`add` / `login` / `default` / `run <harness>#<name>`).
 
 ## Secrets
 
-> **Platform:** `agents secrets` requires macOS Keychain or Linux libsecret.
-> On Windows (non-WSL), use environment variables or a `.env` file instead.
+Secrets are the standalone **`secrets` CLI** (`@phnx-labs/secrets-cli`). agi-cli does not ship the engine. `agents secrets` is a passthrough to the same binary.
+
+```bash
+# Install (pick one — no extra env vars)
+agents clis install secrets
+# or
+npm i -g @phnx-labs/secrets-cli@0.1.2
+# or, after agents is installed:
+agents setup secrets
+```
 
 ```bash
 # API keys in Keychain, not in .env files.
-agents secrets create prod-stripe
-agents secrets add prod-stripe STRIPE_SECRET_KEY     # Prompts, stores in Keychain
-agents secrets add prod-stripe TEST_CARD --value "4242..."
-
-# Injected at run time. Bundle definitions live in the Keychain, not on disk.
+secrets create prod-stripe
+secrets add prod-stripe STRIPE_SECRET_KEY     # Prompts, stores in Keychain
 agents run claude "charge a test card" --secrets prod-stripe
 ```
+
+> **Platform:** macOS Keychain, Linux libsecret / file store. On Windows (non-WSL), use environment variables or a `.env` file instead.
+
+The macOS broker is **not** the agents daemon. It is `secrets _agent-run` (started by `secrets start` or on first unlock), socket under `$SECRETS_HOME/.cache/helpers/secrets-agent/` (`~/.agents` when you go through `agents secrets`). Linux has no broker. `agents daemon` never hosts it.
 
 <p align="center">
   <img src="assets/secrets.svg" alt="How agi-cli secrets work: bundle definitions live in the macOS Keychain alongside their values, agi-cli resolves at runtime and injects the env into the child process" width="100%" />

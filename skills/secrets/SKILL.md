@@ -2,11 +2,25 @@
 name: secrets
 description: "Manage named bundles of environment variables backed by the OS keychain (macOS Keychain, Linux libsecret, Windows Credential Manager). Create bundles, add secrets, generate passwords, and inject them into agent runs. Triggers on: 'API key', 'credentials', 'secrets bundle', 'inject env vars', '--secrets', 'keychain', 'credential manager'."
 argument-hint: "[create|add|list|view|import|export|rotate|generate]"
-allowed-tools: Bash(agents secrets*)
+allowed-tools: Bash(agents secrets*), Bash(secrets*)
 user-invocable: true
 ---
 
 # Secrets
+
+Store credentials in the OS keychain and inject them into agent runs. The engine is the standalone **`secrets` CLI** (`@phnx-labs/secrets-cli`). `agents secrets` is a passthrough to the same binary. agi-cli does not ship the engine.
+
+## Install
+
+```bash
+agents clis install secrets
+# or: npm i -g @phnx-labs/secrets-cli@0.1.2
+# or: agents setup secrets
+```
+
+No extra environment variables. After install, `secrets --version` prints `0.1.2`.
+
+The macOS broker is `secrets _agent-run`, not `agents daemon`. Socket: `$SECRETS_HOME/.cache/helpers/secrets-agent/`.
 
 Store credentials in your OS keychain and inject them into agent runs. Nothing touches disk in plaintext — not even the bundle metadata.
 
