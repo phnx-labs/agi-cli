@@ -1497,7 +1497,8 @@ ever notice that the daemon itself has died — the exact outage that means no
 routine will fire again until someone restarts it. That gap is closed by a
 separate, daemon-independent watchdog in the menu-bar helper (which runs as its
 own launchd `KeepAlive` service): see
-[menubar.md → Daemon-down watchdog](menubar.md#daemon-down-watchdog).
+[AGI Menu → Daemon-down watchdog](https://github.com/phnx-labs/agi-menu/blob/main/docs/menubar.md#daemon-down-watchdog)
+(the helper's own repo; [menubar.md](menubar.md) here is the cross-repo contract).
 
 "Notable output" is folded into the single **Finish** notification, not sent as
 a third message: on success the body is the first line of `report.md` (the

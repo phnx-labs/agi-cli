@@ -1,5 +1,10 @@
 /**
- * verify-menubar-helper.sh — the prepack gate for the menu-bar helper.
+ * verify-menubar-helper.sh — the bundle gate for the staged menu-bar helper.
+ *
+ * Since PHNX-4036 the bundle at bin/MenubarHelper.app is the PUBLISHED release
+ * staged by scripts/stage-menubar-helper.sh (source: phnx-labs/agi-menu), and
+ * this gate is what that script runs after extraction. The checks are the same
+ * ones that used to guard `npm pack`, and the incident they pin still applies:
  *
  * The regression this pins (RUSH-3031): 1.22.44 was packed on a Linux
  * attestation-producer box (no codesign, no xcrun), where every Apple-tool

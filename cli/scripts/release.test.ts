@@ -53,7 +53,10 @@ describeRelease('release.sh attestation promotion (RUSH-2666)', () => {
     expect(RELEASE_SH).toContain('WITH_HELPERS=false');
     expect(RELEASE_SH).not.toContain('sign-cli-binary.sh');
     expect(RELEASE_SH).not.toContain('publish-computer-helper-mac.sh');
-    expect(RELEASE_SH).not.toContain('menubar/scripts/build.sh release');
+    // The menu-bar helper is neither built (its source is phnx-labs/agi-menu,
+    // PHNX-4036) nor staged by a CLI release; it resolves from menubar/v<floor>.
+    expect(RELEASE_SH).not.toContain('swift build');
+    expect(RELEASE_SH).not.toContain('stage-menubar-helper.sh');
     expect(RELEASE_SH).toContain('rebuild/notarization is outside the ordinary release path');
   });
 });

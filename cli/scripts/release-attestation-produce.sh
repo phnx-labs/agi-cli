@@ -14,18 +14,19 @@
 # What it does, against an isolated worktree at the EXACT commit given:
 #   1. Runs the full suite (bun run test). Fail closed -- no attestation is
 #      written for a red suite.
-#   2. On a macOS box with `agents` + the apple.com secrets bundle, signs and
-#      notarizes the CLI binary and the menubar helper .app headlessly (the same
-#      steps release.sh's privileged phase ran before RUSH-2666 relocated
-#      build/sign to attestation time). Off that box the step is simply skipped,
-#      and since RUSH-3100 that costs nothing: the tarball carries no helper
-#      bundle, so there is nothing for `npm pack` to gate on and no unsigned
-#      bundle can ship from anywhere. The old prepack gate (verify-menubar-helper.sh)
-#      is retained for cutting a HELPER release, not for packing the CLI. The
-#      keychain helper moved with the standalone `secrets` engine (PHNX-3989) —
-#      it is no longer built, signed, or verified anywhere in this repo. (The CLI binary left
-#      the tarball in RUSH-3026; the sign step below still builds it on a Mac for
-#      the per-release GitHub-asset path.)
+#   2. With --with-helpers, on a macOS box with `agents` + the apple.com secrets
+#      bundle, signs and notarizes the CLI binary headlessly (the same step
+#      release.sh's privileged phase ran before RUSH-2666 relocated build/sign to
+#      attestation time). Off that box the step is simply skipped, and since
+#      RUSH-3100 that costs nothing: the tarball carries no helper bundle, so
+#      there is nothing for `npm pack` to gate on and no unsigned bundle can ship
+#      from anywhere. No helper is built here at all: the menu-bar helper's source
+#      lives in phnx-labs/agi-menu (PHNX-4036) and computer-mac has its own
+#      publish script; both are recorded in the helper manifest from their
+#      PUBLISHED releases (step 5). The keychain helper moved with the standalone
+#      `secrets` engine (PHNX-3989). (The CLI binary left the tarball in
+#      RUSH-3026; the sign step below still builds it on a Mac for the
+#      per-release GitHub-asset path.)
 #   3. Packs the tarball (`npm pack`) and binds its sha256 into the record.
 #   4. Writes the attestation via release-attestation.sh write, then copies
 #      the tarball alongside it so release-attestation.sh tarball/promote can
@@ -60,9 +61,13 @@
 # routing. Every shard still runs vitest at --maxWorkers=2 --retry=2, so the
 # per-box flake mitigation is unchanged.
 #
-# --with-helpers (default OFF) additionally verifies the helper input-digest
-# manifest. Off by default for the same reason release.sh's flag is: the check
-# aborts on any helper source change, including ones the tarball does not ship.
+# --with-helpers (default OFF) additionally produces the helper input-digest
+# manifest: computer-mac from its published computer-mac/v<floor> release (source-
+# verified via its input-digest sidecar), menubar from its published
+# menubar/v<floor> release (scripts/stage-menubar-helper.sh --fetch-only, sha256-
+# verified; the source is not in this repo). Off by default for the same reason
+# release.sh's flag is: the check aborts on any helper input change, including
+# ones the tarball does not ship.
 #
 # --dir defaults to $RELEASE_ATTESTATION_DIR or <repo-root>/.release-attestations
 # -- the same resolution release.sh uses, so producing and requiring agree
@@ -295,12 +300,16 @@ else
   die "suite failed for ${SHA:0:12} -- refusing to attest a red tree (log: $SUITE_LOG)"
 fi
 
-# Sign + notarize headlessly, matching what release.sh's privileged phase did
-# before RUSH-2666 moved build/sign to attestation time. Skipped off a macOS
-# signing box -- and since RUSH-3100 that skip costs nothing, because the tarball
-# no longer carries a helper bundle for `npm pack` to gate on. The claim that
-# "prepack gates fail closed in that case" was the old contract and is no longer
-# what stops an unsigned helper shipping; nothing ships one, from anywhere.
+# Sign + notarize the CLI binary headlessly, matching what release.sh's
+# privileged phase did before RUSH-2666 moved build/sign to attestation time.
+# Skipped off a macOS signing box -- and since RUSH-3100 that skip costs nothing,
+# because the tarball no longer carries a helper bundle for `npm pack` to gate
+# on. The claim that "prepack gates fail closed in that case" was the old
+# contract and is no longer what stops an unsigned helper shipping; nothing
+# ships one, from anywhere. This block used to ALSO build + sign the menu-bar
+# helper from cli/menubar; that source moved to phnx-labs/agi-menu (PHNX-4036)
+# and the helper is now only ever consumed as its published release (recorded
+# in the manifest below), so nothing here builds a helper.
 # --with-helpers gates this too (PHNX-3699). An ORDINARY CLI release must sign
 # nothing: since RUSH-3026 the CLI binary and since RUSH-3100 both helper .apps
 # are absent from the tarball, so everything this block produces is unreferenced
@@ -312,7 +321,7 @@ fi
 # nowhere. Cutting a HELPER release still signs; that is what --with-helpers is.
 if [[ "$WITH_HELPERS" == true && "$(uname)" == "Darwin" ]] && command -v agents >/dev/null 2>&1 \
   && [[ -x scripts/sign-cli-binary.sh ]]; then
-  bold "Signing + notarizing the CLI binary and helper apps..."
+  bold "Signing + notarizing the CLI binary..."
   # Unlocks rush-signing.keychain-db and authorizes codesign/notarytool to use
   # the Developer ID key non-interactively; without it a headless `agents
   # secrets exec` hits errSecInternalComponent (the key ACL prompts for UI
@@ -322,14 +331,6 @@ if [[ "$WITH_HELPERS" == true && "$(uname)" == "Darwin" ]] && command -v agents 
   . scripts/headless-sign-context.sh
   agents secrets exec apple.com -- scripts/sign-cli-binary.sh \
     || die "CLI binary sign/notarize failed"
-  agents secrets exec apple.com -- bash -c '
-    set -euo pipefail
-    menubar/scripts/build.sh release
-    rm -rf bin/MenubarHelper.app
-    cp -R menubar/dist/MenubarHelper.app bin/MenubarHelper.app
-    codesign --verify --deep --strict "bin/MenubarHelper.app"
-    xcrun stapler validate "bin/MenubarHelper.app"
-  ' || die "signed helper build failed"
 else
   # Nothing to do off a signing box: the tarball carries no helper bundle
   # (RUSH-3100), so `npm pack` neither wants nor gates on one.
@@ -407,14 +408,16 @@ green "Tarball at $DEST_DIR/$TGZ_NAME"
 # script existed (RUSH-2749). The manifest is a SINGLE file per store dir,
 # carried forward across producer runs: a helper whose input digest still
 # matches the recorded one keeps its already-attested record untouched; one
-# that drifted is only re-recorded when a freshly built+signed asset for it
-# is actually on disk in this worktree. This producer builds/signs menubar
-# itself (the Darwin block above); computer-mac is signed by the
-# separate native/computer-mac release path
-# (scripts/publish-computer-helper-mac.sh) and is never rebuilt here, so a
-# drifted computer-mac digest with no prior record to carry forward fails
-# closed with the exact command to run, rather than shipping a stale or
-# missing helper record.
+# that drifted is re-recorded from its PUBLISHED release -- nothing is built
+# here. computer-mac is signed by the separate native/computer-mac release path
+# (scripts/publish-computer-helper-mac.sh), so a drifted computer-mac digest
+# with no prior record to carry forward fails closed with the exact command to
+# run unless the published release proves it was built from this source.
+# menubar has no source in this repo at all (phnx-labs/agi-menu, PHNX-4036):
+# its input is the floor pin in src/lib/helper-versions.ts, and a drift means
+# the floor moved, so it is re-recorded from the published menubar/v<floor>
+# asset (sha256-verified by scripts/stage-menubar-helper.sh --fetch-only) or
+# fails closed when that release is missing or corrupt.
 # The newest release that carries a helper manifest, falling back to the newest
 # release overall.
 #
@@ -548,6 +551,42 @@ if [[ "$WITH_HELPERS" == true && -x scripts/release-manifest.sh ]]; then
     green "Recorded computer-mac from published $tag (input ${want_digest#sha256:}, asset ${got_sha:0:12})"
   }
 
+  # PHNX-4036: menubar is recorded from its PUBLISHED release, the same way
+  # computer-mac is -- but with no source-digest sidecar to compare, because the
+  # source is not in this repo. The proof chain is instead: the floor in
+  # src/lib/helper-versions.ts names one immutable tag; stage-menubar-helper.sh
+  # downloads that tag's asset and refuses a sha256 that differs from the tag's
+  # own .sha256; the recorded assetDigest is the sha of those bytes; and the
+  # optional `source` field carries the release's menubar-source.txt provenance
+  # (repo/commit/tag) when the release has one. A missing or corrupt release
+  # fails closed naming the agi-menu publish step.
+  record_menubar_from_published() {
+    local want_digest="$1" info floor tag zip sha url source
+    [[ -x scripts/stage-menubar-helper.sh ]] \
+      || die "helper menubar input changed but scripts/stage-menubar-helper.sh is missing from this tree -- cannot record the published helper"
+    info="$(scripts/stage-menubar-helper.sh --fetch-only --json --download-dir "$WT/.mb-helper-dl")" \
+      || die "helper menubar input changed and the published release could not be fetched/verified (see above) -- publish the helper from phnx-labs/agi-menu ('agents secrets exec apple.com -- scripts/release.sh <x.y.z>' there), point the menubar floor in src/lib/helper-versions.ts at it, then re-run this producer"
+    floor="$(jq -r .floor <<<"$info")"
+    tag="$(jq -r .tag <<<"$info")"
+    zip="$(jq -r .zip <<<"$info")"
+    sha="$(jq -r .sha256 <<<"$info")"
+    url="$(jq -r .assetUrl <<<"$info")"
+    source="$(jq -c .source <<<"$info")"
+    [[ -f "$zip" && "$sha" =~ ^[0-9a-f]{64}$ ]] \
+      || die "stage-menubar-helper.sh reported no verified asset for $tag: $info"
+    local put_args=(--file "$MANIFEST_FILE" --helper menubar
+      --helper-version "$floor" --input-digest "$want_digest"
+      --asset-digest "sha256:$sha" --asset-path "$zip" --asset-url "$url" --platform darwin)
+    [[ "$source" == "null" ]] || put_args+=(--source "$source")
+    scripts/release-manifest.sh put "${put_args[@]}" >/dev/null \
+      || die "failed to record menubar in the manifest"
+    if [[ "$source" == "null" ]]; then
+      green "Recorded menubar from published $tag (asset ${sha:0:12}; release carries no menubar-source.txt)"
+    else
+      green "Recorded menubar from published $tag (asset ${sha:0:12}, source $(jq -r '"\(.repo)@\(.commit)"' <<<"$source"))"
+    fi
+  }
+
   for helper in computer-mac menubar; do
     helper_digest="$(scripts/release-manifest.sh input-digest --repo-root "$WT" --helper "$helper")" \
       || die "could not compute input digest for helper $helper"
@@ -556,24 +595,12 @@ if [[ "$WITH_HELPERS" == true && -x scripts/release-manifest.sh ]]; then
       gray "helper $helper unchanged (${helper_digest#sha256:}) -- carrying forward its attested record"
       continue
     fi
-
+    # Neither helper is ever built here -- each is recorded from its published,
+    # verified release, or fails closed inside its function.
     case "$helper" in
-      menubar)  asset="bin/MenubarHelper.app/Contents/MacOS/AGI Menu" ;;
-      computer-mac)
-        # Never rebuilt here -- record it from its published, source-verified release
-        # (or fail closed). Fully handled in the function; skip the generic asset+put.
-        record_computer_mac_from_published "$helper_digest"
-        continue
-        ;;
+      computer-mac) record_computer_mac_from_published "$helper_digest" ;;
+      menubar) record_menubar_from_published "$helper_digest" ;;
     esac
-    [[ -f "$asset" ]] \
-      || die "helper $helper input changed but no freshly signed asset at '$asset' -- run this producer on a macOS signing box"
-    asset_digest="sha256:$(manifest_asset_sha256 "$asset")"
-    scripts/release-manifest.sh put --file "$MANIFEST_FILE" --helper "$helper" \
-      --helper-version "$CLI_VERSION_MANIFEST" --input-digest "$helper_digest" \
-      --asset-digest "$asset_digest" --asset-path "$asset" --platform darwin \
-      >/dev/null || die "failed to record helper $helper in the manifest"
-    green "Recorded fresh $helper record (input ${helper_digest#sha256:})"
   done
   green "Manifest at $MANIFEST_FILE"
 else

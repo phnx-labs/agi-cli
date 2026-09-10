@@ -1,26 +1,22 @@
 #!/usr/bin/env bash
 #
-# prepack gate for the macOS menu-bar helper.
+# Bundle gate for the macOS menu-bar helper staged at bin/MenubarHelper.app.
 #
-# The npm `build` script copies bin/MenubarHelper.app into dist only when the
-# bundle is present:  [ -d 'bin/MenubarHelper.app' ] && cp -R ... || true
-# That `|| true` means a release run WITHOUT the staged app silently ships the
-# menubar CODE but no .app — and on every user machine `agents menubar enable`
-# then reports "no bundle ships" and the auto-enable no-ops. 1.20.22 shipped
-# exactly this way. This gate fails the pack so it can't happen again.
+# The bundle is the PUBLISHED AGI Menu release (source: phnx-labs/agi-menu),
+# put in place by scripts/stage-menubar-helper.sh, which runs this gate after
+# extraction; scripts/remote-sign-mac.sh pulls the same staged bundle back from
+# the home base. The tarball has not shipped the bundle since RUSH-3100, so this
+# is no longer a prepack gate -- it is what proves a staged bundle is the real,
+# shippable helper and not a stale or dev artifact.
 #
-# Unlike the keychain helper we don't pin a sha: the app is rebuilt freely, so a
-# pinned sha would false-positive on every rebuild. Presence + a valid signature
+# We don't pin a sha: every helper release is a freshly signed bundle, so a
+# pinned sha would false-positive on every release. Presence + a valid signature
 # + a stapled notarization ticket catches the real failure modes (a missing or
-# corrupt bundle, or an un-notarized cut Gatekeeper rejects as "damaged") without
-# blocking routine rebuilds.
+# corrupt bundle, or an un-notarized cut Gatekeeper rejects as "damaged").
 #
-# prepack runs at `npm pack` / `npm publish` time. That used to be macOS-only,
-# but RUSH-3026 lets release-attestation-produce.sh pack the pretested tarball
-# on a Linux crabbox too (seeding an already-signed bundle from the caller
-# checkout when it isn't building helpers itself) — so this gate MUST hold on
-# both platforms with no soft-skip, which is exactly what let 1.22.44 ship
-# broken (RUSH-3031, see below).
+# This gate MUST hold on both platforms with no soft-skip: a Linux box can stage
+# (--fetch-only) and inspect the bundle too, and a silent no-op off-Mac is
+# exactly what let 1.22.44 ship broken (RUSH-3031, see below).
 
 set -euo pipefail
 
@@ -30,16 +26,15 @@ APP="bin/MenubarHelper.app"
 
 if [ ! -d "$APP" ]; then
   echo "menubar helper missing: $APP not found" >&2
-  echo "Build and stage it before releasing:" >&2
-  echo "  menubar/scripts/build.sh release" >&2
-  echo "  cp -R menubar/dist/MenubarHelper.app bin/MenubarHelper.app" >&2
+  echo "Stage the published helper (source lives in phnx-labs/agi-menu; this repo never builds it):" >&2
+  echo "  scripts/stage-menubar-helper.sh" >&2
   exit 1
 fi
 
 if command -v codesign >/dev/null 2>&1; then
   if ! codesign --verify --deep --strict "$APP" 2>/dev/null; then
     echo "menubar helper failed codesign --verify --deep --strict: $APP" >&2
-    echo "Rebuild it: menubar/scripts/build.sh release" >&2
+    echo "Re-stage the published bundle: scripts/stage-menubar-helper.sh" >&2
     exit 1
   fi
 
@@ -67,17 +62,15 @@ if command -v codesign >/dev/null 2>&1; then
     echo "menubar helper designated requirement is missing the Developer ID team ($MENUBAR_TEAM_ID): $APP" >&2
     echo "That team is what makes the requirement stable across re-signed releases; without it every" >&2
     echo "existing Accessibility grant is invalidated and users are re-prompted. Sign with the real" >&2
-    echo "Developer ID Application: … ($MENUBAR_TEAM_ID) identity: menubar/scripts/build.sh release" >&2
+    echo "Developer ID Application: … ($MENUBAR_TEAM_ID) identity (phnx-labs/agi-menu scripts/release.sh)." >&2
     echo "Requirement read: ${REQ:-<none>}" >&2
     exit 1
   fi
 fi
 
-# Require the packed executable to be a universal (fat) Mach-O binary.
-# menubar/scripts/build.sh's `release` mode always lipo's arm64+x86_64
-# together (a THIN single-arch build is a debug/dev artifact — see its
-# comment "so a release cut on a machine without full Xcode still ships a
-# TRUE universal menu-bar helper"). RUSH-3031's shipped 1.22.44 binary was
+# Require the staged executable to be a universal (fat) Mach-O binary.
+# agi-menu's release build always lipo's arm64+x86_64 together (a THIN
+# single-arch build is a debug/dev artifact). RUSH-3031's shipped 1.22.44 binary was
 # Dev-ID signed but thin (CodeDirectory hashes=47 vs the correct universal
 # build's hashes=390) — a dev slice packed in place of a real release build.
 # The Mach-O fat header's magic bytes (0xCAFEBABE / 0xCAFEBABF, `lipo -create`
@@ -99,20 +92,22 @@ case "$MAGIC" in
   *)
     echo "menubar helper is a THIN (single-arch) binary, not the universal build a release requires: $BIN (magic: 0x$MAGIC)" >&2
     echo "This is the other half of the RUSH-3031 incident (1.22.44 shipped a thin, dev-signed helper)." >&2
-    echo "Rebuild it: menubar/scripts/build.sh release" >&2
+    echo "Re-stage the published bundle: scripts/stage-menubar-helper.sh" >&2
     exit 1
     ;;
 esac
 
-# Require a stapled notarization ticket. build.sh notarizes + staples every
-# Developer-ID build; the ticket is a file inside the bundle, so it survives npm.
-# Refuse to pack an un-notarized helper — Gatekeeper rejects it as "damaged" on
-# macOS 26+, and the install path has no re-sign fallback to paper over it.
+# Require a stapled notarization ticket. agi-menu's build notarizes + staples
+# every Developer-ID build; the ticket is a file inside the bundle, so it
+# survives the zip round-trip. Refuse an un-notarized helper — Gatekeeper
+# rejects it as "damaged" on macOS 26+, and the install path has no re-sign
+# fallback to paper over it.
 if command -v xcrun >/dev/null 2>&1; then
   if ! xcrun stapler validate "$APP" >/dev/null 2>&1; then
     echo "menubar helper is not notarized/stapled: $APP" >&2
-    echo "Rebuild it with Developer ID + apple.com creds so it notarizes:" >&2
-    echo "  agents secrets exec apple.com -- menubar/scripts/build.sh release" >&2
+    echo "Re-stage the published bundle (scripts/stage-menubar-helper.sh); if the published" >&2
+    echo "release itself is unstapled, cut a new one from phnx-labs/agi-menu:" >&2
+    echo "  agents secrets exec apple.com -- scripts/release.sh <x.y.z>   (in agi-menu)" >&2
     exit 1
   fi
 else
@@ -127,8 +122,7 @@ else
   if [ ! -f "$APP/Contents/CodeResources" ]; then
     echo "menubar helper has NO stapled notarization ticket (Contents/CodeResources missing): $APP" >&2
     echo "This is what shipped broken in 1.22.44 -- Gatekeeper rejects the bundle on every Mac." >&2
-    echo "Seed a notarized bundle (e.g. from the last good published tarball's dist/lib/menubar/)," >&2
-    echo "or rebuild on a Mac: agents secrets exec apple.com -- menubar/scripts/build.sh release" >&2
+    echo "Stage the published, notarized bundle on a Mac: scripts/stage-menubar-helper.sh" >&2
     exit 1
   fi
 fi

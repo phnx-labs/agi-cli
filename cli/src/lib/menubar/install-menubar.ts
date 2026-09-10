@@ -43,8 +43,8 @@ const SERVICE_LABEL_BASE = 'com.phnx-labs.agents-menubar';
  * (`SERVICE_LABEL_BASE`, `MENUBAR_HELPER_BUNDLE_ID` in download-menubar.ts) —
  * those are what keep the existing Accessibility grant alive across upgrades.
  * Every basename-matching check reads this constant rather than re-deriving
- * the string; the Swift side has its own equal in
- * `menubar/Sources/MenubarHelper/HelperIdentity.swift`.
+ * the string; the Swift side (phnx-labs/agi-menu,
+ * `Sources/MenubarHelper/HelperIdentity.swift`) has its own equal.
  */
 export const MENUBAR_HELPER_EXECUTABLE_NAME = 'AGI Menu';
 
@@ -69,8 +69,9 @@ export function serviceLabel(): string {
  * respawn rate while staying well inside "the menu bar came back on its own".
  *
  * This only paces the restarts. What actually stops the pile-up is the helper
- * bounding and group-killing its own children (menubar/Sources/MenubarHelper/
- * ChildProcess.swift); the two are complementary, not alternatives.
+ * bounding and group-killing its own children (agi-menu's
+ * `Sources/MenubarHelper/ChildProcess.swift`); the two are complementary, not
+ * alternatives.
  */
 const MENUBAR_THROTTLE_SECONDS = 30;
 
@@ -104,7 +105,7 @@ function installedVersionMarkerPath(): string {
  *
  * `source` matters because the two install paths have different notions of
  * "changed": a release bundle is identified by its helper version, while a local
- * dev build has none (menubar/scripts/build.sh hardcodes CFBundleShortVersionString),
+ * dev build has none (agi-menu's build.sh hardcodes CFBundleShortVersionString),
  * so it is identified by the source path + mtime it was copied from.
  */
 /** Version label for a bundle that has none of its own (a local dev build). */
@@ -181,9 +182,10 @@ export function menubarServiceInstalled(): boolean {
 /**
  * Locate the source `.app` shipped alongside the compiled JS.
  *   1. dist/lib/menubar/MenubarHelper.app — npm install layout (sibling of this file)
- *   2. <repo>/bin/MenubarHelper.app       — raw working tree (tsx/dev)
- *   3. cli/menubar/dist/MenubarHelper.app — fresh local build
- *   4. <on-disk install>/dist/lib/menubar/MenubarHelper.app — Bun single-file
+ *   2. <repo>/bin/MenubarHelper.app       — raw working tree (tsx/dev): the
+ *      published bundle staged by scripts/stage-menubar-helper.sh, or a build
+ *      copied in from a phnx-labs/agi-menu checkout
+ *   3. <on-disk install>/dist/lib/menubar/MenubarHelper.app — Bun single-file
  *      binary: `import.meta.url` is a virtual `/$bunfs/` path, so the sibling
  *      candidates above can't see the on-disk bundle; recover it via the
  *      `agents` launcher symlink.
@@ -194,9 +196,6 @@ function sourceAppPath(): string | null {
     const here = path.dirname(fileURLToPath(import.meta.url));
     candidates.push(path.join(here, APP_BUNDLE_NAME));
     candidates.push(path.resolve(here, '..', '..', '..', 'bin', APP_BUNDLE_NAME));
-    candidates.push(
-      path.resolve(here, '..', '..', '..', 'menubar', 'dist', APP_BUNDLE_NAME)
-    );
   } catch {
     /* import.meta.url unavailable */
   }
@@ -262,10 +261,11 @@ export function codesignVerifies(appPath: string): boolean {
  * A Developer-ID-signed but un-notarized app is rejected by `spctl --assess`,
  * which macOS surfaces as "the app is damaged" and can crash AppKit during
  * launch. This is separate from `codesign --verify`: a signature can be valid
- * while Gatekeeper still refuses to run it. The release notarizes + staples the
- * helper (menubar/scripts/build.sh, gated by verify-menubar-helper.sh), so a
- * shipped bundle passes this; the launch guards use it to fail loud rather than
- * bootstrap a helper macOS would reject.
+ * while Gatekeeper still refuses to run it. The helper's own release
+ * (phnx-labs/agi-menu scripts/release.sh) notarizes + staples it and this repo's
+ * stage-menubar-helper.sh re-verifies it, so a shipped bundle passes this; the
+ * launch guards use it to fail loud rather than bootstrap a helper macOS would
+ * reject.
  */
 export function gatekeeperAssesses(appPath: string): boolean {
   const r = spawnSync('spctl', ['--assess', '--type', 'exec', appPath], { stdio: ['ignore', 'ignore', 'ignore'] });
@@ -769,7 +769,7 @@ export function disableMenubarService(): void {
  * There is deliberately NO content comparison here. Comparing the shipped helper
  * against the installed one cannot distinguish "real upgrade" from "another
  * install's copy": the helper is rebuilt, re-signed and re-notarized on every
- * release (`menubar/scripts/build.sh` via `release.sh`), so consecutive releases
+ * helper release (phnx-labs/agi-menu scripts/release.sh), so consecutive releases
  * ship byte-different bundles from identical Swift source — 1.22.20/21/22 all
  * have the same 2876288-byte executable and three different sha256s AND three
  * different CDHashes. Any digest gate therefore reports "changed" for exactly
@@ -1003,7 +1003,7 @@ export function shouldMigrateMenubarTcc(opts: {
  * Reset the stale Accessibility grant TCC recorded against the pre-migration
  * ad-hoc identity, then stamp the marker so this never runs again on this
  * machine. Targets `SERVICE_LABEL_BASE` — the bundle's actual
- * `CFBundleIdentifier`/codesign `--identifier` (menubar/scripts/build.sh) that
+ * `CFBundleIdentifier`/codesign `--identifier` (set by agi-menu's build.sh) that
  * TCC keys grants to — not the namespaced `serviceLabel()`, which exists only
  * to keep launchd job labels apart under a redirected HOME (RUSH-2639) and is
  * never the app's real identity. Best-effort: a missing/failing `tccutil`

@@ -1438,7 +1438,7 @@ src/
     cloud/             # Provider registry (Rush / Codex / Factory / Antigravity)
     teams/             # `agents teams` orchestration
     computer/          # `agents computer` client (computer-rpc.ts openComputerClient() transport switch → native/computer-mac Unix socket / native/computer-win TCP over ssh -L / rfb-client.ts RFB-VNC desktop; des.ts is the pure-JS DES for VNC auth) plus dispatch/download/loop
-    menubar/           # Menu-bar helper installer (source in ../menubar)
+    menubar/           # AGI Menu installer/downloader/snapshot (the helper's SOURCE is phnx-labs/agi-menu, PHNX-4036)
     profiles.ts        # Host CLI + endpoint + model bundles
 ```
 
@@ -1564,16 +1564,16 @@ downloads, verifies, and manages its own signed helper release now, off
 
 | Helper | Source | Ships in tarball? | Resolver |
 |---|---|---|---|
-| Menu-bar helper | [`menubar/`](menubar) (SwiftPM) → `bin/MenubarHelper.app` | **No** (RUSH-3100) — signed + notarized `MenubarHelper.app.zip` GitHub **release asset** on the helper's own `menubar/v<x.y.z>` tag, downloaded on demand | `src/lib/menubar/install-menubar.ts`, `src/lib/menubar/download-menubar.ts` (shared machinery in `src/lib/helper-download.ts`) |
+| Menu-bar helper (AGI Menu) | [phnx-labs/agi-menu](https://github.com/phnx-labs/agi-menu) (own repo, PHNX-4036) — never built here; `scripts/stage-menubar-helper.sh` stages the published build at `bin/MenubarHelper.app` | **No** (RUSH-3100) — signed + notarized `MenubarHelper.app.zip` GitHub **release asset** on the helper's own `menubar/v<x.y.z>` tag, downloaded on demand | `src/lib/menubar/install-menubar.ts`, `src/lib/menubar/download-menubar.ts` (shared machinery in `src/lib/helper-download.ts`) |
 | Standalone CLI binary | `src/` → `bun build --compile` → `bin/agents-macos` | **No** — dropped from the tarball (RUSH-3026); macOS installs fall back to the JS entrypoint until it returns as a per-release GitHub asset | `scripts/postinstall.js` |
 | computer-mac | [`../../native/computer-mac`](../../native/computer-mac) | No — signed + notarized GitHub **release asset** on its own `computer-mac/v<x.y.z>` tag, downloaded on demand | `src/lib/computer/computer-rpc.ts`, `src/lib/computer/download.ts` (shared machinery in `src/lib/helper-download.ts`) |
 | computer-win | [`../../native/computer-win`](../../native/computer-win) | No — `computer-helper-win.exe` GitHub **release asset** on its own `computer-win/v<x.y.z>` tag, downloaded on demand | `src/lib/computer/ssh-tunnel.ts` |
 
 Path math: compiled resolvers run from `cli/dist/lib/…`. Files still in `dist/lib/`
 reach repo-root `native/` in **4 hops** (`../../../../native/…`); files in
-`dist/lib/computer/` need **5 hops**. The co-located `menubar/` is **3 hops up**
-(`../../../menubar/dist/…`) because it moved into `cli` with the CLI. Recompute
-depth if you move files — don't blind-replace.
+`dist/lib/computer/` need **5 hops**; the menu-bar installer reaches the staged
+`cli/bin/MenubarHelper.app` in **3 hops** (`../../../bin/…`). Recompute depth if
+you move files — don't blind-replace.
 
 ## Build, test, dev
 
@@ -1905,9 +1905,11 @@ already-versioned package.
 
 **`scripts/remote-sign-mac.sh` is no longer on the release path.** The privileged
 phase builds signed artifacts directly on the home base. The script remains only
-for the narrow case of building + pulling back JUST the signed macOS artifacts from
-another Mac (no publish); it takes the same `--device <name>` flag as `release.sh`
-(default `mac-mini`), with no other env knobs or fleet discovery.
+for the narrow case of producing + pulling back JUST the macOS artifacts from
+another Mac (no publish): it signs the standalone CLI binary there and **stages the
+published menu-bar helper** (`scripts/stage-menubar-helper.sh`, no build — see
+below); it takes the same `--device <name>` flag as `release.sh` (default
+`mac-mini`), with no other env knobs or fleet discovery.
 
 **Provisioning the `apple.com` bundle on a headless sign host.** A Linux-driven
 release offloads macOS signing to a sign host over SSH, which needs the `apple.com`
@@ -1933,13 +1935,13 @@ Mac.** The bundle is gone from the tarball, and the keychain helper itself
 moved out of this repo entirely with the standalone `secrets` engine — it is
 no longer built, signed, or verified anywhere here.
 [`scripts/verify-menubar-helper.sh`](scripts/verify-menubar-helper.sh) remains
-the right gate for that helper's own release; it never blocked the CLI
-tarball. Rebuild a helper only when its own sources change; the input digest in
+the gate for a staged `bin/MenubarHelper.app` (`stage-menubar-helper.sh` runs it
+after extraction); it never blocked the CLI tarball. A helper is re-recorded only
+when its own input changes; the input digest in
 [`scripts/release-manifest.sh`](scripts/release-manifest.sh) is what decides that.
 
 **computer-mac records itself from its published release, not a local rebuild
-(PHNX-2943).** Unlike keychain/menubar (which this producer builds+signs in the
-Darwin block), `computer-mac` is signed on the separate
+(PHNX-2943).** `computer-mac` is signed on the separate
 [`scripts/publish-computer-helper-mac.sh`](scripts/publish-computer-helper-mac.sh)
 path and is never rebuilt in `release-attestation-produce.sh`. When its source
 drifts, the producer records the **published** `computer-mac/v<floor>` binary — but
@@ -1953,59 +1955,73 @@ new source digest to an unproven binary. Before this, the producer just died on
 drift and the publish script recorded nothing, so the "republish then re-run"
 advice looped forever (hit live cutting 1.22.43).
 
-**Menu-bar helper** ([`menubar/`](menubar) → `bin/MenubarHelper.app`) is built and
-verified the same way — built into `bin/`, published as a release asset on its own
-`menubar/v<x.y.z>` tag, gated when that asset is cut by
-by [`scripts/verify-menubar-helper.sh`](scripts/verify-menubar-helper.sh) (presence +
-`codesign --verify` + a **stapled notarization ticket** + a **designated-requirement
-pin**). The DR pin is what keeps the Accessibility grant alive across upgrades:
-macOS re-validates each new version against the requirement stored with the grant
-(`identifier "com.phnx-labs.agents-menubar" … certificate leaf[subject.OU] =
-"2HTP252L87"`), not the CDHash — so every re-signed release still satisfies it and
-the grant persists. The gate hard-fails a release whose DR drops the pinned bundle
-id or Team ID (a wrong/absent team, an ad-hoc signature, a CDHash-pinned DR), because
-that would silently revoke every user's grant and re-prompt them on the next paste.
-The compiled executable INSIDE the bundle is named **"AGI Menu"**
-(`menubar/Package.swift`'s `products:` entry — RUSH-3101), separately from the
-bundle FOLDER, which keeps its historical name `MenubarHelper.app`. Before this,
-launchd's `ProgramArguments` exec'd the bundle's Mach-O directly
-(`installedExecutablePath()` in `install-menubar.ts`), bypassing LaunchServices
-name resolution, so macOS fell back to `CFBundleExecutable` — which read
-`MenubarHelper` — for both the Accessibility list row and the "would like to
-control this computer" prompt. Renaming ONLY the executable (not the bundle id,
-Team ID, or designated requirement above) fixes the label without touching what
-keeps the existing grant alive. Every basename-matching check moved together:
-`classifyMenubarProcesses` / `installedExecutablePath` (`install-menubar.ts`),
-`SingleInstance.swift`'s `liveHelperOwnsLock`, and the `HelperIdentity.swift`
-constant the Swift side reads it from.
-It is Developer-ID signed
-**and notarized + stapled** ([`menubar/scripts/build.sh`](menubar/scripts/build.sh),
-run inside the release's `agents secrets exec apple.com` context): Gatekeeper on
-macOS 26+ rejects an un-notarized `.app` as "damaged" (crashing AppKit at launch),
-and the stapled ticket rides inside the bundle so it survives npm's tarball
-round-trip — so the installed helper launches with **no per-machine re-signing**
-(the old `install-menubar.ts` ad-hoc re-sign band-aid is gone; the launch guards now
-verify Gatekeeper acceptance and fail loud instead — RUSH-2134). Notarization is
-mandatory for any real (Developer-ID) build; an ad-hoc dev build can't be notarized
-and the prepack gate refuses to pack it. Keep it a **separate bundle** from the
-keychain app — a menu-bar crash must never take down the secret broker. Stage a
-freshly-built `bin/MenubarHelper.app` before any release or the menu bar ships
-code-only (the 1.20.22 bug the gate prevents).
+**Menu-bar helper (AGI Menu) — consumed from its published release, never built
+here (PHNX-4036).** The helper's source moved to
+[phnx-labs/agi-menu](https://github.com/phnx-labs/agi-menu) (private,
+history-preserving split of the old `cli/menubar/`), the same shape as the AGI EXT
+split (RUSH-3189). The cross-repo contract is short and lives in
+[`docs/menubar.md`](docs/menubar.md):
+
+- **Asset + address.** agi-menu's `scripts/release.sh <x.y.z>` builds, Developer-ID
+  signs, notarizes + staples the bundle and uploads `MenubarHelper.app.zip`,
+  `MenubarHelper.app.zip.sha256`, and a `menubar-source.txt` provenance sidecar
+  (`repo=`/`commit=`/`tag=`/`version=`) to the release tag **`menubar/v<x.y.z>`
+  on THIS public repo** — exactly the URL `src/lib/helper-download.ts`
+  (`HELPER_RELEASE_REPO`) + `src/lib/menubar/download-menubar.ts` resolve. That
+  address, the bundle folder name `MenubarHelper.app`, the executable name
+  `"AGI Menu"`, the bundle id `com.phnx-labs.agents-menubar`, and the Team
+  `2HTP252L87` are the contract; changing any of them on either side breaks
+  every installed CLI or revokes every user's Accessibility grant.
+- **The floor is the pin.** `menubar` in
+  [`src/lib/helper-versions.ts`](src/lib/helper-versions.ts) names the build this
+  CLI was tested against; bump it after agi-menu publishes. It is also the
+  helper's manifest **input** (`release-manifest.sh` hashes that file for
+  `menubar`), so a floor bump is what makes `release-attestation-produce.sh
+  --with-helpers` re-record the row — from the published asset, sha256-verified,
+  with the sidecar's provenance as `source` — and a missing or corrupt release
+  fails closed naming the agi-menu publish step. Nothing rebuilds.
+- **Staging.** [`scripts/stage-menubar-helper.sh`](scripts/stage-menubar-helper.sh)
+  downloads `menubar/v<floor>`, verifies the sha256, and on macOS extracts it to
+  `bin/MenubarHelper.app` behind `codesign --verify --deep --strict`,
+  `spctl --assess --type execute`, and
+  [`scripts/verify-menubar-helper.sh`](scripts/verify-menubar-helper.sh)
+  (**designated-requirement pin** + universal binary + stapled ticket).
+  `--fetch-only` downloads + sha-verifies on any OS (what the producer uses);
+  `--json` reports `{floor, tag, assetUrl, zip, sha256, source, app}`.
+  `remote-sign-mac.sh` runs it on the home base. `bin/MenubarHelper.app` is the
+  installer's working-tree source (`sourceAppPath()` in `install-menubar.ts`);
+  an agi-menu developer copies a local build there to test it with this CLI.
+- **The DR pin is what keeps the Accessibility grant alive across upgrades.**
+  macOS re-validates each new version against the requirement stored with the
+  grant (`identifier "com.phnx-labs.agents-menubar" … certificate
+  leaf[subject.OU] = "2HTP252L87"`), not the CDHash — so every re-signed release
+  still satisfies it. The gate hard-fails a bundle whose DR drops the pinned
+  bundle id or Team ID (a wrong/absent team, an ad-hoc signature, a CDHash-pinned
+  DR), because that would silently revoke every user's grant and re-prompt them
+  on the next paste. Gatekeeper on macOS 26+ rejects an un-notarized `.app` as
+  "damaged", so the launch guards verify Gatekeeper acceptance and fail loud
+  (RUSH-2134) — there is no per-machine re-sign.
+- **What stays here** is the CLI side only: install/heal/status/setup
+  (`src/lib/menubar/install-menubar.ts`), download + verification
+  (`download-menubar.ts`, `helper-download.ts`), the read-only snapshot the helper
+  polls (`agents menubar snapshot --json`, `src/lib/menubar/snapshot.ts`), and
+  desktop notification delivery (`notify-desktop.ts`). Helper behavior — the
+  single-instance `flock`, the bounded `ChildProcess` spawner, the self-tests
+  that gate its build — is documented in agi-menu's `docs/menubar.md`.
 
 **Exactly one status item is an invariant, enforced in the helper.** The bundle
 can be started from more than one place — launchd's `KeepAlive` service, a
 LaunchServices/`open` launch, a second `agents menubar enable` — so the helper
-takes an `flock` on `~/.agents/.cache/state/menubar.lock` at launch
-([`SingleInstance.swift`](menubar/Sources/MenubarHelper/SingleInstance.swift)) and
-holds the descriptor for its lifetime; a loser surfaces the incumbent's menu and
-exits 0. Do NOT re-derive liveness from a pid file or a `ps` scan — the kernel
-releases an `flock` however the holder dies, which a pid cannot express, and a
-process list cannot say which copy launchd will keep alive. On the CLI side,
-`classifyMenubarProcesses` returns live copies of the installed bundle as a LIST
-(`own`), never a boolean: collapsing them is what let a duplicate icon read as a
-healthy `running: yes`. `agents menubar setup` is the recovery path — it ends
-every live helper and re-kickstarts the service so the survivor is always
-launchd's.
+takes an `flock` on `~/.agents/.cache/state/menubar.lock` at launch (agi-menu's
+`SingleInstance.swift`) and holds the descriptor for its lifetime; a loser
+surfaces the incumbent's menu and exits 0. Do NOT re-derive liveness from a pid
+file or a `ps` scan — the kernel releases an `flock` however the holder dies,
+which a pid cannot express, and a process list cannot say which copy launchd will
+keep alive. On the CLI side, `classifyMenubarProcesses` returns live copies of
+the installed bundle as a LIST (`own`), never a boolean: collapsing them is what
+let a duplicate icon read as a healthy `running: yes`. `agents menubar setup` is
+the recovery path — it ends every live helper and re-kickstarts the service so
+the survivor is always launchd's.
 
 **Only the install that OWNS the helper may reinstall it.** The startup self-heal
 (`installMenubarLaunchAgentOnUpgrade`, every darwin invocation) reinstalls when the
@@ -2043,7 +2059,7 @@ result as "damaged" (RUSH-2134) AND poisons the shipped helper's Accessibility
 grant — an ad-hoc signature carrying the production bundle id fails the code
 requirement macOS stored with the grant, so it revokes the grant and re-prompts on
 the next paste. This is why a dev build ALSO signs under a distinct
-`com.phnx-labs.agents-menubar.dev` id (`menubar/scripts/build.sh`), so even a
+`com.phnx-labs.agents-menubar.dev` id (agi-menu's `scripts/build.sh`), so even a
 running dev helper registers its own TCC entry rather than the production one.
 Refusing an ad-hoc healthy-helper takeover strands nothing: escape (1) still heals
 a genuinely broken (missing / ad-hoc-installed) helper from any source, which is
@@ -2059,8 +2075,8 @@ make an older executable use the atomic installer it predates.
 
 **Do NOT "improve" this by comparing bundle content.** It looks like the obvious
 gate and it does not work: the helper is rebuilt, re-signed and re-notarized on
-every release (`menubar/scripts/build.sh` via `release.sh`), so consecutive
-releases ship byte-different bundles from identical Swift source. Measured on
+every helper release (agi-menu's `scripts/release.sh`), so consecutive releases
+ship byte-different bundles from identical Swift source. Measured on
 1.22.20/21/22 — same 2876288-byte executable, three different sha256s, and three
 different **CDHashes** (so stripping the CMS/timestamp blob doesn't rescue it
 either). Any digest gate reports "changed" for precisely the skew case it was
@@ -2070,102 +2086,6 @@ multi-install failure and answered it differently, by keeping a *hot* broker ali
 across version skew (`shouldTeardownVersionSkewedBroker`, the standalone `secrets` engine's own agent.ts;
 #435, PR #909) — same disease, and a third `KeepAlive` helper will need one of
 these two answers rather than a fresh rediscovery.
-
-**The lock fd is `O_CLOEXEC`, and `acquire` self-heals a stale lock.** The lock is
-opened `O_RDWR | O_CREAT | O_CLOEXEC` so no spawned child can inherit the
-descriptor — a pre-fix `doctor` child that inherited it and orphaned at PPID 1 held
-the flock forever, and every relaunch then read "already running" and exited, so
-the menu bar stayed dead until reboot. `O_CLOEXEC` is the fd-level guarantee across
-*every* spawn path: `ChildProcess.spawn` sets only `POSIX_SPAWN_SETPGROUP` (no
-close-on-exec default), and the bare-`Process` one-shots (`runDetached` /
-`runMonitored`) are meant to *outlive* the helper — so the flag on the fd, not the
-spawn site, is what keeps the lock out of every child. The helper never execs
-itself, so it keeps the fd for life. And when the flock is
-held but **no LIVE `"AGI Menu"` owns it** — the lock-file pid is dead, or belongs
-to some other program by reuse (`liveHelperOwnsLock` checks liveness + `proc_pidpath`
-basename) — `acquire` reaps the leaked orphan and retries the lock once, instead of
-surfacing into the deadlock. Only a genuine live incumbent is ever surfaced, so a
-duplicate launch never reaps a live helper's in-flight children (the reap is reached
-only when the holder is provably not a live helper).
-
-**Every CLI child the helper spawns is bounded, group-killable, and reapable.**
-The helper shells `agents` on a timer, and an unbounded `Process` there is not a
-slow menu — it is a machine-killer. `doctor --json` measures **136s on an idle
-box**, the poll asked for it every 60s, and a helper that dies mid-call leaves the
-child reparented to launchd with nothing to reap it (plus the `node -e` probes
-that child forked). The deaths are not preventable from inside the app:
-`NSApplication.shared` segfaults in `SLSNewConnection` when WindowServer is too
-starved to hand out a connection, and `KeepAlive` restarts into another doctor.
-Observed: 38 orphaned doctors + 92 orphaned probes, ~13 of 18 cores, load 490.
-**The property that made this fatal is accumulation, so the rule is scoped to
-what accumulates: every TIMER-DRIVEN, repeating CLI call MUST go through
-[`ChildProcess`](menubar/Sources/MenubarHelper/ChildProcess.swift)** — that is the
-`capture()` path behind the cached refreshers (`routines`, `recentSessions`,
-`activeSessions`, `doctorOverview`, `watchdog`). A poller is the only thing that
-can stack 38 copies of itself.
-
-**User-initiated one-shots deliberately do NOT** — `runDetached`,
-`runMonitored`, and `runMonitoredWithInput` keep a bare `Process` on purpose,
-because every one of their callers is a menu click (`routines run/pause`,
-`devices register`, `open <url>`, and the ticket-agent / quick-fix dispatches).
-Two reasons, and both would be violated by "bound everything": a deadline there
-would **kill the user's headless `agents run` mid-work**, and a fire-and-forget
-`open`/dispatch is *supposed* to outlive the helper. One click cannot stack, so
-there is nothing to accumulate. Do not "fix" these by routing them through
-`ChildProcess` — if a future caller makes one of them repeating, that caller is
-the bug.
-
-`ChildProcess` holds three invariants:
-
-- **Bounded.** Every spawn carries a deadline (30s; `ChildProcess.doctorTimeout`
-  180s for `doctor --json`, above its real measured cost — a ceiling set *below*
-  the true cost just makes every poll fail while still paying full CPU).
-- **Killed as a group.** The child is spawned as its own process-group leader
-  (`POSIX_SPAWN_SETPGROUP`) so a timeout `kill(-pgid)`s the subtree. Signalling
-  the pid alone is what left 92 probes running. Foundation's `Process` cannot set
-  a process group — that is why this is `posix_spawn` and not `Process`.
-- **Reaped by the NEXT launch.** Live children are recorded in
-  `~/.agents/.cache/state/menubar-children`; `reapOrphansFromPreviousLaunch()`
-  runs in `main.swift` **before** the first AppKit call, since the crash being
-  recovered from happens *inside* that call. Do NOT move it after, and do NOT
-  replace it with an exit handler — SIGSEGV runs none. The registry is a
-  versioned, `flock`-serialized document: a launch intent and unguessable
-  provenance token are persisted before `posix_spawn`, the token is inherited
-  through the child environment and carried in a group-leading supervisor's
-  argv (the process-table surface current macOS exposes), and PID/PGID/start-
-  time/resolved executable/argv complete the record immediately after spawn.
-  On the next launch, a token-marked PPID-1 process reconstructs an intent whose
-  helper died in that spawn-to-registration window. Reaping acknowledges entries
-  one at a time:
-  unreadable or identity-ambiguous live records remain durable, and a signalled
-  record is removed only after the process group is confirmed absent. A registry
-  read or write error fails loud and never becomes an empty successful read.
-  Legacy two-field records decode conservatively as unverifiable retained state.
-
-Poll intervals must stay well above the call's real cost:
-`StatusItemController.doctorRefreshInterval` is 15 min against a 136s command
-(it was 60s — a >100% duty cycle). `MENUBAR_CHILD_TEST=1 "AGI Menu"` exercises
-all of it against real processes, including reaping a real surviving orphan and
-proving a spawned child never inherits the single-instance flock fd.
-Separately, **`doctor --json` taking 136s on an idle machine is its own defect**
-— the helper is now safe against it, not a reason to consider it acceptable.
-
-**These self-tests are a build gate now, not just manual modes.** The helper's
-env-gated self-tests (`MENUBAR_GUARD_TEST`, `MENUBAR_ISSUE_TEST`,
-`MENUBAR_PROJECTS_TEST`, `MENUBAR_SINGLE_TEST`, `MENUBAR_CHILD_TEST`,
-`MENUBAR_ACTIVE_TEST`, `MENUBAR_ROUTINE_TEST`, `MENUBAR_DOCTOR_TEST`,
-`MENUBAR_DEVICE_TEST`) are headless — they exit before the
-AppKit path (`Guards.enforceForInteractiveLaunch`) so they need no GUI or signing.
-[`menubar/scripts/test-menubar.sh`](menubar/scripts/test-menubar.sh) runs every one against
-the just-built binary and [`build.sh`](menubar/scripts/build.sh) invokes it before
-signing, so no helper artifact ships whose invariants regressed. A mode that needs
-a per-login-session facility the runner may not have (the pasteboard server behind
-`MENUBAR_PROJECTS_TEST`'s paste/drop coverage) SKIPS that case with a printed
-reason rather than failing the build on the runner's limitation. Nothing ran these
-before — PR CI is Linux (can't build Swift) and prepack only checks the shipped
-bundle's signature — which is how the flock fd-inheritance deadlock escaped. Do NOT
-add `MENUBAR_DUMP` / `MENUBAR_PROMPT_PREVIEW` to the gate: those reach AppKit and
-need a GUI session.
 
 **Standalone `agents` binary (#315) — no longer in the tarball (RUSH-3026).**
 The signed arm64 Mach-O (`bun build --compile` → Developer ID + hardened runtime +

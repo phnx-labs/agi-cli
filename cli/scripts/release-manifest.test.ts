@@ -1,9 +1,15 @@
 /**
  * Helper release-manifest reuse, exercised against REAL helper inputs (no mocks).
  * A missing helper or an input-digest change must fail — there is no rebuild.
+ *
+ * Two helpers, two kinds of input. computer-mac's input is its Swift source in
+ * this repo. menubar's source lives in phnx-labs/agi-menu (PHNX-4036), so its
+ * input is the floor pin in cli/src/lib/helper-versions.ts — the one file that
+ * decides which published MenubarHelper.app.zip the CLI installs.
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -135,6 +141,88 @@ describeUnix('release-manifest.sh', () => {
     const stale = sh(['require', '--file', file, '--repo-root', REPO, '--helper', 'menubar']);
     expect(stale.status).not.toBe(0);
     expect(stale.out).toContain('outside the ordinary release path');
+  });
+
+  it("menubar's input digest is the floor pin: it moves with helper-versions.ts and nothing else", () => {
+    // A throwaway git repo (input-digest resolves --repo-root through git) that
+    // carries ONLY the floor table. No cli/menubar/ source exists anywhere any
+    // more, so hashing it would either fail or hash nothing.
+    const repo = tmp('rel-manifest-floor-');
+    const git = (...args: string[]) => {
+      const r = spawnSync('git', args, { cwd: repo, encoding: 'utf-8' });
+      if (r.status !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`);
+    };
+    git('init', '-q');
+    const table = path.join(repo, 'cli/src/lib/helper-versions.ts');
+    fs.mkdirSync(path.dirname(table), { recursive: true });
+    fs.writeFileSync(table, "export const HELPER_RELEASES = { menubar: { tagPrefix: 'menubar', floor: '1.1.0' } };\n");
+    const before = sh(['input-digest', '--repo-root', repo, '--helper', 'menubar']);
+    expect(before.status, before.out).toBe(0);
+    expect(before.out.trim()).toMatch(/^sha256:[0-9a-f]{64}$/);
+
+    // Something else in the tree changing must NOT move the digest...
+    fs.writeFileSync(path.join(repo, 'cli/src/lib/other.ts'), 'export const x = 1;\n');
+    expect(sh(['input-digest', '--repo-root', repo, '--helper', 'menubar']).out.trim()).toBe(before.out.trim());
+    // ...and a floor bump MUST, so the producer re-records from the new release.
+    fs.writeFileSync(table, "export const HELPER_RELEASES = { menubar: { tagPrefix: 'menubar', floor: '1.2.0' } };\n");
+    const bumped = sh(['input-digest', '--repo-root', repo, '--helper', 'menubar']);
+    expect(bumped.status, bumped.out).toBe(0);
+    expect(bumped.out.trim()).not.toBe(before.out.trim());
+    // A repo with no floor table at all cannot key the helper -- fail loud.
+    fs.rmSync(table);
+    const missing = sh(['input-digest', '--repo-root', repo, '--helper', 'menubar']);
+    expect(missing.status).not.toBe(0);
+    expect(missing.out).toContain('helper input missing');
+  });
+
+  it('put records the published-release provenance as `source` and copy-asset names the menubar zip', () => {
+    const dir = tmp('rel-manifest-menubar-');
+    const file = path.join(dir, 'manifest.json');
+    fs.writeFileSync(file, sh(['new', '--cli-version', '1.22.93', '--cli-tree', 'abc']).out);
+    const digest = sh(['input-digest', '--repo-root', REPO, '--helper', 'menubar']).out.trim();
+    const zip = path.join(dir, 'MenubarHelper.app.zip');
+    fs.writeFileSync(zip, 'published-zip-bytes');
+    const assetDigest = `sha256:${createHash('sha256').update(fs.readFileSync(zip)).digest('hex')}`;
+    const source = JSON.stringify({ repo: 'phnx-labs/agi-menu', commit: 'abc123', tag: 'v1.1.0', version: '1.1.0' });
+
+    // Provenance must be an object: a stray string would leave a reader guessing.
+    const bad = sh([
+      'put', '--file', file, '--helper', 'menubar', '--helper-version', '1.1.0',
+      '--input-digest', digest, '--asset-digest', assetDigest, '--asset-path', zip,
+      '--source', 'phnx-labs/agi-menu@abc123',
+    ]);
+    expect(bad.status).not.toBe(0);
+    expect(bad.out).toContain('--source must be a JSON object');
+
+    const put = sh([
+      'put', '--file', file, '--helper', 'menubar', '--helper-version', '1.1.0',
+      '--input-digest', digest, '--asset-digest', assetDigest, '--asset-path', zip,
+      '--asset-url', 'https://github.com/phnx-labs/agi-cli/releases/download/menubar/v1.1.0/MenubarHelper.app.zip',
+      '--source', source,
+    ]);
+    expect(put.status, put.out).toBe(0);
+    const rec = JSON.parse(sh(['resolve', '--file', file, '--helper', 'menubar']).out);
+    expect(rec.source).toEqual(JSON.parse(source));
+    expect(rec.helperVersion).toBe('1.1.0');
+
+    // A record without provenance (a pre-sidecar release) simply has no field.
+    const plain = path.join(dir, 'plain.json');
+    fs.writeFileSync(plain, sh(['new', '--cli-version', '1.22.93', '--cli-tree', 'abc']).out);
+    expect(sh([
+      'put', '--file', plain, '--helper', 'menubar', '--helper-version', '1.1.0',
+      '--input-digest', digest, '--asset-digest', assetDigest, '--asset-path', zip,
+    ]).status).toBe(0);
+    expect(JSON.parse(sh(['resolve', '--file', plain, '--helper', 'menubar']).out)).not.toHaveProperty('source');
+
+    // copy-asset attaches the ZIP the CLI downloads (never a bare .app directory).
+    const dest = path.join(dir, 'out');
+    const copied = sh(['copy-asset', '--file', file, '--helper', 'menubar', '--asset-path', dest]);
+    expect(copied.status, copied.out).toBe(0);
+    expect(copied.out.trim()).toBe(path.join(dest, 'MenubarHelper.app.zip'));
+    expect(fs.readFileSync(copied.out.trim(), 'utf-8')).toBe('published-zip-bytes');
+    expect(fs.readFileSync(`${copied.out.trim()}.sha256`, 'utf-8')).toBe(
+      `${assetDigest.slice('sha256:'.length)}  MenubarHelper.app.zip\n`,
+    );
   });
 
   it('copy-asset writes the verified helper bytes and refuses a missing asset', () => {

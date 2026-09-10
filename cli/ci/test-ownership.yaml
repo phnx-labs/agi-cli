@@ -342,6 +342,9 @@ testless:
   - NPM_CONSOLIDATION.md
   - native/**
   - apps/ios/**
+  # AGI Menu moved to its own repo (phnx-labs/agi-menu, PHNX-4036); kept mapped
+  # so this deletion and any historical path never read as unmapped, same as
+  # apps/ext above.
   - cli/menubar/**
   - cli/bin/**
   - cli/schema/**

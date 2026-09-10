@@ -1,24 +1,29 @@
 #!/usr/bin/env bash
 #
-# Offload the macOS native-helper build + codesign + notarize to the release home
-# base so an agents-cli release can be DRIVEN FROM ANOTHER MAC.
+# Offload the macOS signing work to the release home base so the signed macOS
+# artifacts can be produced FROM ANOTHER MAC (or a Linux box).
 #
 # NOTE: the normal release flow no longer calls this. release.sh routes the whole
-# privileged phase (build + sign + notarize + npm publish + computer-helper) to
-# the home base directly (run_home_base_phase / --home-base-phase). This script
-# remains for the narrow case of building + pulling back JUST the signed macOS
-# artifacts from another Mac, without publishing.
+# privileged phase to the home base directly (run_home_base_phase /
+# --home-base-phase). This script remains for the narrow case of producing +
+# pulling back JUST the macOS artifacts from another Mac, without publishing.
 #
-# The published tarball bundles one signed macOS .app helper that Linux cannot
-# produce: bin/MenubarHelper.app — the menu-bar status item (swift build →
-# codesign → notarize → staple). See menubar/scripts/build.sh. (A second
-# helper, the keychain broker, used to build here too; it moved out of this
-# repo entirely with the standalone `secrets` engine, PHNX-3989.)
+# Two artifacts come back into THIS worktree's cli/bin/:
+#   bin/MenubarHelper.app  the menu-bar helper. NOT built here: its source lives
+#                          in phnx-labs/agi-menu (PHNX-4036) and this repo only
+#                          consumes the published, signed + notarized release on
+#                          menubar/v<floor>. The home base runs
+#                          scripts/stage-menubar-helper.sh, which downloads that
+#                          asset, verifies sha256 + codesign + Gatekeeper, and
+#                          stages it -- on a Mac so the verification is real.
+#   bin/agents-macos       the standalone CLI binary, built + Developer-ID signed
+#                          + notarized there (scripts/sign-cli-binary.sh).
+# (A third artifact, the keychain broker, used to build here too; it moved out
+# of this repo entirely with the standalone `secrets` engine, PHNX-3989.)
 #
-# This script rsyncs the exact build INPUTS from THIS worktree to the home base,
-# runs the Mac build script there under its headless signing creds, then
-# pulls the signed bundle back into THIS worktree's cli/bin/ so
-# `bun run build` (presence-gated) can package it.
+# This script rsyncs the exact INPUTS from THIS worktree to the home base, runs
+# the Mac steps there under its headless signing creds, then pulls the results
+# back into THIS worktree's cli/bin/.
 #
 # NO ENV VARS: the sign host defaults to mac-mini (matching release.sh) and is
 # overridable only with `--device <name>` (alias `--host`) -- a flag, never
@@ -73,15 +78,18 @@ HOST_CLI="$(ssh "$HOME_BASE" 'echo $HOME/src/github.com/muqsitnawaz/agents-cli/c
 log "remote cli:  $HOME_BASE:$HOST_CLI"
 
 # ----- 1. Ship the build inputs from this worktree to the sign host -----
-# We stage into the sign host's cli subtree so the Mac build scripts see the
-# layout they expect (scripts/.., src/.., menubar/..). This is a build
-# workspace, not a git checkout — the sign host's own branch/version is irrelevant.
+# We stage into the sign host's cli subtree so the Mac scripts see the layout
+# they expect (scripts/.., src/.., bin/..). This is a build workspace, not a git
+# checkout — the sign host's own branch/version is irrelevant.
 log "staging build inputs on $HOME_BASE ..."
-ssh "$HOME_BASE" "mkdir -p '$HOST_CLI/scripts' '$HOST_CLI/bin' '$HOST_CLI/menubar'"
+ssh "$HOME_BASE" "mkdir -p '$HOST_CLI/scripts' '$HOST_CLI/bin'"
 
 # Full src tree + package manifest: the standalone CLI binary is compiled from
 # src/ with `bun build --compile` (scripts/build-bin.sh), which resolves its
 # npm imports from node_modules — the remote script runs `bun install` first.
+# src/lib/helper-versions.ts rides along in src/: it is what
+# stage-menubar-helper.sh reads the menubar floor from, so THIS worktree's pin
+# decides which published helper is staged.
 rsync -az --delete --exclude '__tests__/' --exclude '*.test.ts' \
           "$LOCAL_CLI/src/" "$HOME_BASE:$HOST_CLI/src/"
 rsync -az "$LOCAL_CLI/package.json" "$LOCAL_CLI/bun.lock" "$HOME_BASE:$HOST_CLI/"
@@ -89,16 +97,15 @@ rsync -az "$LOCAL_CLI/scripts/build-bin.sh" \
           "$LOCAL_CLI/scripts/sign-cli-binary.sh" \
           "$LOCAL_CLI/scripts/bun-jit-entitlements.plist" \
           "$LOCAL_CLI/scripts/headless-sign-context.sh" \
+          "$LOCAL_CLI/scripts/stage-menubar-helper.sh" \
+          "$LOCAL_CLI/scripts/verify-menubar-helper.sh" \
           "$HOME_BASE:$HOST_CLI/scripts/"
-# Menu-bar Swift package — exclude build outputs so we don't ship stale artifacts.
-rsync -az --delete --exclude '.build/' --exclude 'dist/' \
-          "$LOCAL_CLI/menubar/" "$HOME_BASE:$HOST_CLI/menubar/"
 ok "inputs staged"
 
-# ----- 2. Build + sign on the sign host -----
+# ----- 2. Stage the published helper + build/sign the CLI binary on the sign host -----
 # Runs under a login shell so `agents` is on PATH, unlocks the signing keychain
 # headless, and injects the Apple notarization creds via the `apple.com` bundle.
-log "building + signing on $HOME_BASE (menu-bar helper, then the standalone CLI binary) ..."
+log "staging + signing on $HOME_BASE (published menu-bar helper, then the standalone CLI binary) ..."
 
 # Generate the remote build script LOCALLY and ship it as a file, then run it on
 # the host. A file dodges the multi-layer quoting hell of embedding a multi-line
@@ -116,18 +123,14 @@ trap 'rm -f "$BUILD_SCRIPT"' EXIT
 # keychain + export AGENTS_SECRETS_PASSPHRASE) -- the single source of truth,
 # also sourced by release.sh's run_home_base_phase.
 . scripts/headless-sign-context.sh
+bun install --frozen-lockfile
+# Needs no Apple credentials: the helper is already signed + notarized by its own
+# release; this downloads it, checks the sha256, and verifies codesign + Gatekeeper.
+echo "== menu-bar helper: stage the published menubar/v<floor> release =="
+bash scripts/stage-menubar-helper.sh
 agents secrets exec apple.com -- bash -c '
   set -euo pipefail
-  echo "== menu-bar helper: swift build + codesign + notarize + staple =="
-  menubar/scripts/build.sh release
-  # rm -rf first so a re-run does not nest the new .app INSIDE a stale
-  # bin/MenubarHelper.app (cp -R into an existing dir), which corrupts the
-  # signature ("unsealed contents present in the bundle root").
-  rm -rf bin/MenubarHelper.app
-  cp -R menubar/dist/MenubarHelper.app bin/MenubarHelper.app
-  codesign --verify --deep --strict "bin/MenubarHelper.app"
   echo "== standalone agents binary: bun build + codesign + notarize =="
-  bun install --frozen-lockfile
   scripts/sign-cli-binary.sh
 '
 REMOTE_EOF
@@ -138,7 +141,7 @@ rsync -az "$BUILD_SCRIPT" "$HOME_BASE:$HOST_CLI/.remote-sign-build.sh"
 # needing the staged script to be +x.
 ssh "$HOME_BASE" "bash -lc 'bash \"$HOST_CLI/.remote-sign-build.sh\"'" \
   || die "remote build/sign failed on $HOME_BASE (see output above)"
-ok "remote build + sign complete"
+ok "remote stage + sign complete"
 
 # ----- 3. Pull the signed bundle + refreshed sha pin back into this worktree -----
 log "pulling signed bundle back into $LOCAL_CLI/bin/ ..."
@@ -166,4 +169,4 @@ actual_cli="$("${SHA_TOOL[@]}" "$LOCAL_CLI/bin/agents-macos" | cut -d ' ' -f 1)"
   || die "standalone agents binary sha mismatch after pull-back: expected $expected_cli, got $actual_cli"
 ok "standalone agents binary sha verified: $actual_cli"
 
-ok "signed bundles ready in $LOCAL_CLI/bin — 'bun run build' will package them."
+ok "signed artifacts ready in $LOCAL_CLI/bin (published menu-bar helper staged, CLI binary signed)."
