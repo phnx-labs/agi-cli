@@ -6,15 +6,16 @@ import {
   isSecretsCliInstalled,
   runSecretsSetupWizard,
   setupSecretsPrefsPath,
+  installSecretsCli,
+  SECRETS_CLI_PACKAGE,
 } from './setup-secrets.js';
 import { _resetSecretsClientForTest } from '../lib/secrets-client.js';
 
 /**
- * `agents setup secrets` no longer runs its own backend/policy wizard against
- * an in-repo engine (PHNX-3989) — it is install guidance for the standalone
- * `secrets` CLI, then a hand-off to that CLI's own `secrets migrate`. DIST-1:
- * agents-cli never rebundles the engine, so a missing executable is the
- * expected, always-testable path (no real dependency needed).
+ * `agents setup secrets` installs the standalone `secrets` CLI when missing
+ * (PHNX-3989), then hands off to `secrets migrate`. DIST-1: agents-cli never
+ * rebundles the engine. With PATH empty, npm is unreachable so install fails
+ * closed and the wizard still returns false (no throw).
  */
 describe('agents setup secrets', () => {
   const saved: Record<string, string | undefined> = {};
@@ -44,6 +45,15 @@ describe('agents setup secrets', () => {
 
   it('prints install guidance and returns false rather than throwing', async () => {
     expect(await runSecretsSetupWizard()).toBe(false);
+  });
+
+  it('installSecretsCli fails closed when npm is not on PATH (does not throw)', () => {
+    expect(installSecretsCli()).toBe(false);
+  });
+
+  it('pins a published package, not @latest', () => {
+    expect(SECRETS_CLI_PACKAGE).toBe('@phnx-labs/secrets-cli@0.1.2');
+    expect(SECRETS_CLI_PACKAGE).not.toMatch(/@latest$/);
   });
 
   it('reports installed once $SECRETS_BIN points at a real executable', () => {
