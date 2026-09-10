@@ -38,6 +38,7 @@ function argv(opts: {
   effort?: string;
   version?: string | null;
   profileName?: string | null;
+  account?: string | null;
   resume?: { id: string; message: string };
 }): string[] {
   const mgr = new AgentManager() as any;
@@ -50,10 +51,19 @@ function argv(opts: {
     opts.version ?? null,
     opts.profileName ?? null,
     opts.resume,
+    opts.account,
   );
 }
 
 describe('buildRunArgv — resume', () => {
+  it('preserves the account through fresh and resumed local/SSH arguments', () => {
+    for (const resume of [undefined, { id: 'session', message: 'continue' }]) {
+      const args = argv({ agentType: 'codex', version: '1.2.3', account: 'account-id-2', resume });
+      expect(args[1]).toBe('codex@1.2.3');
+      expect(args[args.indexOf('--account') + 1]).toBe('account-id-2');
+    }
+  });
+
   it('emits `run <agent> <message> --resume <id>` with headless/json flags', () => {
     const a = argv({ agentType: 'claude', resume: { id: 'sess-123', message: 'merge the PR now' } });
     expect(a[0]).toBe('run');
@@ -438,5 +448,21 @@ describe.skipIf(IS_WINDOWS)('resume log-truncation hazard', () => {
     } finally {
       fs.rmSync(base, { recursive: true, force: true });
     }
+  });
+});
+
+describe('durable teammate account selection', () => {
+  it('retains its selector after saving and reloading the real teammate record', async () => {
+    const base = tmpBase();
+    try {
+      const agent = new AgentProcess('account-roundtrip', 'account-test', 'codex', 'brief');
+      agent.baseDir = base;
+      agent.account = 'account-id-second';
+      agent.version = '1.2.3';
+      await agent.saveMeta();
+      const loaded = await AgentProcess.loadFromDisk('account-roundtrip', base);
+      expect(loaded?.account).toBe('account-id-second');
+      expect(loaded?.version).toBe('1.2.3');
+    } finally { fs.rmSync(base, { recursive: true, force: true }); }
   });
 });

@@ -673,6 +673,7 @@ export class AgentProcess {
   // injection happens; agentType stays the underlying harness so event
   // parsers and CLI availability checks keep working.
   profileName: string | null = null;
+  account: string | null = null;
   // Extra env vars passed through to the child process (from --env KEY=VALUE).
   envOverrides: Record<string, string> | null = null;
   // Factory task-type label. Drives planner fan-out. Null for plain teammates — no behavioral change.
@@ -879,6 +880,7 @@ export class AgentProcess {
       effort: this.effort,
       model: this.model,
       profile_name: this.profileName,
+      account: this.account,
       env_overrides: this.envOverrides,
       task_type: this.taskType,
       cloud_repo: this.cloudRepo,
@@ -1216,6 +1218,7 @@ export class AgentProcess {
       effort: this.effort,
       model: this.model,
       profile_name: this.profileName,
+      account: this.account,
       env_overrides: this.envOverrides,
       task_type: this.taskType,
       cloud_repo: this.cloudRepo,
@@ -1355,6 +1358,7 @@ export class AgentProcess {
       // THIS process's resolved actor, which is wrong for a teammate someone else
       // ran. Legacy teammates predating the field carry no actor -> null.
       agent.actor = meta.actor ?? null;
+      agent.account = meta.account ?? null;
       // Distributed-team fields: set post-construction (like startTime) so the
       // constructor signature stays fixed. Null on every pre-existing teammate.
       agent.hostName = meta.host_name || null;
@@ -2124,6 +2128,7 @@ export class AgentManager {
     hostTarget: string | null = null,
     repoPath: string | null = null,
     project: string | null = null,
+    account: string | null = null,
   ): Promise<AgentProcess> {
     await this.initialize();
     const resolvedMode = resolveMode(mode, this.defaultMode);
@@ -2224,6 +2229,7 @@ export class AgentManager {
     // teammate with no unmet --after deps, so assigning it after spawn()
     // returns would miss the only launch that matters.
     agent.project = project;
+    agent.account = account;
 
     const agentDir = await agent.getAgentDir();
     try {
@@ -2446,6 +2452,7 @@ export class AgentManager {
       agent.profileName,
       resume,
       await resolveTeammateGrants(agent, { forRemote: false }),
+      agent.account,
     );
 
     debug(`Launching ${agent.agentType} agent ${agent.agentId} [${agent.mode}]${resume ? ' (resume)' : ''}: ${cmd.slice(0, 3).join(' ')}...`);
@@ -2561,6 +2568,7 @@ export class AgentManager {
       const { warnings } = ensureHostReady(host, {
         agent: agent.agentType,
         version: agent.version ?? undefined,
+        account: agent.account ?? undefined,
       });
       for (const w of warnings) process.stderr.write(`[teams] warning: ${w}\n`);
     } catch (err) {
@@ -2598,6 +2606,7 @@ export class AgentManager {
       agent.version,
       agent.profileName,
       resume,
+      agent.account,
     );
     // Project grants for a remote teammate, resolved HERE rather than at add
     // time: an unpinned teammate only learns its host from the scheduler, which
@@ -2962,6 +2971,7 @@ export class AgentManager {
     version: string | null,
     profileName: string | null,
     resume?: { id: string; message: string },
+    account: string | null = null,
   ): string[] {
     // Compose the prompt. On RESUME the message is the teammate's next user turn,
     // not a fresh brief — so skip the original brief and the plan-mode prefix, but
@@ -3002,6 +3012,7 @@ export class AgentManager {
     }
     args.push('--mode', mode, '--effort', effort, '--json', '--headless', '--quiet');
     if (model) args.push('--model', model);
+    if (account) args.push('--account', account);
     args.push('--env', 'AGENTS_RUNTIME=teams');
     return args;
   }
@@ -3018,12 +3029,13 @@ export class AgentManager {
     profileName: string | null = null,
     resume?: { id: string; message: string },
     addDirs: string[] = [],
+    account: string | null = null,
   ): string[] {
     // Route through getAgentsInvocation so a teammate launched by the compiled
     // standalone binary (#315) doesn't relaunch as `agents /$bunfs/root/agents …`
     // (process.argv[1] is the bun virtual entry there) → "unknown command".
     const inv = getAgentsInvocation(
-      this.buildRunArgv(agentType, prompt, mode, model, effort, version, profileName, resume),
+      this.buildRunArgv(agentType, prompt, mode, model, effort, version, profileName, resume, account),
     );
     const cmd: string[] = [inv.command, ...inv.args];
 
