@@ -139,7 +139,9 @@ const OWNERSHIP_REJECTION_PREFIX = 'Attach-only ownership check failed';
  * port-squat this guard exists to stop.
  */
 function verifyEndpointOwnership(profile: BrowserProfile, port: number): void {
-  if (!isAttachOnlyProfile(profile)) return;
+  // Attach-only profiles and profiles pinned to the owner's own store
+  // (PHNX-4042) both name the exact user-data dir a running instance must have.
+  if (!isAttachOnlyProfile(profile) && !profile.userDataDir) return;
   // Arc is the user's single running instance under its own default data dir; it
   // has no managed durable dir to compare against and no /tmp-squat vector.
   if (profile.browser === 'arc') return;
@@ -259,7 +261,15 @@ export async function connectLocal(
     }
 
     const newPort = port;
-    const chromeOpts = { ...profile.chrome, viewport: profile.viewport };
+    const chromeOpts = {
+      ...profile.chrome,
+      viewport: profile.viewport,
+      // A discovered native profile launches the owner's browser on its own
+      // store: one window for the owner and agents, logins intact (PHNX-4042).
+      ...(profile.userDataDir
+        ? { userDataDir: profile.userDataDir, profileDirectory: profile.profileDirectory }
+        : {}),
+    };
     let launched;
     try {
       launched = await launchBrowser(

@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { getProfileRuntimeDir } from './profiles.js';
-import { discoverBrowserWsUrl, registerPipeTransport } from './cdp.js';
+import { discoverBrowserWsUrl, registerPipeTransport, type BrowserDiscovery } from './cdp.js';
 import { readAndResolveBundleEnv, bundleExists } from '../secrets-client.js';
 import { writeProfileRuntime, readProfileRuntime } from './runtime-state.js';
 import type { ChromeOptions } from './types.js';
@@ -292,15 +292,25 @@ export async function launchBrowser(
 ): Promise<LaunchResult> {
   const browserPath = findBrowserPath(browserType, customBinary);
 
+  // A profile discovered from the browser's OWN store (PHNX-4042) launches on
+  // that store — the owner's real user-data dir and profile directory — so the
+  // window agents open is the window the owner uses. Its Preferences are the
+  // owner's and are never rewritten. Anything else runs under a managed dir.
+  const ownerStore = options.userDataDir !== undefined;
   const runtimeDir = getProfileRuntimeDir(profileName);
-  const userDataDir = path.join(runtimeDir, 'chrome-data');
-  fs.mkdirSync(userDataDir, { recursive: true });
-
-  // Pre-launch Preferences pass: first-launch profile-name stamp, plus (for
-  // real browsers, not Electron apps) the session-cookie persistence pin.
-  // Electron apps manage their own storage and don't read Chromium's
-  // `session.*` prefs, so they get the name stamp only.
-  ensureProfilePreferences(userDataDir, profileName, !isElectron);
+  const userDataDir = options.userDataDir ?? path.join(runtimeDir, 'chrome-data');
+  if (!ownerStore) {
+    fs.mkdirSync(userDataDir, { recursive: true });
+    // Pre-launch Preferences pass: first-launch profile-name stamp, plus (for
+    // real browsers, not Electron apps) the session-cookie persistence pin.
+    // Electron apps manage their own storage and don't read Chromium's
+    // `session.*` prefs, so they get the name stamp only.
+    ensureProfilePreferences(userDataDir, profileName, !isElectron);
+  }
+  // The owner's store is attached over a TCP port rather than the daemon's
+  // private pipe: the instance outlives any one daemon and must stay reachable
+  // (and verifiable by the ownership guard) after a daemon restart.
+  const transport: 'pipe' | 'port' = ownerStore ? 'port' : 'pipe';
 
   // Chromium on macOS coordinates instances via the SingletonLock file
   // *inside* each user-data-dir. Direct binary spawn with a fresh
@@ -318,8 +328,9 @@ export async function launchBrowser(
 
   const viewport = options.viewport ?? { width: 1512, height: 982 };
   const args = [
-    '--remote-debugging-pipe',
+    transport === 'pipe' ? '--remote-debugging-pipe' : `--remote-debugging-port=${port}`,
     `--user-data-dir=${userDataDir}`,
+    ...(options.profileDirectory ? [`--profile-directory=${options.profileDirectory}`] : []),
     '--disable-background-timer-throttling',
     '--disable-backgrounding-occluded-windows',
     '--disable-renderer-backgrounding',
@@ -341,7 +352,7 @@ export async function launchBrowser(
     // cookies survive, no ghost tabs — and the task flow creates its own tab
     // over CDP anyway. Electron apps need their window to appear (the CDP
     // driver binds to it), so they skip the flag.
-    ...(isElectron ? [] : ['--no-startup-window']),
+    ...(isElectron || ownerStore ? [] : ['--no-startup-window']),
     ...(options.headless ? ['--headless=new'] : []),
     `--window-size=${viewport.width},${viewport.height}`,
     ...(viewport.x !== undefined && viewport.y !== undefined
@@ -356,7 +367,7 @@ export async function launchBrowser(
 
   const child = spawn(browserPath, args, {
     detached: true,
-    stdio: ['ignore', 'pipe', 'pipe', 'pipe', 'pipe'],
+    stdio: transport === 'pipe' ? ['ignore', 'pipe', 'pipe', 'pipe', 'pipe'] : ['ignore', 'pipe', 'pipe'],
     env,
   });
   child.unref();
@@ -364,12 +375,17 @@ export async function launchBrowser(
   child.stderr?.resume();
 
   const pid = child.pid!;
-  const writePipe = child.stdio[3] as Writable | null;
-  const readPipe = child.stdio[4] as Readable | null;
-  if (!writePipe || !readPipe) {
-    throw new Error('Chrome failed to expose CDP pipe file descriptors');
+  let wsUrl: string;
+  if (transport === 'pipe') {
+    const writePipe = child.stdio[3] as Writable | null;
+    const readPipe = child.stdio[4] as Readable | null;
+    if (!writePipe || !readPipe) {
+      throw new Error('Chrome failed to expose CDP pipe file descriptors');
+    }
+    wsUrl = registerPipeTransport({ read: readPipe, write: writePipe });
+  } else {
+    wsUrl = (await waitForDevToolsPort(port, profileName, pid)).wsUrl;
   }
-  const wsUrl = registerPipeTransport({ read: readPipe, write: writePipe });
 
   writeProfileRuntime(profileName, {
     pid,
@@ -378,7 +394,35 @@ export async function launchBrowser(
     kind: isElectron ? 'electron' : 'browser',
   });
 
-  return { pid, port: 0, wsUrl };
+  return { pid, port: transport === 'pipe' ? 0 : port, wsUrl };
+}
+
+/**
+ * Poll the DevTools endpoint of a browser just launched with
+ * `--remote-debugging-port` until it answers, or fail loud naming the pid.
+ * Chromium binds the port only after its profile has loaded, which on a real
+ * signed-in store takes a few seconds.
+ */
+async function waitForDevToolsPort(
+  port: number,
+  profileName: string,
+  pid: number,
+  timeoutMs = 20_000,
+): Promise<BrowserDiscovery> {
+  const deadline = Date.now() + timeoutMs;
+  let lastError = '';
+  while (Date.now() < deadline) {
+    try {
+      return await discoverBrowserWsUrl(port, 'localhost', profileName);
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error(
+    `Browser for profile "${profileName}" (pid ${pid}) did not serve the DevTools protocol on ` +
+      `port ${port} within ${Math.round(timeoutMs / 1000)}s: ${lastError}`,
+  );
 }
 
 export async function attachToChrome(port: number): Promise<string> {

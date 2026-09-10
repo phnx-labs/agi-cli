@@ -24,7 +24,7 @@ import {
   isAttachOnlyProfile,
   resolveProfileDataDir,
   normalizeDataDir,
-  persistDiscoveredArcProfile,
+  persistDiscoveredProfile,
   type EditableProfileFields,
 } from '../lib/browser/profiles.js';
 import { declaringDevices, migrateCentralBrowserProfiles, profileKind } from '../lib/browser/registry.js';
@@ -554,7 +554,7 @@ export async function runBrowserUse(
     if (all.length > 0) console.error(`Available profiles: ${all.map((profile) => profile.name).join(', ')}`);
     return false;
   }
-  await persistDiscoveredArcProfile(selectedName);
+  await persistDiscoveredProfile(selectedName);
   setConfigValue('browser.profile', selectedName);
   const endpoint = Object.values(getEndpointPresets(target))[0]?.target ?? '';
   console.log(`Default browser profile (this machine) is now "${selectedName}" (${target.browser}${endpoint ? `, ${endpoint}` : ''}).`);
@@ -1279,11 +1279,17 @@ function registerProfilesCommands(browser: Command): void {
       profile that is in use, the configured default, or the \`auto-chrome\`
       profile a setup wizard created.
 
-      On a Mac with Arc, every Arc Space is listed as a profile (arc-personal,
+      On a Mac with Arc, every Arc Space is listed as a profile (arc-gmail,
       arc-work, ...) discovered read-only from Arc's own metadata — a Space
       already carries its Arc profile's logins, so it IS the browser profile.
       Agents attach to the running Arc through Apple Events and never launch or
-      relaunch it. Point agents at Comet instead when a workflow needs screenshots,
+      relaunch it. Comet's own profiles are listed the same way (comet-work, ...),
+      pinned to Comet's real user-data dir, so agents and you share one Comet
+      window per profile: agents attach when it is running with remote debugging,
+      launch it on your store when it is not running, and fail loud with the
+      relaunch command when it runs without a port. The daemon publishes every
+      discovered profile into this device's declaration, so other fleet boxes list
+      it with WHERE=<this device> and route to it. Point agents at Comet when a workflow needs screenshots,
       downloads, network capture, or trusted input:
         agents browser profiles create agents-comet --browser comet --attach-only
       A CDP \`--attach-only\` profile attaches to a browser you
@@ -1952,7 +1958,7 @@ function registerTaskCommands(browser: Command): void {
       // Discovery is read-only for list/show/doctor. Starting is the explicit
       // adoption point: persist only the agents-cli alias/native identity, never
       // mutate Arc's own profile or Space data.
-      await persistDiscoveredArcProfile(profileName);
+      await persistDiscoveredProfile(profileName);
 
       // A native endpoint is not CDP and cannot be tunnelled. Re-exec the
       // complete command on the declaring owner, then bind its returned task

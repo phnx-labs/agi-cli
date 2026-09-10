@@ -17,6 +17,7 @@ import {
 } from './registry.js';
 import { findBrowserPath, isPortInUse } from './chrome.js';
 import { arcSpaceProfiles, discoverArcProfiles } from './arc-discovery.js';
+import { discoverChromiumProfiles, discoverableChromiumBrowsers } from './chromium-discovery.js';
 
 export type { BrowserProfile } from './types.js';
 export {
@@ -159,6 +160,7 @@ function configToProfile(
     defaultEndpoint: config.defaultEndpoint,
     launchPolicy: config.launchPolicy,
     userDataDir: config.userDataDir,
+    profileDirectory: config.profileDirectory,
     chrome: config.chrome,
     secrets: config.secrets,
     viewport: config.viewport,
@@ -182,6 +184,7 @@ function profileToConfig(profile: BrowserProfile): BrowserProfileConfig {
   if (profile.defaultEndpoint) config.defaultEndpoint = profile.defaultEndpoint;
   if (profile.launchPolicy) config.launchPolicy = profile.launchPolicy;
   if (profile.userDataDir) config.userDataDir = profile.userDataDir;
+  if (profile.profileDirectory) config.profileDirectory = profile.profileDirectory;
   if (profile.chrome) config.chrome = profile.chrome;
   if (profile.secrets) config.secrets = profile.secrets;
   if (profile.viewport) config.viewport = profile.viewport;
@@ -192,55 +195,153 @@ function profileToConfig(profile: BrowserProfile): BrowserProfileConfig {
 }
 
 /**
- * Every Arc Space on this Mac as an agents-cli profile (PHNX-2399). A Space
- * already carries its Arc profile's cookies and logins, so it IS the browser
- * profile agents pick with `--profile` — no second concept.
+ * Every browser profile this Mac already has, as agents-cli profiles:
  *
- * Discovery reads files Arc rewrites on every Space or tab change, so a torn
- * read is an ordinary event, not corruption. It is reported as `error` rather
- * than thrown: the profile store serves every browser on this machine, and a
- * momentary Arc read must never take the Comet or Chrome rows down with it.
- * The error surfaces where an Arc profile is actually asked for by name.
+ * - each Arc Space (PHNX-2399): a Space carries its Arc profile's cookies and
+ *   logins, so it IS the browser profile agents pick with `--profile`;
+ * - each Comet profile from Comet's own `Local State` (PHNX-4042): pinned to
+ *   Comet's user-data dir and profile directory, so the window agents open is
+ *   the owner's window and a sign-in done once serves both.
+ *
+ * No second concept: agents see one `--profile` list. Discovery reads files
+ * the browsers rewrite on every change, so a torn read is an ordinary event,
+ * not corruption. It is reported as `errors` rather than thrown: the profile
+ * store serves every browser on this machine, and a momentary Arc read must
+ * never take the Comet or Chrome rows down with it. An error surfaces where a
+ * profile of that browser is actually asked for by name.
  */
-function discoverArcSpaceProfiles(): { profiles: BrowserProfileWithDeclarations[]; error?: string } {
-  const discovered = discoverArcProfiles();
-  if (!discovered.ok) {
-    if (discovered.kind === 'unsupported' || discovered.kind === 'not-installed') return { profiles: [] };
-    return { profiles: [], error: `Cannot discover Arc Spaces: ${discovered.reason}` };
+export interface DiscoveredProfiles {
+  profiles: BrowserProfileWithDeclarations[];
+  /** Per-browser discovery failures, keyed by the profile-name prefix (`arc`, `comet`). */
+  errors: Record<string, string>;
+}
+
+export function discoverNativeProfiles(): DiscoveredProfiles {
+  const profiles: BrowserProfileWithDeclarations[] = [];
+  const errors: Record<string, string> = {};
+  const arc = discoverArcProfiles();
+  if (arc.ok) {
+    for (const space of arcSpaceProfiles(arc)) {
+      profiles.push({
+        name: space.name,
+        description: `Arc Space "${space.spaceTitle}" (${space.profileName})`,
+        browser: 'arc',
+        endpoints: { native: { target: 'arc-native://local' } },
+        defaultEndpoint: 'native',
+        launchPolicy: 'attach-only',
+        arc: {
+          profileId: space.profileId,
+          profileName: space.profileName,
+          spaceId: space.spaceId,
+          spaceTitle: space.spaceTitle,
+        },
+        devices: [machineId()],
+      });
+    }
+  } else if (arc.kind === 'invalid') {
+    errors.arc = `Cannot discover Arc Spaces: ${arc.reason}`;
   }
-  return {
-    profiles: arcSpaceProfiles(discovered).map((space) => ({
-      name: space.name,
-      description: `Arc Space "${space.spaceTitle}" (${space.profileName})`,
-      browser: 'arc',
-      endpoints: { native: { target: 'arc-native://local' } },
-      defaultEndpoint: 'native',
-      launchPolicy: 'attach-only',
-      arc: {
-        profileId: space.profileId,
-        profileName: space.profileName,
-        spaceId: space.spaceId,
-        spaceTitle: space.spaceTitle,
-      },
-      devices: [machineId()],
-    })),
-  };
+  for (const browser of discoverableChromiumBrowsers()) {
+    const found = discoverChromiumProfiles(browser);
+    if (!found.ok) {
+      if (found.kind === 'invalid') errors[browser] = `Cannot discover ${browser} profiles: ${found.reason}`;
+      continue;
+    }
+    for (const native of found.profiles) {
+      profiles.push({
+        name: native.name,
+        description: `${browser} profile "${native.displayName}" (${native.profileDirectory})`,
+        browser,
+        endpoints: [`cdp://127.0.0.1:${nativeChromiumPort(native.name)}`],
+        userDataDir: native.userDataDir,
+        profileDirectory: native.profileDirectory,
+        devices: [machineId()],
+      });
+    }
+  }
+  return { profiles, errors };
 }
 
 /**
- * Bring a persisted Arc alias up to date with the live Space (title renames).
- * A Space that is no longer discoverable leaves the alias as stored: listing
- * still works, and using the profile fails loud in `resolveArcSpace` with the
- * Space that is missing from Arc's visible windows.
+ * The CDP port a discovered Chromium profile attaches on. Once the profile is
+ * declared its port lives in the declaration; before that, the port is derived
+ * from the name so every listing agrees, starting at the canonical Comet port
+ * (9333, PHNX-3967) and stepping past ports other local declarations hold.
  */
-function refreshLocalArcProfile(
+function nativeChromiumPort(name: string): number {
+  const declared = localDeclaration(name)?.config;
+  const declaredPort = declared ? parseEndpointPort(declared) : undefined;
+  if (declaredPort) return declaredPort;
+  const taken = new Set<number>();
+  for (const [other, declarations] of profileRegistry()) {
+    if (other === name) continue;
+    for (const declaration of declarations) {
+      if (declaration.device !== machineId()) continue;
+      const port = parseEndpointPort(declaration.config);
+      if (port) taken.add(port);
+    }
+  }
+  let port = 9333;
+  while (taken.has(port)) port += 1;
+  return port;
+}
+
+function parseEndpointPort(config: BrowserProfileConfig): number | undefined {
+  const endpoints = config.endpoints;
+  const first = Array.isArray(endpoints)
+    ? endpoints[0]
+    : endpoints && typeof endpoints === 'object'
+      ? Object.values(endpoints)[0]?.target
+      : undefined;
+  if (typeof first !== 'string') return undefined;
+  const match = /^cdp:\/\/[^:/?]+(?::(\d+)|\?port=(\d+))/.exec(first);
+  const raw = match?.[1] ?? match?.[2];
+  return raw ? Number(raw) : undefined;
+}
+
+/**
+ * Publish every discovered native profile that this device has not declared
+ * yet into its device declaration (`~/.agents/devices/<device>/agents.yaml`),
+ * which the fleet shared-store sync carries to every other box (PHNX-4042).
+ * That is what lets `agents browser profiles list` on a worker show this
+ * Mac's `arc-*` and `comet-*` rows with WHERE=<this device>, and a start from
+ * there route here. Idempotent; a discovery error skips that browser.
+ */
+export async function publishDiscoveredProfiles(): Promise<{ published: string[]; errors: Record<string, string> }> {
+  const discovered = discoverNativeProfiles();
+  const published: string[] = [];
+  for (const profile of discovered.profiles) {
+    if (localDeclaration(profile.name)) continue;
+    await createProfile(profile);
+    published.push(profile.name);
+  }
+  return { published, errors: discovered.errors };
+}
+
+/**
+ * Bring a persisted discovered profile up to date with its live source (an Arc
+ * Space title rename, a Comet profile rename). A source that is no longer
+ * discoverable leaves the declaration as stored: listing still works, and using
+ * the profile fails loud where the browser is actually reached.
+ */
+function refreshDiscoveredProfile(
   profile: BrowserProfileWithDeclarations,
   live: BrowserProfileWithDeclarations[],
 ): BrowserProfileWithDeclarations {
-  if (!profile.arc || !profile.devices.includes(machineId())) return profile;
-  const current = live.find((candidate) => candidate.arc?.spaceId === profile.arc?.spaceId);
-  if (!current) return profile;
-  return { ...profile, arc: current.arc, description: profile.description ?? current.description };
+  if (!profile.devices.includes(machineId())) return profile;
+  if (profile.arc) {
+    const current = live.find((candidate) => candidate.arc?.spaceId === profile.arc?.spaceId);
+    if (!current) return profile;
+    return { ...profile, arc: current.arc, description: profile.description ?? current.description };
+  }
+  if (profile.userDataDir && profile.profileDirectory) {
+    const current = live.find(
+      (candidate) => candidate.userDataDir === profile.userDataDir && candidate.profileDirectory === profile.profileDirectory,
+    );
+    if (!current) return profile;
+    return { ...profile, description: profile.description ?? current.description };
+  }
+  return profile;
 }
 
 function selectedDeclaration(declarations: ProfileDeclaration[]): ProfileDeclaration {
@@ -257,10 +358,10 @@ export function isProfileDeclaredHere(name: string): boolean {
 }
 
 export async function listProfiles(): Promise<BrowserProfileWithDeclarations[]> {
-  const native = discoverArcSpaceProfiles();
+  const native = discoverNativeProfiles();
   const configured = [...profileRegistry()].map(([name, declarations]) => {
     const selected = selectedDeclaration(declarations);
-    return refreshLocalArcProfile(
+    return refreshDiscoveredProfile(
       configToProfile(name, selected.config, declarations.map((declaration) => declaration.device)),
       native.profiles,
     );
@@ -270,25 +371,26 @@ export async function listProfiles(): Promise<BrowserProfileWithDeclarations[]> 
 }
 
 export async function getProfile(name: string): Promise<BrowserProfileWithDeclarations | null> {
-  const native = discoverArcSpaceProfiles();
+  const native = discoverNativeProfiles();
   const declarations = profileRegistry().get(name);
   if (declarations?.length) {
     const selected = selectedDeclaration(declarations);
-    return refreshLocalArcProfile(
+    return refreshDiscoveredProfile(
       configToProfile(name, selected.config, declarations.map((declaration) => declaration.device)),
       native.profiles,
     );
   }
   const discovered = native.profiles.find((profile) => profile.name === name) ?? null;
-  // Only an Arc profile asked for by name pays for a failed Arc read.
-  if (!discovered && native.error && name.startsWith('arc-')) throw new Error(native.error);
+  // Only a profile of that browser asked for by name pays for its failed read.
+  const prefix = name.split('-')[0];
+  if (!discovered && native.errors[prefix]) throw new Error(native.errors[prefix]);
   return discovered;
 }
 
-/** Persist only the agents-cli alias for an auto-discovered Arc profile. */
-export async function persistDiscoveredArcProfile(name: string): Promise<void> {
+/** Persist only the agents-cli alias for an auto-discovered native profile; never the browser's own data. */
+export async function persistDiscoveredProfile(name: string): Promise<void> {
   if (localDeclaration(name)) return;
-  const profile = discoverArcSpaceProfiles().profiles.find((candidate) => candidate.name === name);
+  const profile = discoverNativeProfiles().profiles.find((candidate) => candidate.name === name);
   if (!profile) return;
   await createProfile(profile);
 }
@@ -308,7 +410,7 @@ export function isProfileLaunchableHere(profile: BrowserProfile): boolean {
     (preset) => preset.target.startsWith('arc-native:'),
   );
   if (nativeArc) {
-    return !!profile.arc && discoverArcSpaceProfiles().profiles.some(
+    return !!profile.arc && discoverNativeProfiles().profiles.some(
       (candidate) => candidate.arc?.spaceId === profile.arc?.spaceId,
     );
   }
