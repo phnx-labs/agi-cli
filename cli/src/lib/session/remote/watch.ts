@@ -142,6 +142,7 @@ export function toPreviousSessionWatchRow(scope: string, session: SessionMeta): 
     ...(session.firstUserMessage ? { firstUserMessage: session.firstUserMessage } : {}),
     ...(session.version ? { version: session.version } : {}),
     ...(session.account ? { account: session.account } : {}),
+    ...(session.accountKey ? { accountKey: session.accountKey } : {}),
     ...(session.prUrl ? { pr: { url: session.prUrl, number: session.prNumber } } : {}),
     ...(worktree ? { worktree } : {}),
     ...(session.gitBranch ? { branch: session.gitBranch } : {}),

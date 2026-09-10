@@ -12,7 +12,6 @@ import {
 } from '../accounting/rotate.js';
 import { collectRunCandidatesForRun } from '../accounting/account-pool-collect.js';
 import type { AgentId } from '../types.js';
-import { getVersionHomePath } from '../installations/store.js';
 import type { SessionAgentId, SessionMeta } from './types.js';
 
 const RESUMABLE_SESSION_AGENTS = new Set<SessionAgentId>(['claude', 'codex', 'muse', 'opencode']);
@@ -22,22 +21,11 @@ export function sessionAgentSupportsResume(agent: SessionAgentId): boolean {
   return RESUMABLE_SESSION_AGENTS.has(agent);
 }
 
-/**
- * The account a recovery should authenticate as. Present when resume rotates
- * AWAY from the session's original login (an account limit) to a healthy
- * sibling of the SAME harness. A `providerAccount` is a durable setup-token /
- * API-key account (RUSH-3182) injected via the `--account` spawn path
- * (`resolveSpawnAccount` → `accountEnv`); it is the only kind that can
- * authenticate a NATIVE resume in the origin version home, because a native
- * login lives in its own isolated home and cannot be forwarded. It is also
- * required on `/continue` when the balanced pick is a provider: exec only
- * injects from this field, so omitting it would launch the version home's
- * native login — the exhausted origin in the PHNX-3674 fixture. Absent means
- * "use the launched version home's own native login" (the healthy-origin happy
- * path, or `/continue` on a healthy native sibling).
- */
+/** Target-local account selection forwarded through the normal run resolver. */
 export interface RecoveryAccount {
-  providerAccount: string;
+  selector: string;
+  providerAccount?: string;
+  nativeAccount?: string;
   label: string;
   email: string | null;
 }
@@ -93,10 +81,15 @@ function runnableSessionAgent(session: SessionMeta): AgentId {
   return session.agent as AgentId;
 }
 
+function originCandidate(session: SessionMeta, candidates: RotateCandidate[]): RotateCandidate | undefined {
+  if (session.accountKey) return candidates.find((candidate) => candidate.accountKey === session.accountKey);
+  // Legacy transcripts can prove ownership by location, never by a binary label.
+  return candidates.find((candidate) => candidate.slotDir && inspectNativeResumeSession(session, candidate.slotDir).available);
+}
+
 function sourceReason(session: SessionMeta, candidates: RotateCandidate[]): string {
-  if (!session.version) return 'the origin version was not recorded';
-  const source = candidates.find((candidate) => candidate.version === session.version);
-  if (!source) return `origin ${session.agent}@${session.version} is not installed`;
+  const source = originCandidate(session, candidates);
+  if (!source) return 'the origin account is not available on this device';
   const readiness = readinessFromCandidate(source);
   return readiness.ready
     ? `origin ${session.agent}@${session.version} has no native resume form`
@@ -105,10 +98,12 @@ function sourceReason(session: SessionMeta, candidates: RotateCandidate[]): stri
 
 function recoveryAccountFromCandidate(candidate: RotateCandidate): RecoveryAccount | undefined {
   const providerAccount = candidate.providerAccount;
-  if (!providerAccount) return undefined;
+  const selector = candidate.nativeAccount ?? providerAccount;
+  if (!selector) return undefined;
   return {
-    providerAccount,
-    label: candidate.accountLabel || providerAccount,
+    selector,
+    ...(providerAccount ? { providerAccount } : { nativeAccount: selector }),
+    label: candidate.accountLabel || selector,
     email: candidate.email,
   };
 }
@@ -207,19 +202,8 @@ export function inspectNativeResumeSession(
   return { available: true, cwd };
 }
 
-/**
- * Decide how a durable session resumes on the device that owns it.
- *
- * Native resume is legal only in the exact origin version's isolated home,
- * and only while that home owns the indexed transcript AND some injectable
- * credential for this harness is healthy: the origin login itself, or a
- * provider account rotated in when the origin is usage-limited (PHNX-3626).
- * Every other successful path stays on the same harness and uses `/continue`,
- * whose indexed transcript reader can reach retained version trash. A
- * `/continue` pick of a provider account carries RecoveryAccount so exec
- * injects it instead of launching the version home's native login
- * (PHNX-3674). No healthy same-harness account is a loud failure.
- */
+/** Resume only in the healthy origin account slot that owns the transcript.
+ * A different account uses /continue so credentials and history stay isolated. */
 export function resolveSessionRecoveryFromCandidates(
   session: SessionMeta,
   candidates: RotateCandidate[],
@@ -228,45 +212,8 @@ export function resolveSessionRecoveryFromCandidates(
 ): SessionRecoveryTarget {
   const agent = runnableSessionAgent(session);
   const device = sessionOriginDevice(session);
-  const source = session.version
-    ? candidates.find((candidate) => candidate.version === session.version)
-    : undefined;
+  const source = originCandidate(session, candidates);
   const sourceReady = source ? readinessFromCandidate(source).ready : false;
-
-  // Native-first with account rotation (PHNX-3626). When the origin login is
-  // usage/rate/session-LIMITED (not signed-out or revoked — those need a login,
-  // not a rotation, so they keep going to /continue per SES-39) but its version
-  // home is installed, native-resume-capable, and still owns the indexed
-  // transcript, keep resume NATIVE by rotating to a healthy INJECTABLE (provider)
-  // account in that SAME home — rather than dropping to /continue on a different
-  // version. Only a provider token/key qualifies: a native login lives in its own
-  // isolated home and cannot be forwarded, so it could never authenticate a
-  // resume that must read the origin home's transcript (see §11).
-  const originReadiness = source ? readinessFromCandidate(source) : null;
-  const originLimited = !!originReadiness && !originReadiness.ready
-    && (originReadiness.reason === 'rate_limited' || originReadiness.reason === 'out_of_credits');
-  if (originLimited && source && session.version && supportsNative(agent, session.version)) {
-    const inspection = nativeInspection
-      ?? inspectNativeResumeSession(session, getVersionHomePath(agent, session.version));
-    if (inspection.available) {
-      const rotated = pickBalancedCandidate(
-        candidates.filter((c) => c.providerAccount && c.accountKey !== source.accountKey),
-      );
-      const account = rotated ? recoveryAccountFromCandidate(rotated.picked) : undefined;
-      if (account) {
-        // `originLimited` guarantees the origin is unhealthy with a limit reason.
-        const why = originReadiness!.ready ? 'limited' : originReadiness!.reason;
-        return {
-          mode: 'native',
-          agent,
-          version: session.version,
-          cwd: inspection.cwd,
-          account,
-          reason: `origin ${agent}@${session.version} account is ${why}; rotated to healthy ${account.label} and resuming natively in the same home`,
-        };
-      }
-    }
-  }
 
   // An exact healthy origin is deterministic: preserve its isolated home. If
   // native resume is unavailable for that harness, /continue still launches in
@@ -289,15 +236,16 @@ export function resolveSessionRecoveryFromCandidates(
   // exact healthy origin login. A balanced same-version provider selected for
   // a signed-out/revoked origin must stay on /continue; otherwise we would open
   // the origin home with no usable credential and fail (or fork state).
-  if (sourceReady && session.version === version && supportsNative(agent, version)) {
+  if (sourceReady && source?.slotDir && supportsNative(agent, version)) {
     const inspection = nativeInspection
-      ?? inspectNativeResumeSession(session, getVersionHomePath(agent, version));
+      ?? inspectNativeResumeSession(session, source.slotDir);
     if (inspection.available) {
       return {
         mode: 'native',
         agent,
         version,
         cwd: inspection.cwd,
+        ...(account ? { account } : {}),
         reason: `origin ${agent}@${version} is installed, healthy, and owns the indexed transcript`,
       };
     }
@@ -319,15 +267,7 @@ export function resolveSessionRecoveryFromCandidates(
   };
 }
 
-/**
- * Resolve recovery for a durable session, reading the live account pool.
- *
- * Uses {@link collectRunCandidatesForRun} (native version-home logins PLUS
- * durable provider accounts, RUSH-3182) rather than the native-only
- * {@link collectRunCandidates}, so an origin-account limit can rotate to a
- * healthy provider account and stay NATIVE (PHNX-3626). `collect` is injectable
- * for tests and for callers that must stay native-only.
- */
+/** Resolve recovery against the same provider-inclusive pool used by run. */
 export async function resolveSessionRecovery(
   session: SessionMeta,
   collect: (agent: AgentId) => Promise<RotateCandidate[]> = collectRunCandidatesForRun,
