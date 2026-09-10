@@ -736,6 +736,9 @@ Harness worker credentials are minted by `agents accounts add &lt;harness&gt; [n
       agents browser navigate https://example.com
       agents browser screenshot
 
+      # every tab open in the profile browser, yours next to the task&#39;s (owner column)
+      agents browser tabs --all
+
       # keep one process and browser-service socket warm for repeated actions
       agents browser stream --task &quot;$agents_browser_task&quot;
 
@@ -762,9 +765,10 @@ Harness worker credentials are minted by `agents accounts add &lt;harness&gt; [n
       agents browser start most agent workflows should use the &#39;browser&#39; skill instead of raw subcommands.
       the skill wraps profile selection, snapshotting, and tunneling.
 
-      browser support: chromium-family only (chrome, comet, chromium, brave, edge, arc).
-      safari and firefox are not supported — they don&#39;t speak the chrome devtools
-      protocol the way agents browser expects. on windows, edge is the default
+      browser support: chromium-family over the chrome devtools protocol (chrome,
+      comet, chromium, brave, edge), arc natively (one profile per space), and
+      firefox over webdriver bidi (one profile per profiles.ini entry; firefox 129+
+      dropped cdp). safari is not supported. on windows, edge is the default
       because it&#39;s preinstalled. on macos and linux, chrome is preferred when
       installed; otherwise the first chromium-family binary on disk wins."><div class="command-head"><h3><code>agents browser</code></h3></div><p>Launch and drive browser profiles via the Chrome DevTools Protocol. Power-tool for the `browser` skill.</p><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code># List configured browser profiles
       agents browser profiles list
@@ -781,6 +785,9 @@ Harness worker credentials are minted by `agents accounts add &lt;harness&gt; [n
       # Drive the page (no start / --task needed — identity resolves the task)
       agents browser navigate https://example.com
       agents browser screenshot
+
+      # Every tab open in the profile browser, yours next to the task&#39;s (OWNER column)
+      agents browser tabs --all
 
       # Keep one process and browser-service socket warm for repeated actions
       agents browser stream --task &quot;$AGENTS_BROWSER_TASK&quot;
@@ -808,9 +815,10 @@ Harness worker credentials are minted by `agents accounts add &lt;harness&gt; [n
       agents browser start</code></pre><h4>Notes</h4><p class="notes">Most agent workflows should use the &#39;browser&#39; skill instead of raw subcommands.
       The skill wraps profile selection, snapshotting, and tunneling.
 
-      Browser support: Chromium-family only (Chrome, Comet, Chromium, Brave, Edge, Arc).
-      Safari and Firefox are not supported — they don&#39;t speak the Chrome DevTools
-      Protocol the way agents browser expects. On Windows, Edge is the default
+      Browser support: Chromium-family over the Chrome DevTools Protocol (Chrome,
+      Comet, Chromium, Brave, Edge), Arc natively (one profile per Space), and
+      Firefox over WebDriver BiDi (one profile per profiles.ini entry; Firefox 129+
+      dropped CDP). Safari is not supported. On Windows, Edge is the default
       because it&#39;s preinstalled. On macOS and Linux, Chrome is preferred when
       installed; otherwise the first Chromium-family binary on disk wins.</p></article>
 <article id="browser-click" data-search="click browser click  click an element by ref, or raw coordinates with --at x,y ref  --task &lt;name&gt; task name (defaults to $agents_browser_task, else the caller&#39;s live task) --device &lt;name&gt; not valid here — bind the device at `agents browser start --device` -t, --tab &lt;tabid&gt; tab id (defaults to current) --at &lt;x,y&gt; click viewport coordinates (e.g. --at 320,540), bypassing ref resolution -h, --help show help  "><div class="command-head"><h3><code>agents browser click [ref]</code></h3></div><p>Click an element by ref, or raw coordinates with --at X,Y</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>[ref]</code></td><td>—</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--task &lt;name&gt;</code></td><td>Task name (defaults to $AGENTS_BROWSER_TASK, else the caller&#39;s live task)</td><td></td><td></td></tr><tr><td><code>--device &lt;name&gt;</code></td><td>Not valid here — bind the device at `agents browser start --device`</td><td></td><td></td></tr><tr><td><code>-t, --tab &lt;tabId&gt;</code></td><td>Tab ID (defaults to current)</td><td></td><td></td></tr><tr><td><code>--at &lt;x,y&gt;</code></td><td>Click viewport coordinates (e.g. --at 320,540), bypassing ref resolution</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table></article>
