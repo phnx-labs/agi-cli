@@ -149,6 +149,16 @@ d('BrowserService over Firefox BiDi against real Firefox', () => {
     await expect(service.printToPdf('nope')).rejects.toThrow(/Firefox.*does not support pdf|Chromium/i);
   }, 60_000);
 
+  it('recording is unsupported and says so by name; record status is a truthful "not recording", so the reaper keeps running', async () => {
+    seedTask('rec');
+    await service.tabAdd('rec', dataUrl('<title>rec</title>'));
+    await expect(service.recordStart('rec')).rejects.toThrow(/does not support recording/);
+    // hygiene.ts asks every live task this before deciding it is abandoned; a
+    // throw here parked the daemon's browser-task-reap service after 3 ticks.
+    await expect(service.recordStatus('rec')).resolves.toEqual({ recording: false });
+    await expect(service.recordStop('rec')).rejects.toThrow(/does not support recording/);
+  }, 60_000);
+
   it('tabs --all lists every tab in the profile, the owner\'s next to the task\'s (profileTabs)', async () => {
     const { bidiCreateTab, bidiNavigate } = await import('./drivers/firefox.js');
     const task = seedTask('all');

@@ -2043,7 +2043,7 @@ export class BrowserService {
     }
 
     const { conn, task, key: runtimeKey } = await this.findTask(taskId);
-    requireCdp(conn, 'screenshot');
+    requireCdp(conn, 'recording');
     const shortId = tabHint ? await this.resolveTabHint(conn, task, tabHint) : this.resolveCurrentTab(task);
     const cdpTargetId = this.getCdpTargetId(task, shortId);
     const target = await this.getTarget(conn, cdpTargetId);
@@ -2247,7 +2247,7 @@ export class BrowserService {
     reason: 'manual' | 'duration-cap' | 'size-cap' = 'manual'
   ): Promise<{ path: string; bytes: number; durationMs: number; reason: string }> {
     const activeTask = await this.findTask(taskId).catch(() => undefined);
-    if (activeTask) requireCdp(activeTask.conn, 'screenshot');
+    if (activeTask) requireCdp(activeTask.conn, 'recording');
     const rec = this.recordings.get(taskId);
     if (!rec) {
       throw new Error(`Task "${taskId}" is not currently recording`);
@@ -2342,8 +2342,11 @@ export class BrowserService {
     // not route an already-live task through findTask(), which stamps it as
     // active and defeats idle detection. A cold daemon may still rehydrate for
     // an explicit user query.
+    // A status query, not an action: a backend that cannot record (Arc native,
+    // Firefox BiDi) is truthfully "not recording". Throwing here took the
+    // idle reaper down with it — one Firefox task parked reaping for every task.
     const live = this.findTaskByHandle(taskId) ?? await this.findTask(taskId).catch(() => undefined);
-    if (live) requireCdp(live.conn, 'screenshot');
+    if (live && live.conn.backend !== 'cdp') return { recording: false };
     const rec = this.recordings.get(taskId);
     if (!rec) return { recording: false };
     return { recording: true, path: rec.outputPath, elapsedMs: Date.now() - rec.startedAt };
