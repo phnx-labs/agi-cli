@@ -1,8 +1,8 @@
 ---
 kind: plan
 surface: native
-title: AGI Menu with one session list and trustworthy requests
-summary: Reuse native notifications, correct input detection, and organize sessions, projects, tickets and devices.
+title: "AGI Menu with three tabs: Sessions, Projects, Settings"
+summary: One session list with confirmed requests, a Projects tab that shows the tracker's projects, milestones, cycles and issues, and one Settings tab.
 status: draft
 project: agents-cli
 repository: phnx-labs/agi-cli
@@ -19,22 +19,21 @@ links:
   - https://github.com/phnx-labs/agi-cli/pull/3497
 assets:
   - agi-menu-layout.png
-  - agi-menu-customize.png
-  - agi-menu-options.png
-  - agi-menu-options-empty.png
+  - agi-menu-projects.png
+  - agi-menu-issues.png
+  - agi-menu-settings.png
 ---
 
 ## Focus for review
 
-Keep the existing native notification delivery and reply mechanism. Fix the shared request state before putting a number on the new Notifications tab.
+Keep the existing native notification delivery and reply mechanism. Fix the shared request state before putting a number on the Sessions badge.
 
-- Start with one rich session list, working first and three rows initially; let the user change the row limit and preview density.
-- Add Customize view: enable or hide sections, drag to reorder, and adjust each panel. Keep Customize available even when every section is hidden.
-- Give every panel an Options button with the same saved options Customize shows. Projects can be filtered by tracker priority (All, Urgent only, High and above, Medium and above) as the user's default view. All four live Linear projects are Low today, so a High-and-above default shows an empty state with a way back to all projects.
-- Put requests in Notifications. Its badge counts unresolved requests; remove competing “needs you” totals from the header and session groups.
-- Store a personal default project separately from personal project order. Put tickets inside Projects → Milestones → Tickets, with a “No milestone” group.
+- Three tabs, fixed: **Sessions · Projects · Settings**. No customize mode, no drag ordering, no Notifications or Devices tabs. Version moves to Settings → About.
+- Sessions: working sessions first (three rows, then Show more), then **Needs you** with only confirmed requests and their real choices, then Idle and Previous collapsed. The tab badge counts confirmed requests.
+- Projects shows tracker data and nothing else: each project → its milestones → their issues. Every milestone shows which cycle its open issues sit in, so several milestones can share the current cycle. One filter: **This cycle** (default) or **All open**.
+- Settings holds every preference: default project for New task, rows shown, previews, project priority filter, hide completed milestones, banners, other-device requests, a compact fleet list, and About.
 
-<aside class="artifact-callout">Review draft only. No product changes have been made. The clickable layout uses illustrative counts, including its two requests; those are not a measurement of live sessions.</aside>
+<aside class="artifact-callout">Review draft only. No product changes have been made. The clickable layout uses illustrative sessions, issues and milestones shaped like the installed Linear CLI's JSON; the two requests are not a measurement of live sessions.</aside>
 
 <figure class="artifact-figure artifact-behavior">
 <section data-state="current" data-evidence="mockup">
@@ -56,30 +55,30 @@ Keep the existing native notification delivery and reply mechanism. Fix the shar
 <figcaption>Layout reconstructed from the owner's screenshots. The three totals measure different things. Native Notification Center can contain banners while this submenu is empty.</figcaption>
 </section>
 <section data-state="proposed" data-evidence="mockup">
-<h3>Proposed: working sessions first, one Notifications badge</h3>
-<img class="artifact-image" src="agi-menu-layout.png" alt="Proposed AGI menu with configurable Sessions, Projects, Notifications and Devices tabs, three working session previews with PR and ticket links, collapsed idle and previous sessions, and Customize and About in the footer"/>
-<figcaption>Illustrative layout. Clicking a session opens its details; PR and ticket links have independent actions. Version information moves to About.</figcaption>
+<h3>Proposed: Sessions tab, working first, confirmed requests below</h3>
+<img class="artifact-image" src="agi-menu-layout.png" alt="Proposed AGI menu with three tabs Sessions, Projects and Settings; three working session rows with project, agent, device, age, a one-line preview and PR and issue links; a Needs you group with two confirmed requests and their choices; Idle and Previous collapsed"/>
+<figcaption>Illustrative layout. A session title opens its details; PR and issue links open their exact destination. The Sessions badge equals the confirmed requests listed under Needs you.</figcaption>
 </section>
 </figure>
 
 <figure class="artifact-figure">
-<img class="artifact-image" src="agi-menu-customize.png" alt="Customize view with section visibility checkboxes, drag handles, keyboard move controls, the Projects panel options expanded showing the priority filter, and Restore default view"/>
-<figcaption>Customize appears only while editing the view. A section can be hidden without disabling its underlying service. Panel options here and each panel's Options button read the same option table, so nothing is defined twice.</figcaption>
+<img class="artifact-image" src="agi-menu-projects.png" alt="Projects tab in This cycle mode: a cycle line reads Cycle 28, Design partner live, Sep 8 to 15; Agents CLI is expanded with milestones Native menu (Cycle 28 now, 3 open, 2 of 5 done, target Sep 14), Session reliability (Cycle 28 now and Cycle 29, 1 open) and No milestone (2 open), with a note that one milestone is completed; Client runtime and Research are collapsed with priority badges"/>
+<figcaption>Projects → milestones. Cycle chips come from the milestone's open issues, so two milestones can both read Cycle 28 · now. This cycle hides milestones with nothing in the current cycle and says how many it hid; All open shows every open issue with its own cycle chip.</figcaption>
 </figure>
 
 <figure class="artifact-figure">
-<img class="artifact-image" src="agi-menu-options.png" alt="Projects panel with its Options open: Show projects with priority set to High and above, completed-milestone and untracked-project toggles, one High project listed with its milestones, and a note that two projects are hidden by the filter"/>
-<figcaption>Projects → Options. The priority filter is saved as this user's default view. Each project shows its tracker priority, and a footer line counts what the filter hid. The default-project selector is never filtered.</figcaption>
+<img class="artifact-image" src="agi-menu-issues.png" alt="Milestone issues view: breadcrumb back to Projects, title Agents CLI › Native menu, 3 open in cycle 28, and three issue rows with identifier link, title, state and assignee initial"/>
+<figcaption>Milestone → issues. Identifier opens the issue in the tracker. In All open mode each row also carries its cycle and completed issues fold under Done.</figcaption>
 </figure>
 
 <figure class="artifact-figure">
-<img class="artifact-image" src="agi-menu-options-empty.png" alt="Projects panel with the filter set to Urgent only and no matching projects: an empty state names each project's priority and offers Show all projects and Change filter"/>
-<figcaption>Empty state when the saved filter matches nothing. Show all projects is a temporary override that does not change the saved filter; Change filter reopens Options. This is the state a High-and-above default would show against today's tracker, where every project is Low.</figcaption>
+<img class="artifact-image" src="agi-menu-settings.png" alt="Settings tab with sections New tasks (default project), Sessions (rows shown first, previews), Projects (priority filter, hide completed milestones), Notifications (banner toggle, other-device requests), Fleet (3 online, 1 offline, expandable device list) and About (version, Check for updates)"/>
+<figcaption>Settings is the only place preferences live. The priority filter reads the tracker's project priority and never writes it; today every live project is Low, so High and above would show an empty Projects tab with Show all projects.</figcaption>
 </figure>
 
 ## Purpose
 
-Make the everyday menu useful without scrolling through duplicate session inventories. The owner wants to see running agents first, understand their latest work, open their linked PR or ticket, and find personal priority projects and milestone tasks.
+Make the everyday menu useful without scrolling through duplicate session inventories. The owner wants to see running agents first, understand their latest work, open their linked PR or issue, and see the tracker's projects, milestones, cycles and issues without leaving the menu.
 
 Input alerts must explain the actual pending decision. An agent finishing a turn is not evidence that it requires approval. A question, an approval, a failure and a completed task need different presentation.
 
@@ -144,7 +143,7 @@ An open block must be reconciled against later transcript/hook evidence. New wor
 
 Time-sensitive evidence must expire even when transcript content is unchanged. `active.ts:1291–1292` currently caches computed signals by file mtime and PID liveness, so a 30-minute conversational-question threshold can remain frozen. Cache parsed content separately and recompute time-based classifications; use actual transcript event timestamps, not filesystem mtime, as activity evidence.
 
-**2. Project that same request record everywhere.** The Notifications tab, its badge, session detail and native banners share identity, type, state and supported actions. Remove the separate raw-block menu parser and any status-color fallback that resurrects a resolved request. Use host plus session plus request generation, not bare session ID.
+**2. Project that same request record everywhere.** The Sessions tab's Needs you group, its badge, session detail and native banners share identity, type, state and supported actions. Remove the separate raw-block menu parser and any status-color fallback that resurrects a resolved request. Use host plus session plus request generation, not bare session ID.
 
 ```diff
 # RecentSectionBuilder.swift + FeedModels.swift + SessionRowModel.swift
@@ -162,52 +161,45 @@ Time-sensitive evidence must expire even when transcript content is unchanged. `
 
 Reuse the installed notification sender and `agents feed answer` response path. The daemon, not a UI timer, must own delivery of fleet requests to the selected personal device. Reuse its existing fleet feed aggregation and avoid a new remote poll for each menu view. Verify local and remote delivery, restart replay, and duplicate suppression before claiming this Mac receives the fleet's requests. OS notification history is not the source of unresolved state: users can dismiss a banner without answering.
 
-**3. Replace the long menu with a customizable native surface.** Keep the existing status item, session window, row presentation, feed stream and dispatch behavior. Build the tabbed content in the helper's native popover; the present `NSMenu` does not itself supply this layout. Delete the duplicate ACTIVE/RECENT rendering from the root menu. The excerpt below is a presentation contract:
+**3. Replace the long menu with three fixed tabs.** Keep the existing status item, session window, row presentation, feed stream and dispatch behavior. Build the tabbed content in the helper's native popover; the present `NSMenu` does not itself supply this layout. Delete the duplicate ACTIVE/RECENT rendering from the root menu. The excerpt below is a presentation contract:
 
 ```diff
 # StatusItemController.swift + native session views
 - version banner + multiple attention totals
 - ACTIVE rows + RECENT rows + expanded auxiliary lists
-+ default sections: Sessions | Projects | Notifications | Devices
-+ Customize: show/hide + drag order; Routines and Browser optional
-+ Options button on every panel; one option table feeds it and Customize
-+ Sessions: rows shown, previews, group by project, idle · Devices: offline, load
-+ Notifications: other devices, unverified, history · Projects: priority filter,
-+   completed milestones, untracked projects; empty state keeps Show all projects
-+ one rich session list; configurable working rows + Show more
-+ Idle / Previous collapsed; full session opens from its title
-+ PR and ticket URLs open directly; version under About
-+ Tickets inside Projects → Milestone → Tickets; No milestone preserved
-+ Tools / Customize / Settings / About remain accessible
+- Routines / Tickets / Notifications / Devices submenus
++ tabs, fixed order: Sessions | Projects | Settings
++ Sessions: Working (N rows + Show more) → Needs you (confirmed only) → Idle → Previous
++ Sessions badge = confirmed unresolved requests; no other totals anywhere
++ Projects: tracker projects → milestones (cycle chips) → issues; This cycle | All open
++ Settings: default project, rows, previews, priority filter, completed milestones,
++   banners, other-device requests, fleet list, About (version + update)
++ PR and issue URLs open directly; New task stays in the header
 ```
 
-A blocked session has its details reachable from its notification, while working rows remain first as requested. No session disappears merely because it is not in the initial three. Device load and routine failures remain labeled diagnostics, excluded from the input-request count.
-
-Customize is an explicit editing mode: visibility checkboxes, draggable section rows, and keyboard-accessible move controls. Each panel exposes only relevant options, reachable two ways: an Options button in the panel header and the Panel options list in Customize. Both render from one option table keyed by section ID, so a new option is declared once. Changing an option saves it to the user's view immediately and says so; there is no separate Save step. Defaults are a starting view, not fixed product policy. Hide/show affects presentation, not native notification delivery, underlying jobs or data. Persist stable section IDs, order, visibility and per-panel options with personal preferences; retain hidden-section settings and offer Restore default view. If the active section is hidden, open the next visible section. If all are hidden, show an empty state with Customize still available. Keep transient expansion separate from the saved default layout.
+A blocked session is listed under Needs you with its exact prompt and only the choices the harness offers; working rows remain first as requested. No session disappears merely because it is not in the initial three. Device load and routine failures are diagnostics in Settings → Fleet, excluded from the request count. There is no per-panel customization: the tabs are fixed, and every preference is a row in Settings so a change is made in one place and synced with the user's other preferences.
 
 **4. Normalize links once, upstream.** Keep exact PR repository, number and URL, ticket ID and URL, and separately fetched PR state with freshness. Bind a tool result to the command that produced it; do not attach an unrelated later PR URL. Missing PR checks render “Status unavailable,” not “checks running.” Reuse the preview/identity work in PR #3497 after coordinating ownership.
 
-**5. Add personal projects and real milestone drilldown.** A personal preferences record owns `defaultProjectId`, `orderedProjectIds` and `projectPriorityFilter`; shared `ProjectDef` keeps repository and tracker metadata. Key preferences by signed-in user where available, with an explicit local profile when signed out. Sync only that user's record through the existing user-config mechanism; add its allowlist and merge/isolation coverage rather than promising automatic sync from a new device-only key. Default and priority are separate: changing order must not silently change task destination.
+**5. Projects tab: the tracker's projects, milestones, cycles and issues.** A personal preferences record owns `defaultProjectId` and `projectPriorityFilter`; shared `ProjectDef` keeps repository and tracker metadata. Key preferences by signed-in user where available, with an explicit local profile when signed out. Sync only that user's record through the existing user-config mechanism; add its allowlist and merge/isolation coverage rather than promising automatic sync from a new device-only key. The default project only preselects New task; it never reorders or filters the Projects tab.
 
-**Priority filter.** `linear projects --json` already returns `priority` as the tracker's integer scale (1 urgent, 2 high, 3 medium, 4 low, 0 none; the labels `linear projects update --priority` accepts). The filter keeps projects at the chosen level and above and is saved as the user's default view. Verified 2026-09-10: all four projects return 4 (Low), so a High-and-above default renders the empty state on day one. That state names each project's priority and offers Show all projects, a temporary override that is not saved, and Change filter. The default-project selector and New task never apply the filter, and the filter never writes to the tracker.
+The Projects tab is a read-only projection of the tracker. Each project row shows name, priority and its open count in the current scope. Expanding it lists milestones; each milestone row shows the cycles its open issues sit in (`Cycle 28 · now`, `Cycle 29`), open count, done-of-total progress and target date. Milestones are project-scoped while cycles are team-scoped time boxes, so a milestone can span cycles and several milestones share one cycle; the chips make that visible instead of forcing milestones under a single cycle. Issues without a milestone stay under **No milestone**. Clicking a milestone opens its issues (identifier, title, state, assignee) with a breadcrumb back. The one filter is **This cycle** (open issues whose cycle is the current one; milestones with nothing in it collapse into a one-line count) or **All open** (every open issue, each with its cycle chip; done issues fold under Done).
 
-The Projects tab shows ordered projects, declared tracker milestones, progress and update time. Clicking a milestone opens its tickets inside Projects, with a breadcrumb back to the project. There is no separate Tickets tab. Preserve “No milestone,” unlinked projects, empty milestones, canceled tasks, pagination, stale and partial states. A user's completed-milestone option controls presentation, not whether canceled work is incorrectly counted as actionable.
-
-**Use the existing Linear CLI.** Installed `linear-cli 0.21.1` supports the following authenticated reads. The native app already calls it through `AgentsCLI` and `LinearTickets`, including project binding, filters and a 90-second cache; reuse that path.
+**Use the existing Linear CLI.** Installed `linear-cli 0.21.1` supports these authenticated reads. The native app already calls it through `AgentsCLI` and `LinearTickets`, including project binding, filters and a 90-second cache; reuse that path.
 
 ```sh
-linear projects --json
-linear milestones list <project-id> --json
-linear tasks --all --project <project-id> --milestone <milestone-id> --status open --json
-linear tasks --all --project <project-id> --milestone <milestone-id> --status done --json
-linear tasks --all --project <project-id> --milestone <milestone-id> --status canceled --json
+linear projects --json                     # id, name, state, progress, priority (1 urgent … 4 low, 0 none)
+linear cycles --json                       # number, name, startsAt, endsAt, completedAt
+linear milestones list <project-id> --json # id, name, description, targetDate
+linear tasks --all --project <project-id> --status open --json
+linear tasks --all --project <project-id> --status done --json
 ```
 
-`--all` removes the configured agent/delegate filter; explicit `--project` still scopes results. It does not include completed/canceled work without the status flag. Projects/milestones span all cycles. For “No milestone,” fetch the project's tasks and select records with null `projectMilestone`; `--assignee none` means no person assigned and is not equivalent.
+Verified 2026-09-10 against the live workspace: `linear tasks … --json` returns an object with `count` and `issues`, and each issue carries `identifier`, `title`, `state{name,type}`, `cycle{number,name}`, `projectMilestone{name}`, `assignee{name}`, `priority` and `url`. That is enough to build the tab: the current cycle is the one whose `startsAt ≤ now < endsAt` (cycle 28 today), a milestone's cycle chips are the distinct `cycle.number` values of its open issues, and "No milestone" is `projectMilestone == null`. For the AGI project the same query returned 23 open issues, 21 in the current cycle and none assigned to a milestone, so the day-one view is one expanded project with six declared milestones folded as completed and a large No milestone row. `--all` removes the configured agent/delegate filter; `--assignee none` means no person assigned and is not equivalent.
 
-Two small changes belong in the owning Linear CLI before the richer UI ships: expose milestone rollups and milestone IDs on task JSON, and paginate milestone declarations with coverage metadata. Currently milestone JSON has IDs but no counts; task JSON has milestone name but no ID; human rollups count completed as done while including canceled in the denominator. Milestone list stops at 100, project detail at 50. Task queries paginate in 100-record pages up to a safety cap and must expose partial coverage. Reuse or extend the Linear CLI contract rather than add another GraphQL client in the menu or poll broad fleet-probing `projects status` on redraw.
+Two small additions belong in the owning Linear CLI before the richer view ships: expose the milestone **id** and the cycle **id** on task JSON (today both are name/number only), and add done/canceled rollups per milestone so progress does not need a second query per milestone. Milestone list stops at 100, project detail at 50; task queries paginate in 100-record pages up to a safety cap and must expose partial coverage. Reuse or extend the Linear CLI contract rather than add another GraphQL client in the menu or poll broad fleet-probing `projects status` on redraw.
 
-Existing `UserDefaults` patterns cover dispatch defaults and project selection, but no persisted menu section order exists. Reuse these controls and consolidate the local project-to-Linear override with the canonical binding. Saved default project is distinct from the most recently selected project and from section order.
+Existing `UserDefaults` patterns cover dispatch defaults and project selection. Reuse these controls and consolidate the local project-to-Linear override with the canonical binding. The saved default project is distinct from the most recently selected project.
 
 ## Proposed architecture
 
@@ -230,19 +222,16 @@ Existing `UserDefaults` patterns cover dispatch defaults and project selection, 
 
 | Action | Result |
 | --- | --- |
-| Open AGI Menu | Saved visible sections and order; initial default is Sessions with three working previews. |
-| Customize view | Toggle sections, drag or move them, adjust panel options; changes belong to this user. |
-| Open a panel's Options | The same options Customize lists for that panel; each change is saved to this user's view at once. |
-| Filter projects by priority | Projects at the chosen tracker priority and above; an empty match shows each project's priority with Show all projects (temporary) and Change filter. |
-| Open Notifications | Current unresolved decisions with their exact reason and valid actions; resolved/informational history separate. |
-| Reply to a question | Existing reply transport; retain the request and show a delivery error if sending fails. |
-| Click PR or ticket | Exact linked destination opens independently of the session title. |
-| Set default project | New task preselects that user's chosen project. |
-| Move project to top | Personal order changes; shared tracker priority stays unchanged. |
-| Open milestone | Tickets within that project's context, with open/completed/canceled states and honest coverage. |
-| Open About / Devices / Tools | Version / device health / routines and browser tools respectively. |
+| Open AGI Menu | Sessions tab: three working previews, then Needs you, Idle and Previous. |
+| Click a session, PR or issue | The session opens its details; a PR or issue link opens its exact destination. |
+| Answer under Needs you | Existing reply transport; the request stays until delivery is confirmed, then leaves the list and the badge. |
+| Open Projects | Tracker projects with priority and open count; This cycle is the default scope with the cycle's number, name and dates on one line. |
+| Expand a project | Its milestones with cycle chips, open count, done-of-total and target; No milestone last; folded counts for completed or out-of-cycle milestones. |
+| Open a milestone | Its issues with identifier, title, state and assignee; breadcrumb back; Done folded in All open mode. |
+| Switch to All open | Every open issue in every cycle, each row carrying its cycle chip. |
+| Open Settings | Default project, rows shown, previews, priority filter, completed milestones, banners, other-device requests, fleet list, About with version and Check for updates. |
 
-Expose personal preferences through the owning CLI configuration surface; project defaults remain under the projects noun. Reuse the installed Linear commands above for tracker reads and add the missing JSON fields there. Final preference command names follow component conventions during implementation; proposed preference commands are not claimed to exist today.
+Expose personal preferences through the owning CLI configuration surface; project defaults remain under the projects noun. Reuse the installed Linear commands above for tracker reads and add the missing id fields there. Final preference command names follow component conventions during implementation; proposed preference commands are not claimed to exist today.
 
 ## Plan
 
@@ -250,7 +239,7 @@ Expose personal preferences through the owning CLI configuration surface; projec
 - [x] Run two independent research agents; reconcile findings into this plan.
 - [x] Draft the clickable product layout and identify current notification defects.
 - [x] Inspect the rendered plan and preview at desktop/narrow widths in both appearances; exercise expansion, section visibility/reorder, options, empty-state recovery and milestone drilldown.
-- [x] Design per-panel Options and the project priority filter; exercise every option, the filter's empty state and its temporary override headlessly.
+- [x] Redesign to three fixed tabs after owner feedback: Sessions, Projects as a tracker projection with cycle chips and milestone → issue drilldown, Settings; verify the Linear CLI's cycle and issue JSON and exercise every state headlessly.
 - [ ] Owner review of this draft before product implementation.
 - [ ] After review, refresh PR #3497 and PHNX-3999 ownership and settle shared data contracts.
 - [ ] Start fleet implementation workers with disjoint ownership and confirm each starts successfully.
@@ -261,15 +250,15 @@ Expose personal preferences through the owning CLI configuration surface; projec
 | Parallel track | Ownership | Acceptance evidence |
 | --- | --- | --- |
 | Attention and delivery | `feed/attention`, lifecycle evidence and time-aware cache in `session/active`, daemon notifier, native Notifier only | Completed idle task produces no approval; old inferred evidence expires without file changes; real local/remote permission arrives with matching actions and resolves once. |
-| Native menu | Status item/popover, section customization, per-panel Options from one option table, and session interactions; no notifier logic | No duplicated row; hide/reorder/restore work, including all sections hidden; drag and keyboard controls verified on installed helper. |
-| Projects and milestones | Personal preference storage/sync including the priority filter, existing LinearTickets bridge, additive owning Linear CLI JSON contract | Two user profiles remain isolated; defaults, filter and view survive restart/sync; a filter that matches nothing shows the empty state and the override never persists; milestone IDs and open/completed/canceled task lists agree with real tracker data. |
+| Native menu | Status item/popover, the three tabs, Settings rows and session interactions; no notifier logic | No duplicated row; Sessions badge equals the Needs you list; Settings changes apply at once and survive restart; verified on the installed helper. |
+| Projects and milestones | Personal preference storage/sync including the priority filter, existing LinearTickets bridge, additive owning Linear CLI JSON contract | Two user profiles remain isolated; default project and filter survive restart/sync; This cycle matches the tracker's current cycle; milestone cycle chips, open counts and No milestone agree with real `linear tasks` output; a filter that matches nothing shows the empty state and the override never persists. |
 | Session links | Canonical session PR/ticket fields and row projection, coordinated with #3497 | Real session opens its correct PR and ticket; unknown checks remain unknown. |
 
 Shared interfaces land before composing consumers. Heavy implementation/build work goes to fleet workers. The initial `agents teams` research launches failed before executing: one lacked verified account usage, the other lacked its Linux Codex dependency. Two built-in research agents completed the audit instead. Implementation must preflight healthy worker/harness pairs and verify start, progress and completion; a dispatch command is not evidence of work.
 
 ## Validation
 
-Draft verification completed: `artifacts check` and `artifacts render` pass; screenshots were inspected at 1080/736-pixel desktop and 360-pixel narrow widths. The preview's drag events changed section order, toggles changed visible sections, row-limit and preview options changed the list, all-hidden state retained Customize, and milestone drilldown displayed five illustrative tickets inside Projects. Per-panel Options were exercised the same way: grouping sessions by project inserted project headers and hiding idle removed that group; turning off requests from other devices dropped the badge from 2 to 1 and printed the elsewhere note; the load highlight toggled; the Urgent-only filter produced the empty state, Show all projects restored all three projects as a temporary override, and High and above left one project with a hidden-count line; Customize showed the same values and Restore default view reset every option. No console errors were reported. Optional identity metadata is omitted for public-artifact privacy; the report uses the default artifact theme and the mockup uses native product colors. These checks verify a planning preview, not installed product behavior.
+Draft verification completed: `artifacts check` and `artifacts render` pass; the preview was rendered headlessly at 736 pixels wide and each captured state was read at the pixel level. Exercised in the preview with no console errors: Sessions rows capped at three with Show more; resolving a request removed it from Needs you and dropped the badge from 2 to 1; Projects in This cycle listed Agents CLI expanded with Native menu (Cycle 28 · now, 3 open), Session reliability (Cycle 28 · now and Cycle 29, 1 open), No milestone (2 open) and a folded completed milestone; opening Native menu showed its three open issues for cycle 28 with identifier links; All open showed done-of-total per milestone and expanded Client runtime with its milestone; Settings changed the default project, row limit, previews, priority filter and completed-milestone folding. The tracker shapes were checked against the live Linear CLI the same day. These checks verify a planning preview, not installed product behavior.
 
 The highest-value end-to-end checks use task-owned sessions so the owner's running sessions receive no test answers:
 
@@ -279,7 +268,7 @@ The highest-value end-to-end checks use task-owned sessions so the owner's runni
 4. Repeat from a worker session to the operator's desktop. Restart the notifier and replay the feed; no duplicate notification. Simulate posting failure with a real failing delivery path and verify retry/acknowledgement state.
 5. Keep a genuinely pending old permission; do not expire it by age. Complete a long-running tool without a prompt; it must not become permission after two minutes. Exercise the 30-minute conversational-evidence boundary while PID and file mtime remain unchanged; cached parsing must not freeze classification. A recently touched transcript containing only old events must not count as new activity.
 6. Open a real session's exact PR and ticket; compare destinations with transcript evidence. Confirm failed/unknown PR checks do not appear as running.
-7. Exercise the capped list, expansion, section toggle/drag/keyboard reorder, hiding all sections, recovery, restore defaults, per-panel options from both entry points, the priority filter with its empty state and temporary override, personal default project, and Projects → Milestones → Tickets in both appearances. Verify persistence and isolation across two users. Verify the installed helper after its independent release.
+7. Exercise the capped list and expansion, every Settings row, the priority filter with its empty state and temporary override, the default project preselecting New task, and Projects → milestone → issues in This cycle and All open against a real tracker project, in both appearances. Confirm a milestone with issues in two cycles shows both chips and that This cycle counts only issues whose cycle is current. Verify persistence and isolation across two users. Verify the installed helper after its independent release.
 
 Co-located regression tests protect these distinct failures; real process/service integration is required in addition. Use component scripts for builds/tests/releases and offload heavy checks. Do not install a dev build over the production `agents` binary.
 
@@ -293,7 +282,8 @@ Co-located regression tests protect these distinct failures; real process/servic
 | Per-prompt choices differ from harness defaults | `attention.ts:179–190`, `Notifier.swift:329–336`: preserve actual supported choices; omit unverified session-wide allowance. |
 | Preference leaks or never syncs | `state.ts:1050–1056`: explicit user identity, sync allowlist and reconciliation; signed-out local profile remains separate. |
 | Milestone completeness is overstated | Installed Linear CLI's JSON omits rollups and task milestone IDs; declaration queries cap at 50/100, and canceled tasks count in human-view totals. Add fields and coverage at the owning CLI; distinguish open/completed/canceled and preserve No milestone. |
-| Priority filter hides every project | Live tracker 2026-09-10: all four projects are Low, so High and above matches nothing. The empty state names each project's priority and offers Show all projects (unsaved) and Change filter; the default-project selector and New task ignore the filter, so dispatch keeps working. |
+| A milestone spans cycles or a cycle holds several milestones | Verified shapes: cycles are team-scoped, milestones project-scoped, issues carry both. Chips derive from each milestone's open issues, so both cases render truthfully; never nest milestones under one cycle. |
+| Priority filter hides every project | Live tracker 2026-09-10: all four projects are Low, so High and above matches nothing. The empty state names each project's priority and offers Show all projects (unsaved) and a link to Settings; the default project and New task ignore the filter, so dispatch keeps working. |
 | Existing preview work is overwritten | PR #3497 touches shared session/feed paths; coordinate and compose with its owner before editing. |
 
 Independent research recommendations on notification subtype, attribution-vs-answer state, scoped identity, banner withdrawal, fleet delivery scope and milestone coverage are adopted. Replacing the notification mechanism or using OS history as request truth is rejected because the existing answer lifecycle is reusable and dismissal is not resolution.
