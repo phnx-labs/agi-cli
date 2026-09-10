@@ -247,15 +247,16 @@ span is readable off the row — but each half is still an **unlabeled "X ago"**
 renders identically for running and idle rows, not a called-out "idle for X" /
 "stuck for X". There is no explicit idle/stuck duration string anywhere.
 
-**Gap 2 — a hung agent mid-tool-call is mislabeled `input_required`.** When the last
-tail event is a `tool_use` and the process is alive but not fresh, `inferActivity`
-returns `waiting_input` with `awaitingReason: 'permission'` (`state.ts:558-561`) — a
-**guessed** permission prompt, not an observed one (`permissionQuestion`,
-`state.ts:449`). So a genuinely wedged agent (stuck command, silent loop) shows as
-"waiting for you to approve," sending the operator to approve a prompt that does not
-exist. Every other hang folds into an undifferentiated `idle` (`state.ts:566`, `:590`).
-There is **no dedicated `stuck`/`hung` status**, and the one signal that would reveal a
-hang — elapsed silence — is exactly Gap 1.
+**Gap 2 — closed (PHNX-3999).** A pending tool call with a live process used to be
+guessed as `waiting_input` / `awaitingReason: 'permission'` — a permission prompt
+nobody had observed — so a wedged agent read as "waiting for you to approve." Since
+PHNX-3999 `inferActivity` reports such a session as `working` while the process is
+alive; a permission request exists only when the harness records one
+(`permission_prompt` in `feed/attention.ts`), and a stale or uncorroborated record
+surfaces as `unverified` with no approval controls. Every other hang still folds
+into an undifferentiated `idle` (`state.ts`), and there is **no dedicated
+`stuck`/`hung` status** — the signal that would reveal a hang, elapsed silence, is
+exactly Gap 1.
 
 **Other accuracy caveats:**
 - **Stale cache + frozen clock.** The browser's default view (running filter off) reads
