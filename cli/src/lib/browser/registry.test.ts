@@ -302,7 +302,8 @@ describe('device declaration lifecycle', () => {
       const { machineId } = await import('../machine-id.js');
       const { createProfile, getProfile, listProfiles, publishDiscoveredProfiles, isProfileDeclaredHere } = await import('./profiles.js');
       // A pre-existing declaration on the canonical Comet port: discovered rows step past it.
-      await createProfile({ name: 'comet-local', browser: 'comet', endpoints: ['cdp://127.0.0.1:9333'] });
+      // The binary is any file that exists so the declaration is accepted on Linux CI too.
+      await createProfile({ name: 'comet-local', browser: 'comet', binary: process.execPath, endpoints: ['cdp://127.0.0.1:9333'] });
 
       const first = await publishDiscoveredProfiles();
       expect(first.errors).toEqual({});
