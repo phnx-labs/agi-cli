@@ -104,6 +104,16 @@ d('same-task reopen over the real IPC socket + real Chromium (PHNX-2399)', () =>
     return targetInfos.filter((t) => t.type === 'page');
   };
   const targetsForUrl = async (url: string) => (await pageTargets()).filter((t) => t.url === url);
+  // Right after a Page.reload the target briefly reports no url, so a count taken
+  // at that instant reads 0. Wait for the url to be reported again before counting.
+  const settledTargetsForUrl = async (url: string) => {
+    for (let i = 0; i < 80; i++) {
+      const hits = await targetsForUrl(url);
+      if (hits.length > 0) return hits;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    return targetsForUrl(url);
+  };
 
   beforeAll(async () => {
     fs.rmSync(TEST_HOME, { recursive: true, force: true });
@@ -168,13 +178,15 @@ d('same-task reopen over the real IPC socket + real Chromium (PHNX-2399)', () =>
     expect(first.created).toBe(true);
     expect(first.refreshed).toBe(false);
     expect(await targetsForUrl(urlFor('P'))).toHaveLength(1); // exactly one open — no double execution
+    const before = (await pageTargets()).length;
 
     const again = await ipcCall(socketPath, { action: 'navigate', url: urlFor('P'), profile: PROFILE, sessionId: 'ipc-s1', launchId: 'ipc-l1', actor: 'tester' });
     expect(again.ok).toBe(true);
     expect(again.refreshed).toBe(true);
     expect(again.tabId).toBe(first.tabId); // SAME tab id
     expect(String(again.message)).toContain('Tab already open—refreshed');
-    expect(await targetsForUrl(urlFor('P'))).toHaveLength(1); // still one target
+    expect(await settledTargetsForUrl(urlFor('P'))).toHaveLength(1); // still one target
+    expect((await pageTargets()).length).toBe(before); // the refresh opened nothing
   }, 40_000);
 
   it('two INDEPENDENT socket connections adding one URL create ONE target, same id', async () => {
