@@ -1,7 +1,7 @@
 import * as os from 'os';
 import * as path from 'path';
 import { getHistoryDir } from '../../state.js';
-import { resolveCodexHome, codexHomeShimBash } from '../../codex-home.js';
+import { codexHomeShimBash, codexShortKey, resolveCodexHome } from '../../codex-home.js';
 import { codexEditWritableRoots, codexPolicyArgs } from '../../codex-policy.js';
 import type { HarnessAdapter } from '../adapter.js';
 import { stripForeignConfigDir } from '../adapter.js';
@@ -24,9 +24,12 @@ export const codexAdapter: HarnessAdapter = {
       // On macOS the deep versioned home overflows the Unix-socket SUN_LEN
       // limit for codex's app-server control socket; resolve to a short,
       // SUN_LEN-safe home (migrating once if needed). See codex-home.ts.
-      const versionedHome = path.join(ctx.versionHome, '.codex');
-      const agentsUserDir = path.dirname(getHistoryDir());
-      result.CODEX_HOME = resolveCodexHome(versionedHome, agentsUserDir, ctx.version);
+      // ctx.versionHome is the account slot on a `codex#<account>` launch, so
+      // the short home is keyed by that origin, never by the version alone.
+      const originHome = path.join(ctx.versionHome, '.codex');
+      const historyDir = getHistoryDir();
+      const agentsUserDir = path.dirname(historyDir);
+      result.CODEX_HOME = resolveCodexHome(originHome, agentsUserDir, codexShortKey(originHome, ctx.version, historyDir));
     }
     stripForeignConfigDir(result, ['CODEX_HOME']);
   },
