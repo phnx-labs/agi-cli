@@ -24,7 +24,7 @@ import { listResources, resolveResource } from './resources.js';
 import { probeCapture } from './probe.js';
 import { composeWin32CommandLine } from './platform/index.js';
 import { localBinDir } from './platform/posixpath.js';
-import { builtinSecretsCliManifest, isSecretsPresent, SECRETS_CLI_NAME } from './secrets-cli.js';
+import { isSecretsPresent, SECRETS_CLI_NAME, SECRETS_CLI_SPEC } from './secrets-cli.js';
 
 // ─── Validation primitives ───────────────────────────────────────────────────
 
@@ -131,6 +131,28 @@ export interface CliManifestError {
   file: string;
   /** Human-readable reason. */
   reason: string;
+}
+
+/**
+ * Fallback host-CLI manifest used when no `clis/secrets.yaml` is declared.
+ * Lives here (not in secrets-cli.ts) so the process client can import the pin
+ * without loading this parser.
+ */
+export function builtinSecretsCliManifest(): CliManifest {
+  return {
+    name: SECRETS_CLI_NAME,
+    description: 'Standalone secrets CLI — keychain-backed bundles for agents-cli',
+    homepage: 'https://github.com/phnx-labs/secrets-cli',
+    check: { kind: 'which', cmd: SECRETS_CLI_NAME },
+    install: [{ npm: SECRETS_CLI_SPEC }],
+    postInstall: [
+      'Then onboard existing stores:',
+      '  agents setup secrets',
+      '  agents secrets list',
+    ].join('\n'),
+    source: 'builtin',
+    path: '(builtin)',
+  };
 }
 
 // ─── Parsing ─────────────────────────────────────────────────────────────────

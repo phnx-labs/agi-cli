@@ -7,10 +7,9 @@ import { installSecretsCli } from './secrets-cli-install.js';
 import {
   SECRETS_CLI_SPEC,
   SECRETS_CLI_VERSION,
-  builtinSecretsCliManifest,
   isSecretsPresent,
 } from './secrets-cli.js';
-import { isCliInstalled, resolveCliManifest } from './cli-resources.js';
+import { builtinSecretsCliManifest, isCliInstalled, resolveCliManifest } from './cli-resources.js';
 import { findInPath } from './agent-spec/agents.js';
 import { getShimsDir } from './state.js';
 import { _resetSecretsClientForTest } from './secrets-client.js';

@@ -5,9 +5,12 @@
  * presence check used by setup / doctor / host-CLI install — it carries no
  * storage. Presence is `findInPath`, which skips `~/.agents/.cache/shims`: a
  * leftover alias there `exec`s `agents secrets` and would recurse (agi-cli#3532).
+ *
+ * Keep this file free of `cli-resources` imports: `secrets-client.ts` loads it,
+ * and a cycle through the host-CLI parser would pull yaml/spawn into the
+ * process-client module graph.
  */
 import { findInPath } from './agent-spec/agents.js';
-import type { CliManifest } from './cli-resources.js';
 
 export const SECRETS_CLI_NAME = 'secrets';
 export const SECRETS_CLI_PACKAGE = '@phnx-labs/secrets-cli';
@@ -24,26 +27,4 @@ export function isSecretsPresent(): boolean {
   const explicit = process.env.SECRETS_BIN?.trim();
   if (explicit) return true;
   return findInPath(SECRETS_CLI_NAME) !== null;
-}
-
-/**
- * Fallback host-CLI manifest used when no `clis/secrets.yaml` is declared in
- * project/user/system layers. `agents clis install secrets` and doctor listing
- * then still have a method: the same pinned npm package.
- */
-export function builtinSecretsCliManifest(): CliManifest {
-  return {
-    name: SECRETS_CLI_NAME,
-    description: 'Standalone secrets CLI — keychain-backed bundles for agents-cli',
-    homepage: 'https://github.com/phnx-labs/secrets-cli',
-    check: { kind: 'which', cmd: SECRETS_CLI_NAME },
-    install: [{ npm: SECRETS_CLI_SPEC }],
-    postInstall: [
-      'Then onboard existing stores:',
-      '  agents setup secrets',
-      '  agents secrets list',
-    ].join('\n'),
-    source: 'builtin',
-    path: '(builtin)',
-  };
 }
