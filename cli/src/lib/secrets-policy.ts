@@ -29,7 +29,7 @@ import {
 } from './fleet-shared-state.js';
 import { getCacheDir, getUserAgentsDir, readMeta } from './state.js';
 import { listNativeAccounts, readSlots } from './account-registry.js';
-import { claudeAccountTokenKey, provisionWorkerSlot, readReservedCredential } from './claude-account-token.js';
+import { claudeAccountTokenKey, isClaudeWorkerHomeSeeded, provisionWorkerSlot, readReservedCredential } from './claude-account-token.js';
 import { configuredDeviceRole, isHeadedDeviceRole, selfConfiguredDeviceRole } from './device-config.js';
 import {
   AUTH_STORE_ALIAS,
@@ -653,6 +653,12 @@ export interface ReconcileWorkerSlotsDeps {
   readMetaFn?: () => Pick<Meta, 'accounts' | 'deviceAccounts'>;
   hasLocalKey?: (bundle: string, key: string) => boolean;
   provision?: (account: NativeAccountRecord) => void;
+  /** True when an existing durable slot already carries everything provisioning seeds. */
+  slotSeeded?: (harness: AgentId, slotDir: string) => boolean;
+}
+
+function defaultSlotSeeded(harness: AgentId, slotDir: string): boolean {
+  return harness === 'claude' ? isClaudeWorkerHomeSeeded(slotDir) : true;
 }
 
 /**
@@ -660,8 +666,9 @@ export interface ReconcileWorkerSlotsDeps {
  * account whose credential is now present locally. Runs only on a NON-headed
  * (worker or unmarked) device -- a headed device provisions its slots from an
  * interactive native login (`accounts add`), never from an injected durable key
- * (invariant 7). Idempotent: an account already backed by a `durable` slot is
- * skipped.
+ * (invariant 7). Idempotent: an account already backed by a fully seeded
+ * `durable` slot is skipped; a claude slot provisioned before onboarding was
+ * seeded (no `hasCompletedOnboarding`) is provisioned again so it converges.
  */
 export function reconcileLocalWorkerSlots(deps: ReconcileWorkerSlotsDeps = {}): ReconcileWorkerSlotsResult {
   const result: ReconcileWorkerSlotsResult = { provisioned: [], skipped: [], errors: [] };
@@ -671,6 +678,7 @@ export function reconcileLocalWorkerSlots(deps: ReconcileWorkerSlotsDeps = {}): 
   const slots = readSlots(meta as Pick<Meta, 'deviceAccounts'>);
   const hasLocalKey = deps.hasLocalKey ?? defaultHasLocalKey;
   const provision = deps.provision ?? provisionWorkerSlot;
+  const slotSeeded = deps.slotSeeded ?? defaultSlotSeeded;
   const byId = new Map(listNativeAccounts(meta).map((account) => [account.id, account]));
   // Resolve each account to the one (bundle, key) the push plan uses: a T1 row's
   // reserved `__<harness>__` key, or the legacy `auth` key by email for a claude
@@ -683,7 +691,11 @@ export function reconcileLocalWorkerSlots(deps: ReconcileWorkerSlotsDeps = {}): 
     const account = byId.get(target.accountId);
     if (!account) continue;
     if (!hasLocalKey(target.bundle, target.key)) { result.skipped.push({ accountId: account.id, reason: 'durable key not synced yet' }); continue; }
-    if (slots[account.id]?.authMode === 'durable') { result.skipped.push({ accountId: account.id, reason: 'slot already provisioned' }); continue; }
+    const existing = slots[account.id];
+    if (existing?.authMode === 'durable' && slotSeeded(account.agent, existing.slotDir)) {
+      result.skipped.push({ accountId: account.id, reason: 'slot already provisioned' });
+      continue;
+    }
     try { provision(account); result.provisioned.push(account.id); }
     catch (err) { result.errors.push({ accountId: account.id, message: (err as Error).message }); }
   }

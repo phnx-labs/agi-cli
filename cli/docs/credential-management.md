@@ -245,8 +245,11 @@ from the single legacy `auth` bundle to every portable account:
   `auth` bundle by email; whichever key is on the box, `provisionWorkerSlot` runs
   `ensureSlot` (T1) and writes the credential the way the pre-slot Claude worker
   home was provisioned — for `claude`, the setup-token → `.oauth_token` (0600) plus
-  the seeded identity email (the read-side join then completes the account/org
-  uuids from the registry row); an API-key harness gets a `durable` slot with
+  a seeded `.claude.json`: the identity email (the read-side join then completes
+  the account/org uuids from the registry row) and `hasCompletedOnboarding`, because
+  a worker has no human to answer Claude Code's first-run theme picker. A durable
+  claude slot missing either (provisioned before onboarding was seeded) is
+  provisioned again on the next tick; an API-key harness gets a `durable` slot with
   **no** file (the key is injected at spawn); a token-less harness (`kimi`,
   `antigravity`) gets a `per-device` slot and no push. A row whose key has not
   reached the box is reported `durable key not synced yet` and retried next tick.
@@ -474,7 +477,12 @@ default), `execHome` is that account's slot on this device (`readSlots`). The
 binary still comes from the one managed install. Two slots in one install never
 share a config-dir env: adapters pin `CLAUDE_CONFIG_DIR` / `CODEX_HOME` /
 `GROK_HOME` / `OPENCODE_CONFIG_DIR` / XDG at the slot, and the strip list
-removes every other pin so a parent agent's dir cannot leak. A headed device
+removes every other pin so a parent agent's dir cannot leak. The spawn also
+stamps the slot in `AGENTS_EXEC_HOME` so the versioned alias's own config-dir
+pin yields to it (the claude alias used to re-export the version home over the
+slot, so a worker run picked as one account onboarded and kept its history in
+the shared version home); the alias consumes the marker before `exec`, so a
+nested launch never inherits its parent's slot. A headed device
 still authenticates only with the native login in that slot; a worker still
 injects only the durable credential for that account. Native OAuth files never
 leave the device that minted them.

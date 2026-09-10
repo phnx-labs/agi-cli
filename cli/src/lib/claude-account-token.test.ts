@@ -13,6 +13,7 @@ import {
   resolveClaudeSetupToken,
   resolveClaudeSetupTokenForEmail,
   seedClaudeWorkerHomeIdentity,
+  isClaudeWorkerHomeSeeded,
   writeClaudeWorkerOauthToken,
 } from './claude-account-token.js';
 import { seedReservedAuthToken } from './auth-mint.js';
@@ -403,6 +404,28 @@ describe('claude-account-token (standalone secrets)', () => {
       seedClaudeWorkerHomeIdentity(home, 'dev@getrush.ai');
       expect(readClaudeAccountEmail(home)).toBe('dev@getrush.ai');
       expect(resolveClaudeSetupToken(home)).toBe('sk-ant-oat01-dev');
+    });
+
+    it('seeds the slot as onboarded so a worker launch skips Claude Code first-run onboarding', () => {
+      // A worker has no human at it: nothing else can answer the theme picker /
+      // "Let's get started" that every provisioned slot showed (yosemite-m1, 2026-09-10).
+      const home = makeHome();
+      expect(isClaudeWorkerHomeSeeded(home)).toBe(false);
+      seedClaudeWorkerHomeIdentity(home, 'dev@getrush.ai');
+      for (const rel of [path.join('.claude', '.claude.json'), '.claude.json']) {
+        const doc = JSON.parse(fs.readFileSync(path.join(home, rel), 'utf-8')) as { hasCompletedOnboarding?: boolean };
+        expect(doc.hasCompletedOnboarding).toBe(true);
+      }
+      expect(isClaudeWorkerHomeSeeded(home)).toBe(true);
+    });
+
+    it('reports a slot seeded before onboarding was written as not seeded', () => {
+      const home = makeHome();
+      for (const rel of [path.join('.claude', '.claude.json'), '.claude.json']) {
+        fs.mkdirSync(path.dirname(path.join(home, rel)), { recursive: true });
+        fs.writeFileSync(path.join(home, rel), JSON.stringify({ oauthAccount: { emailAddress: 'dev@getrush.ai' } }));
+      }
+      expect(isClaudeWorkerHomeSeeded(home)).toBe(false);
     });
 
     it('preserves existing .claude.json fields when seeding the identity', () => {

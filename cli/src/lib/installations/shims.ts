@@ -283,7 +283,10 @@ async function promptConflictStrategy(
 //        grok-0.2.118-* file — a 99-byte wrapper that exec'd cursor-agent —
 //        sorted alphabetically before the real self-updated grok binary and
 //        was silently launched instead.
-export const SHIM_SCHEMA_VERSION = 31;
+// v32 — the claude config-dir pin yields to an account-slot launch (AGENTS_EXEC_HOME
+//        from `agents run`), so a slot run reads and writes its own slot home instead
+//        of the shared version home.
+export const SHIM_SCHEMA_VERSION = 32;
 
 /** Internal marker string used to embed the schema version in shim scripts. */
 const SHIM_VERSION_MARKER = 'agents-shim-version:';
@@ -1134,7 +1137,11 @@ export function removeShim(agent: AgentId): boolean {
 // v18 — Cursor aliases select the file credential store and swap HOME to the
 //       version home because current Cursor writes auth.json under ~/.cursor
 //       and ignores XDG_CONFIG_HOME for credential storage.
-export const VERSIONED_ALIAS_SCHEMA_VERSION = 20;
+// v21 — the claude alias's CLAUDE_CONFIG_DIR pin yields to an account-slot launch
+//       (AGENTS_EXEC_HOME from `agents run`). Before, the alias re-pinned every slot
+//       launch onto the shared version home, so a worker run picked as one account
+//       onboarded from scratch and kept its history in another account's home.
+export const VERSIONED_ALIAS_SCHEMA_VERSION = 21;
 
 /** Internal marker string used to embed the schema version in versioned alias scripts. */
 const VERSIONED_ALIAS_VERSION_MARKER = 'agents-versioned-alias-version:';

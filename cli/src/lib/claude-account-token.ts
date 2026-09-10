@@ -389,6 +389,35 @@ export function provisionWorkerSlot(account: NativeAccountRecord): DeviceAccount
   return record;
 }
 
+/**
+ * True when a claude worker slot carries everything provisioning seeds: the
+ * identity email AND the completed-onboarding flag. A slot provisioned before
+ * onboarding was seeded answers false, so the daemon's reconcile re-seeds it.
+ */
+export function isClaudeWorkerHomeSeeded(home: string): boolean {
+  for (const p of [path.join(home, '.claude', '.claude.json'), path.join(home, '.claude.json')]) {
+    try {
+      const doc = JSON.parse(fs.readFileSync(p, 'utf-8')) as {
+        hasCompletedOnboarding?: unknown;
+        oauthAccount?: { emailAddress?: unknown };
+      };
+      const email = doc.oauthAccount?.emailAddress;
+      if (doc.hasCompletedOnboarding !== true) return false;
+      if (typeof email !== 'string' || email.trim().length === 0) return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Seed a worker slot's `.claude.json` (both locations Claude Code reads) with
+ * the account identity AND `hasCompletedOnboarding`. A worker never has a human
+ * at it, so nothing else can complete Claude Code's first-run onboarding (theme
+ * picker, "Let's get started"); without the flag every slot launch re-onboarded.
+ * Everything else in the document is preserved.
+ */
 export function seedClaudeWorkerHomeIdentity(versionHome: string, email: string): void {
   const trimmed = email.trim();
   if (!trimmed) return;
@@ -409,6 +438,7 @@ export function seedClaudeWorkerHomeIdentity(versionHome: string, email: string)
       ? (doc.oauthAccount as Record<string, unknown>)
       : {});
     doc.oauthAccount = { ...existing, emailAddress: trimmed };
+    doc.hasCompletedOnboarding = true;
     fs.mkdirSync(path.dirname(p), { recursive: true });
     // Temp-write + rename: a reader mid-write never sees a truncated doc.
     const tmp = `${p}.agents-${process.pid}.tmp`;
