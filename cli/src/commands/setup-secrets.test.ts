@@ -43,7 +43,7 @@ describe('agents setup secrets', () => {
     expect(isSecretsCliInstalled()).toBe(false);
   });
 
-  it('prints install guidance and returns false rather than throwing', async () => {
+  it('attempts install and returns false rather than throwing when npm is also missing', async () => {
     expect(await runSecretsSetupWizard()).toBe(false);
   });
 
