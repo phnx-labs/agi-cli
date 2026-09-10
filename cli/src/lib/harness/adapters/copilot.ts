@@ -1,6 +1,6 @@
 import * as path from 'path';
 import type { HarnessAdapter } from '../adapter.js';
-import { stripForeignConfigDir } from '../adapter.js';
+import { stripForeignConfigDir, slotAwareConfigEnvBash } from '../adapter.js';
 
 export const copilotAdapter: HarnessAdapter = {
   id: 'copilot',
@@ -21,7 +21,9 @@ export const copilotAdapter: HarnessAdapter = {
 # (settings.json, mcp-config.json, session-state/, logs/, plugins/). Point
 # it at the versioned home so MCP servers, custom agents, and session
 # history are isolated per copilot version.
-export COPILOT_HOME="$VERSION_DIR/home/${ctx.configDirName}"
+# An account-slot launch has already chosen the home (AGENTS_EXEC_HOME); the pin
+# yields to it — see slotAwareConfigEnvBash.
+${slotAwareConfigEnvBash([{ env: 'COPILOT_HOME', rel: ctx.configDirName }], '$VERSION_DIR/home')}
 `;
   },
 };

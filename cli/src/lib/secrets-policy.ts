@@ -692,12 +692,22 @@ export function reconcileLocalWorkerSlots(deps: ReconcileWorkerSlotsDeps = {}): 
     if (!account) continue;
     if (!hasLocalKey(target.bundle, target.key)) { result.skipped.push({ accountId: account.id, reason: 'durable key not synced yet' }); continue; }
     const existing = slots[account.id];
-    if (existing?.authMode === 'durable' && slotSeeded(account.agent, existing.slotDir)) {
+    const reseed = existing?.authMode === 'durable';
+    if (reseed && slotSeeded(account.agent, existing.slotDir)) {
       result.skipped.push({ accountId: account.id, reason: 'slot already provisioned' });
       continue;
     }
-    try { provision(account); result.provisioned.push(account.id); }
-    catch (err) { result.errors.push({ accountId: account.id, message: (err as Error).message }); }
+    try {
+      provision(account);
+      // A re-seed that still reads as unseeded is a slot file this box cannot
+      // repair (a .claude.json that exists but does not parse is left alone by
+      // the seeder). Surface it instead of logging "provisioned" every tick.
+      if (reseed && !slotSeeded(account.agent, existing.slotDir)) {
+        result.errors.push({ accountId: account.id, message: `slot ${existing.slotDir} is still not fully seeded after re-provisioning; a config file there exists but cannot be parsed` });
+        continue;
+      }
+      result.provisioned.push(account.id);
+    } catch (err) { result.errors.push({ accountId: account.id, message: (err as Error).message }); }
   }
   return result;
 }

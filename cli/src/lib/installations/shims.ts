@@ -14,6 +14,7 @@ import { AGENTS, agentConfigDirName, readAuthAccountIdentity } from '../agents.j
 import { acquireAuthOperationLock } from '../accounts/auth-operation-lock.js';
 import { codexHomeShimBash } from '../codex-home.js';
 import { resolveHarnessAdapter } from '../harness/index.js';
+import { slotAwareConfigEnvBash } from '../harness/adapter.js';
 import { randomUUID } from 'node:crypto';
 import { captureProcessStartTime } from '../platform/process.js';
 import { atomicWriteFileSync } from '../fs-atomic.js';
@@ -1273,35 +1274,34 @@ ${resolveHarnessAdapter(agent).shimConfigEnvBash?.({ configDirName }) ?? ''}`
 # Copilot honors COPILOT_HOME to relocate ~/.copilot (settings, mcp-config.json,
 # session-state, logs). Point direct aliases at the versioned home so per-
 # version MCP and session state are isolated.
-export COPILOT_HOME="$AGENTS_REAL_HOME/.agents/.history/versions/${agent}/${version}/home/${configDirName}"
+${slotAwareConfigEnvBash([{ env: 'COPILOT_HOME', rel: configDirName }], `$AGENTS_REAL_HOME/.agents/.history/versions/${agent}/${version}/home`)}
 `
         : agent === 'grok'
           ? `
 # Grok Build uses GROK_HOME to isolate its entire configuration tree (skills,
 # hooks, plugins, agents, memory, sessions, config.toml, MCP). Point direct
 # aliases at the versioned home for isolation parity with the main shim.
-export GROK_HOME="$AGENTS_REAL_HOME/.agents/.history/versions/${agent}/${version}/home/${configDirName}"
+${slotAwareConfigEnvBash([{ env: 'GROK_HOME', rel: configDirName }], `$AGENTS_REAL_HOME/.agents/.history/versions/${agent}/${version}/home`)}
 `
           : agent === 'opencode'
             ? `
 # OpenCode reads plugins, agents, commands, and other config-directory
 # resources from OPENCODE_CONFIG_DIR. Point direct aliases at the versioned
 # global config tree where agents-cli syncs OpenCode resources.
-export OPENCODE_CONFIG_DIR="$AGENTS_REAL_HOME/.agents/.history/versions/${agent}/${version}/home/.config/opencode"
+${slotAwareConfigEnvBash([{ env: 'OPENCODE_CONFIG_DIR', rel: '.config/opencode' }], `$AGENTS_REAL_HOME/.agents/.history/versions/${agent}/${version}/home`)}
 `
           : agent === 'kimi'
             ? `
 # Kimi Code CLI honors KIMI_CODE_HOME to relocate ~/.kimi-code (config.toml,
 # mcp.json, sessions, skills, hooks). Point direct aliases at the versioned home.
-export KIMI_CODE_HOME="$AGENTS_REAL_HOME/.agents/.history/versions/${agent}/${version}/home/${configDirName}"
+${slotAwareConfigEnvBash([{ env: 'KIMI_CODE_HOME', rel: configDirName }], `$AGENTS_REAL_HOME/.agents/.history/versions/${agent}/${version}/home`)}
 `
             : agent === 'muse'
               ? `
 # Muse Code: no dedicated config env var. Pin XDG so config/sessions live under
 # the version home as real directories (not via the adopt symlink at
 # ~/.config/muse, which Muse rejects with SymlinkOrReparse).
-export XDG_CONFIG_HOME="$AGENTS_REAL_HOME/.agents/.history/versions/${agent}/${version}/home/.config"
-export XDG_DATA_HOME="$AGENTS_REAL_HOME/.agents/.history/versions/${agent}/${version}/home/.local/share"
+${slotAwareConfigEnvBash([{ env: 'XDG_CONFIG_HOME', rel: '.config' }, { env: 'XDG_DATA_HOME', rel: '.local/share' }], `$AGENTS_REAL_HOME/.agents/.history/versions/${agent}/${version}/home`)}
 `
               : agent === 'cursor'
                 ? `

@@ -1,6 +1,6 @@
 import * as path from 'path';
 import type { HarnessAdapter } from '../adapter.js';
-import { stripForeignConfigDir } from '../adapter.js';
+import { stripForeignConfigDir, slotAwareConfigEnvBash } from '../adapter.js';
 
 export const kimiAdapter: HarnessAdapter = {
   id: 'kimi',
@@ -18,7 +18,9 @@ export const kimiAdapter: HarnessAdapter = {
     return `
 # Kimi Code CLI honors KIMI_CODE_HOME to relocate ~/.kimi-code (config.toml,
 # mcp.json, sessions, skills, hooks). Point it at the versioned home.
-export KIMI_CODE_HOME="$VERSION_DIR/home/${ctx.configDirName}"
+# An account-slot launch has already chosen the home (AGENTS_EXEC_HOME); the pin
+# yields to it — see slotAwareConfigEnvBash.
+${slotAwareConfigEnvBash([{ env: 'KIMI_CODE_HOME', rel: ctx.configDirName }], '$VERSION_DIR/home')}
 `;
   },
 

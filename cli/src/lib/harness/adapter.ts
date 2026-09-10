@@ -194,6 +194,39 @@ export function stripForeignConfigDir(result: NodeJS.ProcessEnv, keep: readonly 
   }
 }
 
+/**
+ * Bash for a harness's config-dir pin that yields to an account-slot launch.
+ *
+ * A shim (bare or `<agent>@<version>` alias) pins the harness's config-dir env
+ * at the version home. An account-slot launch (PHNX-3940 T5) has already chosen
+ * the HOME-shaped slot: `agents run` pins the same env at the slot in
+ * buildExecEnv and stamps the slot in AGENTS_EXEC_HOME. The shim used to
+ * re-export the version home unconditionally, so a run picked as one account
+ * read and wrote another account's home (claude on yosemite-m1, 2026-09-10;
+ * the same override for every harness below). The pin now yields to the slot
+ * — the way the cursor alias's HOME swap yields to a spawner-chosen HOME — and
+ * consumes the marker so the launched harness never inherits it into a nested
+ * launch; a bare `<agent>@<version>` from a terminal still gets the version home.
+ *
+ * `pins` are `{ env, rel }` with `rel` the HOME-relative config path (the slot
+ * and the version home are both HOME-shaped); `versionHome` is the bash
+ * expression for the version home (`$VERSION_DIR/home` in the shared block, the
+ * absolute versions path in a direct alias).
+ */
+export function slotAwareConfigEnvBash(
+  pins: ReadonlyArray<{ env: string; rel: string }>,
+  versionHome: string,
+): string {
+  const slot = pins.map((p) => `  export ${p.env}="$AGENTS_EXEC_HOME/${p.rel}"`).join('\n');
+  const version = pins.map((p) => `  export ${p.env}="${versionHome}/${p.rel}"`).join('\n');
+  return `if [ -n "\${AGENTS_EXEC_HOME:-}" ]; then
+${slot}
+  unset AGENTS_EXEC_HOME
+else
+${version}
+fi`;
+}
+
 const REGISTRY = new Map<AgentId, HarnessAdapter>();
 
 /**
