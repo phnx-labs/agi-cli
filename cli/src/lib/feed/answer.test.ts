@@ -51,10 +51,13 @@ describe('feed answer claim-before-route', () => {
     // A running (not parked) agent routes the answer to its mailbox, so the
     // delivered text is exactly the resolved deliveryKey — proving `approve-session`
     // maps to Claude's option-2 selection token, not the label.
-    const session = { context: 'terminal', kind: 'claude', host: 'worker', sessionId: 'perm', agentId: 'perm', status: 'running', activity: 'working' } as ActiveSession;
+    // The block carries the harness's recorded subtype and a write-time cursor
+    // the row's last transcript event precedes — a confirmed pending permission.
+    const session = { context: 'terminal', kind: 'claude', host: 'worker', sessionId: 'perm', agentId: 'perm', status: 'running', activity: 'working', pidAlive: true, lastEventMs: 900 } as ActiveSession;
     const block: OpenBlock = {
       blockId: blockIdForSession('perm'), sessionId: 'perm', mailboxId: 'perm', host: 'worker', runtime: 'claude',
-      ts: '2026-09-07T10:00:00.000Z', kind: 'notification', questions: [{ text: 'Permission — run the test suite' }],
+      ts: '2026-09-07T10:00:00.000Z', kind: 'notification', notificationType: 'permission_prompt', sourceCursor: { lastActivityMs: 1_000 },
+      questions: [{ text: 'Permission — run the test suite' }],
     };
     publishBlock(block, root);
     const key = reconcileAttention({ block, session, nowMs: Date.now() })!.key;
@@ -65,6 +68,26 @@ describe('feed answer claim-before-route', () => {
     const inbox = path.join(mailboxRoot, 'perm', 'inbox');
     const delivered = JSON.parse(fs.readFileSync(path.join(inbox, fs.readdirSync(inbox)[0]), 'utf8')) as { text: string };
     expect(delivered.text).toBe('2');
+  });
+
+  it('refuses to answer a request it could not verify is still pending (PHNX-3999)', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'feed-answer-unverified-'));
+    const mailboxRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'feed-answer-unverified-mailbox-'));
+    // A cloud-shaped row: no transcript cursor to check the hook's word against,
+    // and the permission prompt is well past the trust window.
+    const session = { context: 'cloud', kind: 'claude', host: 'worker', sessionId: 'stale', agentId: 'stale', status: 'running' } as ActiveSession;
+    const block: OpenBlock = {
+      blockId: blockIdForSession('stale'), sessionId: 'stale', mailboxId: 'stale', host: 'worker', runtime: 'claude',
+      ts: '2026-09-07T10:00:00.000Z', kind: 'notification', notificationType: 'permission_prompt', questions: [{ text: 'Permission — deploy' }],
+    };
+    publishBlock(block, root);
+    const item = reconcileAttention({ block, session, nowMs: Date.now() })!;
+    expect(item.kind).toBe('unverified');
+    await expect(claimAndRouteAttentionAnswer({
+      attentionKey: item.key, text: '1', operator: { verified: false }, feedRoot: root, mailboxRoot, sessions: [session],
+    })).rejects.toThrow('could not be verified as a pending request');
+    expect(getAnswerRecord(block.blockId, root)).toBeUndefined();
+    expect(fs.existsSync(path.join(mailboxRoot, 'stale'))).toBe(false);
   });
 
   it('recognizes lifecycle-only attention and rolls the claim back when its rail refuses delivery', async () => {

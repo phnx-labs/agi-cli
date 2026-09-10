@@ -107,8 +107,8 @@ claims the first reply and routes it over the recorded session reply rail.
 **It is designed to run for as long as a VS Code window is open, so every tick is
 budgeted (PHNX-3939).** AGI EXT's elected leader spawns exactly ONE `feed watch
 --json` child and fans it out to every window, so a per-tick cost here is paid for
-the whole session, not per render. Two rules keep it flat, and a change that
-breaks either is a regression, not a detail:
+the whole session, not per render. Three rules keep it flat and truthful, and a
+change that breaks any of them is a regression, not a detail:
 
 - **Activity is read incrementally, never re-scanned.**
   [`ActivityStream`](src/lib/feed/activity-stream.ts) holds a per-file cursor
@@ -128,7 +128,24 @@ breaks either is a regression, not a detail:
   when something announced a change — the feed dir and `feed/resolutions` are
   watched directly, which is how an external `agents feed post --blocked` still
   raises promptly — or when `PR_STATUS_TTL_MS` (45 s) has expired and the cached
-  PR verdicts are stale. Nothing else in `reconcileAttention` is time-dependent.
+  PR verdicts are stale. The only other time-dependent verdict in
+  `reconcileAttention` is the 30-minute trust window on a permission block the
+  session offers no transcript cursor to verify (`UNVERIFIED_PROMPT_AGE_MS`,
+  PHNX-3999), and that 45 s cadence is what re-evaluates it — the reconciler
+  takes `nowMs` as an input and owns no clock of its own.
+- **A request is classified from explicit evidence, never from a hook having
+  fired or from elapsed time (PHNX-3999, spec SES-40f).** Claude's `idle_prompt`
+  is a finished turn, not a request: the feed-publish hook does not publish it,
+  and the reconciler yields nothing for one an older hook left on disk. A
+  `permission` needs a recorded `permission_prompt` subtype that the transcript
+  corroborates via `ActiveSession.lastEventMs` (the harness stamp on the last
+  meaningful event — the file mtime moves on every hook firing, so it cannot be
+  the cursor). The state engine never infers `permission` from a quiet pending
+  tool call, and `computeLiveSignals` memoizes the parsed tail on mtime but
+  re-runs `inferSessionState` against the current clock every call, so the
+  30-minute prose-question decay expires on schedule. Anything the CLI cannot
+  confirm is `unverified`: no choices, an open-session action only, refused by
+  `feed answer`.
 
 The fleet fan-out has its own budget: both `watchFleetFeed` and
 `watchFleetSessions` subscribe to peers through

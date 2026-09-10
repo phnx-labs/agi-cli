@@ -119,10 +119,15 @@ describe('inferActivity — working signals', () => {
     expect(s.preview).toContain('bun test');
   });
 
-  it('pending non-plan tool, alive but stale ⇒ waiting / permission', () => {
+  it('pending non-plan tool, alive but stale ⇒ still working, never a permission request (PHNX-3999)', () => {
+    // A tool call with no result and a quiet file is what BOTH a long-running
+    // command and a permission dialog leave behind; elapsed time cannot tell them
+    // apart, so the engine reports the in-flight call and lets the harness's own
+    // permission_prompt hook event (the feed block) be the evidence of a dialog.
     const s = inferActivity([tool('Bash', { command: 'rm -rf x' }, 'rm -rf x')], { pidAlive: true, mtimeMs: stale });
-    expect(s.activity).toBe('waiting_input');
-    expect(s.awaitingReason).toBe('permission');
+    expect(s.activity).toBe('working');
+    expect(s.awaitingReason).toBeUndefined();
+    expect(s.question).toBeUndefined();
   });
 
   it('a dead process is never working', () => {
@@ -191,11 +196,31 @@ describe('inferActivity — structured question (the panel fix)', () => {
     expect(s.question?.options).toBeUndefined();
   });
 
-  it('a permission block carries Approve(1)/Deny(esc) choices', () => {
-    const s = inferActivity([tool('Bash', { command: 'rm -rf build' }, 'rm -rf build')], { pidAlive: true, mtimeMs: stale });
-    expect(s.awaitingReason).toBe('permission');
-    expect(s.question?.reason).toBe('permission');
-    expect(s.question?.options).toEqual([{ label: 'Approve', key: '1' }, { label: 'Deny', key: 'esc' }]);
+  it('a prose question ages by its own transcript stamp against the injected clock, not the file mtime (PHNX-3999)', () => {
+    const askedAt = '2026-09-10T10:00:06.000Z';
+    const askedMs = Date.parse(askedAt);
+    const events: SessionEvent[] = [{ type: 'message', agent: 'claude', timestamp: askedAt, role: 'assistant', content: 'Which data directory should I use?' }];
+    // Same bytes, same mtime: only the clock moves. 10 minutes on it is a live
+    // ask; 31 minutes on it has decayed — the verdict must not be frozen by an
+    // mtime-keyed memo, which is what kept a stale question "waiting" for hours.
+    const live = inferActivity(events, { pidAlive: true, mtimeMs: askedMs + 2_000, nowMs: askedMs + 10 * 60_000 });
+    expect(live.activity).toBe('waiting_input');
+    expect(live.awaitingReason).toBe('question');
+    expect(live.lastEventMs).toBe(askedMs);
+    const decayed = inferActivity(events, { pidAlive: true, mtimeMs: askedMs + 2_000, nowMs: askedMs + 31 * 60_000 });
+    expect(decayed.activity).toBe('idle');
+    expect(decayed.question).toBeUndefined();
+  });
+
+  it('an event stamp later than the file mtime is not transcript evidence (a parser filled it at read time)', () => {
+    const mtimeMs = Date.parse('2026-09-10T10:00:00.000Z');
+    const events: SessionEvent[] = [{ type: 'message', agent: 'grok', timestamp: new Date(mtimeMs + 60 * 60_000).toISOString(), role: 'assistant', content: 'Should I continue?' }];
+    // The stamp claims the question is an hour newer than the file's last write;
+    // the write time is the physical bound, so the age falls to the mtime — and at
+    // 31 minutes past it the question has decayed rather than reading as fresh.
+    const s = inferActivity(events, { pidAlive: true, mtimeMs, nowMs: mtimeMs + 31 * 60_000 });
+    expect(s.activity).toBe('idle');
+    expect(s.lastEventMs).toBeUndefined();
   });
 
   it('collects the last few assistant turns as tail context', () => {

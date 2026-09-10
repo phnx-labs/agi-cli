@@ -35,6 +35,10 @@ function blockFromAttention(attention: AttentionItem, session: ActiveSession): O
     state: 'open', sourceCursor: attention.sourceCursor, project: attention.project,
     ts: attention.openedAt, questions: [attention.question ?? { text: 'Continue from this attention item.' }],
     kind: attention.kind === 'permission' ? 'notification' : attention.kind === 'declared' ? 'declared' : attention.source === 'system' ? 'control' : 'question',
+    // A notification block is a permission only by its recorded subtype
+    // (attention.ts kindFromNotification), so the reconstructed block must carry
+    // it or a re-read classifies the same item as unverified.
+    ...(attention.kind === 'permission' ? { notificationType: 'permission_prompt' } : {}),
     safeDefault: attention.safeDefault,
   };
 }
@@ -46,6 +50,11 @@ async function resolveBlock(attentionKey: string, sessions: ActiveSession[], roo
     let block = readBlock(blockIdForSession(session.sessionId), root);
     const projectedSession = { ...session, host: ownerHost };
     const attention = reconcileAttention({ block, session: projectedSession, pullRequest: await readPullRequestStatus(session), resolution: readResolution(blockIdForSession(session.sessionId), root), nowMs: Date.now() });
+    if (attention?.key === attentionKey && attention.kind === 'unverified') {
+      // No confirmed prompt to land a reply in: an answer typed into the session
+      // could hit an empty prompt line or a different dialog (PHNX-3999).
+      throw new Error(`'${attentionKey}' could not be verified as a pending request — open the session and answer it there.`);
+    }
     if (attention?.key === attentionKey && block) return { block, attention };
     // The winning caller advances the block to answered before a concurrent
     // loser resolves it. Reconstruct only this block's original generation so

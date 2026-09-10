@@ -133,7 +133,11 @@ export interface OpenBlock {
   /**
    * How this block came to exist.
    *   question     — an AskUserQuestion the harness surfaced
-   *   notification — a permission/idle prompt the harness raised
+   *   notification — a prompt the harness raised; `notificationType` names
+   *                  which (`permission_prompt`, `elicitation_dialog`). An
+   *                  `idle_prompt` is not published — it says the turn ended,
+   *                  not that anything is pending (PHNX-3999); a block of that
+   *                  type left on disk by an older hook is not a request either.
    *   control      — a synthetic card the feed itself computed (runaway, needy)
    *   declared     — the AGENT decided it is stuck and said so (`feed post --blocked`)
    *
@@ -796,9 +800,12 @@ import socket
 import tempfile
 from datetime import datetime, timezone
 
+# Notification subtypes that mean something is PENDING. Claude's idle_prompt is
+# deliberately absent: it fires a minute after the turn ended with the operator
+# idle, which is a finished turn, not a request -- publishing it put an
+# Approve/Deny banner on a session that had already answered "pong" (PHNX-3999).
 WAITING_NOTIFICATION_TYPES = {
     "permission_prompt",
-    "idle_prompt",
     "elicitation_dialog",
 }
 CLEAR_EVENTS = {
@@ -1186,7 +1193,7 @@ export const FEED_PUBLISH_HOOK_MANIFEST = {
 export const FEED_NOTIFICATION_HOOK_MANIFEST = {
   name: 'feed-publish-notification',
   events: ['Notification'],
-  matcher: 'permission_prompt|idle_prompt|elicitation_dialog',
+  matcher: 'permission_prompt|elicitation_dialog',
   script: '10-feed-publish.py',
   timeout: 5,
 };
@@ -1251,10 +1258,13 @@ export function ensureFeedPublishHook(userAgentsDir: string = getUserAgentsDir()
         script: '10-feed-publish.py',
         timeout: 5,
       },
+      // idle_prompt is not matched: an idle reminder is a finished turn, not a
+      // pending request (PHNX-3999). An installed agents.yaml that still carries
+      // the old matcher is harmless -- the script drops the subtype itself.
       'feed-publish-notification': {
         agents: ['claude', 'codex'],
         events: ['Notification'],
-        matcher: 'permission_prompt|idle_prompt|elicitation_dialog',
+        matcher: 'permission_prompt|elicitation_dialog',
         script: '10-feed-publish.py',
         timeout: 5,
       },
@@ -1278,7 +1288,7 @@ export function ensureFeedPublishHook(userAgentsDir: string = getUserAgentsDir()
       // never fires PermissionRequest, so it has no approval card to clear here,
       // and a matcher-less PostToolUse for Claude would (1) re-run the script on
       // every tool completion and (2) wipe Claude's notification-kind blocks
-      // (permission_prompt/idle_prompt/elicitation_dialog) the moment any later
+      // (permission_prompt/elicitation_dialog) the moment any later
       // tool runs, instead of letting them persist to Stop/SessionEnd like they
       // did before RUSH-2039. Registering it for codex alone keeps Claude's
       // card lifetime exactly as it was.

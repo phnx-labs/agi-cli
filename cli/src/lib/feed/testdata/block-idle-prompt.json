@@ -1,0 +1,21 @@
+{
+  "blockId": "block-fixture-trivial-done",
+  "sessionId": "fixture-trivial-done",
+  "mailboxId": "fixture-trivial-done",
+  "host": "zion",
+  "runtime": "claude",
+  "ts": "2026-09-10T10:01:04.612000+00:00",
+  "sourceCursor": {
+    "lastActivityMs": 1789034464612
+  },
+  "questions": [
+    {
+      "text": "Claude is waiting for your input",
+      "header": "Idle Prompt",
+      "multiSelect": false
+    }
+  ],
+  "kind": "notification",
+  "project": "repo",
+  "notificationType": "idle_prompt"
+}
