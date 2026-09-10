@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.22.96
+
+- **`agents browser tabs --all` shows every tab open in the profile browser, yours included (PHNX-4043).** Until now `tabs` listed only the task's own tabs, so an agent sharing an Arc Space, a Comet store, or a Firefox profile with you could not see what else was open. `--all` lists every top-level tab: OWNER names the agents-cli task that owns it, or `you` for a tab no task owns; `*` still marks the task's current tab. Read-only on every backend (Chromium `Target.getTargets`, the Arc Space's tabs, Firefox `browsingContext.getTree`). Source: `cli/src/lib/browser/service.ts` `profileTabs`, `cli/src/commands/browser.ts`.
+
 ## 1.22.95
 
 - **Firefox automation over WebDriver BiDi (PHNX-4043).** `agents browser` now drives
