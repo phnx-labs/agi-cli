@@ -78,18 +78,49 @@ describe('codex-home', () => {
     expect(resolveCodexHome(slotHome, agentsUserDir, key, 'darwin')).toBe(slotShort);
   });
 
-  it('refuses a short home that is not the link target of the origin', () => {
-    // The pre-fix bug: a real origin directory and a short home owned by a different origin.
-    const short = shortCodexHome(agentsUserDir, VERSION);
+  it('adopts the short home on a reinstall instead of crashing (BLOCKER 1)', () => {
+    // `agents remove codex@x && agents add codex@x`: removeVersion trashed the
+    // home/.codex symlink; syncResourcesToVersion recreated a fresh REAL .codex.
+    // The short home (keyed by the SAME version) still holds the real login.
+    const key = codexShortKey(versionHome, VERSION, historyDir);
+    const short = shortCodexHome(agentsUserDir, key);
     fs.mkdirSync(short, { recursive: true });
-    fs.writeFileSync(path.join(short, 'auth.json'), '{"who":"gmail"}');
-    fs.mkdirSync(slotHome, { recursive: true });
-    fs.writeFileSync(path.join(slotHome, 'auth.json'), '{"who":"getrush"}');
+    fs.writeFileSync(path.join(short, 'auth.json'), '{"who":"icloud"}');   // the real login
+    fs.mkdirSync(versionHome, { recursive: true });
+    fs.writeFileSync(path.join(versionHome, 'skills.marker'), 'freshly-synced'); // re-derivable
 
-    expect(() => resolveCodexHome(slotHome, agentsUserDir, VERSION, 'darwin')).toThrow(/Refusing to run codex from/);
-    // Nothing was moved or overwritten by the refusal.
-    expect(fs.lstatSync(slotHome).isSymbolicLink()).toBe(false);
-    expect(fs.readFileSync(path.join(short, 'auth.json'), 'utf8')).toBe('{"who":"gmail"}');
+    const resolved = resolveCodexHome(versionHome, agentsUserDir, key, 'darwin');
+
+    expect(resolved).toBe(short);                                          // no throw, login kept
+    expect(fs.readFileSync(path.join(short, 'auth.json'), 'utf8')).toBe('{"who":"icloud"}');
+    expect(fs.lstatSync(versionHome).isSymbolicLink()).toBe(true);
+    expect(fs.realpathSync(versionHome)).toBe(fs.realpathSync(short));
+    // The fresh resources were set aside, not destroyed.
+    const superseded = fs.readdirSync(path.dirname(versionHome)).find((n) => n.includes('.superseded-'));
+    expect(superseded).toBeDefined();
+    expect(fs.readFileSync(path.join(path.dirname(versionHome), superseded!, 'skills.marker'), 'utf8')).toBe('freshly-synced');
+    // Idempotent on the next launch.
+    expect(resolveCodexHome(versionHome, agentsUserDir, key, 'darwin')).toBe(short);
+  });
+
+  it('repoints a slot mis-linked onto a foreign home instead of running it (BLOCKER 2)', () => {
+    // The pre-fix "worse" case: the slot's .codex was captured into a foreign
+    // version short home, leaving a symlink onto gmail's login.
+    const foreign = shortCodexHome(agentsUserDir, VERSION);
+    fs.mkdirSync(foreign, { recursive: true });
+    fs.writeFileSync(path.join(foreign, 'auth.json'), '{"who":"gmail"}');
+    fs.mkdirSync(path.dirname(slotHome), { recursive: true });
+    fs.symlinkSync(foreign, slotHome);   // slot .codex → gmail's home (the bug)
+
+    const key = codexShortKey(slotHome, VERSION, historyDir);
+    const resolved = resolveCodexHome(slotHome, agentsUserDir, key, 'darwin');
+
+    const ownShort = shortCodexHome(agentsUserDir, key);
+    expect(resolved).toBe(ownShort);                    // its OWN home, not gmail's
+    expect(fs.realpathSync(slotHome)).toBe(fs.realpathSync(ownShort));
+    expect(fs.realpathSync(slotHome)).not.toBe(fs.realpathSync(foreign));
+    // The foreign login is untouched (only the symlink was removed).
+    expect(fs.readFileSync(path.join(foreign, 'auth.json'), 'utf8')).toBe('{"who":"gmail"}');
   });
 
   it('adopts an existing short home for an origin that does not exist yet', () => {

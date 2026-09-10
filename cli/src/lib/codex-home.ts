@@ -78,10 +78,15 @@ export function codexShortKey(home: string, version: string, historyDir: string)
   return `a-${accountId.slice(0, 12)}`;
 }
 
+function realpathOrNull(p: string): string | null {
+  try { return fs.realpathSync(p); } catch { return null; }
+}
+
 function isSymlinkOnto(link: string, target: string): boolean {
   try {
     if (!fs.lstatSync(link).isSymbolicLink()) return false;
-    return fs.realpathSync(link) === fs.realpathSync(target);
+    const t = realpathOrNull(target);
+    return t !== null && realpathOrNull(link) === t;
   } catch {
     return false;
   }
@@ -90,13 +95,29 @@ function isSymlinkOnto(link: string, target: string): boolean {
 /**
  * Resolve a macOS SUN_LEN-safe CODEX_HOME for the given origin home, migrating
  * the home to a short real path (once, idempotently) when needed. `key` is the
- * short-home key from {@link codexShortKey}.
+ * short-home key from {@link codexShortKey} — it uniquely identifies the origin
+ * (the version for a version home, `a-<accountId>` for a slot), so
+ * `.codex-homes/<key>` can only ever be THIS origin's own short home. Two
+ * different origins never map to one key, which is what makes every branch
+ * below safe without guessing whose login a short home holds.
  *
  * On non-darwin platforms, or when the origin already fits, the origin is
- * returned unchanged. A short home is returned only when the origin is (or has
- * just become) a symlink onto it; a short home already claimed by a different
- * origin is refused loudly — returning it would run codex as another login.
- * If migration itself fails the origin is returned (no worse than the pre-fix
+ * returned unchanged. Otherwise the short home is authoritative for `key`, and
+ * the origin is made a symlink onto it:
+ *  - already linked onto it → return it (healthy, the common path).
+ *  - linked onto a DIFFERENT target (a pre-fix layout where a slot's `.codex`
+ *    was captured into a foreign version short home) → REPOINT to this key's own
+ *    short home and warn; the foreign login is never run. The account may need a
+ *    re-login, which is correct — its login was never isolated.
+ *  - a real directory with the short home ALREADY present → a version/account
+ *    reinstall recreated a fresh `.codex`; adopt the short home (which holds the
+ *    real login), backing the fresh dir aside so freshly-synced resources are
+ *    not lost. This is the case the earlier refuse-and-throw broke
+ *    (`agents remove codex@x && agents add codex@x` then `agents run`).
+ *  - a real directory with no short home yet → first migration: rename it into
+ *    the short home and leave a symlink.
+ *  - absent → create/adopt the short home and link the origin to it.
+ * If any filesystem step fails the origin is returned (no worse than the pre-fix
  * behavior).
  */
 export function resolveCodexHome(
@@ -112,30 +133,43 @@ export function resolveCodexHome(
   if (isSymlinkOnto(originHome, short)) return short;
 
   const origin = fs.lstatSync(originHome, { throwIfNoEntry: false });
-  if (fs.existsSync(short) && origin) {
-    throw new Error(
-      `Refusing to run codex from ${short}: it is not the short home of ${originHome} `
-      + `(the origin is a real directory, not a link onto it). Another codex home owns that path; `
-      + `move it aside or pick a different account.`,
-    );
-  }
 
   try {
     fs.mkdirSync(path.dirname(short), { recursive: true });
-    if (origin && origin.isDirectory() && !origin.isSymbolicLink()) {
-      // Migrate the existing deep home so config/auth/state stay intact,
-      // then leave a symlink so anything referencing the origin path still
-      // resolves (session discovery, the slot record, the shim).
-      fs.renameSync(originHome, short);
+
+    if (origin?.isSymbolicLink()) {
+      // Mis-linked onto a foreign target (pre-fix bug): never run that identity.
+      // Repoint onto this key's own short home, creating it if absent.
+      process.stderr.write(
+        `[codex] ${originHome} was linked to a foreign home; repointing to ${short} `
+        + `(this account may need to log in again).\n`,
+      );
+      if (!fs.existsSync(short)) fs.mkdirSync(short, { recursive: true });
+      fs.rmSync(originHome); // removes the symlink only, never its target
       fs.symlinkSync(short, originHome);
-    } else if (!origin) {
+    } else if (origin?.isDirectory()) {
+      if (fs.existsSync(short)) {
+        // Reinstall: the fresh real `.codex` has re-derivable resources but no
+        // login; the short home holds the real login. Adopt the short home and
+        // set the fresh dir aside (non-destructive) rather than lose either.
+        const superseded = `${originHome}.superseded-${Date.now()}`;
+        fs.renameSync(originHome, superseded);
+        fs.symlinkSync(short, originHome);
+      } else {
+        // First migration: relocate the deep home so config/auth/state stay
+        // intact, then leave a symlink behind so anything referencing the origin
+        // path still resolves (session discovery, the slot record, the shim).
+        fs.renameSync(originHome, short);
+        fs.symlinkSync(short, originHome);
+      }
+    } else {
       // Fresh origin: create (or adopt) the short home and link the origin to it.
       fs.mkdirSync(short, { recursive: true });
       fs.mkdirSync(path.dirname(originHome), { recursive: true });
       fs.symlinkSync(short, originHome);
     }
   } catch {
-    // Migration lost a race or hit a permission error. Fall back to the
+    // A filesystem step lost a race or hit a permission error. Fall back to the
     // origin rather than crash the invocation.
     return originHome;
   }
