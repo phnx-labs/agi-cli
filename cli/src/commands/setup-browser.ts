@@ -25,8 +25,9 @@ import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { defaultBrowserChoice } from './setup-preferences.js';
 
 const INSTALL_HINT =
-  'Install one of: Google Chrome, Brave, Microsoft Edge, Chromium, Comet, Arc, or Firefox, then re-run `agents setup browser`.\n' +
-  '(Safari is not supported — agents browser drives over the Chrome DevTools Protocol, Arc natively, and Firefox over WebDriver BiDi.)';
+  'Install one of: Google Chrome, Brave, Microsoft Edge, Chromium, Comet, or Arc, then re-run `agents setup browser`.\n' +
+  '(This wizard picks a Chromium-family browser. An installed Firefox is not auto-picked here; its profiles are ' +
+  'discovered from profiles.ini and selected with `agents browser use firefox-<name>`. Safari is not supported.)';
 
 /**
  * Interactive browser setup. Returns true if a usable default profile exists

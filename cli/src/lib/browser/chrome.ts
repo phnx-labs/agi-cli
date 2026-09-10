@@ -197,9 +197,10 @@ export function findBrowserPath(browserType: BrowserType, customBinary?: string)
 }
 
 // Per-platform Chromium-family priority list for "no --profile" auto-pick.
-// Order is: most-likely-installed-and-stable first. Safari and Firefox are
-// intentionally excluded — they don't speak the Chrome DevTools Protocol the
-// way cdp.ts expects, so they'd need separate drivers.
+// Order is: most-likely-installed-and-stable first. Firefox is intentionally
+// absent: it has its own WebDriver BiDi driver (drivers/firefox.ts) and its
+// profiles come from profiles.ini discovery, never from this binary pick.
+// Safari has no driver at all.
 const DEFAULT_BROWSER_PRIORITY: Record<string, BrowserType[]> = {
   // macOS: Chrome leads (>70% of dev machines), then the rest of the family.
   // Arc is last: it's in maintenance mode and needs a blank tab to drive, so it
