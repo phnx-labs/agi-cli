@@ -20,6 +20,47 @@ import {
   type CachedUsageSnapshot,
 } from './usage.js';
 
+/** Cadence of the usage-sync git tick — the trust window for a `sync` snapshot. */
+export const USAGE_SYNC_INTERVAL_MS = 15 * 60_000;
+/** Re-publish an unchanged windowed row at least this often so workers' 15-min trust does not lapse. */
+export const USAGE_PUBLISH_HEARTBEAT_MS = 10 * 60_000;
+
+function usageMeterSignature(row: CachedUsageSnapshot): string {
+  return JSON.stringify({
+    windows: row.windows,
+    plan: row.plan ?? null,
+    unavailable: row.unavailable ?? null,
+    freshnessSource: row.freshnessSource ?? null,
+    pollerDevice: row.pollerDevice ?? null,
+  });
+}
+
+/**
+ * Keep the previously published `capturedAt` when meters have not moved and
+ * the last publish is still inside the heartbeat. Stops statusline re-renders
+ * from dirtying the shared store (and taking the git lock) every few seconds.
+ */
+export function mergeUsageRowsForPublish(
+  previous: Record<string, CachedUsageSnapshot> | undefined,
+  next: Record<string, CachedUsageSnapshot>,
+  nowMs: number = Date.now(),
+): Record<string, CachedUsageSnapshot> {
+  if (!previous) return next;
+  const out: Record<string, CachedUsageSnapshot> = {};
+  for (const [key, row] of Object.entries(next)) {
+    const prior = previous[key];
+    if (prior && usageMeterSignature(prior) === usageMeterSignature(row)) {
+      const priorMs = prior.capturedAt ? Date.parse(prior.capturedAt) : NaN;
+      if (Number.isFinite(priorMs) && nowMs - priorMs < USAGE_PUBLISH_HEARTBEAT_MS) {
+        out[key] = { ...row, capturedAt: prior.capturedAt };
+        continue;
+      }
+    }
+    out[key] = row;
+  }
+  return out;
+}
+
 /** Legacy hidden ingest/export envelope kept for older fleet CLI compatibility. */
 export interface UsageSyncPayload {
   v: 1;
@@ -57,16 +98,22 @@ export async function publishUsageSnapshotToSharedStore(
     result.skipped = 'this device is not a usage publisher (mark it personal or desktop)';
     return result;
   }
-  const rows = exportClaudeUsageCacheRows(options.cachePath);
-  if (Object.keys(rows).length === 0) {
+  const rawRows = exportClaudeUsageCacheRows(options.cachePath);
+  if (Object.keys(rawRows).length === 0) {
     result.skipped = 'no local usage snapshot to publish';
     return result;
   }
   try {
+    const device = options.device ?? machineId();
+    const userAgentsDir = options.userAgentsDir ?? getUserAgentsDir();
+    const prior = readFleetSharedDeviceStates(userAgentsDir).states
+      .find((state) => normalizeHost(state.device) === normalizeHost(device))
+      ?.usage?.rows;
+    const rows = mergeUsageRowsForPublish(prior, rawRows);
     const write = await updateFleetSharedDeviceStateAsync(
-      options.device ?? machineId(),
+      device,
       { usage: { rows } },
-      options.userAgentsDir ?? getUserAgentsDir(),
+      userAgentsDir,
     );
     result.published = true;
     result.changed = write.changed;
@@ -75,6 +122,26 @@ export async function publishUsageSnapshotToSharedStore(
     result.error = (err as Error).message;
   }
   return result;
+}
+
+/**
+ * Publish a changed snapshot immediately and exchange the shared repo so
+ * workers see it without waiting for the 15-minute tick. No-ops when the
+ * serialized store is unchanged (statusline re-renders with the same windows).
+ */
+export async function pushUsageSnapshotNow(
+  options: PublishUsageSnapshotOptions & { lockPath?: string; timeoutMs?: number } = {},
+): Promise<{ published: PublishUsageSnapshotResult; transport?: import('../fleet-shared-repo-sync.js').FleetSharedRepoSyncResult }> {
+  const published = await publishUsageSnapshotToSharedStore(options);
+  if (!published.changed) return { published };
+  const { syncFleetSharedStateRepo } = await import('../fleet-shared-repo-sync.js');
+  const transport = await syncFleetSharedStateRepo({
+    userAgentsDir: options.userAgentsDir,
+    device: options.device,
+    timeoutMs: options.timeoutMs,
+    lockPath: options.lockPath,
+  });
+  return { published, transport };
 }
 
 export interface ConsumeUsageSnapshotsOptions {
@@ -120,14 +187,19 @@ export function consumeUsageSnapshotsFromSharedStore(
     result.sources.push(state.device);
     for (const [identity, incoming] of Object.entries(state.usage.rows)) {
       if (!incoming || !Array.isArray(incoming.windows) || incoming.windows.length === 0) continue;
+      const stamped: CachedUsageSnapshot = {
+        ...incoming,
+        freshnessSource: 'sync',
+        pollerDevice: incoming.pollerDevice ?? state.device,
+      };
       const current = rows[identity];
       if (!current) {
-        rows[identity] = incoming;
+        rows[identity] = stamped;
         continue;
       }
-      const incomingMs = capturedAtMs(incoming);
+      const incomingMs = capturedAtMs(stamped);
       const currentMs = capturedAtMs(current);
-      if (incomingMs !== null && (currentMs === null || incomingMs > currentMs)) rows[identity] = incoming;
+      if (incomingMs !== null && (currentMs === null || incomingMs > currentMs)) rows[identity] = stamped;
     }
   }
   result.sources.sort();

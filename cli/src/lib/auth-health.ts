@@ -34,6 +34,8 @@ import {
 } from './accounting/usage.js';
 import { getVersionHomePath, listInstalledVersions } from './installations/versions.js';
 import { atomicWriteFileSync, ensureLockTarget, withFileLock } from './fs-atomic.js';
+import { selfConfiguredDeviceRole } from './device-config.js';
+import { mayIssueUsageEndpointProbe, trySpendUsageApiCall } from './usage-refresh.js';
 
 /**
  * - `live`        — completed an authenticated request (200).
@@ -506,6 +508,23 @@ export async function probeAuthHealth(
     if (opts?.forceLive !== true) {
       const derived = verdictFromFreshUsage(usageScope, opts?.info?.signedIn === true, checkedAt);
       if (derived) return derived;
+    }
+    if (!mayIssueUsageEndpointProbe({
+      role: selfConfiguredDeviceRole(),
+      forceLive: opts?.forceLive,
+    })) {
+      return {
+        verdict: 'unverified',
+        checkedAt,
+        detail: 'setup-token box does not probe the usage endpoint',
+      };
+    }
+    if (opts?.forceLive !== true && usageScope && !trySpendUsageApiCall(usageScope, agent, checkedAt)) {
+      return {
+        verdict: 'unverified',
+        checkedAt,
+        detail: 'usage-endpoint budget already spent this hour',
+      };
     }
     let probe: ProviderProbe;
     if (agent === 'claude') probe = await probeClaudeStatus(home, opts?.cliVersion, usageScope, opts?.signal);

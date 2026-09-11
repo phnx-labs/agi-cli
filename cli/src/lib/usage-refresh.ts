@@ -1,12 +1,13 @@
 /**
- * Daemon-owned usage refresher — runs on every host.
+ * Daemon-owned usage refresher — one poller per account, on a headed box.
  *
  * The routing hot path (`agents run` → collectRunCandidates) reads usage
  * CACHE-ONLY (`getUsageInfoForIdentity`, RUSH-2061) and never blocks
- * on a provider fetch. Something still has to keep that cache fresh — this
- * module is that something, running inside the daemon on every host
- * (RUSH-3193 #15: no primary/subscriber split — each host refreshes only
- * the accounts it holds credentials for).
+ * on a provider fetch. A headed box (`isHeadedDeviceRole`) polls only the
+ * accounts it holds native logins for; a setup-token-only box never polls.
+ * A stray `.credentials.json` for an account another headed box already
+ * publishes defers to that poller. Auth-health draws from the same
+ * per-account call budget so the two stay under the ~100/hr ceiling.
  *
  * Design:
  *
@@ -49,22 +50,26 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { getCacheDir } from './state.js';
+import { getCacheDir, getUserAgentsDir } from './state.js';
 import { atomicWriteFileSync, ensureLockTarget, withFileLock } from './fs-atomic.js';
 import {
   deriveUsageHeadroom,
-  getUsageInfo,
   buildCanonicalUsageContext,
   agentUsesNetworkUsage,
   USAGE_SOURCE_AGENT_IDS,
+  claudeHomeHasNativeOauthFile,
   type UsageHeadroom,
   type UsageSnapshot,
   type UsageInfo,
   type UsageIdentityInput,
 } from './accounting/usage.js';
-import { getAccountInfo } from './agents.js';
+import { getAccountInfo, credentialPresence } from './agents.js';
 import { listInstalledVersions, getVersionHomePath } from './installations/versions.js';
 import type { AgentId } from './types.js';
+import { isHeadedDeviceRole, selfConfiguredDeviceRole, type ConfiguredDeviceRole } from './device-config.js';
+import { machineId, normalizeHost } from './session/sync/config.js';
+import { readFleetSharedDeviceStates } from './fleet-shared-state.js';
+import { USAGE_SYNC_INTERVAL_MS } from './accounting/usage-sync.js';
 
 /**
  * Default schedule between successful (or attempted) live usage fetches for one
@@ -394,6 +399,128 @@ function failedHeadroomEntry(prev: HeadroomEntry | null, now: number): HeadroomE
   return next;
 }
 
+/** One account considered for the headed poller. */
+export interface UsagePollCandidate {
+  usageKey: string;
+  agentId: AgentId;
+  home: string;
+  holdsNativeLogin: boolean;
+}
+
+/**
+/** Daemon auth-health may hit `/oauth/usage` only on a headed box, unless forceLive. */
+export function mayIssueUsageEndpointProbe(opts: {
+  role: ConfiguredDeviceRole | undefined;
+  forceLive?: boolean;
+}): boolean {
+  if (opts.forceLive === true) return true;
+  return isHeadedDeviceRole(opts.role);
+}
+
+/**
+ * Sticky one-poller election: lex-least among this box (if it holds a native
+ * login) and peer devices that published a `freshnessSource=poll` row. Statusline
+ * ingest does not claim. Two headed boxes therefore converge on one poller
+ * instead of each deferring to the other.
+ */
+export function electUsagePoller(opts: {
+  selfDevice: string;
+  selfHoldsNativeLogin: boolean;
+  peerPollers?: string[];
+}): string | null {
+  const names = new Set<string>();
+  if (opts.selfHoldsNativeLogin) names.add(normalizeHost(opts.selfDevice));
+  for (const peer of opts.peerPollers ?? []) names.add(normalizeHost(peer));
+  if (names.size === 0) return null;
+  return [...names].sort()[0];
+}
+
+export function shouldPollUsageAccount(
+  candidate: Pick<UsagePollCandidate, 'usageKey' | 'holdsNativeLogin'>,
+  opts: {
+    role: ConfiguredDeviceRole | undefined;
+    selfDevice: string;
+    peerPollers?: string[];
+    /** @deprecated use peerPollers; kept so older tests that pass claimedBy still compile */
+    claimedBy?: Record<string, string>;
+  },
+): boolean {
+  if (!isHeadedDeviceRole(opts.role)) return false;
+  if (!candidate.holdsNativeLogin) return false;
+  const peerPollers = opts.peerPollers
+    ?? (opts.claimedBy?.[candidate.usageKey] ? [opts.claimedBy[candidate.usageKey]] : []);
+  const elected = electUsagePoller({
+    selfDevice: opts.selfDevice,
+    selfHoldsNativeLogin: true,
+    peerPollers,
+  });
+  return elected === normalizeHost(opts.selfDevice);
+}
+
+/** Native rotating login on this home — Claude's `.credentials.json` blob, else a credential file. */
+export function homeHoldsNativeLogin(agentId: AgentId, home: string): boolean {
+  if (agentId === 'claude') return claudeHomeHasNativeOauthFile(home);
+  return credentialPresence(agentId, home).perVersion;
+}
+
+/** usageKey → devices that published a `poll` row (statusline/sync do not claim). */
+export function pollerClaimsFromSharedStore(
+  selfDevice: string,
+  userAgentsDir = getUserAgentsDir(),
+): Record<string, string[]> {
+  const claims: Record<string, string[]> = {};
+  const read = readFleetSharedDeviceStates(userAgentsDir);
+  const self = normalizeHost(selfDevice);
+  for (const state of read.states) {
+    if (!state.usage) continue;
+    for (const [key, row] of Object.entries(state.usage.rows)) {
+      if (row.freshnessSource !== 'poll') continue;
+      const capturedMs = row.capturedAt ? Date.parse(row.capturedAt) : NaN;
+      if (!Number.isFinite(capturedMs) || Date.now() - capturedMs > USAGE_SYNC_INTERVAL_MS) continue;
+      const poller = normalizeHost(row.pollerDevice ?? state.device);
+      if (!poller || poller === self) continue;
+      const list = claims[key] ?? [];
+      if (!list.includes(poller)) list.push(poller);
+      claims[key] = list;
+    }
+  }
+  return claims;
+}
+
+/**
+ * Spend one live usage-endpoint call from the shared per-account / per-provider
+ * budget. Auth-health and the usage poller both go through here so they cannot
+ * together exceed {@link PROVIDER_HOURLY_BUDGET} (~30/hr, well under ~100/hr).
+ * Returns false when the call must not fire.
+ */
+export function trySpendUsageApiCall(usageKey: string, agentId: AgentId, now: number): boolean {
+  if (!agentUsesNetworkUsage(agentId)) return true;
+  const cache = readHeadroomCache();
+  const entry = cache[usageKey];
+  const recent = pruneCallTimestamps(entry?.callTimestamps ?? [], now);
+  if (recent.length >= HOURLY_CALL_CAP) return false;
+  let providerSpent = recent.length;
+  for (const [key, other] of Object.entries(cache)) {
+    if (key === usageKey) continue;
+    if (!key.startsWith(`${agentId}:`)) continue;
+    providerSpent += pruneCallTimestamps(other.callTimestamps ?? [], now).length;
+  }
+  if (providerSpent >= PROVIDER_HOURLY_BUDGET) return false;
+  writeHeadroomEntries({
+    [usageKey]: {
+      status: entry?.status ?? null,
+      minutesToLimit: entry?.minutesToLimit ?? null,
+      sessionUsedPercent: entry?.sessionUsedPercent ?? null,
+      capturedAt: entry?.capturedAt ?? null,
+      nextRefreshAt: entry?.nextRefreshAt ?? now,
+      callTimestamps: [...recent, now],
+      computedAt: now,
+      consecutiveFailures: entry?.consecutiveFailures ?? 0,
+    },
+  });
+  return true;
+}
+
 /** An account whose credentials live on the publisher host. */
 export interface LocalUsageAccount {
   usageKey: string;
@@ -456,15 +583,28 @@ export function providerRecentCalls(
   return counts;
 }
 
+export interface BuildLocalUsageAccountsOpts {
+  role?: ConfiguredDeviceRole;
+  device?: string;
+  userAgentsDir?: string;
+  holdsNativeLogin?: (agentId: AgentId, home: string) => boolean;
+  claimedBy?: Record<string, string[]>;
+}
+
 /**
- * Enumerate the usage accounts whose credentials live on THIS host — one
- * per unique usage key, deduped to the most-recently-active version (the same
- * canonicalization `getUsageInfoByIdentity` uses). Each carries a closure that
- * live-fetches its usage. This is the daemon's `listAccounts`; because it only
- * ever lists local, signed-in accounts, each host is the sole writer for its own
- * accounts' caches. `runUsageRefreshTick` calls this on every host.
+ * Enumerate the usage accounts THIS headed box should poll — native logins it
+ * holds, minus accounts another headed poller already claims. A worker or
+ * setup-token-only box returns [].
  */
-export async function buildLocalUsageAccounts(): Promise<LocalUsageAccount[]> {
+export async function buildLocalUsageAccounts(
+  opts: BuildLocalUsageAccountsOpts = {},
+): Promise<LocalUsageAccount[]> {
+  const role = opts.role ?? selfConfiguredDeviceRole();
+  if (!isHeadedDeviceRole(role)) return [];
+  const selfDevice = opts.device ?? machineId();
+  const claimedBy = opts.claimedBy ?? pollerClaimsFromSharedStore(selfDevice, opts.userAgentsDir);
+  const nativeAt = opts.holdsNativeLogin ?? homeHoldsNativeLogin;
+
   const accounts: LocalUsageAccount[] = [];
   for (const agentId of USAGE_SOURCE_AGENT_IDS) {
     const versions = listInstalledVersions(agentId);
@@ -481,14 +621,17 @@ export async function buildLocalUsageAccounts(): Promise<LocalUsageAccount[]> {
     for (const [usageKey, fetchInput] of usageFetchInputs) {
       const canonical = canonicalByUsageKey.get(usageKey);
       if (!canonical?.signedIn) continue; // only refresh accounts actually usable here
+      const home = fetchInput.home ?? getVersionHomePath(agentId, fetchInput.cliVersion ?? '');
+      if (!shouldPollUsageAccount(
+        { usageKey, holdsNativeLogin: nativeAt(agentId, home) },
+        { role, selfDevice, peerPollers: claimedBy[usageKey] },
+      )) continue;
       accounts.push({
         usageKey,
         agentId,
-        // fileOnly: never open the ACL-bound keychain item from the daemon —
-        // that path is the Touch ID storm. Usage reads the file-based setup-token
-        // only, never the interactive login (see loadClaudeOauth); no setup-token
-        // reads as "usage unavailable (no usage credential)" — "usage pending"
-        // is now the cold-cache state only (#2987).
+        // Native file login: skip setup-token (403s on /oauth/usage) and the
+        // ACL keychain (Touch ID). Linux headed boxes store the rotating blob
+        // in `.credentials.json`; a missing file is a no-op fetch.
         fetch: async (signal?: AbortSignal) => {
           const { getUsageInfoForIdentity } = await import('./accounting/usage.js');
           return getUsageInfoForIdentity({
@@ -496,7 +639,7 @@ export async function buildLocalUsageAccounts(): Promise<LocalUsageAccount[]> {
             home: fetchInput.home,
             cliVersion: fetchInput.cliVersion,
             info: canonical,
-          }, { forceRefresh: true, fileOnly: true, signal });
+          }, { forceRefresh: true, fileOnly: true, nativeFileLogin: true, signal });
         },
       });
     }
@@ -529,6 +672,10 @@ export interface UsageRefreshDeps {
   readCachedSnapshot?: (usageKey: string) => UsageSnapshot | null;
   /** Daemon tick deadline signal, forwarded to each account's provider fetch (PHNX-3608). */
   signal?: AbortSignal;
+  /** Stamp D8 provenance on a successful poll write. */
+  pollerDevice?: string;
+  /** Fire after at least one snapshot was written (push-on-change). */
+  onSnapshotsChanged?: (usageKeys: string[]) => Promise<void> | void;
 }
 
 export interface UsageRefreshResult {
@@ -582,6 +729,7 @@ export async function runUsageRefresh(deps: UsageRefreshDeps): Promise<UsageRefr
   for (const [agent, last] of lastCall) spacingTokens.set(agent, providerSpacingTokens(last, now));
   const spacingUsed = new Map<AgentId, number>();
   const updates: Record<string, HeadroomEntry> = {};
+  const refreshedKeys: string[] = [];
 
   for (const [index, account] of accounts.entries()) {
     const entry = cache[account.usageKey] ?? null;
@@ -636,9 +784,13 @@ export async function runUsageRefresh(deps: UsageRefreshDeps): Promise<UsageRefr
         // `source` is provenance, not freshness. A forced collection that just
         // reread a local harness event returns `last_seen`; that is still a
         // successful collection and belongs in the shared read cache.
-        deps.writeUsageCache(account.usageKey, usage.snapshot);
-        updates[account.usageKey] = nextHeadroomEntry(entry, usage.snapshot, now);
+        const stamped = deps.pollerDevice
+          ? { ...usage.snapshot, freshness: { source: 'poll' as const, poller: deps.pollerDevice } }
+          : usage.snapshot;
+        deps.writeUsageCache(account.usageKey, stamped);
+        updates[account.usageKey] = nextHeadroomEntry(entry, stamped, now);
         result.refreshed += 1;
+        refreshedKeys.push(account.usageKey);
       } else {
         // No live snapshot (expired token / fetch miss): don't rewrite the usage
         // cache, but still record the call + reschedule so a broken account
@@ -653,5 +805,6 @@ export async function runUsageRefresh(deps: UsageRefreshDeps): Promise<UsageRefr
   }
 
   if (Object.keys(updates).length > 0) writeHeadroomEntries(updates);
+  if (refreshedKeys.length > 0) await deps.onSnapshotsChanged?.(refreshedKeys);
   return result;
 }

@@ -995,7 +995,9 @@ the account; and a MISSING snapshot is treated as unknown, never as headroom —
 a blind account on a worker box (usage 403s, RUSH-2392) can't outrank a
 verified-healthy one, while an all-*blind* pool (no snapshots at all) still
 draws a pick. An all-*stale* pool does NOT (PHNX-2526): when every account
-carries a snapshot older than `USAGE_DECISION_MAX_AGE_MS` and none is verified,
+carries a snapshot older than its freshness bar (`USAGE_DECISION_MAX_AGE_MS` for
+a local capture, `USAGE_SYNC_TRUST_MS` — the 15-minute sync cadence — for a
+row that arrived via sync from the account's poller) and none is verified,
 `balanced`/`available` refuse to auto-pick on a plausible-but-wrong number —
 `resolveRunVersion` returns `noVerifiedUsage`, an interactive run shows the
 account picker and an unattended one fails loud with `NO_VERIFIED_USAGE`

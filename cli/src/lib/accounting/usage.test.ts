@@ -260,6 +260,30 @@ describe('loadClaudeOauth — file-based `auth` setup-token (Touch-ID-free usage
     const oauth = await loadClaudeOauth(home, { accessTokenCache: true, fileOnly: true });
     expect(oauth).toBeNull();
   });
+
+  it('nativeFileLogin reads a rotating .credentials.json blob and ignores the setup-token and keychain', async () => {
+    fs.writeFileSync(
+      path.join(home, '.claude', '.credentials.json'),
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: 'native-access',
+          refreshToken: 'native-refresh',
+          expiresAt: Date.now() + 3_600_000,
+        },
+      }),
+    );
+    const oauth = await loadClaudeOauth(home, { nativeFileLogin: true, fileOnly: true });
+    expect(oauth?.accessToken).toBe('native-access');
+    expect(oauth?.refreshToken).toBe('native-refresh');
+  });
+
+  it('nativeFileLogin refuses a setup-token-shaped access-only file', async () => {
+    fs.writeFileSync(
+      path.join(home, '.claude', '.credentials.json'),
+      JSON.stringify({ claudeAiOauth: { accessToken: 'sk-ant-oat01-not-native' } }),
+    );
+    expect(await loadClaudeOauth(home, { nativeFileLogin: true, fileOnly: true })).toBeNull();
+  });
 });
 
 describe('deriveUsageHeadroom — projects minutes-to-cap from the session burn rate', () => {

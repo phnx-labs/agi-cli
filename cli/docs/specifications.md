@@ -2103,8 +2103,16 @@ schema (`--json` passes through each agent's native stream format).
     setup-token via `resolveClaudeSetupToken(home)` and, if none exists, MUST
     `return null` — it MUST NOT read the interactive OAuth login (keychain /
     `.credentials.json`). This is the RUSH-1822 guarantee and the behavior for
-    EVERY background caller (daemon usage warm `usage-refresh.ts`, auth-health probe
+    background callers other than the headed usage poller below (auth-health probe
     `auth-health.ts`, watchdog, `collectRunCandidates`).
+  - **W3 exception (PHNX-3940):** the headed daemon usage poller (`usage-refresh.ts`
+    `nativeFileLogin: true`) MAY read the file-based native rotating blob at
+    `<home>/.claude/.credentials.json` (access + refresh token) so it can poll
+    `/api/oauth/usage`, which the setup-token 403s on (RUSH-2392). It MUST NOT
+    open the ACL keychain (Touch ID). A setup-token-only / worker box MUST NOT
+    take this path (`buildLocalUsageAccounts` returns `[]` when
+    `!isHeadedDeviceRole`). This is the one unattended writer that can keep
+    idle-account snapshots inside the 15-minute sync trust window.
   - Only `agents view` sets the flag, and only for a **foreground human render on a
     headed device** (`personal` or `desktop`): `allowInteractiveUsageLogin(role, isTTY)`
     (`commands/view.ts`) returns true iff `isHeadedDeviceRole(selfConfiguredDeviceRole())`
@@ -2825,13 +2833,17 @@ its weekly limit MUST also persist a `rate_limited`
 `collectRunCandidates` sees it and `hasUsageAvailable` excludes the account
 (`lib/accounting/rotate.ts:226-247`).
 
-**GWT-E5d — Entirely stale usage is never auto-picked (PHNX-2526).**
+**GWT-E5d — Entirely stale usage is never auto-picked (PHNX-2526 / W3).**
 Given a `balanced`/`available` pool where EVERY eligible account carries a usage
-snapshot older than `USAGE_DECISION_MAX_AGE_MS` (5 min) and none is verified
+snapshot older than its freshness bar and none is verified
 (the yosemite-s1 failing-refresh incident); When `resolveRunVersion` resolves a
 version; Then it MUST NOT auto-pick on the stale number — it returns
 `version: null` with `noVerifiedUsage: true` (`lib/accounting/rotate.ts`,
 `preferVerified` computing `verified.length === 0 && pool.some(hasStaleUsage)`).
+The freshness bar is `USAGE_DECISION_MAX_AGE_MS` (5 min) for a locally
+captured row (`poll` / `statusline`) and `USAGE_SYNC_TRUST_MS` (the 15-minute
+usage-sync cadence) for a row whose `freshness.source` is `sync` — a worker
+that only ever sees poller-pushed rows MUST still auto-pick (D8).
 An INTERACTIVE run (TTY, not `--json`/`--headless`) MUST then show the account
 picker; an UNATTENDED run MUST fail loud with an error containing the literal
 `NO_VERIFIED_USAGE` (`formatNoVerifiedUsageError`), for both `agents run`

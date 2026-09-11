@@ -140,6 +140,7 @@ export async function runUsageRefreshTick(signal?: AbortSignal): Promise<void> {
   const { runUsageRefresh, buildLocalUsageAccounts } = await import('./usage-refresh.js');
   const { writeClaudeUsageCache, readClaudeUsageCache } = await import('./accounting/usage.js');
   const { usageRateLimitedUntil } = await import('./usage-backoff.js');
+  const { machineId } = await import('./machine-id.js');
   const r = await runUsageRefresh({
     listAccounts: buildLocalUsageAccounts,
     writeUsageCache: writeClaudeUsageCache,
@@ -151,6 +152,11 @@ export async function runUsageRefreshTick(signal?: AbortSignal): Promise<void> {
     // Thread the supervisor deadline into each provider fetch so the tick's I/O
     // is bounded by deadlineMs, not just each fetch's own 5s timeout (PHNX-3608).
     signal,
+    pollerDevice: machineId(),
+    onSnapshotsChanged: async () => {
+      const { pushUsageSnapshotNow } = await import('./accounting/usage-sync.js');
+      await pushUsageSnapshotNow();
+    },
   });
   const { listProfiles } = await import('./profiles.js');
   const { refreshDueByokUsage } = await import('./byok-usage.js');

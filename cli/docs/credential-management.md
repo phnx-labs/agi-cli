@@ -96,8 +96,12 @@ Both come from the same mistake: **agents-cli touching the interactive login.**
    ingestion merges each window into the last snapshot instead of replacing the
    other one. `agents view claude` always reserves both `S` and `W` slots: a
    provider-omitted window is a filled red `unavailable` slot, distinct from a real
-   zero-percent window. Do not restore `/api/oauth/usage` polling or read/copy the
-   interactive OAuth credential to fill these bars.
+   zero-percent window. Do not restore `/api/oauth/usage` polling from a worker,
+   and do not read the ACL keychain, to fill these bars. The one sanctioned
+   unattended poller is a headed box reading its file-based native rotating
+   blob (`nativeFileLogin` in `usage-refresh.ts` — EXEC-2b W3 exception):
+   setup-token 403s on that endpoint (RUSH-2392), and workers consume the
+   published snapshot.
 
 6. **Zero Touch ID** — `ag view`, agent launch, usage, any op — across **every
    harness**, including the hard ones (Droid, Kimi). Solution decided per credential

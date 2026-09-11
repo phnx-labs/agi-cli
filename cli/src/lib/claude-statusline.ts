@@ -13,6 +13,7 @@ import { atomicWriteFileSync } from './fs-atomic.js';
 import { mergeClaudeUsageCacheWindows, type UsageWindow } from './accounting/usage.js';
 import { loadReminders, pickReminderForSession } from './reminders.js';
 import { readMeta } from './state.js';
+import { machineId } from './machine-id.js';
 
 export const CLAUDE_STATUSLINE_COMMAND = 'agents __claude-statusline';
 const DELEGATE_FILE = path.join('.agents', 'claude-statusline-delegate');
@@ -103,7 +104,11 @@ export function ingestClaudeStatusLineUsage(
     sourceLabel: 'Claude response rate limits',
     capturedAt: new Date(),
     windows,
+    freshness: { source: 'statusline', poller: machineId() },
   });
+  void import('./accounting/usage-sync.js')
+    .then((mod) => mod.pushUsageSnapshotNow())
+    .catch(() => { /* best-effort push-on-change */ });
   return true;
 }
 

@@ -22,6 +22,9 @@ import {
   matchAccountVersion,
   matchAccountCandidate,
   isUsageVerified,
+  usageVerifiedMaxAgeMs,
+  USAGE_SYNC_TRUST_MS,
+  USAGE_DECISION_MAX_AGE_MS,
   buildRotationDecisionEvent,
   isLaunchableSignedIn,
   isVersionLaunchableHere,
@@ -923,6 +926,28 @@ describe('routing refuses to decide on usage it cannot verify', () => {
     // snapshot() leaves capturedAt null — an undated number proves nothing.
     expect(isUsageVerified(candidate({ version: '1.0.0', usageSnapshot: snapshot([{ key: 'week', usedPercent: 10 }]) }), NOW)).toBe(false);
     expect(isUsageVerified(candidate({ version: '1.0.0' }), NOW)).toBe(false);
+  });
+
+  it('isUsageVerified: a synced poller snapshot is trusted for the 15-minute sync cadence', () => {
+    const tenMinOld = snapshotAt(new Date(NOW - 10 * 60_000), [{ key: 'week', usedPercent: 40 }]);
+    tenMinOld.freshness = { source: 'sync', poller: 'zion' };
+    expect(usageVerifiedMaxAgeMs(tenMinOld)).toBe(USAGE_SYNC_TRUST_MS);
+    expect(isUsageVerified(candidate({ version: '1.0.0', usageSnapshot: tenMinOld }), NOW)).toBe(true);
+
+    const sixteenMinOld = snapshotAt(new Date(NOW - 16 * 60_000), [{ key: 'week', usedPercent: 40 }]);
+    sixteenMinOld.freshness = { source: 'sync', poller: 'zion' };
+    expect(isUsageVerified(candidate({ version: '1.0.0', usageSnapshot: sixteenMinOld }), NOW)).toBe(false);
+  });
+
+  it('isUsageVerified: a locally captured snapshot keeps the 5-minute bar', () => {
+    const sixMinOld = snapshotAt(new Date(NOW - 6 * 60_000), [{ key: 'week', usedPercent: 40 }]);
+    sixMinOld.freshness = { source: 'poll', poller: 'zion' };
+    expect(usageVerifiedMaxAgeMs(sixMinOld)).toBe(USAGE_DECISION_MAX_AGE_MS);
+    expect(isUsageVerified(candidate({ version: '1.0.0', usageSnapshot: sixMinOld }), NOW)).toBe(false);
+
+    const statusline = snapshotAt(new Date(NOW - 6 * 60_000), [{ key: 'week', usedPercent: 40 }]);
+    statusline.freshness = { source: 'statusline', poller: 'zion' };
+    expect(isUsageVerified(candidate({ version: '1.0.0', usageSnapshot: statusline }), NOW)).toBe(false);
   });
 
   it('isUsageVerified: a fresh snapshot with no windows verifies nothing', () => {

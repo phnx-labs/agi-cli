@@ -274,6 +274,15 @@ function isAvailableEligible(candidate: RotateCandidate): boolean {
 export const USAGE_DECISION_MAX_AGE_MS = 5 * 60 * 1000;
 
 /**
+ * How old a *synced* snapshot (arrived from the account's poller through the
+ * fleet store) may be and still settle a routing decision. Matches the
+ * usage-sync tick so a worker that only ever sees 15-minute-old rows does not
+ * drop to the account picker. Local captures (`poll` / `statusline`) keep
+ * {@link USAGE_DECISION_MAX_AGE_MS}.
+ */
+export const USAGE_SYNC_TRUST_MS = 15 * 60 * 1000;
+
+/**
  * How old a usage snapshot may be before routing REFUSES to run at all
  * (NO_VERIFIED_USAGE), as opposed to merely declining to *weight* by its number.
  *
@@ -308,11 +317,18 @@ export const USAGE_STALE_REFUSAL_MAX_AGE_MS = 40 * 60 * 1000;
  * running it refreshes that log. That self-reinforcing pin is exactly what the
  * narrowing rule below exists to prevent.
  */
+export function usageVerifiedMaxAgeMs(snapshot: UsageSnapshot | null | undefined): number {
+  // D8: a row that arrived via sync from the account's own poller is trusted
+  // for the sync cadence. A locally captured row (poll / statusline / unset)
+  // keeps the 5-minute bar — the poller is on this box and can refresh it.
+  return snapshot?.freshness?.source === 'sync' ? USAGE_SYNC_TRUST_MS : USAGE_DECISION_MAX_AGE_MS;
+}
+
 export function isUsageVerified(candidate: RotateCandidate, nowMs: number = Date.now()): boolean {
   const snapshot = candidate.usageSnapshot;
   const capturedAt = snapshot?.capturedAt;
   if (!capturedAt || !snapshot?.windows.length) return false;
-  return nowMs - capturedAt.getTime() <= USAGE_DECISION_MAX_AGE_MS;
+  return nowMs - capturedAt.getTime() <= usageVerifiedMaxAgeMs(snapshot);
 }
 
 /**
@@ -1256,6 +1272,8 @@ function describeRotationCandidate(c: RotateCandidate, nowMs: number): Record<st
     tier,
     source: snap?.source ?? null,
     sourceLabel: snap?.sourceLabel ?? null,
+    captureSource: snap?.freshness?.source ?? null,
+    pollerDevice: snap?.freshness?.poller ?? null,
     capturedAt: snap?.capturedAt ? snap.capturedAt.toISOString() : null,
     ageMs: capturedAtMs === null ? null : nowMs - capturedAtMs,
     windows: (snap?.windows ?? []).map((w) => ({ key: w.key, usedPercent: Math.round(w.usedPercent) })),
