@@ -98,9 +98,6 @@ import { confirm } from '@inquirer/prompts';
 import { formatPath, isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { terminalWidth, truncateToWidth, stringWidth, padToWidth } from '../lib/session/width.js';
 
-/** Re-exported for view.account.test.ts — canonical definition lives in accounting/usage.ts. */
-export { viewUsageSummaryOptions };
-
 /** Shared account identity formatter, re-exported for the view-specific tests. */
 export const accountColumnLabel = accountDisplayLabel;
 

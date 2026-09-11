@@ -50,6 +50,8 @@ function row(overrides: Partial<HarnessRow> = {}): HarnessRow {
     ready: true,
     verdict: 'live',
     fix: null,
+    snapshot: null,
+    usageError: null,
     ...overrides,
   };
 }

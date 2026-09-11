@@ -16,7 +16,7 @@ import {
   toProviderRow,
   type NativeHomeRow,
 } from './account-catalog.js';
-import { usageHeadlessScopeError } from './accounting/usage.js';
+import { USAGE_NOT_COLLECTED_MARKER, usageErrorForDisplay, usageHeadlessScopeError } from './accounting/usage.js';
 import type { UsageSnapshot } from './accounting/usage.js';
 import { setKeychainTokenSync, _resetSecretsClientForTest } from './secrets-client.js';
 import { standaloneKeychainIsFileBacked, useFreshSecretsHome } from '../../tests/secrets-standalone.js';
@@ -520,5 +520,73 @@ describe('account catalog per-window USAGE rendering (PHNX-3940 regression)', ()
     expect(single).toContain('W:');
     expect(single).toContain('M:');
     expect(single).not.toContain('+1');
+  });
+});
+
+describe('agents accounts list --json never leaks the stale sentinel (PHNX-3348 follow-up)', () => {
+  it('a signed-in account with no collected usage has a display-safe usageError', () => {
+    // Real path: harness-inventory sanitizes via usageErrorForDisplay before the
+    // row reaches NativeAccountCatalogRow and accountListJson (fix/view-usage-windows).
+    // A never-refreshed cache returns USAGE_NOT_COLLECTED_MARKER ('stale') from
+    // getUsageInfoForIdentity (readOnly); the JSON must never carry that raw sentinel.
+    const row: import('./account-catalog.js').NativeAccountCatalogRow = {
+      kind: 'native',
+      agent: 'claude',
+      identityKey: 'claude:user=1',
+      name: 'work',
+      id: 'id-1',
+      email: 'w@example.com',
+      display: 'w@example.com',
+      identityLabel: 'w@example.com',
+      home: 'main',
+      installations: [{ label: 'main', releaseVersion: '2.1.220', signedIn: true }],
+      isDefault: false,
+      state: 'connected',
+      provisioning: 'portable',
+      verdict: 'live',
+      checkedAt: null,
+      devices: [{ device: 'zion', authMode: 'native', verdict: 'live' }],
+      usage: null,
+      usageSnapshot: null,
+      usageError: usageErrorForDisplay(USAGE_NOT_COLLECTED_MARKER),
+      fix: null,
+    };
+    const json = accountListJson([row]);
+    const entry = json.accounts[0] as unknown as { usageError?: string | null };
+    expect(entry.usageError).toBeTruthy();
+    expect(entry.usageError).not.toBe(USAGE_NOT_COLLECTED_MARKER);
+    expect(entry.usageError).not.toBe('stale');
+    expect(entry.usageError).toContain('not collected');
+    expect(entry.usageError).toContain('--refresh');
+    expect(JSON.stringify(json)).not.toContain('"stale"');
+    expect(JSON.stringify(json)).not.toContain(USAGE_NOT_COLLECTED_MARKER);
+  });
+
+  it('the sanitizer is exactly one hop — harness row display value passes through unchanged', () => {
+    const display = usageErrorForDisplay(USAGE_NOT_COLLECTED_MARKER)!;
+    const row: import('./account-catalog.js').NativeAccountCatalogRow = {
+      kind: 'native',
+      agent: 'claude',
+      identityKey: 'claude:user=2',
+      name: 'personal',
+      id: 'id-2',
+      email: 'p@example.com',
+      display: 'p@example.com',
+      identityLabel: 'p@example.com',
+      home: 'main',
+      installations: [{ label: 'main', releaseVersion: '2.1.220', signedIn: true }],
+      isDefault: false,
+      state: 'connected',
+      provisioning: 'portable',
+      verdict: 'live',
+      checkedAt: null,
+      devices: [{ device: 'zion', authMode: 'native', verdict: 'live' }],
+      usage: null,
+      usageSnapshot: null,
+      usageError: display,
+      fix: null,
+    };
+    const json = accountListJson([row]);
+    expect((json.accounts[0] as unknown as { usageError?: string | null }).usageError).toBe(display);
   });
 });
