@@ -611,7 +611,7 @@ export function whereText(row: NativeAccountCatalogRow, localDevice: string): st
       .map((device) => device.device);
     return present.join(', ') || 'this box';
   }
-  const provisioned = row.devices.filter((device) => device.verdict !== 'missing' && device.verdict !== 'unconfigured').length;
+  const provisioned = row.devices.filter((device) => device.verdict !== 'missing').length;
   if (provisioned === 0) return '—';
   const usable = row.devices.filter((device) => device.verdict === 'live' || device.verdict === 'rate_limited' || device.verdict === 'unverified').length;
   if (usable === provisioned) return `on ${usable} ${usable === 1 ? 'box' : 'boxes'}`;
