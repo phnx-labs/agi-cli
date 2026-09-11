@@ -32,10 +32,10 @@ import {
   viewHasAgent,
 } from '../hosts/ready.js';
 import {
-  collectRunCandidates,
   isSignInRecoverable,
   readinessFromCandidate,
 } from '../accounting/rotate.js';
+import { collectRunCandidatesForRun } from '../accounting/account-pool-collect.js';
 import { localMachineId } from '../origin-machine.js';
 import { normalizeHost } from '../machine-id.js';
 import { checkCliAvailable, type AgentType } from './agents.js';
@@ -78,6 +78,7 @@ function probeRemoteReadiness(
   installed: boolean | undefined;
   signedIn: boolean | undefined;
   pickerEligible: boolean | undefined;
+  accounts?: string[];
 }> {
   let args: string[];
   let env: Record<string, string>;
@@ -148,6 +149,7 @@ export async function probePoolSignals(
     installed: boolean | undefined;
     signedIn: boolean | undefined;
     pickerEligible: boolean | undefined;
+    accounts?: string[];
   };
   const installed = new Map<string, InstalledInfo>(agent
     ? await Promise.all(
@@ -156,13 +158,14 @@ export async function probePoolSignals(
         if (isSelf) {
           const inst = checkCliAvailable(agent)[0];
           if (!inst) return [d.name, { installed: false, signedIn: false, pickerEligible: false }];
-          const candidates = await collectRunCandidates(agent).catch(() => null);
+          const candidates = await collectRunCandidatesForRun(agent).catch(() => null);
           if (!candidates) {
             return [d.name, { installed: true, signedIn: undefined, pickerEligible: undefined }];
           }
           const readiness = candidates.map(readinessFromCandidate);
           return [d.name, {
             installed: true,
+            accounts: candidates.filter((_, index) => readiness[index].ready).flatMap((candidate) => candidate.nativeAccount ?? candidate.providerAccount ?? []),
             signedIn: readiness.some((candidate) => candidate.ready),
             pickerEligible: readiness.some((candidate) => candidate.ready || isSignInRecoverable(candidate)),
           }];
@@ -188,6 +191,7 @@ export async function probePoolSignals(
       installed: inst?.installed,
       signedIn: inst?.signedIn,
       pickerEligible: inst?.pickerEligible,
+      accounts: inst?.accounts,
     });
   }
 

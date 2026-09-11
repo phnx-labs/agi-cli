@@ -639,7 +639,7 @@ export async function runInteractiveOnHost(host: Host, opts: InteractiveDispatch
   const target = sshTargetFor(host);
   // Concrete version pins fail loud here (RUSH-2313) so we never open a TTY
   // to a box that cannot run the pin.
-  const { warnings } = ensureHostReady(host, { agent: opts.agent, version: opts.version });
+  const { warnings } = ensureHostReady(host, { agent: opts.agent, version: opts.version, account: opts.account });
   for (const w of warnings) process.stderr.write(`[hosts] warning: ${w}\n`);
 
   const invocation = ['agents', ...buildInteractiveRunForwardedArgs(opts)].map(shellQuote).join(' ');
@@ -685,7 +685,7 @@ export async function dispatchToHost(host: Host, opts: DispatchOptions): Promise
   const target = sshTargetFor(host);
   // Concrete agent@version pins fail loud before we print "Dispatched" and
   // leave a dead remote log (RUSH-2313). Aliases stay remote-resolved.
-  const { warnings } = ensureHostReady(host, { agent: opts.agent, version: opts.version });
+  const { warnings } = ensureHostReady(host, { agent: opts.agent, version: opts.version, account: opts.account });
   for (const w of warnings) process.stderr.write(`[hosts] warning: ${w}\n`);
 
   return launchDetached(host, target, {

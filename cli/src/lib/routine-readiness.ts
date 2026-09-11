@@ -1,3 +1,4 @@
+import { readinessFromCandidate, type RotateCandidate } from './accounting/rotate.js';
 /**
  * Activation readiness for a routine, composed from the target-aware execution
  * context ({@link resolveJobExecutionContext}) plus the harness/target checks a
@@ -19,10 +20,9 @@ import { evaluateRoutineReadiness, type RoutineReadinessResult, type RoutineRead
 import { readAuthHealth, type AuthVerdict } from './auth-health.js';
 import { machineId } from './machine-id.js';
 import { getVersionHomePath, isVersionInstalled, resolveVersion } from './installations/versions.js';
-import { probeLocalFleetAuth } from './auth-health.js';
 import { resolveHostRunTarget } from './hosts/run-target.js';
 import { hostIdentityArgs, sshTargetFor } from './hosts/types.js';
-import { probeHost } from './hosts/ready.js';
+import { probeHost, readyProbe, evaluateHostAgentInstall, viewAgentAccountEligibility } from './hosts/ready.js';
 import { sshExec, shellQuote } from './ssh-exec.js';
 import { encodePowershell, powershellQuote, POWERSHELL_PROGRESS_SILENCE } from './hosts/remote-cmd.js';
 
@@ -55,7 +55,16 @@ function fireBlockingAuthVerdict(verdict: AuthVerdict): boolean {
  * checked AFTER version rotation resolves the account (`launch.chain[0]`), so it
  * judges the identity the run will actually use, never a rotated-past dead pin.
  */
-export function fireTimeAuthReadiness(agent: string, version: string): RoutineReadiness | null {
+export function fireTimeAuthReadiness(agent: string, version: string, candidate?: RotateCandidate): RoutineReadiness | null {
+  if (candidate) {
+    const readiness = readinessFromCandidate(candidate);
+    if (readiness.ready || (readiness.reason !== 'signed_out' && readiness.reason !== 'revoked')) return null;
+    return {
+      code: 'agent_auth_failed',
+      message: `the selected ${agent} account is ${readiness.reason}`,
+      repair: `agents accounts login ${agent}#${candidate.nativeAccount ?? candidate.providerAccount ?? candidate.accountKey}`,
+    };
+  }
   const health = readAuthHealth(machineId(), agent, version);
   if (!health || !fireBlockingAuthVerdict(health.verdict)) return null;
   const who = health.account ? ` (${health.account})` : '';
@@ -163,9 +172,9 @@ export function probeOutputHasSentinel(stdout: string, sentinel: string): boolea
   });
 }
 
-function codexWorkspaceTrusted(version: string, cwd: string): boolean {
+function codexWorkspaceTrusted(home: string, cwd: string): boolean {
   try {
-    const configPath = path.join(getVersionHomePath('codex', version), '.codex', 'config.toml');
+    const configPath = path.join(home, '.codex', 'config.toml');
     const parsed = TOML.parse(fs.readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
     const projects = parsed.projects as Record<string, { trust_level?: string }> | undefined;
     return Object.entries(projects ?? {}).some(([root, project]) => {
@@ -190,25 +199,22 @@ export async function evaluateActivationReadinessLive(config: JobConfig): Promis
   const mode = resolveHostStrategy(config);
   if (mode === 'host' && config.host) return evaluateHostActivationReadiness(config);
   if (mode !== 'local' || !config.agent || config.workflow || config.command) return structural;
-  const version = resolveVersion(config.agent as never);
-  if (!version) return structural;
   const context = resolveJobExecutionContext(config, { mode: 'local' });
-
-  let authVerdict: { ok: boolean; reason?: string };
-  const rows = await probeLocalFleetAuth({ agents: [config.agent as never] });
-  const row = rows.find((candidate) => candidate.version === version);
-  const accepted = new Set(['live', 'rate_limited', 'unverified']);
-  authVerdict = row && accepted.has(row.health.verdict)
-    ? { ok: true }
-    : { ok: false, reason: row?.health.verdict ?? 'unconfigured' };
-
-  return evaluateRoutineReadiness(context, {
-    agentInstalled: () => true,
-    ...(config.agent === 'codex' && context.absoluteCwd
-      ? { codexTrusted: () => codexWorkspaceTrusted(version, context.absoluteCwd!) }
-      : {}),
-    authOk: () => authVerdict,
-  }, { agent: config.agent });
+  try {
+    const { resolveRoutineLaunch } = await import('./daemon/runner.js');
+    const launch = await resolveRoutineLaunch(config);
+    const selected = launch.chain[0]?.candidate;
+    const readiness = selected ? readinessFromCandidate(selected) : null;
+    return evaluateRoutineReadiness(context, {
+      agentInstalled: () => true,
+      ...(config.agent === 'codex' && context.absoluteCwd && selected?.slotDir
+        ? { codexTrusted: () => codexWorkspaceTrusted(selected.slotDir!, context.absoluteCwd!) }
+        : {}),
+      authOk: () => !readiness || readiness.ready ? { ok: true } : { ok: false, reason: readiness.reason },
+    }, { agent: config.agent });
+  } catch (error) {
+    return evaluateRoutineReadiness(context, { authOk: () => ({ ok: false, reason: (error as Error).message }) }, { agent: config.agent });
+  }
 }
 
 /** Resolve and probe the actual SSH target used by a host-placed routine. */
@@ -258,7 +264,8 @@ export async function evaluateHostActivationReadiness(config: JobConfig): Promis
 
   if (config.agent && !config.workflow && !config.command) {
     if (config.agent === 'codex') {
-      const args = ['run', 'codex', 'Reply with exactly ROUTINE_READY', '--mode', 'plan', '--timeout', '45s', '--json'];
+      const args = ['run', config.version ? `codex@${config.version}` : 'codex', 'Reply with exactly ROUTINE_READY', '--mode', 'plan', '--timeout', '45s', '--json'];
+      if (config.account) args.push('--account', config.account);
       const command = windows
         ? `powershell -NoProfile -EncodedCommand ${encodePowershell(`${POWERSHELL_PROGRESS_SILENCE}; Set-Location -LiteralPath ${powershellQuote(unprobed.absoluteCwd)}; & agents ${args.map(powershellQuote).join(' ')}`)}`
         : `cd ${shellQuote(unprobed.absoluteCwd)} && agents ${args.map(shellQuote).join(' ')}`;
@@ -271,22 +278,14 @@ export async function evaluateHostActivationReadiness(config: JobConfig): Promis
         }, { agent: config.agent });
       }
     } else {
-      const pingArgs = ['devices', 'ping', '--local', '--json'];
-      const command = windows
-        ? `powershell -NoProfile -EncodedCommand ${encodePowershell(`${POWERSHELL_PROGRESS_SILENCE}; & agents ${pingArgs.map(powershellQuote).join(' ')}`)}`
-        : `agents ${pingArgs.map(shellQuote).join(' ')}`;
-      const probe = sshExec(target, command, { timeoutMs: 30_000, extraSshArgs: identity });
-      let verdict = 'error';
-      if (probe.code === 0) {
-        try {
-          const payload = JSON.parse(probe.stdout) as { rows?: Array<{ agent: string; health: { verdict: string } }> };
-          verdict = payload.rows?.find((row) => row.agent === config.agent)?.health.verdict ?? 'unconfigured';
-        } catch { verdict = 'error'; }
+      const probe = readyProbe(target, host.os, identity);
+      try {
+        evaluateHostAgentInstall(probe.view, { agent: config.agent, version: config.version, account: config.account }, host.name);
+      } catch (error) {
+        return evaluateRoutineReadiness(unprobed, { authOk: () => ({ ok: false, reason: (error as Error).message }) }, { agent: config.agent });
       }
-      if (!new Set(['live', 'rate_limited', 'unverified']).has(verdict)) {
-        return evaluateRoutineReadiness(unprobed, {
-          authOk: () => ({ ok: false, reason: verdict }),
-        }, { agent: config.agent });
+      if (!config.account && viewAgentAccountEligibility(probe.view, config.agent).signedIn !== true) {
+        return evaluateRoutineReadiness(unprobed, { authOk: () => ({ ok: false, reason: 'no eligible account on target' }) }, { agent: config.agent });
       }
     }
   }

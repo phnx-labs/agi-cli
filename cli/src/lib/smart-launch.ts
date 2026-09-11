@@ -118,6 +118,8 @@ export interface DeviceAffinityPlan {
 
 /** Live placement plan used by the explicit `--device auto` surface. */
 export interface DeviceAutoPlan {
+  /** Target-local eligible account selectors to preserve across dispatch. */
+  accounts?: string[];
   /** null means the local machine won the comparison. */
   host: string | null;
   candidates: Array<{ key: string; loadPercent?: number; installed?: boolean; signedIn?: boolean }>;
@@ -244,6 +246,7 @@ export async function resolveDeviceAuto(
   return {
     host: picked === local ? null : picked,
     pickedDeviceKey: picked,
+    accounts: signals.get(picked)?.accounts,
     candidates: pool.map((key) => ({
       key,
       loadPercent: signals.get(key)?.loadPercent,

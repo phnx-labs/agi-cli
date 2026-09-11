@@ -483,10 +483,11 @@ describe('backfillActiveRowsFromMeta (firstUserMessage rides live rows, PHNX-362
       { context: 'terminal', kind: 'claude', sessionId: 's1', status: 'running' },
     ];
     backfillActiveRowsFromMeta(rows, new Map([
-      ['s1', { firstUserMessage: 'the full originating request', version: '2.1.207' }],
+      ['s1', { firstUserMessage: 'the full originating request', version: '2.1.207', accountKey: 'claude:org=second' }],
     ]));
     expect(rows[0].firstUserMessage).toBe('the full originating request');
     expect(rows[0].version).toBe('2.1.207');
+    expect(rows[0].accountKey).toBe('claude:org=second');
   });
 
   it('never clobbers a firstUserMessage the row already carries', () => {

@@ -46,6 +46,8 @@ import type { Headroom } from '../devices/health.js';
  * tier of the rank. See {@link DeviceStats}/{@link headroom} in devices/health.
  */
 export interface DevicePlacementSignal {
+  /** Eligible account selectors resolved on this device. */
+  accounts?: string[];
   /** SSH probe answered. `false` → excluded (unreachable). undefined → unknown. */
   reachable?: boolean;
   /**

@@ -1,3 +1,4 @@
+import { machineId } from './machine-id.js';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -113,6 +114,19 @@ describe('buildNativeCatalog account-first read model', () => {
     const catalog = buildNativeCatalog(rows, meta, (a) => (a === 'claude' ? 'acct-2' : null));
     expect(catalog.find(r => r.identityKey === 'claude:user=2')?.isDefault).toBe(true);
     expect(catalog.find(r => r.identityKey === 'claude:user=1')?.isDefault).toBe(false);
+  });
+
+  it('serializes this device observation separately from the fleet verdict and timestamp', () => {
+    const [row] = buildNativeCatalog([home({})], { accounts: {} }, noGlobalDefault);
+    row.verdict = 'revoked';
+    row.checkedAt = '2026-09-10T12:00:00.000Z';
+    row.devices = [
+      { device: machineId(), authMode: 'native', verdict: 'live', checkedAt: '2026-09-10T11:00:00.000Z' },
+      { device: 'peer-device', authMode: 'durable', verdict: 'revoked', checkedAt: row.checkedAt },
+    ];
+    const serialized = accountListJson([row]).accounts[0];
+    expect(serialized.verdict).toBe('revoked');
+    expect(serialized.local).toMatchObject({ verdict: 'live', checkedAt: '2026-09-10T11:00:00.000Z' });
   });
 
   it('emits the version 2 public JSON shape without installation or store internals', () => {

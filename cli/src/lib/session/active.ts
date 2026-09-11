@@ -168,7 +168,7 @@ type ActiveContext = 'terminal' | 'teams' | 'cloud' | 'headless';
 
 /** The SessionMeta fields the live-row backfill reads — the enrichment a running process cannot report. */
 export type BackfillMeta = Pick<SessionMeta,
-  'version' | 'account' | 'timestamp' | 'label' | 'firstUserMessage' | 'lastUserMessage' | 'ticketId' | 'prUrl' | 'prNumber' | 'origin' | 'routineName' | 'harness' |
+  'version' | 'account' | 'accountKey' | 'timestamp' | 'label' | 'firstUserMessage' | 'lastUserMessage' | 'ticketId' | 'prUrl' | 'prNumber' | 'origin' | 'routineName' | 'harness' |
   'tokenCount' | 'durationMs' | 'subAgentCount'
 >;
 
@@ -182,6 +182,7 @@ export function backfillActiveRowsFromMeta(
     if (!m) continue;
     if (!s.version && m.version) s.version = m.version;
     if (!s.account && m.account) s.account = m.account;
+    if (!s.accountKey && m.accountKey) s.accountKey = m.accountKey;
     if (!s.label && m.label) s.label = m.label;
     if (!s.firstUserMessage && m.firstUserMessage) s.firstUserMessage = m.firstUserMessage;
     if (!s.lastUserMessage && m.lastUserMessage) s.lastUserMessage = m.lastUserMessage;
@@ -457,6 +458,8 @@ export interface ActiveSession {
    * `accountKey`.
    */
   account?: string;
+  /** Durable account identity from the session index, never the display email. */
+  accountKey?: string;
   /**
    * Last-activity epoch — the transcript's last write (mtime). Distinct from
    * {@link startedAtMs} (session START): a session begun 3h ago but last touched

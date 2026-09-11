@@ -756,6 +756,9 @@ export interface RunMeta {
    * command/self-updating runs.
    */
   version?: string;
+  /** Resolved account home and identity for transcript archival after restart. */
+  execHome?: string;
+  accountKey?: string;
   workflow?: string;
   /** The shell command that ran, for command-mode routines (no agent). */
   command?: string;

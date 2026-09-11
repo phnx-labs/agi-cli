@@ -1,0 +1,3 @@
+- **Keep account identity through background and remote launches (PHNX-3940).** Teams retain account selectors across restart and SSH, routine attempts retain their selected account, remote readiness checks account provisioning, and resume locates the account slot that owns the transcript instead of matching a binary version. Session streams include the durable account key. Source: `src/lib/daemon/runner.ts`, `src/lib/session/recovery.ts`, `src/lib/hosts/ready.ts`, `src/lib/teams/agents.ts`.
+
+- Remote placement uses target-local account evidence and probe times. Routine release pins still select accounts, retain model/effort/directory grants, and archive transcripts from the resolved account home. Teams resolves release aliases on the execution device.
