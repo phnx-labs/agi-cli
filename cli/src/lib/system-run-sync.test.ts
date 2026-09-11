@@ -9,6 +9,7 @@ process.env.HOME = TEST_HOME;
 
 const { getVersionHomePath } = await import('./installations/versions.js');
 const { applySystemResourcesAtRun } = await import('./system-run-sync.js');
+const { upsertResourceProfilePreset, setActiveResourceProfile } = await import('./resource-profiles.js');
 
 const AGENT = 'claude' as const;
 const VERSION = '9.9.9';
@@ -76,5 +77,35 @@ describe('applySystemResourcesAtRun', () => {
     const result = applySystemResourcesAtRun(AGENT, VERSION, home);
     expect(result.subagents.sort()).toEqual(['artifact-critic', 'code-reviewer']);
     expect(fs.existsSync(installedSubagent('artifact-critic'))).toBe(true);
+  });
+
+  it('filters subagents and skills through the active resource profile, like the full sync does', () => {
+    const home = getVersionHomePath(AGENT, VERSION);
+    upsertResourceProfilePreset('client', { skills: ['artifacts'], subagents: ['code-reviewer'] });
+    setActiveResourceProfile('client');
+    try {
+      sleepPastMtimeGranularity();
+      writeFile('.agents/.system/subagents/noise/AGENT.md', '---\nname: noise\ndescription: not for this client\n---\nNoise.\n');
+      writeFile('.agents/.system/skills/other/SKILL.md', '---\nname: other\ndescription: not for this client\n---\nOther.\n');
+      const result = applySystemResourcesAtRun(AGENT, VERSION, home);
+      expect(result.subagents).toEqual(['code-reviewer']);
+      expect(result.skills).toEqual(['artifacts']);
+      expect(fs.existsSync(installedSubagent('noise'))).toBe(false);
+      expect(fs.existsSync(installedSkill('other'))).toBe(false);
+    } finally {
+      setActiveResourceProfile(null);
+    }
+  });
+
+  it('retries on the next run when a subagent source fails to write, instead of advancing the sentinel', () => {
+    const home = getVersionHomePath(AGENT, VERSION);
+    sleepPastMtimeGranularity();
+    writeFile('.agents/.system/subagents/broken/AGENT.md', 'no frontmatter at all\n');
+    const first = applySystemResourcesAtRun(AGENT, VERSION, home);
+    expect(first.subagents).not.toContain('broken');
+    // Nothing changed in the source since, yet the kind is attempted again.
+    const second = applySystemResourcesAtRun(AGENT, VERSION, home);
+    expect(second.subagents.length).toBeGreaterThan(0);
+    expect(second.skills).toEqual([]);
   });
 });

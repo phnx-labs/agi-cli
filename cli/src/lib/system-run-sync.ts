@@ -13,9 +13,9 @@
  *
  * Scope: the system layer's `skills/` and `subagents/` directories. The
  * writers resolve each name through the normal precedence (a user-layer
- * shadow still wins), and the active resource profile filters skill names the
+ * shadow still wins), and the active resource profile filters both kinds the
  * same way `syncResourcesToVersion` does. Never blocks a launch: any failure
- * is swallowed, the next run retries.
+ * is swallowed and leaves the sentinel stale, so the next run retries.
  */
 import * as fs from 'fs';
 import * as path from 'path';
@@ -101,20 +101,23 @@ export function applySystemResourcesAtRun(
     const writer = getWriter(kind, agent);
     if (!writer) continue;
     const sources = namesWithMarker(dir, marker);
-    let names = Array.from(sources.keys());
-    if (kind === 'skills') {
-      names = filterNamesForActiveResourceProfile('skills', names, sources);
-    }
+    // The active resource profile is the per-client scoping seam (a brand pins
+    // one); it filters every kind here exactly as `syncResourcesToVersion` does.
+    const names = filterNamesForActiveResourceProfile(kind, Array.from(sources.keys()), sources);
     if (names.length === 0) {
       next[kind] = { dir, files: fingerprintDir(dir) };
       continue;
     }
+    let written;
     try {
-      const written = writer.write({ version, versionHome, selection: names, cwd: '' });
-      result[kind] = written.synced;
+      written = writer.write({ version, versionHome, selection: names, cwd: '' });
     } catch {
       continue; // leave the sentinel stale so the next run retries
     }
+    result[kind] = written.synced;
+    // A per-name failure (an AGENT.md that does not parse) also leaves the
+    // sentinel stale: the next run retries instead of never seeing it again.
+    if (written.errors?.length) continue;
     next[kind] = { dir, files: fingerprintDir(dir) };
   }
 
