@@ -2,16 +2,28 @@
  * Fleet shared-state sync as a `PeriodicService` (PHNX-3392 usage-sync,
  * PHNX-3792 session mirror).
  *
- * This is the one tick that owns the bounded Git exchange over the fleet-synced
+ * This is the ONE tick that owns the bounded Git exchange over the fleet-synced
  * user repo, so every non-secret daemon-state field rides it rather than opening
  * a second committer. Each tick: (1) publishes this box's own fields into its
  * conflict-free `devices/<device>/daemon-state.json` — a headed box's Claude
- * usage snapshot, and EVERY box's lightweight session digests (PHNX-3792);
- * (2) runs one serialized, timeout-bounded commit/rebase/push; (3) consumes the
- * peer fields the exchange delivered — a worker merges usage newest-wins, and
- * every non-worker box folds peers' session digests into its local index so the
- * picker renders remote-host previews inline. No tick opens a device-to-device
- * SSH mesh.
+ * usage snapshot, EVERY box's lightweight session digests (PHNX-3792), and the
+ * reserved-auth readiness verdict (PHNX-4051, folded in from the auth-sync tick
+ * so a single caller holds the shared-repo lock per tick); (2) runs one
+ * serialized, timeout-bounded commit/rebase/push; (3) consumes the peer fields
+ * the exchange delivered — a worker merges usage newest-wins, and every
+ * non-worker box folds peers' session digests into its local index so the picker
+ * renders remote-host previews inline. No tick opens a device-to-device SSH mesh.
+ *
+ * Why the auth verdict publishes here (PHNX-4051): auth-sync used to run its OWN
+ * `syncFleetSharedStateRepo`, so on every box two ticks 30 s apart contended for
+ * the one `proper-lockfile` lock (20×100 ms ≈ 2 s of retries) while a real
+ * fetch/rebase/push on a drifted repo runs far longer — the usage tick then
+ * failed with "Lock file is already being held" (zion logged it 95× in 24 h) and
+ * workers never received a fresh usage snapshot, which the 40-min placement gate
+ * turned into "no ready device". Folding the auth verdict into this single
+ * committer removes the second caller entirely. Auth-sync keeps its non-git
+ * duties (worker-slot reconcile + the credential SSH pushes) under its own
+ * deadline and circuit breaker.
  */
 import { BasePeriodicService, type DaemonContext } from './service.js';
 import type { DaemonServiceId } from '../daemon-services.js';
@@ -54,6 +66,14 @@ export class UsageSyncService extends BasePeriodicService {
     const mirrored = await publishSessionMirrorToSharedStore();
     if (mirrored.changed) ctx.log('INFO', `session-mirror: published ${mirrored.count} session digest(s)`);
     if (mirrored.error) ctx.log('WARN', `session-mirror: publish: ${mirrored.error}`);
+    // The reserved-auth readiness verdict rides this single git exchange too
+    // (PHNX-4051): it is a conflict-free field in the same owned daemon-state
+    // file, so publishing it here — instead of from a second committer in
+    // auth-sync — is what keeps exactly one caller of syncFleetSharedStateRepo on
+    // the periodic path.
+    const { publishReservedAuthVerdict } = await import('../secrets-policy.js');
+    const authVerdict = await publishReservedAuthVerdict();
+    if (authVerdict.error) ctx.log('WARN', `usage-sync: auth verdict: ${authVerdict.error}`);
     const { syncFleetSharedStateRepo } = await import('../fleet-shared-repo-sync.js');
     const transport = await syncFleetSharedStateRepo();
     if (transport.skipped) ctx.log('WARN', `usage-sync: ${transport.skipped}`);
