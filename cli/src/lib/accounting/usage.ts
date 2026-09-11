@@ -926,6 +926,38 @@ export interface FormatUsageSummaryOpts {
   noRecentUsageLabel?: string | null;
 }
 
+/**
+ * Shared builder for {@link formatUsageSummary} options in `agents view` and
+ * account-catalog rows. One builder, no copy — captures `headless`,
+ * `unverified`, `expectedWindows`, `errorKind`, `benignState`, and the grok
+ * `noRecentUsageLabel` consistently.
+ */
+export function viewUsageSummaryOptions(
+  agentId: AgentId,
+  signedIn: boolean,
+  usageInfo: UsageInfo | undefined,
+  maxWindows: number | undefined,
+  version?: string,
+): FormatUsageSummaryOpts {
+  const headless = isUsageHeadlessScopeError(usageInfo?.error);
+  const benignState = usageInfo ? getUsageBenignState(usageInfo) : null;
+  return {
+    unavailable: agentReportsUsage(agentId) && signedIn && !usageInfo?.snapshot && !headless && !benignState,
+    unverified: !headless && !!usageInfo?.snapshot && !!usageInfo.error,
+    headless,
+    maxWindows,
+    expectedWindows: agentId === 'claude'
+      ? [{ key: 'session', shortLabel: 'S' }, { key: 'week', shortLabel: 'W' }]
+      : undefined,
+    errorKind: classifyUsageErrorKind(usageInfo?.error),
+    errorDetail: usageInfo?.error ?? null,
+    benignState,
+    noRecentUsageLabel: agentId === 'grok'
+      ? `run grok${version ? `@${version}` : ''} once to refresh usage`
+      : null,
+  };
+}
+
 /** Human label for a classified usage error, for the no-bars branch of {@link formatUsageSummary}. */
 function formatUsageErrorKindLabel(
   kind: UsageErrorKind | null | undefined,

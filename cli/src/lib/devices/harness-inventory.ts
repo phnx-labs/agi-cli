@@ -75,7 +75,7 @@ export interface HarnessRow {
   verdict: AccountVerdict;
   fix: string | null;
   /** The live usage snapshot backing `quota`, or null when none was collected. */
-  snapshot: import('../accounting/usage.js').UsageSnapshot | null;
+  snapshot: UsageSnapshot | null;
   /** Raw error string from the usage fetch, if any (headless scope, expired, etc.). */
   usageError: string | null;
 }

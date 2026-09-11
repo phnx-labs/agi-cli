@@ -29,6 +29,7 @@ import {
   usageExpiredKimiCredentialError,
   USAGE_BENIGN_STATE,
   type UsageInfo,
+  type UsageSnapshot,
 } from '../lib/accounting/usage.js';
 import { padToWidth, stringWidth } from '../lib/session/width.js';
 
@@ -549,7 +550,7 @@ describe('executePrunePlan — repoint default to keeper before retiring the dup
 });
 
 describe('account rows render per-window usage bars (PHNX-3940 regression)', () => {
-  const snapshotWithBoth = (): import('../lib/accounting/usage.js').UsageSnapshot => ({
+  const snapshotWithBoth = (): UsageSnapshot => ({
     source: 'live',
     sourceLabel: 'live account data',
     capturedAt: new Date(Date.now() - 60 * 60 * 1000),
@@ -594,7 +595,7 @@ describe('account rows render per-window usage bars (PHNX-3940 regression)', () 
   });
 
   it('overview cap limits a multi-window harness to 2 bars while single-harness view shows all', () => {
-    const threeWindowSnapshot = (): import('../lib/accounting/usage.js').UsageSnapshot => ({
+    const threeWindowSnapshot = (): UsageSnapshot => ({
       source: 'live',
       sourceLabel: 'live',
       capturedAt: new Date(),
