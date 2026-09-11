@@ -56,7 +56,7 @@ vi.mock('../fleet-shared-repo-sync.js', () => ({
 }));
 
 // Imported after the mocks are registered.
-const { UsageSyncService } = await import('./usage-sync-service.js');
+const { UsageSyncService, USAGE_SYNC_TICK_MS } = await import('./usage-sync-service.js');
 const { AuthSyncService } = await import('./auth-sync-service.js');
 
 let logs: string[] = [];
@@ -168,5 +168,20 @@ describe('auth-sync credential-push freshness gate (PHNX-4051)', () => {
     expect(mocks.syncAuthBundle).not.toHaveBeenCalled();
     expect(mocks.syncStores).not.toHaveBeenCalled();
     expect(logs.some((l) => /WARN auth-sync: skipping credential push .* last completed \d+s ago/.test(l))).toBe(true);
+  });
+
+  it('the gate threshold is USAGE_SYNC_TICK_MS (the producer cadence), not auth-sync\'s own interval', async () => {
+    // A marker older than the usage-sync cadence but younger than a hypothetically
+    // larger AUTH_SYNC_TICK_MS is STILL stale: the delivered peer verdicts are
+    // refreshed once per usage-sync exchange, so the gate must key on that cadence.
+    // Sitting just past USAGE_SYNC_TICK_MS proves the threshold is the producer's,
+    // and the WARN echoes that same interval back rather than auth-sync's literal.
+    mocks.readLastExchange.mockReturnValue(Date.now() - (USAGE_SYNC_TICK_MS + 60_000));
+    await new AuthSyncService().tick(makeCtx(), signal());
+
+    expect(mocks.syncAuthBundle).not.toHaveBeenCalled();
+    expect(mocks.syncStores).not.toHaveBeenCalled();
+    const needWithin = Math.round(USAGE_SYNC_TICK_MS / 1000);
+    expect(logs.some((l) => l.includes(`need one within ${needWithin}s`))).toBe(true);
   });
 });

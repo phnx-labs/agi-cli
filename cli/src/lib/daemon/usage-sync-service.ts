@@ -28,7 +28,13 @@
 import { BasePeriodicService, type DaemonContext } from './service.js';
 import type { DaemonServiceId } from '../daemon-services.js';
 
-const USAGE_SYNC_TICK_MS = 15 * 60_000;
+/**
+ * The usage-sync tick cadence. Exported because auth-sync's credential-push
+ * freshness gate is the CONSUMER of this producer's cadence: it skips the
+ * pushes when the last exchange is older than one usage-sync interval, so it
+ * must track this constant rather than its own equal-by-coincidence literal.
+ */
+export const USAGE_SYNC_TICK_MS = 15 * 60_000;
 const USAGE_SYNC_DEADLINE_MS = 2 * 60_000;
 const USAGE_SYNC_KICKOFF_MS = 90_000;
 
