@@ -1067,7 +1067,12 @@ reserved-auth readiness verdict — BEFORE the single commit/rebase/push, so all
 three ride one exchange. `auth-sync` no longer runs its own exchange: it keeps
 only its non-git duties (worker-slot reconcile + the credential SSH pushes,
 under its own deadline and circuit breaker) and acts on the peer verdicts the
-usage-sync exchange last delivered into the local checkout. Before PHNX-4051 both
+usage-sync exchange last delivered into the local checkout. Those pushes are
+gated on the exchange's freshness marker (`readLastSuccessfulExchangeMs`, written
+beside the lock on every success): when the last usage-sync exchange is missing or
+older than one tick interval, auth-sync skips the pushes and WARNs rather than
+acting on peer state that may no longer hold (worker-slot reconcile is NOT gated —
+it reads only local durable keys). Before PHNX-4051 both
 ticks committed 30 s apart and contended for the one `proper-lockfile` lock
 (20×100 ms of retries vs a multi-second real fetch/rebase/push), so the usage
 tick logged "Lock file is already being held", workers never got a fresh usage

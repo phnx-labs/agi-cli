@@ -499,4 +499,132 @@ describe('syncFleetSharedStateRepo (real git)', () => {
     // The untracked store is untouched — the scan never looked at it.
     expect(fs.readdirSync(artifactDir).length).toBe(fileCount);
   });
+
+  // PHNX-4051: scoping the collision scan to `devices/` + `agents.yaml` (the paths
+  // this exchange commits) re-opened the PHNX-3923 wedge for every OTHER path
+  // origin tracks — the rebase still checks out the whole tree, so a stale
+  // untracked `projects/rush.yaml` still aborted it. Scoping instead to the
+  // TRACKED ROOTS origin carries keeps every such path in scope. This is the
+  // original PHNX-3923 fixture, restored next to the devices/ case above.
+  it('clears an untracked collision under a NON-owned tracked root (projects/) too (PHNX-4051)', async () => {
+    const root = tempDir();
+    const remote = path.join(root, 'remote.git');
+    const publisher = path.join(root, 'publisher');
+    const worker = path.join(root, 'worker');
+    git(root, ['init', '--bare', '--initial-branch=main', remote]);
+    git(root, ['clone', remote, publisher]);
+    configureIdentity(publisher);
+    fs.writeFileSync(path.join(publisher, 'README.md'), 'fleet store\n', 'utf-8');
+    git(publisher, ['add', 'README.md']);
+    git(publisher, ['commit', '-m', 'seed user store']);
+    git(publisher, ['push', 'origin', 'main']);
+
+    // Worker clones before the project file exists on origin.
+    git(root, ['clone', remote, worker]);
+    configureIdentity(worker);
+
+    // A peer publishes a file origin now TRACKS at `projects/rush.yaml` — NOT under
+    // the owned `devices/` tree, so the previous scoping skipped it entirely.
+    const differsRel = 'projects/rush.yaml';
+    fs.mkdirSync(path.dirname(path.join(publisher, differsRel)), { recursive: true });
+    fs.writeFileSync(path.join(publisher, differsRel), 'canonical: true\n', 'utf-8');
+    git(publisher, ['add', differsRel]);
+    git(publisher, ['commit', '-m', 'peer publishes a non-device shared file']);
+    git(publisher, ['push', 'origin', 'main']);
+
+    // The worker holds the SAME path as an UNTRACKED stale local snapshot that
+    // differs from origin. Before this fix the rebase aborted here with
+    // "untracked working tree files would be overwritten by checkout".
+    fs.mkdirSync(path.dirname(path.join(worker, differsRel)), { recursive: true });
+    fs.writeFileSync(path.join(worker, differsRel), 'stale: local\n', 'utf-8');
+
+    updateFleetSharedDeviceState('worker-a', { auth: { status: 'missing' } }, worker);
+    const result = await syncFleetSharedStateRepo({
+      userAgentsDir: worker,
+      device: 'worker-a',
+      timeoutMs: 10_000,
+      lockPath: path.join(root, 'worker.lock-target'),
+    });
+
+    expect(result).toMatchObject({ success: true, timedOut: false, error: null });
+    // The differing collision was preserved in a backup, not destroyed, and origin's
+    // version was checked out cleanly.
+    expect(result.untrackedBackedUp).toContain(differsRel);
+    expect(fs.readFileSync(path.join(worker, differsRel), 'utf-8')).toBe('canonical: true\n');
+    const backupRoot = `${worker}-fleet-sync-backups`;
+    const stamps = fs.readdirSync(backupRoot);
+    expect(fs.readFileSync(path.join(backupRoot, stamps[0], differsRel), 'utf-8')).toBe('stale: local\n');
+    // The worker's own state commit still reached origin.
+    expect(git(root, ['--git-dir', remote, 'log', '--format=%s', 'main'])).toContain(
+      'chore(devices): publish worker-a daemon state',
+    );
+  });
+
+  // PHNX-4051: the two failures together — a collision under a tracked root that
+  // MUST be cleared, alongside a large untracked-only tree outside every tracked
+  // root that must NOT push the listing over the cap. Scoping to tracked roots
+  // resolves both: the collision under `projects/` is cleared, the oversized
+  // `artifact-history/` tree is never listed, and the exchange succeeds.
+  it('clears a projects/ collision while a large untracked-only tree outside tracked roots exceeds the cap (PHNX-4051)', async () => {
+    const root = tempDir();
+    const remote = path.join(root, 'remote.git');
+    const publisher = path.join(root, 'publisher');
+    const worker = path.join(root, 'worker');
+    git(root, ['init', '--bare', '--initial-branch=main', remote]);
+    git(root, ['clone', remote, publisher]);
+    configureIdentity(publisher);
+    fs.writeFileSync(path.join(publisher, 'README.md'), 'fleet store\n', 'utf-8');
+    git(publisher, ['add', 'README.md']);
+    git(publisher, ['commit', '-m', 'seed user store']);
+    git(publisher, ['push', 'origin', 'main']);
+    git(root, ['clone', remote, worker]);
+    configureIdentity(worker);
+
+    // Origin now tracks a non-device path.
+    const differsRel = 'projects/rush.yaml';
+    fs.mkdirSync(path.dirname(path.join(publisher, differsRel)), { recursive: true });
+    fs.writeFileSync(path.join(publisher, differsRel), 'canonical: true\n', 'utf-8');
+    git(publisher, ['add', differsRel]);
+    git(publisher, ['commit', '-m', 'peer publishes a non-device shared file']);
+    git(publisher, ['push', 'origin', 'main']);
+
+    // The worker holds a stale untracked copy of that tracked path (the collision
+    // that MUST be cleared) …
+    fs.mkdirSync(path.dirname(path.join(worker, differsRel)), { recursive: true });
+    fs.writeFileSync(path.join(worker, differsRel), 'stale: local\n', 'utf-8');
+
+    // … AND a large untracked-only revision store OUTSIDE every tracked root, whose
+    // `-z` listing alone would exceed the output cap and kill an unscoped scan.
+    const artifactDir = path.join(worker, 'artifact-history');
+    fs.mkdirSync(artifactDir, { recursive: true });
+    const nameLen = 240;
+    const bytesPerEntry = 'artifact-history/'.length + nameLen + 1; // + NUL separator
+    const fileCount = Math.ceil(FLEET_SHARED_REPO_OUTPUT_MAX_BYTES / bytesPerEntry) + 64;
+    let untrackedBytes = 0;
+    for (let i = 0; i < fileCount; i++) {
+      const name = `${String(i).padStart(8, '0')}-${'x'.repeat(nameLen - 9)}`;
+      fs.writeFileSync(path.join(artifactDir, name), '');
+      untrackedBytes += 'artifact-history/'.length + name.length + 1;
+    }
+    expect(untrackedBytes).toBeGreaterThan(FLEET_SHARED_REPO_OUTPUT_MAX_BYTES);
+
+    updateFleetSharedDeviceState('worker-a', { auth: { status: 'missing' } }, worker);
+    const result = await syncFleetSharedStateRepo({
+      userAgentsDir: worker,
+      device: 'worker-a',
+      timeoutMs: 20_000,
+      lockPath: path.join(root, 'worker.lock-target'),
+    });
+
+    // Both conditions hold at once: the collision cleared, the exchange succeeded.
+    expect(result).toMatchObject({ success: true, committed: true, timedOut: false, error: null });
+    expect(result.untrackedBackedUp).toContain(differsRel);
+    expect(fs.readFileSync(path.join(worker, differsRel), 'utf-8')).toBe('canonical: true\n');
+    // The oversized untracked tree was never touched — it never entered the scan.
+    expect(fs.readdirSync(artifactDir).length).toBe(fileCount);
+    // The worker's own publish reached the remote.
+    expect(git(root, ['--git-dir', remote, 'log', '--format=%s', 'main'])).toContain(
+      'chore(devices): publish worker-a daemon state',
+    );
+  });
 });

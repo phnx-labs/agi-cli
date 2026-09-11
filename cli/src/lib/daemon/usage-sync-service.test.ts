@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   syncAuthBundle: vi.fn(),
   syncStores: vi.fn(),
   syncRepo: vi.fn(),
+  readLastExchange: vi.fn(),
 }));
 
 vi.mock('../accounting/usage-sync.js', () => ({
@@ -51,6 +52,7 @@ vi.mock('../secrets-policy.js', () => ({
 }));
 vi.mock('../fleet-shared-repo-sync.js', () => ({
   syncFleetSharedStateRepo: mocks.syncRepo,
+  readLastSuccessfulExchangeMs: mocks.readLastExchange,
 }));
 
 // Imported after the mocks are registered.
@@ -80,6 +82,9 @@ beforeEach(() => {
     success: true, committed: true, pushed: true, commit: 'abc12345',
     timedOut: false, skipped: null, error: null,
   });
+  // Default: the usage-sync exchange completed just now, so auth-sync's pushes
+  // read fresh peer state. Individual tests override this to exercise the gate.
+  mocks.readLastExchange.mockReturnValue(Date.now());
 });
 
 afterEach(() => {
@@ -120,11 +125,48 @@ describe('one shared-repo committer per tick (PHNX-4051)', () => {
 
   it('the credential pushes run even when this tick did not just complete an exchange', async () => {
     // Regression against gating the pushes on an in-tick transport.success: they
-    // now act on the peer state the usage-sync exchange last delivered.
+    // now act on the peer state the usage-sync exchange last delivered, so a
+    // FRESH prior exchange (no in-tick one) is enough.
+    mocks.readLastExchange.mockReturnValue(Date.now() - 60_000); // 1 min ago, well within a tick
     mocks.syncAuthBundle.mockResolvedValue({ pushed: ['worker-b'], errors: [] });
     await new AuthSyncService().tick(makeCtx(), signal());
 
     expect(mocks.syncAuthBundle).toHaveBeenCalledTimes(1);
     expect(logs.some((l) => /pushed auth to worker-b/.test(l))).toBe(true);
+  });
+});
+
+describe('auth-sync credential-push freshness gate (PHNX-4051)', () => {
+  it('normal path: pushes when the usage-sync exchange completed within one tick interval', async () => {
+    mocks.readLastExchange.mockReturnValue(Date.now() - 5 * 60_000); // 5 min ago (< 15-min interval)
+    await new AuthSyncService().tick(makeCtx(), signal());
+
+    // The slot reconcile always runs; the freshness gate lets the pushes through.
+    expect(mocks.reconcileSlots).toHaveBeenCalledTimes(1);
+    expect(mocks.syncAuthBundle).toHaveBeenCalledTimes(1);
+    expect(mocks.syncStores).toHaveBeenCalledTimes(1);
+    expect(logs.some((l) => /skipping credential push/.test(l))).toBe(false);
+  });
+
+  it('skip-and-warn: no marker (exchange never completed) skips the pushes and WARNs', async () => {
+    mocks.readLastExchange.mockReturnValue(null);
+    await new AuthSyncService().tick(makeCtx(), signal());
+
+    // Slot reconcile still runs — it reads only local durable keys, not peer verdicts.
+    expect(mocks.reconcileSlots).toHaveBeenCalledTimes(1);
+    // The peer-state-dependent pushes are skipped because the delivered state is stale.
+    expect(mocks.syncAuthBundle).not.toHaveBeenCalled();
+    expect(mocks.syncStores).not.toHaveBeenCalled();
+    expect(logs.some((l) => /WARN auth-sync: skipping credential push .* never completed/.test(l))).toBe(true);
+  });
+
+  it('skip-and-warn: a stale exchange older than one tick interval skips the pushes and WARNs', async () => {
+    mocks.readLastExchange.mockReturnValue(Date.now() - 30 * 60_000); // 30 min ago (> 15-min interval)
+    await new AuthSyncService().tick(makeCtx(), signal());
+
+    expect(mocks.reconcileSlots).toHaveBeenCalledTimes(1);
+    expect(mocks.syncAuthBundle).not.toHaveBeenCalled();
+    expect(mocks.syncStores).not.toHaveBeenCalled();
+    expect(logs.some((l) => /WARN auth-sync: skipping credential push .* last completed \d+s ago/.test(l))).toBe(true);
   });
 });

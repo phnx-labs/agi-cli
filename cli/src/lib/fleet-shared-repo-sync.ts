@@ -25,6 +25,44 @@ export const FLEET_SHARED_REPO_OUTPUT_MAX_BYTES = 1024 * 1024;
 const FLEET_SHARED_REPO_PUSH_ATTEMPTS = 3;
 const FLEET_SHARED_REPO_REBASE_CLEANUP_RESERVE_MS = 5_000;
 
+/**
+ * The exchange records its last SUCCESSFUL completion beside its lock so a
+ * sibling service (auth-sync) can gate work on the freshness of the peer state
+ * this exchange delivers into the local checkout (PHNX-4051). auth-sync's
+ * credential pushes read the peer verdicts the LAST usage-sync exchange wrote; if
+ * that exchange has not landed within a tick interval, those verdicts are stale
+ * and pushing off them would act on a peer that may already hold the key.
+ */
+function exchangeMarkerPath(lockPath: string): string {
+  return `${lockPath}.last-success`;
+}
+
+function writeExchangeMarker(lockPath: string, nowMs: number = Date.now()): void {
+  try {
+    const p = exchangeMarkerPath(lockPath);
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, JSON.stringify({ at: nowMs }), 'utf-8');
+  } catch {
+    // Best-effort telemetry — never fail the exchange over its own marker.
+  }
+}
+
+/**
+ * When the shared-state exchange last completed successfully, in epoch ms, or
+ * `null` if it never has on this box (no marker yet) or the marker is unreadable.
+ * Reads the default daemon-dir marker the periodic exchange writes.
+ */
+export function readLastSuccessfulExchangeMs(): number | null {
+  try {
+    const lockPath = path.join(getDaemonDir(), 'fleet-shared-repo-sync');
+    const raw = fs.readFileSync(exchangeMarkerPath(lockPath), 'utf-8');
+    const at = (JSON.parse(raw) as { at?: unknown }).at;
+    return typeof at === 'number' && Number.isFinite(at) ? at : null;
+  } catch {
+    return null;
+  }
+}
+
 export interface BoundedProcessResult {
   code: number | null;
   stdout: string;
@@ -218,25 +256,31 @@ function retainedAutostash(
  * the rebase check out origin's version. A file we cannot clear is left in
  * place; the rebase may still abort, no worse than today and never losing data.
  *
- * The scan is scoped to `ownedPaths` — the `devices/` tree and the central
- * `agents.yaml` this exchange actually commits — NOT the whole working tree
- * (PHNX-4051). An unbounded `git ls-files --others` walks every untracked file
- * in `~/.agents`, which on a box carrying artifacts-cli's revision store
- * (`~/.agents/artifact-history/`, ~11k files / >1 MiB of paths) blows past
- * {@link FLEET_SHARED_REPO_OUTPUT_MAX_BYTES} and kills the exchange on every
- * tick. Only the paths this exchange writes can collide with what it checks out,
- * so listing anything else is pure overhead that an unrelated untracked tree can
- * push over the cap. A collision under an unowned path is left to the reconcile
- * paths that own it (adopt-in-place / `agents repo pull`), exactly as before
- * PHNX-3923 for those paths.
+ * The scan is scoped to the TRACKED ROOTS origin carries — the top-level entries
+ * of `git ls-tree --name-only origin/<branch>` — NOT the whole working tree
+ * (PHNX-4051). Only a file origin tracks can be overwritten by the rebase
+ * checkout, so a tracked root is the tightest superset of the collidable paths:
+ * every path origin tracks stays in scope (a stale untracked `projects/rush.yaml`
+ * under a tracked `projects/` root is still cleared), while an untracked-ONLY tree
+ * origin never tracks — artifacts-cli's revision store
+ * (`~/.agents/artifact-history/`, ~11k files / >1 MiB of paths) is the live case —
+ * is never a tracked root, so it never enters the `git ls-files --others` listing.
+ * An unbounded listing there blows past {@link FLEET_SHARED_REPO_OUTPUT_MAX_BYTES}
+ * and kills the exchange on every tick; scoping to the tracked roots keeps the
+ * PHNX-3923 coverage whole while an unrelated untracked tree cannot push the
+ * listing over the cap. `ls-tree`'s own output is bounded — it lists only the root
+ * entries, never the recursive tree.
  */
 async function clearCollidingUntracked(
   git: (args: string[], reserveMs?: number) => Promise<BoundedProcessResult>,
   root: string,
   branch: string,
-  ownedPaths: string[],
 ): Promise<{ cleared: number; backedUp: string[]; backupDir: string | null } | { error: BoundedProcessResult }> {
-  const others = await git(['ls-files', '--others', '--exclude-standard', '-z', '--', ...ownedPaths]);
+  const tree = await git(['ls-tree', '--name-only', '-z', `origin/${branch}`]);
+  if (tree.code !== 0) return { error: tree };
+  const trackedRoots = tree.stdout.split('\0').filter(Boolean);
+  if (trackedRoots.length === 0) return { cleared: 0, backedUp: [], backupDir: null };
+  const others = await git(['ls-files', '--others', '--exclude-standard', '-z', '--', ...trackedRoots]);
   if (others.code !== 0) return { error: others };
   const relPaths = others.stdout.split('\0').filter(Boolean);
   let cleared = 0;
@@ -333,13 +377,6 @@ async function performFleetSharedRepoSync(
   const centralFile = path.join(root, 'agents.yaml');
   const publishPaths = [relativeOwnedFile];
   if (fs.existsSync(centralFile)) publishPaths.push('agents.yaml');
-  // The only paths the rebase checkout can collide with are the ones this
-  // exchange owns: every device's doc under `devices/` (a peer's doc can arrive
-  // as a stale untracked local copy — the PHNX-3923 case) and the central
-  // `agents.yaml`. Scope the untracked-collision scan to them so an unrelated
-  // untracked tree cannot push the listing past the output cap (PHNX-4051).
-  const deviceDocRoot = `${relativeOwnedFile.split('/')[0]}/`;
-  const collisionScanPaths = [deviceDocRoot, 'agents.yaml'];
   const existingPaths = publishPaths.filter(rel => fs.existsSync(path.join(root, rel)));
   let committed = false;
   if (existingPaths.length > 0) {
@@ -368,7 +405,7 @@ async function performFleetSharedRepoSync(
     // Untracked files that origin tracks would abort the rebase's checkout
     // (autostash only covers tracked changes). Clear them first — this is the
     // fleet-drift root cause (PHNX-3923).
-    const reconcile = await clearCollidingUntracked(git, root, branch, collisionScanPaths);
+    const reconcile = await clearCollidingUntracked(git, root, branch);
     if ('error' in reconcile) {
       return { ...failure('git ls-files --others', reconcile.error), committed };
     }
@@ -472,7 +509,11 @@ export async function syncFleetSharedStateRepo(
       retries: { retries: 20, factor: 1, minTimeout: 100, maxTimeout: 100 },
       onCompromised: logAndContinueOnLockCompromised('fleet shared repo sync'),
     });
-    return await performFleetSharedRepoSync(root, device, timeoutMs);
+    const result = await performFleetSharedRepoSync(root, device, timeoutMs);
+    // Record freshness only on a real success, beside the lock so a test-redirected
+    // lockPath keeps its marker isolated too (PHNX-4051).
+    if (result.success) writeExchangeMarker(lockPath);
+    return result;
   } catch (err) {
     return {
       success: false,
