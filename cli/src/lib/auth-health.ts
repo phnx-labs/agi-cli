@@ -20,8 +20,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import { ALL_AGENT_IDS, getAccountInfo, type AccountInfo } from './agents.js';
+import { listNativeAccounts } from './account-registry.js';
+import { readSlots } from './accounts/slots.js';
 import { getCacheDir } from './state.js';
-import type { AgentId } from './types.js';
+import type { AgentId, Meta } from './types.js';
 import {
   probeClaudeStatus,
   probeDroidStatus,
@@ -309,6 +311,46 @@ export function authCacheKey(host: string, agent: AgentId | string, version: str
   return `${host}:${agent}:${version}`;
 }
 
+/**
+ * The `version` slot an account SLOT occupies in the auth cache and the probe
+ * rows: `slot:<accountId>`. A slot is a HOME-shaped dir, not an installed
+ * version, so it needs its own key or its verdict would collide with (or be
+ * silently dropped in favor of) whichever version home the account's label
+ * happened to match.
+ */
+export function slotAuthVersionKey(accountId: string): string {
+  return `slot:${accountId}`;
+}
+
+/** One account slot on this device that the auth probe must cover. */
+export interface SlotAuthInstall extends FleetAuthInstall {
+  home: string;
+  accountId: string;
+}
+
+/**
+ * Every registered account's slot on this device (PHNX-3940 T1), as probe
+ * targets. Before this the probe walked `listInstalledVersions` only, so a
+ * slot's verdict was never re-derived after `accounts add/login` wrote it —
+ * a slot re-materialized as `unconfigured` while the device doc was unreadable
+ * stayed MISSING forever even though its login was live. A slot whose dir is
+ * gone is skipped: there is nothing to probe and the row would only say so.
+ */
+export function enumerateSlotInstalls(
+  meta: Pick<Meta, 'accounts' | 'deviceAccounts'>,
+  agentIds: readonly AgentId[],
+): SlotAuthInstall[] {
+  const byId = new Map(listNativeAccounts(meta).map((account) => [account.id, account]));
+  const out: SlotAuthInstall[] = [];
+  for (const [accountId, slot] of Object.entries(readSlots(meta))) {
+    const account = byId.get(accountId);
+    if (!account || !agentIds.includes(account.agent)) continue;
+    if (!fs.existsSync(slot.slotDir)) continue;
+    out.push({ agent: account.agent, version: slotAuthVersionKey(accountId), home: slot.slotDir, account: undefined, accountId });
+  }
+  return out;
+}
+
 interface AuthHealthCacheFile {
   version: 1;
   entries: Record<string, AuthHealth>;
@@ -572,14 +614,23 @@ export async function probeLocalFleetAuth(opts?: {
     accountId?: string;
   }
 
-  // Enumerate every install, then resolve its account label. getAccountInfo is a
-  // local credential-file read (no network), so this fan-out is cheap and cannot
-  // contribute to the rate limit the probe grouping below exists to avoid.
+  // Enumerate every install AND every account slot on this device, then resolve
+  // each one's account label. getAccountInfo is a local credential-file read
+  // (no network), so this fan-out is cheap and cannot contribute to the rate
+  // limit the probe grouping below exists to avoid.
+  const [{ readMeta }, { findNativeAccountByIdentity }] = await Promise.all([
+    import('./state.js'),
+    import('./account-registry.js'),
+  ]);
+  const meta = readMeta();
   const installs: LocalInstall[] = [];
   for (const agent of agentIds) {
     for (const version of listInstalledVersions(agent)) {
       installs.push({ agent, version, home: getVersionHomePath(agent, version), info: null, account: undefined });
     }
+  }
+  for (const slot of enumerateSlotInstalls(meta, agentIds)) {
+    installs.push({ ...slot, info: null });
   }
   await Promise.all(
     installs.map(async (inst) => {
@@ -587,13 +638,9 @@ export async function probeLocalFleetAuth(opts?: {
       inst.account = authAccountLabel(inst.info);
     }),
   );
-  const [{ readMeta }, { findNativeAccountByIdentity }] = await Promise.all([
-    import('./state.js'),
-    import('./account-registry.js'),
-  ]);
-  const meta = readMeta();
   for (const inst of installs) {
-    inst.accountId = findNativeAccountByIdentity(meta, inst.agent, inst.info)?.id;
+    // A slot already knows its account; a version home is joined by identity.
+    inst.accountId ??= findNativeAccountByIdentity(meta, inst.agent, inst.info)?.id;
   }
 
   // Probe once per (agent, account) — but only for the network-probing agents

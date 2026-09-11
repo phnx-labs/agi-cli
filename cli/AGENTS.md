@@ -917,6 +917,16 @@ names both paths rather than one command that quietly covers half the cases. A
 one.
 
 **Sign-in is per ACCOUNT (a slot), and a logged-out claim must be provable.**
+A slot's STATE is derived from the slot itself, never from a version home its
+label happens to match: `loadAccountCatalog` reads the slot's own credential live
+(`getAccountInfo(agent, slot.slotDir)`) and the daemon's `probeLocalFleetAuth`
+enumerates every registered slot on the box (`enumerateSlotInstalls`, rows keyed
+`slot:<accountId>`) alongside `listInstalledVersions`. The slot record's
+`verdict: unconfigured` is `ensureSlot`'s DEFAULT, not a probe result — the daemon
+never publishes `unconfigured` — so it maps to `unverified` when the slot is signed
+in and `missing` only when it is not. Before this, a slot re-materialized as
+`unconfigured` while the device doc was unreadable stayed MISSING forever while
+`agents run` used its login without complaint.
 [`credentialPresence(agent, versionHome)`](src/lib/agents.ts) splits a credential's
 existence into the per-version home and the active/global HOME; a logged-out
 critical is emitted only when BOTH are absent (`provable = !perVersion && !active`).
