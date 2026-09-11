@@ -14,7 +14,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { consumeUsageSnapshotsFromSharedStore, publishUsageSnapshotToSharedStore } from './accounting/usage-sync.js';
 import { readClaudeUsageCache, type CachedUsageSnapshot } from './accounting/usage.js';
 import { updateFleetSharedDeviceState } from './fleet-shared-state.js';
-import { syncFleetSharedStateRepo } from './fleet-shared-repo-sync.js';
+import { FLEET_SHARED_REPO_OUTPUT_MAX_BYTES, syncFleetSharedStateRepo } from './fleet-shared-repo-sync.js';
 
 const dirs: string[] = [];
 
@@ -255,9 +255,12 @@ describe('syncFleetSharedStateRepo (real git)', () => {
     git(root, ['clone', remote, worker]);
     configureIdentity(worker);
 
-    // A peer publishes files that origin now TRACKS at these paths.
+    // A peer publishes files that origin now TRACKS at these paths. Both live
+    // under the owned `devices/` tree, which is what the collision scan is scoped
+    // to after PHNX-4051 — a peer's device doc arriving as a stale untracked local
+    // copy is exactly the PHNX-3923 wedge.
     const identicalRel = 'devices/peer/daemon-state.json';
-    const differsRel = 'projects/rush.yaml';
+    const differsRel = 'devices/peer2/daemon-state.json';
     fs.mkdirSync(path.dirname(path.join(publisher, identicalRel)), { recursive: true });
     fs.writeFileSync(path.join(publisher, identicalRel), '{"auth":"ok"}\n', 'utf-8');
     fs.mkdirSync(path.dirname(path.join(publisher, differsRel)), { recursive: true });
@@ -401,5 +404,99 @@ describe('syncFleetSharedStateRepo (real git)', () => {
     const backupRoot = `${worker}-fleet-sync-backups`;
     const stamps = fs.readdirSync(backupRoot);
     expect(fs.readFileSync(path.join(backupRoot, stamps[0], rel))).toEqual(localBytes);
+  });
+
+  // PHNX-4051: the collision scan's first command, `git ls-files --others`, used
+  // to walk the WHOLE working tree. On a box carrying artifacts-cli's revision
+  // store (~/.agents/artifact-history/, ~11k untracked files) the `-z` listing
+  // exceeded the 1 MiB output cap, runBoundedProcess killed it, and the exchange
+  // failed on every tick. Scoping the scan to the owned paths (devices/,
+  // agents.yaml) means an unrelated untracked tree — however large — can never
+  // push the listing over the cap, and the full publish -> push -> consume runs.
+  it('completes publish/push/consume when an untracked tree OUTSIDE owned paths exceeds the output cap (PHNX-4051)', async () => {
+    const root = tempDir();
+    const remote = path.join(root, 'remote.git');
+    const publisher = path.join(root, 'publisher');
+    const worker = path.join(root, 'worker');
+    git(root, ['init', '--bare', '--initial-branch=main', remote]);
+    git(root, ['clone', remote, publisher]);
+    configureIdentity(publisher);
+    fs.writeFileSync(path.join(publisher, 'README.md'), 'fleet store\n', 'utf-8');
+    git(publisher, ['add', 'README.md']);
+    git(publisher, ['commit', '-m', 'seed user store']);
+    git(publisher, ['push', 'origin', 'main']);
+
+    const sourceCache = path.join(root, 'source-cache.json');
+    const workerCache = path.join(root, 'worker-cache.json');
+    fs.writeFileSync(
+      sourceCache,
+      JSON.stringify({ 'claude:org=alpha': row('2026-09-10T20:00:00.000Z', 71) }),
+      'utf-8',
+    );
+    expect(await publishUsageSnapshotToSharedStore({
+      userAgentsDir: publisher,
+      cachePath: sourceCache,
+      role: 'personal',
+      device: 'zion',
+    })).toMatchObject({ published: true, changed: true, error: null });
+    expect((await syncFleetSharedStateRepo({
+      userAgentsDir: publisher,
+      device: 'zion',
+      timeoutMs: 10_000,
+      lockPath: path.join(root, 'publisher.lock-target'),
+    }))).toMatchObject({ success: true, error: null });
+
+    git(root, ['clone', remote, worker]);
+    configureIdentity(worker);
+
+    // An untracked revision store outside the owned paths, larger than the cap.
+    // Long names keep the file count down while the `-z` listing still clears
+    // 1 MiB. These are neither tracked nor ignored, so an unscoped `ls-files
+    // --others` would list every one and overflow runBoundedProcess.
+    const artifactDir = path.join(worker, 'artifact-history');
+    fs.mkdirSync(artifactDir, { recursive: true });
+    const nameLen = 240;
+    const bytesPerEntry = 'artifact-history/'.length + nameLen + 1; // + NUL separator
+    const fileCount = Math.ceil(FLEET_SHARED_REPO_OUTPUT_MAX_BYTES / bytesPerEntry) + 64;
+    let untrackedBytes = 0;
+    for (let i = 0; i < fileCount; i++) {
+      const name = `${String(i).padStart(8, '0')}-${'x'.repeat(nameLen - 9)}`;
+      fs.writeFileSync(path.join(artifactDir, name), '');
+      untrackedBytes += 'artifact-history/'.length + name.length + 1;
+    }
+    // Guard the fixture itself: the untracked listing must genuinely exceed the
+    // cap, or the test would pass without exercising the scoping.
+    expect(untrackedBytes).toBeGreaterThan(FLEET_SHARED_REPO_OUTPUT_MAX_BYTES);
+
+    updateFleetSharedDeviceState('worker-a', { auth: { status: 'missing' } }, worker);
+    const delivered = await syncFleetSharedStateRepo({
+      userAgentsDir: worker,
+      device: 'worker-a',
+      timeoutMs: 20_000,
+      lockPath: path.join(root, 'worker.lock-target'),
+    });
+    expect(delivered).toMatchObject({ success: true, committed: true, timedOut: false, error: null });
+
+    // The peer's usage snapshot was delivered and consumed despite the big tree.
+    const consumed = consumeUsageSnapshotsFromSharedStore({
+      userAgentsDir: worker,
+      cachePath: workerCache,
+      role: 'worker',
+      device: 'worker-a',
+      roles: { zion: 'personal', 'worker-a': 'worker' },
+    });
+    expect(consumed).toEqual({ sources: ['zion'], merged: 1, skipped: null, errors: [] });
+    expect(readClaudeUsageCache(
+      'claude:org=alpha',
+      workerCache,
+      new Date('2026-09-10T20:01:00.000Z'),
+    )?.windows[0].usedPercent).toBe(71);
+
+    // The worker's own publish reached the remote.
+    expect(git(root, ['--git-dir', remote, 'log', '--format=%s', 'main'])).toContain(
+      'chore(devices): publish worker-a daemon state',
+    );
+    // The untracked store is untouched — the scan never looked at it.
+    expect(fs.readdirSync(artifactDir).length).toBe(fileCount);
   });
 });

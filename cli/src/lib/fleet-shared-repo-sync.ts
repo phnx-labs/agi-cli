@@ -21,7 +21,7 @@ import { getDaemonDir, getUserAgentsDir } from './state.js';
 
 export const FLEET_SHARED_REPO_SYNC_DEADLINE_MS = 45_000;
 export const FLEET_SHARED_REPO_KILL_GRACE_MS = 250;
-const FLEET_SHARED_REPO_OUTPUT_MAX_BYTES = 1024 * 1024;
+export const FLEET_SHARED_REPO_OUTPUT_MAX_BYTES = 1024 * 1024;
 const FLEET_SHARED_REPO_PUSH_ATTEMPTS = 3;
 const FLEET_SHARED_REPO_REBASE_CLEANUP_RESERVE_MS = 5_000;
 
@@ -217,13 +217,26 @@ function retainedAutostash(
  * cannot create a fresh collision — so nothing is silently destroyed. Then let
  * the rebase check out origin's version. A file we cannot clear is left in
  * place; the rebase may still abort, no worse than today and never losing data.
+ *
+ * The scan is scoped to `ownedPaths` — the `devices/` tree and the central
+ * `agents.yaml` this exchange actually commits — NOT the whole working tree
+ * (PHNX-4051). An unbounded `git ls-files --others` walks every untracked file
+ * in `~/.agents`, which on a box carrying artifacts-cli's revision store
+ * (`~/.agents/artifact-history/`, ~11k files / >1 MiB of paths) blows past
+ * {@link FLEET_SHARED_REPO_OUTPUT_MAX_BYTES} and kills the exchange on every
+ * tick. Only the paths this exchange writes can collide with what it checks out,
+ * so listing anything else is pure overhead that an unrelated untracked tree can
+ * push over the cap. A collision under an unowned path is left to the reconcile
+ * paths that own it (adopt-in-place / `agents repo pull`), exactly as before
+ * PHNX-3923 for those paths.
  */
 async function clearCollidingUntracked(
   git: (args: string[], reserveMs?: number) => Promise<BoundedProcessResult>,
   root: string,
   branch: string,
+  ownedPaths: string[],
 ): Promise<{ cleared: number; backedUp: string[]; backupDir: string | null } | { error: BoundedProcessResult }> {
-  const others = await git(['ls-files', '--others', '--exclude-standard', '-z']);
+  const others = await git(['ls-files', '--others', '--exclude-standard', '-z', '--', ...ownedPaths]);
   if (others.code !== 0) return { error: others };
   const relPaths = others.stdout.split('\0').filter(Boolean);
   let cleared = 0;
@@ -320,6 +333,13 @@ async function performFleetSharedRepoSync(
   const centralFile = path.join(root, 'agents.yaml');
   const publishPaths = [relativeOwnedFile];
   if (fs.existsSync(centralFile)) publishPaths.push('agents.yaml');
+  // The only paths the rebase checkout can collide with are the ones this
+  // exchange owns: every device's doc under `devices/` (a peer's doc can arrive
+  // as a stale untracked local copy — the PHNX-3923 case) and the central
+  // `agents.yaml`. Scope the untracked-collision scan to them so an unrelated
+  // untracked tree cannot push the listing past the output cap (PHNX-4051).
+  const deviceDocRoot = `${relativeOwnedFile.split('/')[0]}/`;
+  const collisionScanPaths = [deviceDocRoot, 'agents.yaml'];
   const existingPaths = publishPaths.filter(rel => fs.existsSync(path.join(root, rel)));
   let committed = false;
   if (existingPaths.length > 0) {
@@ -348,7 +368,7 @@ async function performFleetSharedRepoSync(
     // Untracked files that origin tracks would abort the rebase's checkout
     // (autostash only covers tracked changes). Clear them first — this is the
     // fleet-drift root cause (PHNX-3923).
-    const reconcile = await clearCollidingUntracked(git, root, branch);
+    const reconcile = await clearCollidingUntracked(git, root, branch, collisionScanPaths);
     if ('error' in reconcile) {
       return { ...failure('git ls-files --others', reconcile.error), committed };
     }

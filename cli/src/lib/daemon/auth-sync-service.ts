@@ -1,10 +1,21 @@
 /**
  * Reserved `auth` bundle fleet sync as a `PeriodicService` (PHNX-2371).
  *
- * Each daemon publishes a safe readiness verdict to the fleet-shared user repo,
- * then runs the same serialized, timeout-bounded git exchange as usage sync.
- * One deterministic ready device asynchronously provisions peers whose delivered
- * verdict says `missing`; the secret never enters Git.
+ * This tick owns only the NON-git duties of auth sync: it materializes worker
+ * slots from durable keys already on the box, then (on the elected headed
+ * publisher) provisions peers whose LAST-DELIVERED verdict says `missing` by
+ * pushing the credential over SSH. The secret never enters Git.
+ *
+ * It no longer runs its own `syncFleetSharedStateRepo` (PHNX-4051). The verdict
+ * this tick's decisions read is published and delivered by the single git
+ * committer, the usage-sync tick — folding both publishes into one caller is
+ * what stops the two ticks (30 s apart) from contending for the one shared-repo
+ * lock and starving the usage snapshot workers depend on. This tick keeps its
+ * own deadline and circuit breaker, so a hung peer SSH push parks only auth-sync
+ * and never the usage delivery. The pushes read the peer verdicts the last
+ * usage-sync exchange wrote into the local checkout; they are idempotent
+ * (push only when a peer is missing a key), so acting on at-most-one-tick-old
+ * data converges exactly as the in-tick exchange did.
  */
 import { BasePeriodicService, type DaemonContext } from './service.js';
 import type { DaemonServiceId } from '../daemon-services.js';
@@ -29,7 +40,6 @@ export class AuthSyncService extends BasePeriodicService {
 
   protected async onTick(ctx: DaemonContext): Promise<void> {
     const {
-      publishReservedAuthVerdict,
       reconcileLocalWorkerSlots,
       syncReservedAuthBundle,
       syncReservedStores,
@@ -38,9 +48,10 @@ export class AuthSyncService extends BasePeriodicService {
     // Worker-side slot materialization FIRST (PHNX-3940 T6): for each registered
     // account whose durable key is already on this box, create the HOME-shaped
     // slot the picker and spawn read. It touches only local state — the registry
-    // copy and the file-backed store — so it never waits on the git exchange
-    // below. It used to sit after `if (!transport.success) return`, so a single
-    // `git rebase timed out` postponed every slot on the box by another tick.
+    // copy and the file-backed store — so it never waits on any git exchange. It
+    // used to sit after this tick's own `if (!transport.success) return`, so a
+    // single `git rebase timed out` postponed every slot on the box by another
+    // tick; that exchange has since moved to the usage-sync tick (PHNX-4051).
     // Self-gated on device role: a headed box returns immediately.
     try {
       const slots = reconcileLocalWorkerSlots();
@@ -58,16 +69,9 @@ export class AuthSyncService extends BasePeriodicService {
       ctx.log('WARN', `auth-sync: worker slot reconcile: ${(err as Error).message}`);
     }
 
-    const published = await publishReservedAuthVerdict();
-    if (published.error) ctx.log('WARN', `auth-sync: verdict: ${published.error}`);
-    const { syncFleetSharedStateRepo } = await import('../fleet-shared-repo-sync.js');
-    const transport = await syncFleetSharedStateRepo();
-    if (transport.skipped) ctx.log('WARN', `auth-sync: ${transport.skipped}`);
-    if (transport.error) ctx.log('WARN', `auth-sync: shared-store transport: ${transport.error}`);
-    if (transport.untrackedBackedUp?.length) {
-      ctx.log('WARN', `auth-sync: backed up ${transport.untrackedBackedUp.length} untracked shared-store collision(s) to ${transport.untrackedBackupDir}: ${transport.untrackedBackedUp.join(', ')}`);
-    }
-    if (!transport.success) return;
+    // The verdict this tick's pushes read is published by the usage-sync tick,
+    // the single git committer (PHNX-4051), and delivered into the local checkout
+    // by its exchange. The pushes below act on that last-delivered peer state.
     const result = await syncReservedAuthBundle();
     if (result.pushed.length > 0) {
       ctx.log('INFO', `auth-sync: pushed auth to ${result.pushed.join(', ')}`);

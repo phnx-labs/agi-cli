@@ -1904,14 +1904,18 @@ engine.
   `assertRemoteBundleFlagsUnsupported`, `secrets-policy.ts`) before the client
   is ever called; the standalone never sees the `@host` suffix.
 - **Fleet sync of reserved credentials is agents-cli's own fleet model, not
-  portable secret-storage behavior.** `syncReservedAuthBundle` /
-  `syncReservedStores` / `reconcileLocalWorkerSlots` (`secrets-policy.ts`),
-  run from the daemon's `auth-sync` service, publish only a
-  `ready`/`missing`/`invalid` verdict to the owning device's tracked
-  `~/.agents/devices/<device>/daemon-state.json` — never a credential — and a
-  bounded, kill-deadlined Git exchange plus a targeted SSH push (through the
-  client's `pushBundleToHostAsync`) deliver the real bundle only to a pinned,
-  reachable, `role=worker` peer whose synced verdict says `missing`. **Given**
+  portable secret-storage behavior.** A `ready`/`missing`/`invalid` verdict —
+  never a credential — is published to the owning device's tracked
+  `~/.agents/devices/<device>/daemon-state.json` by the daemon's single
+  shared-repo committer, the `usage-sync` tick (`publishReservedAuthVerdict`,
+  `secrets-policy.ts`; PHNX-4051), so exactly one caller holds the shared-repo
+  lock per tick. The bounded, kill-deadlined Git exchange that delivers those
+  verdicts across the fleet is that same tick's. The `auth-sync` service then
+  runs the non-git half — `reconcileLocalWorkerSlots` plus the targeted SSH push
+  (`syncReservedAuthBundle` / `syncReservedStores`, `secrets-policy.ts`, through
+  the client's `pushBundleToHostAsync`) — delivering the real bundle only to a
+  pinned, reachable, `role=worker` peer whose last-synced verdict says `missing`.
+  **Given**
   a local file-backed `auth` bundle and a pinned worker peer reporting
   `missing` **When** this device is the one deterministically elected ready
   publisher **Then** the push is async, `--backend file`, and the destination

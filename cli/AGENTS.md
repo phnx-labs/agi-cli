@@ -1025,9 +1025,10 @@ therefore receives the file without an operator running `agents repo sync user`,
 then reads its local checkout and merges every headed snapshot
 NEWEST-WINS (`ingestPeerClaudeUsageRows`, `src/lib/accounting/usage.ts`). Both
 sides need not be online together, a tick opens no device-to-device SSH mesh, and two
-headed publishers converge per identity regardless of order. `auth-sync` shares
-the same envelope for safe `ready`/`missing`/`invalid` metadata only; credentials
-never enter Git. **The credential push is per KEY and per ROLE, not bundle-coarse
+headed publishers converge per identity regardless of order. The reserved-auth
+readiness verdict (`ready`/`missing`/`invalid` metadata only; credentials never
+enter Git) rides this **same** envelope and is published by the **same**
+usage-sync tick, not a second committer (PHNX-4051 — see below). **The credential push is per KEY and per ROLE, not bundle-coarse
 (PHNX-3940 T6).** Each portable account resolves to one reserved-store key
 `<ENV>_<accountId>` in `__<harness>__` (a claude row predating T1 falls back to the
 legacy `auth` alias keyed by email); the elected single publisher (`syncReservedStores`,
@@ -1057,10 +1058,21 @@ bare-remote test proves the automatic Git delivery
 peers and retain real-file / real-CLI coverage. A synced row reads as `last_seen`
 (cached), never a live fetch, so a worker's bar is honest about being propagated.
 
-**The same shared-state tick carries the session mirror (PHNX-3792).** So there
-is exactly one committer of `daemon-state.json`, the `usage-sync` service also
-publishes EVERY box's lightweight per-session preview/metadata into the
-`sessions` field of its owned file, and every box except a marked `worker` folds
+**One committer per tick — usage-sync (PHNX-3792 session mirror, PHNX-4051 auth
+verdict).** There is exactly one caller of `syncFleetSharedStateRepo` on the
+periodic path: the `usage-sync` service. It publishes every owned conflict-free
+field into its `devices/<device>/daemon-state.json` — the usage snapshot, EVERY
+box's lightweight per-session preview/metadata (the `sessions` field), and the
+reserved-auth readiness verdict — BEFORE the single commit/rebase/push, so all
+three ride one exchange. `auth-sync` no longer runs its own exchange: it keeps
+only its non-git duties (worker-slot reconcile + the credential SSH pushes,
+under its own deadline and circuit breaker) and acts on the peer verdicts the
+usage-sync exchange last delivered into the local checkout. Before PHNX-4051 both
+ticks committed 30 s apart and contended for the one `proper-lockfile` lock
+(20×100 ms of retries vs a multi-second real fetch/rebase/push), so the usage
+tick logged "Lock file is already being held", workers never got a fresh usage
+snapshot, and the 40-min placement gate (`viewAgentAccountEligibility`) turned
+every worker into "no ready device". Every box except a marked `worker` folds
 peers' digests into its local `sessions` index as mirror rows. Only topic/label,
 a first-user-message snippet, last-activity, agent+version, cwd, ticket, and PR
 ride — never a transcript — and the mirror is bounded (200 recent sessions per

@@ -139,9 +139,11 @@ describe('daemon tick call sites use the async, non-blocking helper variants', (
     expect(src).not.toMatch(/\bemit\(/);           // the sleepSync-locked emitter
   });
 
-  it('usage-sync + auth-sync ticks await the async fleet-state publish', () => {
+  it('usage-sync tick awaits the async fleet-state publishes (usage + auth verdict)', () => {
+    // Both fleet-state fields publish from the single git committer (PHNX-4051),
+    // so both must use the async, non-blocking variant on this tick.
     expect(read('usage-sync-service.ts')).toMatch(/await publishUsageSnapshotToSharedStore\(/);
-    expect(read('auth-sync-service.ts')).toMatch(/await publishReservedAuthVerdict\(/);
+    expect(read('usage-sync-service.ts')).toMatch(/await publishReservedAuthVerdict\(/);
   });
 
   it('browser-task-reap tick awaits the async idle-config read', () => {

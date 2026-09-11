@@ -51,12 +51,15 @@ modules:
   the reserved per-harness stores (`__<harness>__`, plus the legacy `auth`
   alias for Claude) are agents-cli's own naming convention on top of the
   engine's storage.
-- **Fleet sync of reserved credentials.** The daemon's `auth-sync` service
-  publishes only a `ready`/`missing`/`invalid` verdict to the owning device's
-  tracked `~/.agents/devices/<device>/daemon-state.json`; a serialized,
-  45-second-bounded Git exchange delivers those verdicts through the user
-  repo. One deterministically elected ready device asynchronously pushes the
-  real bundle only to pinned peers whose synced verdict says `missing`, always
+- **Fleet sync of reserved credentials.** The daemon publishes only a
+  `ready`/`missing`/`invalid` verdict to the owning device's tracked
+  `~/.agents/devices/<device>/daemon-state.json`; a serialized,
+  45-second-bounded Git exchange delivers those verdicts through the user repo.
+  That publish + exchange runs on the single shared-repo committer, the
+  `usage-sync` tick (PHNX-4051), so the two daemon ticks never contend for the
+  one shared-repo lock. The `auth-sync` service then does the non-git half: one
+  deterministically elected ready device asynchronously pushes the real bundle
+  only to pinned peers whose last-synced verdict says `missing`, always
   file-backed with a kill-bounded SSH deadline so each destination
   auto-provisions its own machine-local key. Tokens never enter the Git store.
 
