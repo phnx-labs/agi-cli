@@ -65,6 +65,31 @@ describe('parseSidebarSpaces', () => {
     });
   });
 
+  it('lists an untitled Space beside named ones instead of failing discovery', () => {
+    const result = parseSidebarSpaces(path.join(testdata, 'untitled-space', 'StorableSidebar.json'));
+    expect(result).toEqual([
+      { id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', title: 'Home', profileId: 'Default' },
+      { id: '22222222-3333-4444-5555-666666666666', title: '', profileId: 'Default' },
+      { id: '11111111-2222-3333-4444-555555555555', title: 'Gmail', profileId: 'Profile 1' },
+      { id: '33333333-4444-5555-6666-777777777777', title: '', profileId: 'Profile 1' },
+    ]);
+  });
+
+  it('still rejects an untitled Space whose key does not match its stable id', () => {
+    const result = parseSidebarSpaces(path.join(testdata, 'storable-sidebar-id-mismatch.json'));
+    expect(result).toEqual({ error: 'Arc Space key "space-untitled-key" does not match its stable id' });
+  });
+
+  it('still rejects an untitled Space with an unknown profile mapping', () => {
+    const result = parseSidebarSpaces(path.join(testdata, 'storable-sidebar-untitled-bad-profile.json'));
+    expect(result).toEqual({ error: 'Arc Space "space-untitled" has an unknown profile mapping' });
+  });
+
+  it('rejects a title that is present but not text', () => {
+    const result = parseSidebarSpaces(path.join(testdata, 'storable-sidebar-title-wrong-type.json'));
+    expect(result).toEqual({ error: 'Arc Space "space-numeric-title" has a non-text title' });
+  });
+
   it('rejects unsupported version', () => {
     const result = parseSidebarSpaces(
       path.join(testdata, 'storable-sidebar-wrong-version.json'),
@@ -86,6 +111,17 @@ describe('arcSpaceProfiles', () => {
       { name: 'arc-home', profileId: 'Default', profileName: 'Personal', spaceId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', spaceTitle: 'Home' },
       { name: 'arc-reading', profileId: 'Default', profileName: 'Personal', spaceId: 'ffffffff-aaaa-bbbb-cccc-dddddddddddd', spaceTitle: 'Reading' },
       { name: 'arc-work', profileId: 'Profile 1', profileName: 'Work', spaceId: '11111111-2222-3333-4444-555555555555', spaceTitle: 'Work' },
+    ]);
+  });
+
+  it('names untitled Spaces arc-space and keeps the named ones addressable', () => {
+    const result = discoverArcProfilesAt(path.join(testdata, 'untitled-space'));
+    expect(result.ok).toBe(true);
+    expect(arcSpaceProfiles(result)).toEqual([
+      { name: 'arc-home', profileId: 'Default', profileName: 'Personal', spaceId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', spaceTitle: 'Home' },
+      { name: 'arc-space-222222', profileId: 'Default', profileName: 'Personal', spaceId: '22222222-3333-4444-5555-666666666666', spaceTitle: '' },
+      { name: 'arc-gmail', profileId: 'Profile 1', profileName: 'Work', spaceId: '11111111-2222-3333-4444-555555555555', spaceTitle: 'Gmail' },
+      { name: 'arc-space-333333', profileId: 'Profile 1', profileName: 'Work', spaceId: '33333333-4444-5555-6666-777777777777', spaceTitle: '' },
     ]);
   });
 

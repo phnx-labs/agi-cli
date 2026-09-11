@@ -1,0 +1,9 @@
+{
+  "profile": {
+    "info_cache": {
+      "Default": { "name": "Personal" },
+      "Profile 1": { "name": "Work" },
+      "__ARC_SYSTEM_PROFILE": { "name": "System" }
+    }
+  }
+}
