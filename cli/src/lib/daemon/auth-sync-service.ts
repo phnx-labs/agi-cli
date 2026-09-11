@@ -15,7 +15,11 @@
  * and never the usage delivery. The pushes read the peer verdicts the last
  * usage-sync exchange wrote into the local checkout; they are idempotent
  * (push only when a peer is missing a key), so acting on at-most-one-tick-old
- * data converges exactly as the in-tick exchange did.
+ * data converges exactly as the in-tick exchange did. To keep "at-most-one-tick-
+ * old" true, the pushes are gated on the exchange's freshness marker
+ * (`readLastSuccessfulExchangeMs`): when the last usage-sync exchange is missing
+ * or older than one tick interval, this tick skips the pushes and WARNs instead
+ * of acting on peer state that may no longer hold.
  */
 import { BasePeriodicService, type DaemonContext } from './service.js';
 import type { DaemonServiceId } from '../daemon-services.js';
@@ -71,7 +75,23 @@ export class AuthSyncService extends BasePeriodicService {
 
     // The verdict this tick's pushes read is published by the usage-sync tick,
     // the single git committer (PHNX-4051), and delivered into the local checkout
-    // by its exchange. The pushes below act on that last-delivered peer state.
+    // by its exchange. The pushes below act on that last-delivered peer state, so
+    // they are only sound while that state is fresh. Gate them on the exchange's
+    // freshness: if the last successful usage-sync exchange is missing or older
+    // than one tick interval, the delivered peer verdicts may be stale — a peer
+    // that already received the key still reads `missing`, or a cleared `missing`
+    // still reads stale — so skip the pushes and WARN rather than pushing off it.
+    // The worker-slot reconcile above is NOT gated: it reads only local durable
+    // keys, never delivered peer verdicts.
+    const { readLastSuccessfulExchangeMs } = await import('../fleet-shared-repo-sync.js');
+    const lastExchangeMs = readLastSuccessfulExchangeMs();
+    const ageMs = lastExchangeMs === null ? null : Date.now() - lastExchangeMs;
+    if (ageMs === null || ageMs > this.intervalMs) {
+      const age = ageMs === null ? 'never completed' : `last completed ${Math.round(ageMs / 1000)}s ago`;
+      ctx.log('WARN', `auth-sync: skipping credential push — usage-sync exchange ${age} (need one within ${Math.round(this.intervalMs / 1000)}s); peer verdicts may be stale`);
+      return;
+    }
+
     const result = await syncReservedAuthBundle();
     if (result.pushed.length > 0) {
       ctx.log('INFO', `auth-sync: pushed auth to ${result.pushed.join(', ')}`);
