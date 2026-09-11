@@ -63,8 +63,10 @@ describe('renderAccountList', () => {
     expect(out).toContain('FIX');
     expect(out).toContain('* work');
     expect(out).toContain('LIVE');
-    expect(out).toContain('+1');
+    expect(out).toContain('on 1 box');
     expect(out).toContain('20%');
+    expect(out).toContain('STATE:');
+    expect(out).toContain('* stale usage');
   });
 
   it('puts the usage bar + percent in USAGE and leaves FIX empty when there is no repair', () => {
@@ -91,12 +93,12 @@ describe('renderAccountList', () => {
   it('reads WHERE as this box when only the local device reports', () => {
     const out = stripAnsi(renderAccountList([row()], [], { localDevice: 'zion' }));
     expect(out).toContain('this box');
-    expect(out).not.toContain('+1');
+    expect(out).not.toContain('on 1 box');
     // The renderer must not consult machineId() — omitting localDevice stays
     // hermetic even when this host's name matches the fixture device.
     const omitted = stripAnsi(renderAccountList([row()]));
     expect(omitted).not.toContain('this box');
-    expect(omitted).toContain('+1');
+    expect(omitted).toContain('on 1 box');
   });
 
   it('restricts a harness filter to that harness and never prints an empty group', () => {

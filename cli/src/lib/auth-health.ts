@@ -41,11 +41,18 @@ import { atomicWriteFileSync, ensureLockTarget, withFileLock } from './fs-atomic
  *                   setup-token `user:profile` scope denials (those are
  *                   `unverified` via `reason: 'usage_scope'` — RUSH-2392).
  * - `expired`     — locally-detected expiry; not network-verified (no refresh on the read path).
- * - `rate_limited`— token works but is throttled right now (429).
+ * - `rate_limited`— the account is throttled per its usage snapshot
+ *                   ({@link deriveUsageStatusFromSnapshot} / {@link applyUsageHonesty}),
+ *                   not per a probe HTTP 429. A 429 from the usage endpoint is
+ *                   probe throttling and never produces `rate_limited`: it keeps
+ *                   the previous real verdict when one exists within
+ *                   {@link AUTH_PROBE_MAX_AGE_MS}, otherwise `unverified` with
+ *                   detail `probe throttled (HTTP 429)` (PHNX-4051).
  * - `unverified`  — credential present, not locally expired, but this agent has
  *                   no in-repo probe endpoint (codex/grok), OR the probe
  *                   endpoint cannot prove live for a known non-revocation
- *                   reason (Claude setup-token usage-scope gap — RUSH-2392).
+ *                   reason (Claude setup-token usage-scope gap — RUSH-2392),
+ *                   OR a throttled probe with no fresh previous verdict (PHNX-4051).
  * - `unconfigured`— no usable credential on disk.
  * - `error`       — network/other failure; verdict indeterminate (keep the last known one).
  */
@@ -80,11 +87,15 @@ export const LIVE_PROBE_AGENTS: ReadonlySet<AgentId> = new Set<AgentId>(['claude
 // Pure classifiers / render (unit-tested; no network, no fs)
 // ---------------------------------------------------------------------------
 
-/** Map an HTTP status from a live probe to a verdict. */
+/** Map an HTTP status from a live probe to a verdict. Probe 429 never yields `rate_limited` (PHNX-4051). */
 export function classifyHttpStatus(status: number): AuthVerdict {
   if (status >= 200 && status < 300) return 'live';
   if (status === 401 || status === 403) return 'revoked';
-  if (status === 429) return 'rate_limited';
+  // 429 is probe throttling, not an account throttle — the account's real
+  // throttle state comes from the usage snapshot (deriveUsageStatusFromSnapshot).
+  // Treating it as `rate_limited` let a burst-throttled endpoint mark every
+  // account LIMITED. See mergeAuthHealthEntries for the keep-or-unverified path.
+  if (status === 429) return 'error';
   return 'error';
 }
 
@@ -105,6 +116,7 @@ export function probeDetail(probe: ProviderProbe): string | undefined {
   if (probe.reason === 'usage_scope') {
     return probe.error ?? USAGE_HEADLESS_SCOPE_MARKER;
   }
+  if (probe.status === 429) return 'probe throttled (HTTP 429)';
   if (probe.status != null && (probe.status < 200 || probe.status >= 300)) return `HTTP ${probe.status}`;
   if (probe.error) return probe.error;
   return undefined;
@@ -460,13 +472,24 @@ export function readFleetAuthRows(host: string): AuthProbeRow[] {
  * known verdict — otherwise one 8s timeout flips a `live` chip to `error`,
  * exactly the "cry wolf" the verdict model avoids for `expired`. This is the
  * behaviour promised by the `error` doc on AuthVerdict ("keep the last known
- * one"). Pure, so it's unit-tested directly. */
+ * one"). A probe-throttled 429 (detail `probe throttled (HTTP 429)`) keeps the
+ * previous real verdict when one exists within {@link AUTH_PROBE_MAX_AGE_MS},
+ * otherwise becomes `unverified` (PHNX-4051). Pure, so it's unit-tested directly. */
 export function mergeAuthHealthEntries(
   current: Record<string, AuthHealth>,
   incoming: Record<string, AuthHealth>,
 ): Record<string, AuthHealth> {
   const merged: Record<string, AuthHealth> = { ...current };
   for (const [key, health] of Object.entries(incoming)) {
+    const isProbeThrottled = health.detail === 'probe throttled (HTTP 429)';
+    if (isProbeThrottled) {
+      const prev = merged[key];
+      const fresh = !!prev && prev.verdict !== 'error' && prev.verdict !== 'unconfigured'
+        && (health.checkedAt - prev.checkedAt < AUTH_PROBE_MAX_AGE_MS);
+      if (fresh) continue; // keep previous real verdict
+      merged[key] = { ...health, verdict: 'unverified' };
+      continue;
+    }
     if (health.verdict === 'error' && merged[key]) continue; // keep last known
     merged[key] = health;
   }
@@ -602,6 +625,8 @@ export interface FleetAuthInstall {
   version: string;
   /** Human account label from {@link authAccountLabel}, or undefined when none resolves. */
   account: string | undefined;
+  /** Stable account id when known (slot or resolved via registry) — preferred dedup key. */
+  accountId?: string | undefined;
 }
 
 /**
@@ -635,16 +660,26 @@ export interface FleetAuthProbeGroup<T extends FleetAuthInstall> {
  * per-install probe (also the `unconfigured` case dropped downstream). Pure: no
  * fs, no network, so the dedup decision is unit-tested directly.
  */
+/** Small fixed delay between live probes so one box no longer fires 16 requests in 4s (PHNX-4051). */
+export const AUTH_PROBE_SPACING_MS = 150;
+
 export function groupFleetAuthInstalls<T extends FleetAuthInstall>(
   installs: readonly T[],
   isMergeable: (install: T) => boolean = () => true,
 ): FleetAuthProbeGroup<T>[] {
   const groups = new Map<string, FleetAuthProbeGroup<T>>();
   for (const inst of installs) {
-    // The `acct:` / `ver:` tokens make the two branches disjoint, so an account
-    // label can never collide with a version fallback key no matter its content.
-    const key = inst.account && isMergeable(inst)
-      ? `${inst.agent} acct:${inst.account}`
+    // Prefer stable accountId (identity) — a version home and its slot share the
+    // same id, so they collapse to ONE probe per identity (PHNX-4051). Fallback
+    // to the display label when no id is known. The `id:`/`acct:`/`ver:` tokens
+    // keep the three branches disjoint.
+    const mergeKey = (inst as FleetAuthInstall).accountId
+      ? `id:${(inst as FleetAuthInstall).accountId}`
+      : inst.account
+        ? `acct:${inst.account}`
+        : null;
+    const key = mergeKey && isMergeable(inst)
+      ? `${inst.agent} ${mergeKey}`
       : `${inst.agent} ver:${inst.version}`;
     const existing = groups.get(key);
     if (existing) existing.members.push(inst);
@@ -700,27 +735,36 @@ export async function probeLocalFleetAuth(opts?: {
     inst.accountId ??= findNativeAccountByIdentity(meta, inst.agent, inst.info)?.id;
   }
 
-  // Probe once per (agent, account) — but only for the network-probing agents
+  // Probe once per (agent, identity) — but only for the network-probing agents
   // that can actually 429; best-effort agents stay per-install (see
-  // groupFleetAuthInstalls). Groups run in parallel: they target distinct
-  // accounts, so no same-account concurrency is left to trip the throttle.
-  const perGroup = await Promise.all(
-    groupFleetAuthInstalls(installs, (inst) => LIVE_PROBE_AGENTS.has(inst.agent)).map(async (group): Promise<AuthProbeRow[]> => {
-      const rep = group.probe;
-      const health = await probeAuthHealth(rep.agent, rep.home, { cliVersion: opts?.cliVersion, info: rep.info, forceLive: opts?.forceLive, signal: opts?.signal });
-      health.account = authAccountLabel(rep.info);
-      health.accountId = rep.accountId;
-      if (health.verdict === 'unconfigured') return [];
-      return group.members.map((inst) => ({
+  // groupFleetAuthInstalls). Groups are probed SEQUENTIALLY with a small fixed
+  // delay between them (PHNX-4051) so one box no longer fires 16 requests in
+  // 4s; they target distinct identities, so no same-account concurrency remains.
+  const groups = groupFleetAuthInstalls(installs, (inst) => LIVE_PROBE_AGENTS.has(inst.agent));
+  const perGroup: AuthProbeRow[][] = [];
+  for (let idx = 0; idx < groups.length; idx++) {
+    const group = groups[idx];
+    const rep = group.probe;
+    const health = await probeAuthHealth(rep.agent, rep.home, { cliVersion: opts?.cliVersion, info: rep.info, forceLive: opts?.forceLive, signal: opts?.signal });
+    health.account = authAccountLabel(rep.info);
+    health.accountId = rep.accountId;
+    if (health.verdict === 'unconfigured') {
+      perGroup.push([]);
+    } else {
+      perGroup.push(group.members.map((inst) => ({
         agent: inst.agent,
         version: inst.version,
         account: health.account,
         accountId: inst.accountId ?? health.accountId,
         // A distinct object per row so a later mutation of one can't bleed across.
         health: { ...health },
-      }));
-    }),
-  );
+      })));
+    }
+    // Space probes; not after the last group and not if the tick is being aborted.
+    if (idx < groups.length - 1 && !opts?.signal?.aborted) {
+      await new Promise<void>((resolve) => setTimeout(resolve, AUTH_PROBE_SPACING_MS));
+    }
+  }
   return perGroup.flat();
 }
 
