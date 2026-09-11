@@ -667,7 +667,11 @@ async function showInstalledVersions(
       console.log();
     }
     if (filterAgentId) {
-      console.log(chalk.gray(`  Add an account: agents accounts add ${filterAgentId} [name]\n`));
+      console.log(chalk.gray(`  Add an account: agents accounts add ${filterAgentId} [name]`));
+      console.log(chalk.gray('  STATE: LIVE ready · LIMITED rate-limited · EXPIRED needs refresh · REVOKED needs login · UNVERIFIED unconfirmed · MISSING not provisioned · * stale usage\n'));
+    } else if (versionManaged.length > 0 && !viewOpts?.versions) {
+      // Overview also renders account tables (footer:false) — explain STATE there too.
+      console.log(chalk.gray('  STATE: LIVE ready · LIMITED rate-limited · EXPIRED needs refresh · REVOKED needs login · UNVERIFIED unconfirmed · MISSING not provisioned · * stale usage\n'));
     }
   }
   if (versionManaged.length > 0 && viewOpts?.versions) {

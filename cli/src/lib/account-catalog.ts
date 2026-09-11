@@ -489,12 +489,10 @@ export async function loadAccountCatalog(): Promise<AccountCatalog> {
       ? (shared.get(`${row.agent}:${row.id}`) ?? [])
       : (shared.get(`label:${row.agent}:${row.identityLabel}`) ?? []);
     row.devices = mergeDeviceVerdicts(fromFleet, local);
-    row.verdict = aggregateAccountVerdict(row.provisioning, row.devices);
+    const localQuota = localHome ? (inventoryByHome.get(`${row.agent}:${localHome.label}`)?.quota ?? null) : null;
+    row.verdict = aggregateAccountVerdict(row.provisioning, row.devices, localQuota);
     row.checkedAt = newestCheckedAt(row.devices);
-    const honest = applyUsageHonesty(
-      row.verdict,
-      localHome ? (inventoryByHome.get(`${row.agent}:${localHome.label}`)?.quota ?? null) : null,
-    );
+    const honest = applyUsageHonesty(row.verdict, localQuota);
     row.verdict = honest.verdict;
     row.usage = honest.usage;
     const inv = localHome ? inventoryByHome.get(`${row.agent}:${localHome.label}`) : undefined;
@@ -602,17 +600,28 @@ function verdictText(verdict: AccountVerdict): string {
 function whereText(row: NativeAccountCatalogRow, localDevice: string): string {
   const names = [...new Set(row.devices.map((device) => device.device))];
   // Peers on an older release do not publish slot verdicts, so the only
-  // observation is this box — say so rather than a coverage count of +1.
+  // observation is this box — say so rather than a coverage count.
   if (names.length === 1 && names[0] === localDevice) return 'this box';
+  const total = row.devices.length;
   const live = row.devices.filter((device) => device.verdict === 'live').length;
-  if (live > 0) return `+${live}`;
+  // Per-device accounts are provisioned per box; show which boxes are present
+  // rather than a live/total fraction — the fraction would hide that each box
+  // is its own account.
   if (row.provisioning === 'per-device') {
     const present = row.devices
       .filter((device) => device.verdict !== 'missing')
       .map((device) => device.device);
     return present.join(', ') || 'this box';
   }
+  if (total > 0) {
+    if (live === total) return `on ${live} ${live === 1 ? 'box' : 'boxes'}`;
+    if (live > 0 || total > 1) return `on ${live} of ${total} boxes`;
+  }
   return '—';
+}
+
+export function formatWhereText(row: NativeAccountCatalogRow, localDevice: string): string {
+  return whereText(row, localDevice);
 }
 
 export const OVERVIEW_MAX_USAGE_WINDOWS = 2;
@@ -788,6 +797,7 @@ export function renderAccountRows(
     const count = visibleNative.filter((row) => !!row.fix).length
       + visibleProviders.filter((row) => !!row.fix).length;
     out.push(chalk.gray(`${count} accounts need you · add: agents accounts add <harness>`));
+    out.push(chalk.gray('STATE: LIVE ready · LIMITED rate-limited · EXPIRED needs refresh · REVOKED needs login · UNVERIFIED unconfirmed · MISSING not provisioned · * stale usage'));
   }
   return out.join('\n').trimEnd();
 }
@@ -900,14 +910,20 @@ function mergeDeviceVerdicts(
   return [...byDevice.values()].sort((a, b) => a.device.localeCompare(b.device));
 }
 
-function aggregateAccountVerdict(
+export function aggregateAccountVerdict(
   provisioning: AccountProvisioning,
   devices: AccountDeviceVerdict[],
+  localQuota?: QuotaSummary | null,
 ): AccountVerdict {
   const verdicts = devices.map((row) => row.verdict);
   if (verdicts.includes('revoked')) return 'revoked';
   if (verdicts.includes('expired')) return 'expired';
-  if (verdicts.includes('rate_limited')) return 'rate_limited';
+  // A remote `rate_limited` never overrides a fresh local `available` usage
+  // read (PHNX-3940/4051): the usage snapshot is the real throttle signal;
+  // a burst-throttled probe's `rate_limited` is probe throttling, not an
+  // account limit. Keep revoked/expired as real credential facts.
+  const freshAvailable = !!localQuota && localQuota.status === 'available' && localQuota.stale === false;
+  if (verdicts.includes('rate_limited') && !freshAvailable) return 'rate_limited';
   if (verdicts.includes('live')) return 'live';
   if (verdicts.includes('unverified')) return 'unverified';
   return provisioning === 'per-device' ? 'per-device' : 'missing';

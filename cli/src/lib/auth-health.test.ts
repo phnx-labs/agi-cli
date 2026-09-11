@@ -29,8 +29,10 @@ describe('classifyHttpStatus', () => {
     expect(classifyHttpStatus(401)).toBe('revoked');
     expect(classifyHttpStatus(403)).toBe('revoked');
   });
-  it('maps 429 to rate_limited (token good, throttled)', () => {
-    expect(classifyHttpStatus(429)).toBe('rate_limited');
+  it('maps 429 to error with probe-throttled detail (PHNX-4051: probe 429 is not rate_limited)', () => {
+    expect(classifyHttpStatus(429)).toBe('error');
+    expect(verdictFromProbe({ status: 429, token: 'present' })).toBe('error');
+    expect(probeDetail({ status: 429, token: 'present' })).toBe('probe throttled (HTTP 429)');
   });
   it('maps other statuses to error, not a false negative', () => {
     expect(classifyHttpStatus(500)).toBe('error');
@@ -190,6 +192,18 @@ describe('mergeAuthHealthEntries', () => {
   it('an error on a brand-new key is still recorded (nothing prior to keep)', () => {
     expect(mergeAuthHealthEntries({}, { k: { verdict: 'error' as const, checkedAt: 200 } }).k.verdict).toBe('error');
   });
+  it('a probe 429 keeps the previous real verdict when within 20 min (PHNX-4051)', () => {
+    const current = { 'zion:claude:1.0.0': { verdict: 'live' as const, checkedAt: 1_000_000 } };
+    const incoming = { 'zion:claude:1.0.0': { verdict: 'error' as const, checkedAt: 1_000_000 + 5 * 60_000, detail: 'probe throttled (HTTP 429)' } };
+    expect(mergeAuthHealthEntries(current, incoming)['zion:claude:1.0.0'].verdict).toBe('live');
+  });
+  it('a probe 429 becomes unverified when no fresh previous verdict exists (PHNX-4051)', () => {
+    const stale = { 'zion:claude:1.0.0': { verdict: 'live' as const, checkedAt: 1_000_000 } };
+    const throttledStale = { 'zion:claude:1.0.0': { verdict: 'error' as const, checkedAt: 1_000_000 + 25 * 60_000, detail: 'probe throttled (HTTP 429)' } };
+    expect(mergeAuthHealthEntries(stale, throttledStale)['zion:claude:1.0.0'].verdict).toBe('unverified');
+    expect(mergeAuthHealthEntries(stale, throttledStale)['zion:claude:1.0.0'].detail).toBe('probe throttled (HTTP 429)');
+    expect(mergeAuthHealthEntries({}, { k: { verdict: 'error' as const, checkedAt: 2_000_000, detail: 'probe throttled (HTTP 429)' } }).k.verdict).toBe('unverified');
+  });
 });
 
 describe('summarizeHostAuth', () => {
@@ -228,9 +242,9 @@ describe('summarizeHostAuth', () => {
   });
 });
 
-describe('groupFleetAuthInstalls — probe once per account (RUSH-2111)', () => {
-  const inst = (agent: string, version: string, account: string | undefined): FleetAuthInstall =>
-    ({ agent: agent as FleetAuthInstall['agent'], version, account });
+describe('groupFleetAuthInstalls — probe once per account (RUSH-2111, PHNX-4051)', () => {
+  const inst = (agent: string, version: string, account: string | undefined, accountId?: string): FleetAuthInstall =>
+    ({ agent: agent as FleetAuthInstall['agent'], version, account, accountId });
 
   it('collapses two homes on the SAME account into ONE probe group', () => {
     const groups = groupFleetAuthInstalls([
@@ -307,6 +321,23 @@ describe('groupFleetAuthInstalls — probe once per account (RUSH-2111)', () => 
     const claude = groups.find((g) => g.probe.agent === 'claude');
     expect(claude?.members).toHaveLength(2);
     expect(groups.filter((g) => g.probe.agent === 'cursor').every((g) => g.members.length === 1)).toBe(true);
+  });
+
+  it('collapses a version home and its slot sharing one accountId into one probe (PHNX-4051)', () => {
+    const id = 'acc-123';
+    const groups = groupFleetAuthInstalls([
+      inst('claude', '2.1.170', 'a@x.com', id),
+      inst('claude', 'slot:acc-123', undefined, id),
+      inst('claude', '2.1.171', 'a@x.com', id),
+    ]);
+    // All three share one identity -> one probe, not three.
+    expect(groups).toHaveLength(1);
+    expect(groups[0].members).toHaveLength(3);
+  });
+
+  it('a throttled 429 never produces rate_limited (honesty comes from usage snapshot)', () => {
+    expect(classifyHttpStatus(429)).not.toBe('rate_limited');
+    expect(probeDetail({ status: 429, token: 'present' })).toBe('probe throttled (HTTP 429)');
   });
 });
 

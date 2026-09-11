@@ -598,7 +598,7 @@ export function registerAccountsCommand(program: Command): void {
 agents accounts list claude
 agents accounts list --json
 agents accounts list --fleet`,
-    notes: 'One row per account per harness. STATE is the daemon verdict. WHERE is `this box` when only this device reports (peers on an older release publish no slot verdicts), else live-device coverage. USAGE is the bar + percent. FIX is the exact repair command — empty when there is none. Reserved credential stores are not listed here; `agents secrets` is the place those show.',
+    notes: 'One row per account per harness. STATE is the daemon verdict (rate_limited is the usage snapshot, never a probe 429 — a throttled probe keeps the previous verdict within 20 min, otherwise unverified with `probe throttled (HTTP 429)`). WHERE is `this box` when only this device reports, otherwise `on N boxes` / `on N of M boxes`. USAGE is the bar + percent (`*` stale). FIX is the exact repair command — empty when there is none. Reserved credential stores are not listed here; `agents secrets` is the place those show.',
   });
 
   registerMintCommand(accounts, undefined, { hidden: true });
