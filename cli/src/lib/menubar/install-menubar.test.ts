@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { menubarHelperCacheDir } from './download-menubar.js';
+import { helperFloor } from '../helper-versions.js';
 import { serviceManagerRegistrationAllowed } from '../service-manifest.js';
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';
@@ -14,6 +15,8 @@ import {
   hasDeveloperIdSignature,
   installMenubarLaunchAgentOnUpgrade,
   isMenubarStale,
+  cachedFloorBundlePath,
+  menubarHelperPrefetchNeeded,
   stampVersionLabel,
   LOCAL_BUILD_LABEL,
   releaseVersionOfCachedBundle,
@@ -1046,5 +1049,44 @@ describe('installMenubarLaunchAgentOnUpgrade (driven, sandboxed)', () => {
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
+  });
+});
+
+// The npm tarball ships no helper bundle (PHNX-4036), so on an `npm i -g` Mac the
+// floor release's download cache is the ONLY source the network-free startup
+// self-heal can install from. These pin the two halves of that path: the cached
+// bundle must classify as the floor RELEASE (never `local`, which would flip the
+// stamp kind and reinstall forever — #2109), and the background worker must fetch
+// exactly when a fetch changes something.
+describe('release-path self-heal source (cached floor bundle)', () => {
+  it('the cached floor bundle stamps as the floor release, not a local build', () => {
+    const cached = cachedFloorBundlePath();
+    const floor = helperFloor('menubar');
+    expect(cached).toBe(path.join(menubarHelperCacheDir(floor), 'MenubarHelper.app'));
+    expect(releaseVersionOfCachedBundle(cached)).toBe(floor);
+    expect(stampFor(cached)).toEqual({ source: 'release', helperVersion: floor });
+  });
+});
+
+describe('menubarHelperPrefetchNeeded', () => {
+  const base = { darwin: true, disabledByUser: false, hasSource: false, serviceInstalled: true, stale: true };
+
+  it('fetches when an installed helper is behind the floor and nothing else can be a source', () => {
+    expect(menubarHelperPrefetchNeeded(base)).toBe(true);
+  });
+  it('fetches for a fresh machine with no service yet (the auto-enable the bootstrap promises)', () => {
+    expect(menubarHelperPrefetchNeeded({ ...base, serviceInstalled: false, stale: false })).toBe(true);
+  });
+  it('does nothing when the installed helper already matches the floor', () => {
+    expect(menubarHelperPrefetchNeeded({ ...base, stale: false })).toBe(false);
+  });
+  it('does nothing when a bundle already resolves — shipped with the build or already cached', () => {
+    expect(menubarHelperPrefetchNeeded({ ...base, hasSource: true })).toBe(false);
+  });
+  it('respects `agents menubar disable`', () => {
+    expect(menubarHelperPrefetchNeeded({ ...base, disabledByUser: true })).toBe(false);
+  });
+  it('never runs off macOS', () => {
+    expect(menubarHelperPrefetchNeeded({ ...base, darwin: false })).toBe(false);
   });
 });

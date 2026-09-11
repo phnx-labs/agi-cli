@@ -131,6 +131,26 @@ async function processTarget(target: RepoTarget): Promise<void> {
   }
 }
 
+/**
+ * macOS only: fetch the floor AGI Menu release into the verified cache when the
+ * installed helper is behind it and no bundle ships with this install, so the
+ * next foreground invocation's network-free self-heal has a source to install
+ * from (`sourceAppPath` candidate 4). Same lock discipline as the repo targets.
+ */
+async function prefetchMenubarHelperTarget(): Promise<void> {
+  if (process.platform !== 'darwin') return;
+  const alias = 'menubar-helper';
+  if (!tryAcquireLock(alias)) return;
+  try {
+    const { prefetchMenubarHelper } = await import('./menubar/install-menubar.js');
+    await prefetchMenubarHelper();
+  } catch {
+    /* network / verification failures are non-fatal; the next cycle retries */
+  } finally {
+    releaseLock(alias);
+  }
+}
+
 async function main(): Promise<void> {
   const targets: RepoTarget[] = [];
 
@@ -150,7 +170,7 @@ async function main(): Promise<void> {
     }
   }
 
-  await Promise.all(targets.map(processTarget));
+  await Promise.all([...targets.map(processTarget), prefetchMenubarHelperTarget()]);
 
   // Stamp the cycle so the next foreground CLI invocation can skip the ~7ms
   // detached spawn for SYNC_LOCK_TTL_MS (RUSH-2324). Written even when every

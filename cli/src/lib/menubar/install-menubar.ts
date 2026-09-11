@@ -189,6 +189,13 @@ export function menubarServiceInstalled(): boolean {
  *      binary: `import.meta.url` is a virtual `/$bunfs/` path, so the sibling
  *      candidates above can't see the on-disk bundle; recover it via the
  *      `agents` launcher symlink.
+ *   4. the verified download cache for the FLOOR release — the npm tarball ships
+ *      no bundle (PHNX-4036), so on an `npm i -g` machine this is the only
+ *      source there is. It is filled by `agents menubar setup` or by the
+ *      detached background worker (`prefetchMenubarHelper`), never here: this
+ *      resolver stays network-free so the startup self-heal stays cheap. Last
+ *      so a bundle that ships with the build always wins; keyed by the floor
+ *      version so an older cached release is never picked up.
  */
 function sourceAppPath(): string | null {
   const candidates: string[] = [];
@@ -211,7 +218,14 @@ function sourceAppPath(): string | null {
     const p = path.join(layout.distDir, 'lib', 'menubar', APP_BUNDLE_NAME);
     if (fs.existsSync(p)) return p;
   }
+  const cached = cachedFloorBundlePath();
+  if (fs.existsSync(cached)) return cached;
   return null;
+}
+
+/** Where a downloaded copy of the floor release sits once fetched and verified. */
+export function cachedFloorBundlePath(): string {
+  return path.join(menubarHelperCacheDir(helperFloor('menubar')), APP_BUNDLE_NAME);
 }
 
 /** Resolve the compiled CLI entry (dist/index.js) so the helper can exec node directly. */
@@ -657,6 +671,48 @@ function menubarSetupStale(): boolean {
     available: availableStamp(),
     execExists: fs.existsSync(installedExecutablePath()),
   });
+}
+
+/**
+ * Pure decision (no I/O): should the detached background worker download the
+ * floor release into the cache so the next startup self-heal has a source?
+ *
+ * The self-heal (`installMenubarLaunchAgentOnUpgrade`) is deliberately
+ * network-free, and the npm tarball ships no bundle, so without this step an
+ * `npm i -g` Mac keeps whatever helper it has — a crashing 1.1.2, a dead 0.1.0 —
+ * until someone runs `agents menubar setup` by hand. The worker fetches only
+ * when the fetch would change something: nothing else can act as a source, the
+ * user has not opted out, and either no service exists yet (the auto-enable the
+ * bootstrap promises) or the installed helper is older than the floor.
+ */
+export function menubarHelperPrefetchNeeded(opts: {
+  darwin: boolean;
+  disabledByUser: boolean;
+  /** `sourceAppPath()` found a bundle (shipped or already cached). */
+  hasSource: boolean;
+  serviceInstalled: boolean;
+  stale: boolean;
+}): boolean {
+  if (!opts.darwin || opts.disabledByUser || opts.hasSource) return false;
+  return !opts.serviceInstalled || opts.stale;
+}
+
+/**
+ * Background half of the release-path self-heal: download + verify the floor
+ * release into the cache when `menubarHelperPrefetchNeeded` says so. Returns
+ * the cached path, or null when nothing was fetched. Run from the detached
+ * auto-pull worker; the foreground CLI never waits on it.
+ */
+export async function prefetchMenubarHelper(): Promise<string | null> {
+  const needed = menubarHelperPrefetchNeeded({
+    darwin: onDarwin(),
+    disabledByUser: menubarDisabledByUser(),
+    hasSource: Boolean(sourceAppPath()),
+    serviceInstalled: menubarServiceInstalled(),
+    stale: menubarSetupStale(),
+  });
+  if (!needed) return null;
+  return downloadMenubarHelperApp(helperFloor('menubar'));
 }
 
 /**
