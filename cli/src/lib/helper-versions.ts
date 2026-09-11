@@ -51,7 +51,7 @@ export interface HelperRelease {
  * helper release now, off this table entirely.
  */
 export const HELPER_RELEASES: Readonly<Record<HelperName, HelperRelease>> = {
-  menubar: { tagPrefix: 'menubar', floor: '1.2.2' },
+  menubar: { tagPrefix: 'menubar', floor: '1.2.3' },
   'computer-mac': { tagPrefix: 'computer-mac', floor: '1.0.0' },
   // The Windows helper is a bare .exe, not an .app bundle, so it does not share
   // helper-download.ts's zip/codesign/notarize machinery -- but it has the same
