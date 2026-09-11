@@ -26,6 +26,7 @@ import {
 import {
   formatUsageSummary,
   renderBar,
+  usageErrorForDisplay,
   viewUsageSummaryOptions,
 } from './accounting/usage.js';
 import type { UsageInfo, UsageSnapshot } from './accounting/usage.js';
@@ -585,7 +586,7 @@ export function accountListJson(
         devices: row.devices.map(({ device, authMode, verdict }) => ({ device, authMode, verdict })),
         usage: row.usage,
         ...(row.usageSnapshot ? { usageSnapshot: row.usageSnapshot } : {}),
-        ...(row.usageError ? { usageError: row.usageError } : {}),
+        ...((() => { const v = usageErrorForDisplay(row.usageError); return v ? { usageError: v } : {}; })()),
         fix: row.fix,
       })),
       ...providers.flatMap((row) => providerJsonEntries(row, harness)),

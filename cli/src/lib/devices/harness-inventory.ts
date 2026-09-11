@@ -315,7 +315,7 @@ export async function collectLocalHarnessInventory(opts?: {
       verdict,
       fix: fixFor({ agent, verdict, name: saved?.name, version, provisioning }),
       snapshot,
-      usageError: usageErrorForDisplay(usage?.error ?? null),
+      usageError: usage?.error ?? null,
     };
   });
 }
