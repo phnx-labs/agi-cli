@@ -74,6 +74,10 @@ export interface HarnessRow {
   reason?: string;
   verdict: AccountVerdict;
   fix: string | null;
+  /** The live usage snapshot backing `quota`, or null when none was collected. */
+  snapshot: import('../accounting/usage.js').UsageSnapshot | null;
+  /** Raw error string from the usage fetch, if any (headless scope, expired, etc.). */
+  usageError: string | null;
 }
 
 /** One host's rows, or the reason it produced none. */
@@ -310,6 +314,8 @@ export async function collectLocalHarnessInventory(opts?: {
       reason,
       verdict,
       fix: fixFor({ agent, verdict, name: saved?.name, version, provisioning }),
+      snapshot,
+      usageError: usage?.error ?? null,
     };
   });
 }

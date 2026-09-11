@@ -430,3 +430,94 @@ describe.skipIf(process.platform === 'win32')('loadAccountCatalog tolerates an u
     expect(secretsUnavailableNote({ secretsUnavailable: undefined })).toBeNull();
   });
 });
+
+describe('account catalog per-window USAGE rendering (PHNX-3940 regression)', () => {
+  const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '');
+  const snapshotWithBoth = (): import('./accounting/usage.js').UsageSnapshot => ({
+    source: 'live',
+    sourceLabel: 'live account data',
+    capturedAt: new Date(Date.now() - 60 * 60 * 1000),
+    windows: [
+      { key: 'session', label: 'Current session', shortLabel: 'S', usedPercent: 58, resetsAt: new Date(Date.now() + 2 * 60 * 60 * 1000), windowMinutes: 300 },
+      { key: 'week', label: 'Current week', shortLabel: 'W', usedPercent: 41, resetsAt: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000), windowMinutes: 10080 },
+    ],
+  });
+
+  it('catalog row with 5h + 7d windows renders BOTH labeled bars', async () => {
+    const { renderAccountRows } = await import('./account-catalog.js');
+    const row: import('./account-catalog.js').NativeAccountCatalogRow = {
+      kind: 'native',
+      agent: 'claude',
+      identityKey: 'claude:user=1',
+      name: 'work',
+      id: 'id-1',
+      email: 'w@example.com',
+      display: 'w@example.com',
+      identityLabel: 'w@example.com',
+      home: 'main',
+      installations: [{ label: 'main', releaseVersion: '2.0.0', signedIn: true }],
+      isDefault: false,
+      state: 'connected',
+      provisioning: 'portable',
+      verdict: 'live',
+      checkedAt: null,
+      devices: [{ device: 'zion', authMode: 'native', verdict: 'live' }],
+      usage: { status: 'available', verdict: 'available', usedPercent: 58, stale: false, capturedAt: new Date().toISOString(), resetsAt: null, unavailableReason: null },
+      usageSnapshot: snapshotWithBoth(),
+      usageError: null,
+      fix: null,
+    };
+    const { renderAccountRows: render } = await import('./account-catalog.js');
+    const out = stripAnsi(render([row], { heading: false, footer: false, harnessHeadings: false, localDevice: 'zion', harness: 'claude' }));
+    expect(out).toContain('S:');
+    expect(out).toContain('58%');
+    expect(out).toContain('W:');
+    expect(out).toContain('41%');
+  });
+
+  it('overview cap limits to 2 windows while single-harness view shows all', async () => {
+    const { renderAccountRows } = await import('./account-catalog.js');
+    const snapshot: import('./accounting/usage.js').UsageSnapshot = {
+      source: 'live',
+      sourceLabel: 'live',
+      capturedAt: new Date(),
+      windows: [
+        { key: 'session', label: 'Current session', shortLabel: 'S', usedPercent: 10, resetsAt: null, windowMinutes: 300 },
+        { key: 'week', label: 'Current week', shortLabel: 'W', usedPercent: 20, resetsAt: null, windowMinutes: 10080 },
+        { key: 'month', label: 'Current month', shortLabel: 'M', usedPercent: 30, resetsAt: null, windowMinutes: 43200 },
+      ],
+    };
+    const row: import('./account-catalog.js').NativeAccountCatalogRow = {
+      kind: 'native',
+      agent: 'droid',
+      identityKey: 'droid:user=1',
+      name: 'work',
+      id: 'id-1',
+      email: null,
+      display: 'work',
+      identityLabel: 'work',
+      home: 'main',
+      installations: [{ label: 'main', releaseVersion: '1.0.0', signedIn: true }],
+      isDefault: false,
+      state: 'connected',
+      provisioning: 'portable',
+      verdict: 'live',
+      checkedAt: null,
+      devices: [{ device: 'zion', authMode: 'native', verdict: 'live' }],
+      usage: { status: 'available', verdict: 'available', usedPercent: 30, stale: false, capturedAt: new Date().toISOString(), resetsAt: null, unavailableReason: null },
+      usageSnapshot: snapshot,
+      usageError: null,
+      fix: null,
+    };
+    const overview = stripAnsi(renderAccountRows([row], { heading: false, footer: false, harnessHeadings: false, localDevice: 'zion' }));
+    const single = stripAnsi(renderAccountRows([row], { heading: false, footer: false, harnessHeadings: false, localDevice: 'zion', harness: 'droid' }));
+    expect(overview).toContain('S:');
+    expect(overview).toContain('W:');
+    expect(overview).not.toContain('M:');
+    expect(overview).toContain('+1');
+    expect(single).toContain('S:');
+    expect(single).toContain('W:');
+    expect(single).toContain('M:');
+    expect(single).not.toContain('+1');
+  });
+});
