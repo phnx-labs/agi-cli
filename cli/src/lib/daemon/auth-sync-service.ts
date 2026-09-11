@@ -18,11 +18,14 @@
  * data converges exactly as the in-tick exchange did. To keep "at-most-one-tick-
  * old" true, the pushes are gated on the exchange's freshness marker
  * (`readLastSuccessfulExchangeMs`): when the last usage-sync exchange is missing
- * or older than one tick interval, this tick skips the pushes and WARNs instead
- * of acting on peer state that may no longer hold.
+ * or older than one usage-sync tick interval (`USAGE_SYNC_TICK_MS`, the
+ * producer's cadence — not this service's own `AUTH_SYNC_TICK_MS`), this tick
+ * skips the pushes and WARNs instead of acting on peer state that may no longer
+ * hold.
  */
 import { BasePeriodicService, type DaemonContext } from './service.js';
 import type { DaemonServiceId } from '../daemon-services.js';
+import { USAGE_SYNC_TICK_MS } from './usage-sync-service.js';
 
 const AUTH_SYNC_TICK_MS = 15 * 60_000;
 const AUTH_SYNC_DEADLINE_MS = 2 * 60_000;
@@ -86,9 +89,14 @@ export class AuthSyncService extends BasePeriodicService {
     const { readLastSuccessfulExchangeMs } = await import('../fleet-shared-repo-sync.js');
     const lastExchangeMs = readLastSuccessfulExchangeMs();
     const ageMs = lastExchangeMs === null ? null : Date.now() - lastExchangeMs;
-    if (ageMs === null || ageMs > this.intervalMs) {
+    // The threshold is the PRODUCER's cadence (USAGE_SYNC_TICK_MS), not this
+    // service's own AUTH_SYNC_TICK_MS: the delivered peer verdicts are refreshed
+    // once per usage-sync exchange, so "stale" is measured against that tick, not
+    // this one. The two constants are equal today, but sourcing it here keeps the
+    // gate tracking the usage-sync cadence if either is ever retuned alone.
+    if (ageMs === null || ageMs > USAGE_SYNC_TICK_MS) {
       const age = ageMs === null ? 'never completed' : `last completed ${Math.round(ageMs / 1000)}s ago`;
-      ctx.log('WARN', `auth-sync: skipping credential push — usage-sync exchange ${age} (need one within ${Math.round(this.intervalMs / 1000)}s); peer verdicts may be stale`);
+      ctx.log('WARN', `auth-sync: skipping credential push — usage-sync exchange ${age} (need one within ${Math.round(USAGE_SYNC_TICK_MS / 1000)}s); peer verdicts may be stale`);
       return;
     }
 
