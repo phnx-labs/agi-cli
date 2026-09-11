@@ -6,7 +6,7 @@ import * as path from 'node:path';
 export interface ArcSpace {
   /** Stable UUID used for every native operation. */
   id: string;
-  /** Display-only title. */
+  /** Display-only title; empty when the Space is untitled. Never part of identity. */
   title: string;
 }
 
@@ -93,6 +93,12 @@ function parseProfileId(value: unknown, spaceId: string): string | { error: stri
   return profileId;
 }
 
+function parseTitle(value: unknown, spaceId: string): string | { error: string } {
+  if (value === undefined || value === null) return '';
+  if (typeof value === 'string') return value;
+  return { error: `Arc Space ${JSON.stringify(spaceId)} has a non-text title` };
+}
+
 export function parseSidebarSpaces(
   sidebarPath: string,
 ): SidebarSpace[] | { error: string } {
@@ -130,16 +136,18 @@ export function parseSidebarSpaces(
       if (typeof value.id !== 'string' || value.id !== encodedId) {
         return { error: `Arc Space key ${JSON.stringify(encodedId)} does not match its stable id` };
       }
-      if (typeof value.title !== 'string') {
-        return { error: `Arc Space ${JSON.stringify(encodedId)} has no title` };
-      }
+      // Identity is the stable id and the profile binding. The title is
+      // display-only: Arc omits it for an untitled Space, which must still be
+      // listed (as `arc-space`) instead of taking every other Space down.
+      const title = parseTitle(value.title, encodedId);
+      if (typeof title !== 'string') return title;
       if (ids.has(encodedId)) {
         return { error: `Arc Space ${JSON.stringify(encodedId)} appears more than once` };
       }
       const profileId = parseProfileId(value.profile, encodedId);
       if (typeof profileId !== 'string') return profileId;
       ids.add(encodedId);
-      spaces.push({ id: encodedId, title: value.title, profileId });
+      spaces.push({ id: encodedId, title, profileId });
     }
   }
   return spaces;

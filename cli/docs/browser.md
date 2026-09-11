@@ -462,9 +462,11 @@ profiles) and `StorableSidebar.json` (Spaces and the profile each binds to) unde
 `~/Library/Application Support/Arc` as read-only metadata; `AGENTS_ARC_DIR` points
 at another root. Profile ids and Space ids are authoritative; profile names and
 Space titles are display-only, and two Spaces sharing a title get the first six
-characters of their Space id appended to the profile name. An unknown or malformed
-Space-to-profile mapping fails discovery instead of falling back to the Default
-profile.
+characters of their Space id appended to the profile name. A Space Arc stored
+without a title is listed as `arc-space` (with the same id suffix when there are
+several); it never blocks discovery of the named Spaces beside it. An unknown or
+malformed Space-to-profile mapping fails discovery instead of falling back to the
+Default profile.
 
 **Tab identity.** Durable task state stores `{windowId, spaceId, tabId}` for each
 owned tab. URL and title are display data, never identifiers. Every AppleScript
