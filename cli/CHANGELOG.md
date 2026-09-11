@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.22.99
+
+- **`agents setup secrets` installs the published secrets CLI instead of only printing a hint (PHNX-3989).** A missing `secrets` binary tries `agents clis install secrets` then a pinned `npm i -g @phnx-labs/secrets-cli@0.1.2`, then hands off to `secrets migrate`. Docs point at the standalone engine; the broker is `secrets _agent-run` on macOS, not the agents daemon. Source: `cli/src/commands/setup-secrets.ts`, `cli/docs/secrets.md`.
+
+- `agents accounts list` / `agents view` no longer report a signed-in account slot as `MISSING`. A slot's STATE now comes from a live read of the slot's own credential and from the daemon's auth probe, which now covers account slots (`slot:<accountId>` rows) as well as version homes. Before, a slot's verdict was written only by `accounts add/login`, the daemon never re-derived it, and `signedIn` was read from an unrelated version home — so a slot re-materialized as `unconfigured` while the device doc was unreadable (a duplicate YAML key from a shared-repo autostash merge) stayed `MISSING` forever even though `agents run` used its login fine.
+
 ## 1.22.98
 
 - `agents run codex#<account>` on macOS now runs as that account. The SUN_LEN short-home relocation keyed `CODEX_HOME` by version alone, so an account slot (long enough to overflow too) was silently redirected to the default version's `~/.agents/.codex-homes/<version>/.codex` and its login — `agents run codex#getrush` opened the gmail session while the banner still said `getrush`. The short home is now keyed by the origin (`a-<account id>` for a slot). A version/account reinstall that recreates a fresh `.codex` adopts its existing short home (which holds the login) instead of failing, and a slot mis-linked onto a foreign home by the old layout is repointed to its own home rather than run as the wrong account.
