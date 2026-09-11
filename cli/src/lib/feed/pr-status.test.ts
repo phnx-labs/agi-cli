@@ -12,6 +12,12 @@ describe('checksVerdict', () => {
   it('an unfinished check is pending', () => {
     expect(checksVerdict([{ conclusion: 'SUCCESS' }, { status: 'IN_PROGRESS' }])).toBe('pending');
   });
+  it('reads legacy Status-API contexts, which carry state instead of conclusion', () => {
+    expect(checksVerdict([{ state: 'SUCCESS' }, { state: 'FAILURE' }])).toBe('failing');
+    expect(checksVerdict([{ state: 'SUCCESS' }, { state: 'PENDING' }])).toBe('pending');
+    expect(checksVerdict([{ state: 'SUCCESS' }, { conclusion: 'STALE' }])).toBe('pending');
+    expect(checksVerdict([{ state: 'SUCCESS' }, { conclusion: 'SUCCESS' }])).toBe('passing');
+  });
   it('all settled without failure passes', () => {
     expect(checksVerdict([{ conclusion: 'SUCCESS' }, { conclusion: 'NEUTRAL' }, { conclusion: 'SKIPPED', status: 'COMPLETED' }])).toBe('passing');
   });

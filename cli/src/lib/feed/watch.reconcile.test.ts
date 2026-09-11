@@ -12,6 +12,7 @@ import type { ActiveSession } from '../session/active.js';
 import { getActivityDir, getFeedDir } from '../state.js';
 import { appendActivityEvent } from './activity.js';
 import { watchLocalFeed, type FeedWatchEnvelope } from './watch.js';
+import { resetPullRequestStatusCache } from './pr-status.js';
 
 afterAll(() => { fs.rmSync(TEST_HOME, { recursive: true, force: true }); });
 
@@ -27,19 +28,24 @@ interface Harness {
 }
 
 /** Start the real local feed watcher over the temp HOME with one live row. */
-function start(options: { reconcileMs: number; sessionId?: string; withFeedDir?: boolean }): Harness {
+function start(options: {
+  reconcileMs: number; sessionId?: string; withFeedDir?: boolean;
+  pr?: { url: string; number: number };
+  gh?: (args: string[]) => Promise<string>;
+}): Harness {
   fs.mkdirSync(getActivityDir(), { recursive: true });
   if (options.withFeedDir !== false) fs.mkdirSync(getFeedDir(), { recursive: true });
   const events: FeedWatchEnvelope[] = [];
   const controller = new AbortController();
   const journalPath = path.join(TEST_HOME, `journal-${Math.random().toString(36).slice(2)}.jsonl`);
-  const sessions = options.sessionId ? [liveSession(options.sessionId)] : [];
+  const sessions = options.sessionId ? [{ ...liveSession(options.sessionId), ...(options.pr ? { pr: options.pr } : {}) }] : [];
   const watching = watchLocalFeed({
     scope: 'test-box',
     signal: controller.signal,
     emit: (event) => events.push(event),
     activityPollMs: 25,
     reconcileMs: options.reconcileMs,
+    gh: options.gh,
     sessions: {
       journalPath,
       journalPollMs: 10,
@@ -111,5 +117,45 @@ describe('feed watch reconcile cadence', () => {
     const raised = harness.events.filter((event) => event.type === 'attention.upsert');
     expect(raised).toHaveLength(1);
     expect(raised[0]).toMatchObject({ attention: { kind: 'question', sessionId: 'live-timed' } });
+  });
+});
+
+describe('feed watch PR status on agent rows', () => {
+  const prView = (state: string, rollup: unknown[]) => JSON.stringify({
+    number: 7, state, isDraft: false, reviewDecision: 'REVIEW_REQUIRED', mergeable: 'MERGEABLE', statusCheckRollup: rollup,
+  });
+
+  it('projects the fetched status onto the row and re-emits the row only when it changes', async () => {
+    resetPullRequestStatusCache();
+    let response = prView('OPEN', [{ status: 'IN_PROGRESS' }]);
+    let calls = 0;
+    const gh = async (args: string[]) => {
+      calls += 1;
+      expect(args.slice(0, 3)).toEqual(['pr', 'view', 'https://github.com/o/r/pull/7']);
+      return response;
+    };
+    const harness = start({ reconcileMs: 30, sessionId: 'live-pr', pr: { url: 'https://github.com/o/r/pull/7', number: 7 }, gh });
+    await settle(150);
+    const reset = harness.events.find((event) => event.type === 'reset');
+    expect(reset && reset.type === 'reset' ? reset.agents[0]?.pr : undefined).toEqual({
+      url: 'https://github.com/o/r/pull/7', number: 7,
+      state: 'OPEN', isDraft: false, reviewDecision: 'REVIEW_REQUIRED', mergeable: 'MERGEABLE', checks: 'pending',
+    });
+    const upsertsBefore = harness.events.filter((event) => event.type === 'agent.upsert').length;
+
+    // Same status across several reconcile passes: no row re-emit.
+    await settle(150);
+    expect(harness.events.filter((event) => event.type === 'agent.upsert').length).toBe(upsertsBefore);
+
+    // The PR merges (the 45 s cache is cleared as its TTL would): exactly one re-emit.
+    response = prView('MERGED', [{ conclusion: 'SUCCESS' }]);
+    resetPullRequestStatusCache();
+    await settle(200);
+    await harness.stop();
+    const upserts = harness.events.filter((event) => event.type === 'agent.upsert');
+    expect(upserts.length).toBe(upsertsBefore + 1);
+    const last = upserts[upserts.length - 1];
+    expect(last.type === 'agent.upsert' ? last.agent.pr : undefined).toMatchObject({ state: 'MERGED', checks: 'passing' });
+    expect(calls).toBeGreaterThanOrEqual(2);
   });
 });
