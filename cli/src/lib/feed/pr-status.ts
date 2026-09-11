@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { ActiveSession } from '../session/active.js';
+import type { DetectedPr } from '../session/state.js';
 import type { PullRequestAttentionSignal } from './attention.js';
 
 const execFileAsync = promisify(execFile);
@@ -57,3 +58,36 @@ export async function projectPullRequestBoard(sessions: ActiveSession[]): Promis
 }
 
 export function resetPullRequestStatusCache(): void { cache.clear(); }
+
+/** The check rollup folded to one verdict; undefined when the PR has no checks. */
+export function checksVerdict(rollup?: unknown[]): DetectedPr['checks'] {
+  if (!rollup || rollup.length === 0) return undefined;
+  let pending = false;
+  for (const check of rollup) {
+    const row = check as { conclusion?: string; status?: string };
+    const conclusion = (row.conclusion ?? '').toUpperCase();
+    if (['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE'].includes(conclusion)) return 'failing';
+    if (!conclusion && (row.status ?? '').toUpperCase() !== 'COMPLETED') pending = true;
+  }
+  return pending ? 'pending' : 'passing';
+}
+
+/**
+ * The row with its `pr` carrying the fetched status, so a consumer that only
+ * sees the agent row (the menu bar, the extension) can color the chip without
+ * its own `gh` call. A row without a PR, or a status that never resolved, is
+ * returned as is.
+ */
+export function withPullRequestStatus<T extends { pr?: DetectedPr }>(row: T, status?: PullRequestStatus): T {
+  if (!row.pr || !status) return row;
+  const pr: DetectedPr = {
+    ...row.pr,
+    ...(status.state !== undefined ? { state: status.state } : {}),
+    ...(status.isDraft !== undefined ? { isDraft: status.isDraft } : {}),
+    ...(status.reviewDecision !== undefined ? { reviewDecision: status.reviewDecision } : {}),
+    ...(status.mergeable !== undefined ? { mergeable: status.mergeable } : {}),
+  };
+  const checks = checksVerdict(status.statusCheckRollup);
+  if (checks) pr.checks = checks;
+  return { ...row, pr };
+}

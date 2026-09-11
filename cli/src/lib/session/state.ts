@@ -69,6 +69,13 @@ export interface StructuredQuestion {
 export interface DetectedPr {
   url: string;
   number?: number;
+  /** `gh pr view` status, attached by the feed watch when it has fetched it. */
+  state?: string;
+  isDraft?: boolean;
+  reviewDecision?: string;
+  mergeable?: string;
+  /** The check rollup folded to one verdict. */
+  checks?: 'passing' | 'failing' | 'pending';
 }
 export interface DetectedWorktree {
   /** Absolute worktree path (the session cwd). */

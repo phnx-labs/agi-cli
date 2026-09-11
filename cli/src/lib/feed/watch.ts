@@ -12,7 +12,7 @@ import { readBlock, readResolution, blockIdForSession } from './feed.js';
 import { reconcileAttention, type AttentionItem } from './attention.js';
 import { type ActivityEvent } from './activity.js';
 import { ActivityStream } from './activity-stream.js';
-import { PR_STATUS_TTL_MS, readPullRequestStatus } from './pr-status.js';
+import { PR_STATUS_TTL_MS, readPullRequestStatus, withPullRequestStatus, type PullRequestStatus } from './pr-status.js';
 
 export const FEED_WATCH_VERSION = 1 as const;
 type Base = { v: 1; type: string; streamId: string; sequence: number; scope: string };
@@ -38,36 +38,54 @@ export class FeedWatchState {
   }
 }
 
-async function attentionFor(agent: SessionWatchRow): Promise<AttentionItem | undefined> {
-  // Durable Previous rows share the operator stream for Sessions history, but
-  // they are not live work and must never synthesize Needs-you attention.
-  if (!agent.sessionId || agent.previous || agent.context === 'recent') return undefined;
+/**
+ * Live rows only: durable Previous rows share the operator stream for Sessions
+ * history, but they are not live work and must never synthesize Needs-you
+ * attention or a PR lookup.
+ */
+function isLive(agent: SessionWatchRow): boolean {
+  return Boolean(agent.sessionId) && !agent.previous && agent.context !== 'recent';
+}
+
+// ActiveSession.host names the terminal app; the feed contract's host is the
+// device scope. Normalize only the reconciler input so lifecycle/PR keys are
+// routable across the fleet while the projected agent row stays compatible.
+function reconcilerSession(agent: SessionWatchRow): import('../session/active.js').ActiveSession {
+  return { ...agent, context: agent.context as import('../session/active.js').ActiveSession['context'], host: agent.sourceDevice, viewingIn: undefined };
+}
+
+/** One `gh pr view` (cached 45 s) feeds both the attention verdict and the row's `pr` status. */
+async function pullRequestFor(agent: SessionWatchRow): Promise<PullRequestStatus | undefined> {
+  if (!isLive(agent) || !agent.pr) return undefined;
+  return readPullRequestStatus(reconcilerSession(agent));
+}
+
+function attentionFor(agent: SessionWatchRow, pullRequest: PullRequestStatus | undefined): AttentionItem | undefined {
+  if (!isLive(agent) || !agent.sessionId) return undefined;
   const blockId = blockIdForSession(agent.sessionId);
-  // ActiveSession.host names the terminal app; the feed contract's host is the
-  // device scope. Normalize only the reconciler input so lifecycle/PR keys are
-  // routable across the fleet while the projected agent row stays compatible.
-  const session: import('../session/active.js').ActiveSession = {
-    ...agent,
-    context: agent.context,
-    host: agent.sourceDevice,
-    viewingIn: undefined,
-  };
   return reconcileAttention({
-    block: readBlock(blockId), session,
+    block: readBlock(blockId), session: reconcilerSession(agent),
     resolution: readResolution(blockId),
-    pullRequest: await readPullRequestStatus(session), nowMs: Date.now(),
+    pullRequest, nowMs: Date.now(),
   });
+}
+
+/** The row as the feed projects it: the session row with its PR status attached. */
+async function projectAgent(agent: SessionWatchRow): Promise<{ agent: SessionWatchRow; attention: AttentionItem | undefined }> {
+  const pullRequest = await pullRequestFor(agent);
+  return { agent: withPullRequestStatus(agent, pullRequest), attention: attentionFor(agent, pullRequest) };
 }
 
 export async function projectSessionEnvelope(event: SessionWatchEnvelope, state: FeedWatchState): Promise<FeedWatchEnvelope[]> {
   if (event.type === 'reset') {
-    const attention = (await Promise.all(event.rows.map(attentionFor))).filter((item): item is AttentionItem => item !== undefined);
-    return [state.emit({ type: 'reset', capturedAt: event.capturedAt, scope: event.scope, agents: event.rows, attention })];
+    const projected = await Promise.all(event.rows.map(projectAgent));
+    const attention = projected.map((p) => p.attention).filter((item): item is AttentionItem => item !== undefined);
+    return [state.emit({ type: 'reset', capturedAt: event.capturedAt, scope: event.scope, agents: projected.map((p) => p.agent), attention })];
   }
   if (event.type === 'upsert') {
-    const attention = await attentionFor(event.row);
+    const { agent, attention } = await projectAgent(event.row);
     return [
-      state.emit({ type: 'agent.upsert', scope: event.scope, rowKey: event.rowKey, agent: event.row }),
+      state.emit({ type: 'agent.upsert', scope: event.scope, rowKey: event.rowKey, agent }),
       attention
         ? state.emit({ type: 'attention.upsert', scope: event.scope, rowKey: event.rowKey, attention })
         : state.emit({ type: 'attention.remove', scope: event.scope, rowKey: event.rowKey }),
@@ -126,10 +144,18 @@ export async function watchLocalFeed(options: WatchLocalFeedOptions): Promise<vo
   let activityCursor = Date.now();
   const agents = new Map<string, SessionWatchRow>();
   const attention = new Map<string, string>();
+  // The PR status last projected onto each row, so a merge or a check verdict
+  // that lands between session events still reaches the row's consumers.
+  const prStatus = new Map<string, string>();
   let pending = Promise.resolve();
   const reconcileRows = async () => {
-    for (const [rowKey, agent] of agents) {
-      const item = await attentionFor(agent);
+    for (const [rowKey, raw] of agents) {
+      const { agent, attention: item } = await projectAgent(raw);
+      const nextPr = agent.pr ? JSON.stringify(agent.pr) : '';
+      if (agent.pr && prStatus.get(rowKey) !== nextPr) {
+        prStatus.set(rowKey, nextPr);
+        options.emit(state.emit({ type: 'agent.upsert', scope: options.scope, rowKey, agent }));
+      }
       const next = item ? JSON.stringify(item) : '';
       if (attention.get(rowKey) === next) continue;
       attention.set(rowKey, next);
@@ -169,16 +195,19 @@ export async function watchLocalFeed(options: WatchLocalFeedOptions): Promise<vo
         agents.clear();
         for (const row of event.rows) agents.set(row.rowKey, row);
       } else if (event.type === 'upsert') agents.set(event.rowKey, event.row);
-      else if (event.type === 'remove') { agents.delete(event.rowKey); attention.delete(event.rowKey); }
+      else if (event.type === 'remove') { agents.delete(event.rowKey); attention.delete(event.rowKey); prStatus.delete(event.rowKey); }
       pending = pending.then(() => projectSessionEnvelope(event, state)).then((events) => {
         for (const projected of events) {
           if (projected.type === 'reset') {
             attention.clear();
-            for (const row of projected.agents) attention.set(row.rowKey, '');
+            prStatus.clear();
+            for (const row of projected.agents) { attention.set(row.rowKey, ''); if (row.pr) prStatus.set(row.rowKey, JSON.stringify(row.pr)); }
             for (const item of projected.attention) {
               const row = projected.agents.find((agent) => agent.sessionId === item.sessionId);
               if (row) attention.set(row.rowKey, JSON.stringify(item));
             }
+          } else if (projected.type === 'agent.upsert') {
+            if (projected.agent.pr) prStatus.set(projected.rowKey, JSON.stringify(projected.agent.pr));
           } else if (projected.type === 'attention.upsert') attention.set(projected.rowKey, JSON.stringify(projected.attention));
           else if (projected.type === 'attention.remove') attention.set(projected.rowKey, '');
           options.emit(projected);
