@@ -7,7 +7,6 @@ import {
   aggregateAccountVerdict,
   applyUsageHonesty,
   buildNativeCatalog,
-  formatWhereText,
   groupNativeAccountRows,
   isLaunchableSignedIn,
   listDevicesWithoutAccountVerdicts,
@@ -16,6 +15,7 @@ import {
   resolveLocalAccountObservation,
   secretsUnavailableNote,
   toProviderRow,
+  whereText,
   type NativeHomeRow,
 } from './account-catalog.js';
 import { USAGE_NOT_COLLECTED_MARKER, deriveUsageStatusFromSnapshot, usageErrorForDisplay, usageHeadlessScopeError } from './accounting/usage.js';
@@ -593,42 +593,50 @@ describe('agents accounts list --json never leaks the stale sentinel (PHNX-3348 
   });
 });
 
-describe('aggregateAccountVerdict honours fresh local available (PHNX-4051)', () => {
-  const freshAvailable: QuotaSummary = {
+describe('aggregateAccountVerdict honours local usage snapshot (PHNX-3940/4051)', () => {
+  const staleBelow100: QuotaSummary = {
     status: 'available',
     verdict: 'available',
-    usedPercent: 48,
-    stale: false,
+    usedPercent: 83,
+    stale: true,
     capturedAt: new Date().toISOString(),
-    resetsAt: null,
+    resetsAt: new Date(Date.now() + 60_000).toISOString(),
     unavailableReason: null,
   };
-  const staleAvailable: QuotaSummary = { ...freshAvailable, stale: true };
-  const devices = (verdicts: Array<'live' | 'rate_limited' | 'revoked' | 'expired'> ) =>
-    verdicts.map((v, i) => ({ device: `box-${i}`, authMode: 'native' as const, verdict: v }));
+  const noSnapshot: QuotaSummary = {
+    status: 'available',
+    verdict: 'available',
+    usedPercent: null,
+    stale: false,
+    capturedAt: null,
+    resetsAt: null,
+    unavailableReason: 'usage unavailable',
+  };
+  const blocking100Limited: QuotaSummary = {
+    status: 'rate_limited',
+    verdict: 'rate_limited',
+    usedPercent: 100,
+    stale: true,
+    capturedAt: new Date().toISOString(),
+    resetsAt: new Date(Date.now() + 60_000).toISOString(),
+    unavailableReason: null,
+  };
+  const devices = (verdicts: Array<'live' | 'rate_limited' | 'revoked' | 'expired' | 'unverified' | 'missing'> ) =>
+    verdicts.map((v, i) => ({ device: `box-${i}`, authMode: 'native' as const, verdict: v as never }));
 
-  it('a fresh local available drops a remote rate_limited — STATE stays READY not LIMITED', () => {
-    // The zion case: local live + usage available fresh, 6 workers throttled
+  it('a stale last_seen snapshot with windows below 100% ignores six remote rate_limited rows — STATE stays LIVE', () => {
     const all = [
       { device: 'zion', authMode: 'native' as const, verdict: 'live' as const },
       ...devices(['rate_limited', 'rate_limited', 'rate_limited', 'rate_limited', 'rate_limited', 'rate_limited']),
     ];
-    expect(aggregateAccountVerdict('portable', all, freshAvailable)).not.toBe('rate_limited');
-    expect(aggregateAccountVerdict('portable', all, freshAvailable)).toBe('live');
+    // aggregate ignores remote rate_limited when hasLocalSnapshot (usedPercent !== null)
+    expect(aggregateAccountVerdict('portable', all, staleBelow100)).toBe('live');
+    // honesty keeps it live because usage is available, not throttled
+    const honest = applyUsageHonesty(aggregateAccountVerdict('portable', all, staleBelow100), staleBelow100);
+    expect(honest.verdict).toBe('live');
   });
 
-  it('without a fresh available (stale or null) a remote rate_limited still yields LIMITED', () => {
-    const all = devices(['live', 'rate_limited']);
-    expect(aggregateAccountVerdict('portable', all, null)).toBe('rate_limited');
-    expect(aggregateAccountVerdict('portable', all, staleAvailable)).toBe('rate_limited');
-  });
-
-  it('a remote revoked/expired still wins even against a fresh local available', () => {
-    expect(aggregateAccountVerdict('portable', devices(['live', 'revoked']), freshAvailable)).toBe('revoked');
-    expect(aggregateAccountVerdict('portable', devices(['live', 'expired']), freshAvailable)).toBe('expired');
-  });
-
-  it('a blocking window at 100% still yields rate_limited via usage honesty', () => {
+  it('a local snapshot with a blocking window at 100% renders LIMITED via usage honesty', () => {
     const snap = {
       source: 'live' as const,
       sourceLabel: 'live',
@@ -636,33 +644,84 @@ describe('aggregateAccountVerdict honours fresh local available (PHNX-4051)', ()
       windows: [{ key: 'session' as const, label: 'Session', shortLabel: 'S', usedPercent: 100, resetsAt: new Date(Date.now() + 60_000), windowMinutes: 300 }],
     };
     expect(deriveUsageStatusFromSnapshot(snap)).toBe('rate_limited');
-    const honest = applyUsageHonesty('live', { status: 'rate_limited', verdict: 'rate_limited', usedPercent: 100, stale: false, capturedAt: new Date().toISOString(), resetsAt: null, unavailableReason: null });
+    // Even with a stale surrounding tick, a 100% blocking window is rate_limited
+    const all = [
+      { device: 'zion', authMode: 'native' as const, verdict: 'live' as const },
+      ...devices(['rate_limited', 'rate_limited']),
+    ];
+    const base = aggregateAccountVerdict('portable', all, blocking100Limited);
+    // base is live (remote ignored), honesty promotes to rate_limited
+    expect(base).toBe('live');
+    const honest = applyUsageHonesty(base, blocking100Limited);
     expect(honest.verdict).toBe('rate_limited');
+  });
+
+  it('no local snapshot plus remote rate_limited renders LIMITED', () => {
+    const all = devices(['live', 'rate_limited']);
+    expect(aggregateAccountVerdict('portable', all, null)).toBe('rate_limited');
+    expect(aggregateAccountVerdict('portable', all, noSnapshot)).toBe('rate_limited');
+  });
+
+  it('freshly added account with no usage windows but a genuine remote rate_limited is not discarded as LIVE (reviewer BLOCKING)', () => {
+    // summarizeQuota NO-SNAPSHOT branch for Claude returns status available + usedPercent null (hardcoded available)
+    const all = [
+      { device: 'zion', authMode: 'native' as const, verdict: 'live' as const },
+      { device: 'worker-1', authMode: 'durable' as const, verdict: 'rate_limited' as const },
+    ];
+    expect(aggregateAccountVerdict('portable', all, noSnapshot)).toBe('rate_limited');
+    expect(aggregateAccountVerdict('portable', all, null)).toBe('rate_limited');
+  });
+
+  it('a remote revoked/expired still wins even against a stale available snapshot', () => {
+    expect(aggregateAccountVerdict('portable', devices(['live', 'revoked']), staleBelow100)).toBe('revoked');
+    expect(aggregateAccountVerdict('portable', devices(['live', 'expired']), staleBelow100)).toBe('expired');
   });
 });
 
 describe('WHERE English rendering (PHNX-4051)', () => {
-  const mkRow = (devices: Array<{ device: string; verdict: 'live' | 'revoked' | 'rate_limited' | 'unverified' | 'missing' }>, provisioning: 'portable' | 'per-device' = 'portable'): Parameters<typeof formatWhereText>[0] =>
+  const mkRow = (devices: Array<{ device: string; verdict: 'live' | 'revoked' | 'rate_limited' | 'unverified' | 'missing' | 'expired' }>, provisioning: 'portable' | 'per-device' = 'portable'): Parameters<typeof whereText>[0] =>
     ({ kind: 'native', agent: 'claude', identityKey: 'k', name: 'n', id: 'id', email: null, display: 'd', identityLabel: 'd', home: null, installations: [], isDefault: false, state: 'connected', provisioning, verdict: 'live', checkedAt: null, devices: devices as never, usage: null, fix: null } as never);
 
   it('this box when only the local device reports', () => {
-    expect(formatWhereText(mkRow([{ device: 'zion', verdict: 'live' }]), 'zion')).toBe('this box');
+    expect(whereText(mkRow([{ device: 'zion', verdict: 'live' }]), 'zion')).toBe('this box');
   });
-  it('on N boxes when every provisioned device is live', () => {
-    const devices = Array.from({ length: 7 }, (_, i) => ({ device: `box-${i}`, verdict: 'live' as const }));
-    expect(formatWhereText(mkRow(devices), 'zion')).toBe('on 7 boxes');
-  });
-  it('on N of M boxes when some are not live', () => {
+  it('on N boxes when every provisioned device is usable (live + rate_limited + unverified)', () => {
     const devices = [
-      ...Array.from({ length: 5 }, (_, i) => ({ device: `live-${i}`, verdict: 'live' as const })),
-      ...Array.from({ length: 2 }, (_, i) => ({ device: `other-${i}`, verdict: 'revoked' as const })),
+      ...Array.from({ length: 2 }, (_, i) => ({ device: `live-${i}`, verdict: 'live' as const })),
+      ...Array.from({ length: 2 }, (_, i) => ({ device: `limited-${i}`, verdict: 'rate_limited' as const })),
+      ...Array.from({ length: 2 }, (_, i) => ({ device: `unverified-${i}`, verdict: 'unverified' as const })),
     ];
-    expect(formatWhereText(mkRow(devices), 'zion')).toBe('on 5 of 7 boxes');
+    expect(whereText(mkRow(devices), 'zion')).toBe('on 6 boxes');
+  });
+  it('on 1 box when single provisioned usable device but not this box alone', () => {
+    expect(whereText(mkRow([{ device: 'a', verdict: 'live' }, { device: 'b', verdict: 'missing' }]), 'zion')).toBe('on 1 box');
+  });
+  it('on N of M boxes when some provisioned are not usable (revoked/expired)', () => {
+    const devices = [
+      { device: 'a', verdict: 'live' as const },
+      { device: 'b', verdict: 'rate_limited' as const },
+      { device: 'c', verdict: 'unverified' as const },
+      { device: 'd', verdict: 'revoked' as const },
+      { device: 'e', verdict: 'expired' as const },
+    ];
+    // 3 usable of 5 provisioned
+    expect(whereText(mkRow(devices), 'zion')).toBe('on 3 of 5 boxes');
+  });
+  it('— when nothing is provisioned (all missing)', () => {
+    expect(whereText(mkRow([{ device: 'a', verdict: 'missing' }, { device: 'b', verdict: 'missing' }]), 'zion')).toBe('—');
+    expect(whereText(mkRow([]), 'zion')).toBe('—');
+  });
+  it('per-device branch lists present devices', () => {
+    const devices = [
+      { device: 'zion', verdict: 'live' as const },
+      { device: 'worker-1', verdict: 'live' as const },
+      { device: 'worker-2', verdict: 'missing' as const },
+    ];
+    expect(whereText(mkRow(devices, 'per-device'), 'zion')).toBe('zion, worker-1');
   });
   it('legend line is present in rendered output', async () => {
     const { renderAccountRows } = await import('./account-catalog.js');
     const row = mkRow([{ device: 'zion', verdict: 'live' }]) as never;
-    // Use renderAccountRows with footer:true to get legend
     const out = renderAccountRows([row] as never, { localDevice: 'zion' } as never);
     expect(out).toContain('STATE:');
     expect(out).toContain('* stale usage');

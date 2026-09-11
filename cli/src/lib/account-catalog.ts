@@ -597,13 +597,11 @@ function verdictText(verdict: AccountVerdict): string {
   return verdict.toUpperCase();
 }
 
-function whereText(row: NativeAccountCatalogRow, localDevice: string): string {
+export function whereText(row: NativeAccountCatalogRow, localDevice: string): string {
   const names = [...new Set(row.devices.map((device) => device.device))];
   // Peers on an older release do not publish slot verdicts, so the only
   // observation is this box — say so rather than a coverage count.
   if (names.length === 1 && names[0] === localDevice) return 'this box';
-  const total = row.devices.length;
-  const live = row.devices.filter((device) => device.verdict === 'live').length;
   // Per-device accounts are provisioned per box; show which boxes are present
   // rather than a live/total fraction — the fraction would hide that each box
   // is its own account.
@@ -613,15 +611,11 @@ function whereText(row: NativeAccountCatalogRow, localDevice: string): string {
       .map((device) => device.device);
     return present.join(', ') || 'this box';
   }
-  if (total > 0) {
-    if (live === total) return `on ${live} ${live === 1 ? 'box' : 'boxes'}`;
-    if (live > 0 || total > 1) return `on ${live} of ${total} boxes`;
-  }
-  return '—';
-}
-
-export function formatWhereText(row: NativeAccountCatalogRow, localDevice: string): string {
-  return whereText(row, localDevice);
+  const provisioned = row.devices.filter((device) => device.verdict !== 'missing' && device.verdict !== 'unconfigured').length;
+  if (provisioned === 0) return '—';
+  const usable = row.devices.filter((device) => device.verdict === 'live' || device.verdict === 'rate_limited' || device.verdict === 'unverified').length;
+  if (usable === provisioned) return `on ${usable} ${usable === 1 ? 'box' : 'boxes'}`;
+  return `on ${usable} of ${provisioned} boxes`;
 }
 
 export const OVERVIEW_MAX_USAGE_WINDOWS = 2;
@@ -918,12 +912,16 @@ export function aggregateAccountVerdict(
   const verdicts = devices.map((row) => row.verdict);
   if (verdicts.includes('revoked')) return 'revoked';
   if (verdicts.includes('expired')) return 'expired';
-  // A remote `rate_limited` never overrides a fresh local `available` usage
-  // read (PHNX-3940/4051): the usage snapshot is the real throttle signal;
-  // a burst-throttled probe's `rate_limited` is probe throttling, not an
-  // account limit. Keep revoked/expired as real credential facts.
-  const freshAvailable = !!localQuota && localQuota.status === 'available' && localQuota.stale === false;
-  if (verdicts.includes('rate_limited') && !freshAvailable) return 'rate_limited';
+  // LIMITED comes from the usage snapshot only (PHNX-3940/4051): an account's
+  // quota is one shared identity and `deriveUsageStatusFromSnapshot` already
+  // applies the freshness gate (expired windows -> staleWindows), so a
+  // `last_seen` snapshot whose blocking windows are below 100% is trustworthy
+  // for "not throttled". A remote `rate_limited` (probe 429) never sets STATE;
+  // only the local `QuotaSummary.status` (`rate_limited`/`out_of_credits` via
+  // `applyUsageHonesty`) does. When this box has no usage snapshot at all
+  // (no windows, `usedPercent === null`), the remote `rate_limited` may stand.
+  const hasLocalSnapshot = !!localQuota && localQuota.usedPercent !== null && localQuota.usedPercent !== undefined;
+  if (!hasLocalSnapshot && verdicts.includes('rate_limited')) return 'rate_limited';
   if (verdicts.includes('live')) return 'live';
   if (verdicts.includes('unverified')) return 'unverified';
   return provisioning === 'per-device' ? 'per-device' : 'missing';
