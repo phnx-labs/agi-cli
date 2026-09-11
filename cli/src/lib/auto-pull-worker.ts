@@ -69,6 +69,11 @@ function tryAcquireLock(alias: string): boolean {
   }
 }
 
+function touchLock(alias: string): void {
+  const now = new Date();
+  try { fs.utimesSync(lockFilePath(alias), now, now); } catch { /* lock gone; nothing to extend */ }
+}
+
 function releaseLock(alias: string): void {
   try { fs.unlinkSync(lockFilePath(alias)); } catch { /* ignore */ }
 }
@@ -141,12 +146,19 @@ async function prefetchMenubarHelperTarget(): Promise<void> {
   if (process.platform !== 'darwin') return;
   const alias = 'menubar-helper';
   if (!tryAcquireLock(alias)) return;
+  // The zip fetch may run up to 15 min (helper-download.ts) while the lock
+  // reads as stale after SYNC_LOCK_TTL_MS, and the download lands through one
+  // shared partial file — so keep the lock's mtime fresh for as long as this
+  // worker is actually fetching, or a second worker races onto the same bytes.
+  const heartbeat = setInterval(() => touchLock(alias), SYNC_LOCK_TTL_MS / 2);
+  heartbeat.unref();
   try {
     const { prefetchMenubarHelper } = await import('./menubar/install-menubar.js');
     await prefetchMenubarHelper();
   } catch {
     /* network / verification failures are non-fatal; the next cycle retries */
   } finally {
+    clearInterval(heartbeat);
     releaseLock(alias);
   }
 }
