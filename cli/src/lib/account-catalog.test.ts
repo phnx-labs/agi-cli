@@ -17,6 +17,7 @@ import {
   type NativeHomeRow,
 } from './account-catalog.js';
 import { usageHeadlessScopeError } from './accounting/usage.js';
+import type { UsageSnapshot } from './accounting/usage.js';
 import { setKeychainTokenSync, _resetSecretsClientForTest } from './secrets-client.js';
 import { standaloneKeychainIsFileBacked, useFreshSecretsHome } from '../../tests/secrets-standalone.js';
 import type { CredentialAccount } from './account-registry.js';
@@ -433,7 +434,7 @@ describe.skipIf(process.platform === 'win32')('loadAccountCatalog tolerates an u
 
 describe('account catalog per-window USAGE rendering (PHNX-3940 regression)', () => {
   const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '');
-  const snapshotWithBoth = (): import('./accounting/usage.js').UsageSnapshot => ({
+  const snapshotWithBoth = (): UsageSnapshot => ({
     source: 'live',
     sourceLabel: 'live account data',
     capturedAt: new Date(Date.now() - 60 * 60 * 1000),
@@ -477,7 +478,7 @@ describe('account catalog per-window USAGE rendering (PHNX-3940 regression)', ()
 
   it('overview cap limits to 2 windows while single-harness view shows all', async () => {
     const { renderAccountRows } = await import('./account-catalog.js');
-    const snapshot: import('./accounting/usage.js').UsageSnapshot = {
+    const snapshot: UsageSnapshot = {
       source: 'live',
       sourceLabel: 'live',
       capturedAt: new Date(),

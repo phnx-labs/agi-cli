@@ -24,12 +24,11 @@ import {
   type AccountVerdict,
 } from './signin-badge.js';
 import {
-  agentReportsUsage,
-  classifyUsageErrorKind,
   formatUsageSummary,
-  isUsageHeadlessScopeError,
   renderBar,
+  viewUsageSummaryOptions,
 } from './accounting/usage.js';
+import type { UsageInfo, UsageSnapshot } from './accounting/usage.js';
 import { padToWidth, stringWidth } from './text/width.js';
 
 export { applyUsageHonesty };
@@ -157,7 +156,7 @@ export interface NativeAccountCatalogRow {
    * single max-percent bar. Added non-breaking: JSON clients keep `usage`
    * and may read this when present.
    */
-  usageSnapshot?: import('./accounting/usage.js').UsageSnapshot | null;
+  usageSnapshot?: UsageSnapshot | null;
   /** Raw usage fetch error, for headless/unverified labeling alongside the bars. */
   usageError?: string | null;
   fix: string | null;
@@ -250,7 +249,7 @@ export interface AccountListEntryJson {
   }>;
   usage: QuotaSummary | null;
   /** The live usage snapshot backing `usage`, when available — additive, not breaking. */
-  usageSnapshot?: import('./accounting/usage.js').UsageSnapshot | null;
+  usageSnapshot?: UsageSnapshot | null;
   usageError?: string | null;
   fix: string | null;
 }
@@ -618,47 +617,14 @@ function whereText(row: NativeAccountCatalogRow, localDevice: string): string {
 export const OVERVIEW_MAX_USAGE_WINDOWS = 2;
 
 function usageText(row: NativeAccountCatalogRow, maxWindows?: number): string {
-  // Prefer the per-window compact bars when the underlying snapshot is
-  // available — reuse the canonical formatUsageSummary path so S/W labels,
-  // stale markers, and reset hints render identically to the old version rows.
   if (row.usageSnapshot) {
-    const headless = row.usageError ? isUsageHeadlessScopeError(row.usageError) : false;
-    const unverified = !headless && !!row.usageSnapshot && !!row.usageError;
-    const rendered = formatUsageSummary(null, row.usageSnapshot, 3, {
-      unverified,
-      headless,
-      maxWindows,
-      expectedWindows: row.agent === 'claude'
-        ? [{ key: 'session', shortLabel: 'S' }, { key: 'week', shortLabel: 'W' }]
-        : undefined,
-      errorKind: row.usageError ? classifyUsageErrorKind(row.usageError) : null,
-      errorDetail: row.usageError,
-    });
-    if (rendered && stripAnsi(rendered).trim().length > 0) {
-      // formatUsageSummary pads plan width (3) with gray spaces; trim that
-      // leading pad when plan is null so the USAGE column starts with S:
-      const trimmed = rendered.trimStart();
-      if (stripAnsi(trimmed).length > 0) return trimmed;
-    }
-    // If snapshot exists but format produced nothing (e.g., empty windows with
-    // no stale and no plan), fall through to the single-bar legacy path below
-    // so "limited" / "no credits" still surface.
-  }
-  if (row.usageError && !row.usageSnapshot) {
-    const headless = isUsageHeadlessScopeError(row.usageError);
-    const signedIn = row.state === 'connected';
-    const rendered = formatUsageSummary(null, null, 3, {
-      unavailable: agentReportsUsage(row.agent) && signedIn && !headless,
-      headless,
-      maxWindows,
-      expectedWindows: row.agent === 'claude'
-        ? [{ key: 'session', shortLabel: 'S' }, { key: 'week', shortLabel: 'W' }]
-        : undefined,
-      errorKind: classifyUsageErrorKind(row.usageError),
-      errorDetail: row.usageError,
-    });
-    const trimmed = rendered.trimStart();
-    if (stripAnsi(trimmed).length > 0) return trimmed;
+    const usageInfo: UsageInfo = { snapshot: row.usageSnapshot, error: row.usageError ?? null };
+    return formatUsageSummary(
+      null,
+      usageInfo.snapshot,
+      3,
+      viewUsageSummaryOptions(row.agent, row.state === 'connected', usageInfo, maxWindows),
+    );
   }
   if (row.usage?.status === 'rate_limited' && (row.usage.usedPercent === null || row.usage.usedPercent === undefined)) {
     return 'limited';
@@ -667,10 +633,6 @@ function usageText(row: NativeAccountCatalogRow, maxWindows?: number): string {
   if (row.usage?.usedPercent === null || row.usage?.usedPercent === undefined) return '';
   const percent = `${row.usage.usedPercent}%${row.usage.stale ? '*' : ''}`;
   return `${renderBar(row.usage.usedPercent, LISTING_USAGE_BAR_LEN)} ${percent}`;
-}
-
-function stripAnsi(s: string): string {
-  return s.replace(/\x1b\[[0-9;]*m/g, '');
 }
 
 interface ListingLine {

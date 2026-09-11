@@ -35,20 +35,17 @@ import type { AgentId } from '../lib/types.js';
 import { machineId } from '../lib/machine-id.js';
 import { authCacheKey, readAuthHealthCache } from '../lib/auth-health.js';
 import {
-  agentReportsUsage,
-  classifyUsageErrorKind,
   deriveUsageStatusFromSnapshot,
   formatUsageSection,
   formatUsageSummary,
   formatUsageStatusBadge,
-  getUsageBenignState,
   getUsageInfoForIdentity,
   getUsageInfoByIdentity,
   getUsageLookupKey,
-  isUsageHeadlessScopeError,
   usageErrorForDisplay,
+  viewUsageSummaryOptions,
 } from '../lib/accounting/usage.js';
-import type { FormatUsageSummaryOpts, UsageInfo } from '../lib/accounting/usage.js';
+import { OVERVIEW_MAX_USAGE_WINDOWS } from '../lib/account-catalog.js';
 import { isHeadedDeviceRole, selfConfiguredDeviceRole, type ConfiguredDeviceRole } from '../lib/device-config.js';
 import { readManifest } from '../lib/manifest.js';
 import {
@@ -101,31 +98,8 @@ import { confirm } from '@inquirer/prompts';
 import { formatPath, isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { terminalWidth, truncateToWidth, stringWidth, padToWidth } from '../lib/session/width.js';
 
-export function viewUsageSummaryOptions(
-  agentId: AgentId,
-  signedIn: boolean,
-  usageInfo: UsageInfo | undefined,
-  maxWindows: number | undefined,
-  version?: string,
-): FormatUsageSummaryOpts {
-  const headless = isUsageHeadlessScopeError(usageInfo?.error);
-  const benignState = usageInfo ? getUsageBenignState(usageInfo) : null;
-  return {
-    unavailable: agentReportsUsage(agentId) && signedIn && !usageInfo?.snapshot && !headless && !benignState,
-    unverified: !headless && !!usageInfo?.snapshot && !!usageInfo.error,
-    headless,
-    maxWindows,
-    expectedWindows: agentId === 'claude'
-      ? [{ key: 'session', shortLabel: 'S' }, { key: 'week', shortLabel: 'W' }]
-      : undefined,
-    errorKind: classifyUsageErrorKind(usageInfo?.error),
-    errorDetail: usageInfo?.error ?? null,
-    benignState,
-    noRecentUsageLabel: agentId === 'grok'
-      ? `run grok${version ? `@${version}` : ''} once to refresh usage`
-      : null,
-  };
-}
+/** Re-exported for view.account.test.ts — canonical definition lives in accounting/usage.ts. */
+export { viewUsageSummaryOptions };
 
 /** Shared account identity formatter, re-exported for the view-specific tests. */
 export const accountColumnLabel = accountDisplayLabel;
@@ -178,14 +152,6 @@ export function compareAccountOrderedVersions(
 
   return compareVersions(b.version, a.version);
 }
-
-/**
- * Overview (`agents view` with no agent filter) caps compact usage windows so
- * multi-meter agents (Antigravity's four model quotas, Droid's three buckets)
- * cannot force every row to pad past the terminal width and wrap. Single-agent
- * views leave the cap unset and show every blocking window.
- */
-const OVERVIEW_MAX_USAGE_WINDOWS = 2;
 
 /**
  * Join fixed view columns with a consistent two-space gutter. Empty trailing
