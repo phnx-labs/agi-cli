@@ -43,7 +43,7 @@ function printStatus(s: MenubarStatus, opts: { brief?: boolean } = {}): void {
   console.log(`  helper installed   ${s.installedVersion ? chalk.gray(s.installedVersion) : chalk.gray('unknown')}`);
   console.log(`  helper available   ${chalk.gray(s.currentVersion)}`);
   console.log(`  CLI version        ${chalk.gray(s.cliVersion)}`);
-  console.log(`  bundle source      ${s.source ? chalk.gray(s.source) : chalk.red('missing (cannot enable)')}`);
+  console.log(`  bundle source      ${s.source ? chalk.gray(s.source) : chalk.yellow(`not fetched yet — the background sync downloads ${s.currentVersion}; \`agents menubar setup\` fetches it now`)}`);
   console.log(`  disabled by user   ${yn(s.disabledByUser)}`);
 
   // Two copies of the INSTALLED bundle is the duplicate the user sees as two
