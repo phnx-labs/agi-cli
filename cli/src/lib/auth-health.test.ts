@@ -436,3 +436,48 @@ describe('derivation guards (RUSH-3036 review findings)', () => {
     });
   });
 });
+
+describe('enumerateSlotInstalls — the daemon probe covers account slots', () => {
+  // Real temp dirs, no mocks: a registered codex account with a slot on disk is a
+  // probe target keyed `slot:<id>`; a slot whose dir is gone, and an account whose
+  // harness is not being probed, are skipped. Before this the probe walked
+  // `listInstalledVersions` only, so a slot's verdict was never re-derived.
+  it('yields one probe target per registered slot that exists on disk', async () => {
+    const fs = await import('node:fs');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const { enumerateSlotInstalls, slotAuthVersionKey } = await import('./auth-health.js');
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'slot-probe-'));
+    try {
+      const present = 'e003a157-64fd-4899-92cc-ac7ca547586e';
+      const gone = '1f87cf2a-41c4-445d-90a0-d021e9ad2ae1';
+      const otherHarness = 'a9935675-1c79-407e-9f3c-3750efb99ae3';
+      const presentDir = path.join(root, 'accounts', 'codex', present);
+      fs.mkdirSync(path.join(presentDir, '.codex'), { recursive: true });
+      const meta = {
+        accounts: {
+          native: {
+            [present]: { id: present, name: 'getrush', agent: 'codex' as const, identityKey: 'codex:account=x', identityLabel: 'muqsit@getrush.ai' },
+            [gone]: { id: gone, name: 'icloud', agent: 'codex' as const, identityKey: 'codex:account=y', identityLabel: 'muqsitnawaz@icloud.com' },
+            [otherHarness]: { id: otherHarness, name: 'work', agent: 'claude' as const, identityKey: 'claude:account=z', identityLabel: 'muqsit@getrush.ai' },
+          },
+        },
+        deviceAccounts: {
+          slots: {
+            [present]: { accountId: present, slotDir: presentDir, authMode: 'native' as const, verdict: 'unconfigured' as const },
+            [gone]: { accountId: gone, slotDir: path.join(root, 'accounts', 'codex', gone), authMode: 'native' as const, verdict: 'live' as const },
+            [otherHarness]: { accountId: otherHarness, slotDir: presentDir, authMode: 'native' as const, verdict: 'live' as const },
+          },
+        },
+      };
+      const out = enumerateSlotInstalls(meta as never, ['codex']);
+      expect(out).toEqual([
+        { agent: 'codex', version: slotAuthVersionKey(present), home: presentDir, account: undefined, accountId: present },
+      ]);
+      // The other harness's slot is a target only when that harness is probed.
+      expect(enumerateSlotInstalls(meta as never, ['claude']).map((s) => s.accountId)).toEqual([otherHarness]);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});

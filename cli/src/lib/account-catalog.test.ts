@@ -230,6 +230,18 @@ describe('resolveLocalAccountObservation (newest observation wins)', () => {
     expect(resolveLocalAccountObservation(undefined, undefined, true).verdict).toBe('unverified');
     expect(resolveLocalAccountObservation(undefined, undefined, false).verdict).toBe('missing');
   });
+
+  it("an `unconfigured` slot record is ensureSlot's default, not a verdict — the live signedIn read decides", () => {
+    // The 2026-09-10 zion case: `accounts login` re-materialized the slot while the
+    // device doc was unreadable (verdict: unconfigured, no checkedAt), the user
+    // logged in, and the row still rendered MISSING because `unconfigured` was
+    // mapped to missing unconditionally.
+    const stale = { authMode: 'native' as const, verdict: 'unconfigured' as const };
+    expect(resolveLocalAccountObservation(stale, undefined, true).verdict).toBe('unverified');
+    expect(resolveLocalAccountObservation(stale, undefined, false).verdict).toBe('missing');
+    // A newer daemon probe of the slot still wins over the default.
+    expect(resolveLocalAccountObservation(stale, cached('2026-09-10T19:06:37.000Z', 'live'), true).verdict).toBe('live');
+  });
 });
 
 describe('fleet-synced account verdict rows', () => {

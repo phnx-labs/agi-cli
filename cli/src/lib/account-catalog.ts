@@ -9,7 +9,7 @@ import { harnessWorkerIsPerDevice } from './harness-auth-capabilities.js';
 import { hasKeychainTokenSync, isSecretsTransportError, type SecretsClientError } from './secrets-client.js';
 import type { AgentId, Meta } from './types.js';
 import { isLaunchableSignedIn as isCredentialLaunchable } from './accounting/rotate.js';
-import { authCacheKey, readAuthHealthCache, type AuthVerdict } from './auth-health.js';
+import { authCacheKey, readAuthHealthCache, slotAuthVersionKey, type AuthVerdict } from './auth-health.js';
 import { readFleetSharedDeviceStates, type FleetSharedDeviceState } from './fleet-shared-state.js';
 import { machineId } from './machine-id.js';
 import { isHeadedDeviceRole, selfConfiguredDeviceRole } from './device-config.js';
@@ -437,9 +437,21 @@ export async function loadAccountCatalog(): Promise<AccountCatalog> {
     const localHome = row.installations.find((home) => home.label === row.home)
       ?? row.installations.find((home) => home.signedIn)
       ?? row.installations[0];
-    const cached = localHome ? auth[authCacheKey(host, row.agent, localHome.label)] : undefined;
     const slot = row.id ? localSlots[row.id] : undefined;
-    const observation = resolveLocalAccountObservation(slot, cached, localHome?.signedIn === true);
+    // A slot account's local truth is the SLOT — its own credential file and its
+    // own daemon probe row (keyed `slot:<id>`) — never the version home its label
+    // happens to match. Reading the version home here is what rendered a
+    // signed-in slot MISSING: the slot record held ensureSlot's `unconfigured`
+    // default, the daemon never probed the slot, and `signedIn` came from an
+    // unrelated home.
+    const slotSignedIn = slot
+      ? await getAccountInfo(row.agent, slot.slotDir)
+          .then((info) => isLaunchableSignedIn(row.agent, slot.slotDir, info))
+          .catch(() => false)
+      : false;
+    const cached = (slot && row.id ? auth[authCacheKey(host, row.agent, slotAuthVersionKey(row.id))] : undefined)
+      ?? (localHome ? auth[authCacheKey(host, row.agent, localHome.label)] : undefined);
+    const observation = resolveLocalAccountObservation(slot, cached, slot ? slotSignedIn : localHome?.signedIn === true);
     const local: AccountDeviceVerdict = {
       device: host,
       authMode: observation.authMode
@@ -791,7 +803,11 @@ function normalizeAuthVerdict(
   verdict: AuthVerdict | undefined,
   signedIn: boolean,
 ): AccountDeviceVerdict['verdict'] {
-  if (verdict === 'unconfigured') return 'missing';
+  // `unconfigured` is the slot record's DEFAULT (ensureSlot), not a probe
+  // result — the daemon never publishes it (probeLocalFleetAuth drops those
+  // rows). So it says nothing about the credential on disk; the live signedIn
+  // read of the slot decides, exactly as it does when no verdict exists at all.
+  if (verdict === 'unconfigured') return signedIn ? 'unverified' : 'missing';
   if (verdict === 'error') return signedIn ? 'unverified' : 'missing';
   return verdict ?? (signedIn ? 'unverified' : 'missing');
 }
