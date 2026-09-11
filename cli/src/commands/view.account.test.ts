@@ -12,7 +12,6 @@ import {
   nativeAccountViewLabel,
   planDuplicatePrune,
   pruneGroupKey,
-  viewUsageSummaryOptions,
   type AccountOrderedVersion,
   type PruneCandidate,
 } from './view.js';
@@ -25,6 +24,7 @@ import {
   formatUsageSummary,
   readClaudeUsageCache,
   setClaudeUsageCachePathForTest,
+  viewUsageSummaryOptions,
   writeClaudeUsageCache,
   usageExpiredKimiCredentialError,
   USAGE_BENIGN_STATE,
