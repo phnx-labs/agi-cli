@@ -124,6 +124,7 @@ import {
   type HarnessRow,
   type HostHarnessResult,
 } from '../lib/devices/harness-inventory.js';
+import { usageErrorForDisplay } from '../lib/accounting/usage.js';
 import { crabboxList, crabboxFind, crabboxSshArgv, type CrabboxBox } from '../lib/crabbox/cli.js';
 import { boxAddress, boxStatus, fmtIdleShort, fmtExpiresShort, registerLeaseCommand } from './lease.js';
 import { registerSnapshotCommand } from './snapshot.js';
@@ -1150,13 +1151,20 @@ export async function collectFleetHarnesses(opts: HarnessInventoryOpts): Promise
 async function runDevicesHarnesses(opts: HarnessInventoryOpts): Promise<void> {
   if (opts.local) {
     const rows = await collectLocalHarnessInventory({ agents: opts.agents, refresh: opts.refresh });
-    if (opts.json) console.log(JSON.stringify({ host: machineId(), rows }));
-    else for (const line of renderHarnessMatrix([{ host: machineId(), rows }])) console.log(line);
+    if (opts.json) {
+      const sanitized = rows.map((row) => ({ ...row, usageError: usageErrorForDisplay(row.usageError) }));
+      console.log(JSON.stringify({ host: machineId(), rows: sanitized }));
+    } else for (const line of renderHarnessMatrix([{ host: machineId(), rows }])) console.log(line);
     return;
   }
   const results = await collectFleetHarnesses(opts);
-  if (opts.json) console.log(JSON.stringify(results, null, 2));
-  else for (const line of renderHarnessMatrix(results)) console.log(line);
+  if (opts.json) {
+    const sanitized = results.map((result) => ({
+      ...result,
+      rows: result.rows.map((row) => ({ ...row, usageError: usageErrorForDisplay(row.usageError) })),
+    }));
+    console.log(JSON.stringify(sanitized, null, 2));
+  } else for (const line of renderHarnessMatrix(results)) console.log(line);
 }
 
 export async function runDevicesAccounts(opts: HarnessInventoryOpts): Promise<void> {

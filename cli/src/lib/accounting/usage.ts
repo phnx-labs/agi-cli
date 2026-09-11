@@ -269,11 +269,6 @@ export type UsageErrorKind =
 export function classifyUsageErrorKind(error: string | null | undefined): UsageErrorKind | null {
   if (!error) return null;
   if (error === USAGE_NOT_COLLECTED_MARKER) return 'not-collected';
-  // `usageErrorForDisplay` maps the internal sentinel to a human sentence
-  // (`'Usage not collected yet — run `agents view --refresh` …'`). The display
-  // value flows through the same classifier when the compact bar is rendered
-  // from a sanitized HarnessRow, so recognize it as the same kind (PHNX-3348).
-  if (error.includes('not collected yet')) return 'not-collected';
   if (isUsageHeadlessScopeError(error)) return 'headless-scope';
   if (isUsageNoUsageCredentialError(error)) return 'no-usage-credential';
   if (error.startsWith('No readable ')) return 'no-credential';
