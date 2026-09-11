@@ -30,8 +30,7 @@ import { isInteractiveTerminal, isPromptCancelled } from './format.js';
 import {
   computeSyncStatus,
   type UnifiedSyncStatus,
-  type AgentVersionStatus,
-} from './sync-status.js';
+  type AgentVersionStatus, formatDriftRows } from './sync-status.js';
 
 export interface DriftSyncOptions {
   cwd?: string;
@@ -75,7 +74,10 @@ function renderSummary(status: UnifiedSyncStatus, needing: AgentVersionStatus[])
       )} ${chalk.gray('— pull recommended')}`,
     );
   }
-  for (const v of needing) console.log(versionLine(v));
+  for (const v of needing) {
+    console.log(versionLine(v));
+    for (const line of formatDriftRows(v)) console.log(chalk.gray(`      ${line}`));
+  }
   if (status.totals.orphan > 0) {
     console.log(
       chalk.gray(`  (${status.totals.orphan} orphan${status.totals.orphan === 1 ? '' : 's'} — run \`agents prune cleanup\`)`),

@@ -16,7 +16,7 @@ import { AGENTS } from '../lib/agents.js';
 import { AgentId } from '../lib/types.js';
 import { setHelpSections } from '../lib/help.js';
 import { addHostOption } from '../lib/hosts/option.js';
-import { computeSyncStatus, type AgentVersionStatus } from '../lib/sync-status.js';
+import { computeSyncStatus, type AgentVersionStatus, formatDriftRows } from '../lib/sync-status.js';
 import { promptDriftSync } from '../lib/drift-sync.js';
 import { resolveConfiguredModel } from '../lib/models.js';
 import { resolveSurface } from './utils.js';
@@ -111,6 +111,7 @@ export function registerStatusCommand(syncCmd: Command): void {
         + (v.isDefault ? chalk.gray(' (default)') : '');
       const pad = ' '.repeat(Math.max(1, 34 - plain.length));
       console.log(`  ${shown}${pad}${versionSummary(v)}`);
+      for (const line of formatDriftRows(v)) console.log(chalk.gray(`      ${line}`));
     }
     if (status.totals.orphan > 0) {
       console.log(
