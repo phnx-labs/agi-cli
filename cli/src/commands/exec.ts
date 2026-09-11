@@ -32,6 +32,7 @@ import { spawnSync } from 'child_process';
 import { randomUUID } from 'crypto';
 import { isSessionTrackedAgent } from '../lib/session/types.js';
 import { applyActiveRulesPresetAtRun } from '../lib/rules/run-sync.js';
+import { applySystemResourcesAtRun } from '../lib/system-run-sync.js';
 import { handleBroadcast } from './run-broadcast.js';
 import { bootMark } from '../lib/boot-profile.js';
 
@@ -3080,6 +3081,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
       // path itself; there's no version home to sync into.
       if (defaultVersion) {
         applyActiveRulesPresetAtRun(agent, defaultVersion, getVersionHomePath(agent, defaultVersion));
+        applySystemResourcesAtRun(agent, defaultVersion, getVersionHomePath(agent, defaultVersion));
       }
       bootMark('rules-sync:done');
 

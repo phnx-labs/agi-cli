@@ -153,6 +153,18 @@ export function formatResidualDrift(residual: ResidualDrift[]): string[] {
   return lines;
 }
 
+/**
+ * The rows behind a "N drifted" count, one line each, for the human renderers.
+ * A count alone cannot be acted on; the name says which skill or hook to look
+ * at, and `detail` says what differs when the differ knows.
+ */
+export function formatDriftRows(v: AgentVersionStatus): string[] {
+  return v.resources
+    .filter((r) => r.status === 'drifted' || r.status === 'missing')
+    .sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name))
+    .map((r) => `${r.status.padEnd(7)} ${r.kind}/${r.name}${r.detail ? ` (${r.detail})` : ''}`);
+}
+
 const STATUS_MAP: Record<DiffStatus, ResourceSyncStatus> = {
   ok: 'synced',
   diff: 'drifted',

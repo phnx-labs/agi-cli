@@ -40,6 +40,7 @@ import { probeUnprivilegedUserns, type UsernsStatus } from './linux-userns.js';
 import { resolveClaudeSetupToken } from './claude-account-token.js';
 import { applyAddDirs } from './add-dir.js';
 import { applyActiveRulesPresetAtRun } from './rules/run-sync.js';
+import { applySystemResourcesAtRun } from './system-run-sync.js';
 import { resolveHarnessAdapter, stripForeignConfigDir } from './harness/index.js';
 import { resolveConfigVersion } from './harness/exec-config-version.js';
 import { getAccountInfo } from './agents.js';
@@ -2872,6 +2873,7 @@ export async function runWithFallback(options: FallbackOptions): Promise<number>
     const rulesVersion = version ?? resolveVersion(agent);
     if (rulesVersion) {
       applyActiveRulesPresetAtRun(agent, rulesVersion, getVersionHomePath(agent, rulesVersion));
+      applySystemResourcesAtRun(agent, rulesVersion, getVersionHomePath(agent, rulesVersion));
     }
     // Record the entry we're about to attempt so the caller (audit log) sees the
     // agent+version that actually ran, even after a rate-limit handoff.
