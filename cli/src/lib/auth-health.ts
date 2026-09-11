@@ -22,7 +22,7 @@ import * as path from 'path';
 import { ALL_AGENT_IDS, getAccountInfo, type AccountInfo } from './agents.js';
 import { listNativeAccounts } from './account-registry.js';
 import { readSlots } from './accounts/slots.js';
-import { getCacheDir } from './state.js';
+import { getCacheDir, readMeta } from './state.js';
 import type { AgentId, Meta } from './types.js';
 import {
   probeClaudeStatus,
@@ -312,6 +312,15 @@ export function authCacheKey(host: string, agent: AgentId | string, version: str
 }
 
 /**
+ * Host-independent identity of one probe target — the (agent, version) pair
+ * {@link authCacheKey} is keyed by. The separator cannot appear in either half,
+ * so an agent id can never run into a version the way a `:` join allows.
+ */
+export function authTargetKey(agent: AgentId | string, version: string): string {
+  return `${agent}@${version}`;
+}
+
+/**
  * The `version` slot an account SLOT occupies in the auth cache and the probe
  * rows: `slot:<accountId>`. A slot is a HOME-shaped dir, not an installed
  * version, so it needs its own key or its verdict would collide with (or be
@@ -351,6 +360,42 @@ export function enumerateSlotInstalls(
   return out;
 }
 
+/** One probe target on this device: an installed version home, or an account slot. */
+export interface LocalAuthInstall extends FleetAuthInstall {
+  home: string;
+  accountId?: string;
+}
+
+/**
+ * Every (agent, version) home the local auth probe covers on this device —
+ * installed version homes plus account slots. {@link probeLocalFleetAuth} probes
+ * exactly this set, so it is also the answer to "which cached rows are still
+ * backed by something on disk" (PHNX-4051).
+ */
+export function enumerateLocalAuthInstalls(
+  meta: Pick<Meta, 'accounts' | 'deviceAccounts'>,
+  agentIds: readonly AgentId[],
+): LocalAuthInstall[] {
+  const installs: LocalAuthInstall[] = [];
+  for (const agent of agentIds) {
+    for (const version of listInstalledVersions(agent)) {
+      installs.push({ agent, version, home: getVersionHomePath(agent, version), account: undefined });
+    }
+  }
+  for (const slot of enumerateSlotInstalls(meta, agentIds)) installs.push(slot);
+  return installs;
+}
+
+/**
+ * {@link authTargetKey} for every local probe target — what a cached row must
+ * match to still be about this device. A row outside it is an ORPHAN: its home
+ * was uninstalled, so nothing will ever re-probe it and its `checkedAt` is
+ * frozen at whatever the last probe left (PHNX-4051).
+ */
+export function localAuthTargetKeys(agentIds: readonly AgentId[] = ALL_AGENT_IDS): Set<string> {
+  return new Set(enumerateLocalAuthInstalls(readMeta(), agentIds).map((i) => authTargetKey(i.agent, i.version)));
+}
+
 interface AuthHealthCacheFile {
   version: 1;
   entries: Record<string, AuthHealth>;
@@ -376,20 +421,31 @@ export function readAuthHealth(host: string, agent: AgentId | string, version: s
   return readAuthHealthCache()[authCacheKey(host, agent, version)] ?? null;
 }
 
+/**
+ * Split a cache key back into the install it names, for one host. Returns null
+ * for a key that belongs to another host or does not name a known agent — the
+ * one place the `host:agent:version` join is undone.
+ */
+export function parseAuthCacheKey(key: string, host: string): { agent: AgentId; version: string } | null {
+  const prefix = `${host}:`;
+  if (!key.startsWith(prefix)) return null;
+  const identity = key.slice(prefix.length);
+  const separator = identity.indexOf(':');
+  if (separator <= 0) return null;
+  const agent = identity.slice(0, separator);
+  if (!ALL_AGENT_IDS.includes(agent as AgentId)) return null;
+  return { agent: agent as AgentId, version: identity.slice(separator + 1) };
+}
+
 /** Reconstruct one host's published probe rows for a lease waiter/CLI reader. */
 export function readFleetAuthRows(host: string): AuthProbeRow[] {
-  const prefix = `${host}:`;
   const rows: AuthProbeRow[] = [];
   for (const [key, health] of Object.entries(readAuthHealthCache())) {
-    if (!key.startsWith(prefix)) continue;
-    const identity = key.slice(prefix.length);
-    const separator = identity.indexOf(':');
-    if (separator <= 0) continue;
-    const agent = identity.slice(0, separator);
-    if (!ALL_AGENT_IDS.includes(agent as AgentId)) continue;
+    const install = parseAuthCacheKey(key, host);
+    if (!install) continue;
     rows.push({
-      agent: agent as AgentId,
-      version: identity.slice(separator + 1),
+      agent: install.agent,
+      version: install.version,
       account: health.account,
       accountId: health.accountId,
       health,
@@ -417,15 +473,29 @@ export function mergeAuthHealthEntries(
   return merged;
 }
 
-/** Merge one or more entries into the cache (best-effort write). */
-export function writeAuthHealthEntries(entries: Record<string, AuthHealth>): void {
+/**
+ * Merge one or more entries into the cache (best-effort write).
+ *
+ * `drop` removes entries the writer knows are gone — it runs on the PRE-merge
+ * cache, so an incoming row always wins over a drop of the same key and the two
+ * can never fight. Only a writer that knows the full truth for the keys it drops
+ * may pass one (see {@link writeFleetAuthRows}).
+ */
+export function writeAuthHealthEntries(
+  entries: Record<string, AuthHealth>,
+  drop?: (key: string) => boolean,
+): void {
   try {
     const target = cacheFilePath();
     ensureLockTarget(target, JSON.stringify({ version: 1, entries: {} }));
     withFileLock(target, () => {
+      let current = readAuthHealthCache();
+      if (drop) {
+        current = Object.fromEntries(Object.entries(current).filter(([key]) => !drop(key)));
+      }
       const merged: AuthHealthCacheFile = {
         version: 1,
-        entries: mergeAuthHealthEntries(readAuthHealthCache(), entries),
+        entries: mergeAuthHealthEntries(current, entries),
       };
       atomicWriteFileSync(target, JSON.stringify(merged, null, 2));
     });
@@ -608,30 +678,17 @@ export async function probeLocalFleetAuth(opts?: {
 }): Promise<AuthProbeRow[]> {
   const agentIds = opts?.agents ?? ALL_AGENT_IDS;
 
-  interface LocalInstall extends FleetAuthInstall {
-    home: string;
+  interface LocalInstall extends LocalAuthInstall {
     info: AccountInfo | null;
-    accountId?: string;
   }
 
   // Enumerate every install AND every account slot on this device, then resolve
   // each one's account label. getAccountInfo is a local credential-file read
   // (no network), so this fan-out is cheap and cannot contribute to the rate
   // limit the probe grouping below exists to avoid.
-  const [{ readMeta }, { findNativeAccountByIdentity }] = await Promise.all([
-    import('./state.js'),
-    import('./account-registry.js'),
-  ]);
+  const { findNativeAccountByIdentity } = await import('./account-registry.js');
   const meta = readMeta();
-  const installs: LocalInstall[] = [];
-  for (const agent of agentIds) {
-    for (const version of listInstalledVersions(agent)) {
-      installs.push({ agent, version, home: getVersionHomePath(agent, version), info: null, account: undefined });
-    }
-  }
-  for (const slot of enumerateSlotInstalls(meta, agentIds)) {
-    installs.push({ ...slot, info: null });
-  }
+  const installs: LocalInstall[] = enumerateLocalAuthInstalls(meta, agentIds).map((inst) => ({ ...inst, info: null }));
   await Promise.all(
     installs.map(async (inst) => {
       inst.info = await getAccountInfo(inst.agent, inst.home).catch(() => null);
@@ -667,11 +724,28 @@ export async function probeLocalFleetAuth(opts?: {
   return perGroup.flat();
 }
 
-/** Persist a host's probed rows into the cache (keyed by host+agent+version). */
-export function writeFleetAuthRows(host: string, rows: AuthProbeRow[]): void {
+/**
+ * Persist a host's probed rows into the cache (keyed by host+agent+version).
+ *
+ * `installed` — the {@link authTargetKey} set of homes that still exist on
+ * `host` ({@link localAuthTargetKeys}) — prunes this host's ORPHAN entries: rows
+ * for a version that has since been uninstalled. Nothing re-probes those, so
+ * they never age out on their own; they froze the reuse window permanently false
+ * and kept surfacing in `agents view` / fleet status (PHNX-4051). Only a caller
+ * that enumerated `host`'s real installs may pass it — the `fleet ping` fan-out
+ * writes a PEER's rows and cannot enumerate that box's homes, so it omits it and
+ * merges as before.
+ */
+export function writeFleetAuthRows(host: string, rows: AuthProbeRow[], installed?: ReadonlySet<string>): void {
   const entries: Record<string, AuthHealth> = {};
   for (const row of rows) {
     entries[authCacheKey(host, row.agent, row.version)] = row.health;
   }
-  writeAuthHealthEntries(entries);
+  const drop = installed
+    ? (key: string) => {
+      const install = parseAuthCacheKey(key, host);
+      return install != null && !installed.has(authTargetKey(install.agent, install.version));
+    }
+    : undefined;
+  writeAuthHealthEntries(entries, drop);
 }
