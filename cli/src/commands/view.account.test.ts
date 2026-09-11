@@ -547,3 +547,107 @@ describe('executePrunePlan — repoint default to keeper before retiring the dup
     expect(out.bExists).toBe(true);     // the other account's home untouched
   });
 });
+
+describe('account rows render per-window usage bars (PHNX-3940 regression)', () => {
+  const snapshotWithBoth = (): import('../lib/accounting/usage.js').UsageSnapshot => ({
+    source: 'live',
+    sourceLabel: 'live account data',
+    capturedAt: new Date(Date.now() - 60 * 60 * 1000),
+    windows: [
+      { key: 'session', label: 'Current session', shortLabel: 'S', usedPercent: 58, resetsAt: new Date(Date.now() + 2 * 60 * 60 * 1000), windowMinutes: 300 },
+      { key: 'week', label: 'Current week', shortLabel: 'W', usedPercent: 41, resetsAt: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000), windowMinutes: 10080 },
+    ],
+  });
+
+  const rowBase = (agent: 'claude' | 'codex' = 'claude'): NativeAccountCatalogRow => ({
+    kind: 'native',
+    agent,
+    identityKey: 'claude:user=1',
+    name: 'work',
+    id: 'id-work',
+    email: 'w@example.com',
+    display: 'w@example.com',
+    identityLabel: 'w@example.com',
+    home: 'main',
+    installations: [{ label: 'main', releaseVersion: '2.0.0', signedIn: true }],
+    isDefault: false,
+    state: 'connected',
+    provisioning: 'portable',
+    verdict: 'live',
+    checkedAt: null,
+    devices: [{ device: 'zion', authMode: 'native', verdict: 'live' }],
+    usage: { status: 'available', verdict: 'available', usedPercent: 58, stale: false, capturedAt: new Date().toISOString(), resetsAt: null, unavailableReason: null },
+    usageSnapshot: snapshotWithBoth(),
+    usageError: null,
+    fix: null,
+  });
+
+  it('renders BOTH S: and W: labeled bars for a Claude snapshot with 5h + 7d windows', () => {
+    const row = rowBase('claude');
+    const out = stripAnsi(renderAccountRows([row], { heading: false, footer: false, harnessHeadings: false, localDevice: 'zion', harness: 'claude' }));
+    expect(out).toContain('S:');
+    expect(out).toContain('58%');
+    expect(out).toContain('W:');
+    expect(out).toContain('41%');
+    // Must not collapse to the old single-percent bar form without labels.
+    expect(out).not.toMatch(/█{1,5}░{1,5}\s+83%\*/);
+  });
+
+  it('overview cap limits a multi-window harness to 2 bars while single-harness view shows all', () => {
+    const threeWindowSnapshot = (): import('../lib/accounting/usage.js').UsageSnapshot => ({
+      source: 'live',
+      sourceLabel: 'live',
+      capturedAt: new Date(),
+      windows: [
+        { key: 'session', label: 'Current session', shortLabel: 'S', usedPercent: 10, resetsAt: null, windowMinutes: 300 },
+        { key: 'week', label: 'Current week', shortLabel: 'W', usedPercent: 20, resetsAt: null, windowMinutes: 10080 },
+        { key: 'month', label: 'Current month', shortLabel: 'M', usedPercent: 30, resetsAt: null, windowMinutes: 43200 },
+      ],
+    });
+    const row: NativeAccountCatalogRow = {
+      ...rowBase('droid'),
+      identityKey: 'droid:user=1',
+      usageSnapshot: threeWindowSnapshot(),
+    };
+    const overview = stripAnsi(renderAccountRows([row], { heading: false, footer: false, harnessHeadings: false, localDevice: 'zion' }));
+    const single = stripAnsi(renderAccountRows([row], { heading: false, footer: false, harnessHeadings: false, localDevice: 'zion', harness: 'droid' }));
+    // Overview (no harness filter, no explicit cap) should cap at 2: shows S + W, hides M behind +1
+    expect(overview).toContain('S:');
+    expect(overview).toContain('W:');
+    // Overview should not show all three windows; the third is hidden (either omitted or via +1 hint)
+    const overviewHasM = overview.includes('M:');
+    const overviewHasPlusOne = overview.includes('+1');
+    expect(overviewHasM || overviewHasPlusOne).toBe(true);
+    // But if it shows M, it must show +1? Actually with cap 2, it shows S and W then +1 (hidden count), not M.
+    // So assert M is NOT shown in overview when capped, but +1 is.
+    expect(overviewHasM).toBe(false);
+    expect(overviewHasPlusOne).toBe(true);
+    // Single-harness view (harness filter, no cap) shows all three
+    expect(single).toContain('S:');
+    expect(single).toContain('W:');
+    expect(single).toContain('M:');
+    expect(single).not.toContain('+1');
+  });
+
+  it('provider rows with no windows keep rendering as today (empty USAGE)', () => {
+    const row = rowBase('claude');
+    const providers: ProviderAccountCatalogRow[] = [{
+      kind: 'provider',
+      name: 'my-openrouter',
+      id: 'id-or',
+      provider: 'openrouter',
+      auth: 'api-key',
+      harnesses: ['claude'],
+      defaultFor: [],
+      identityLabel: 'openrouter',
+      verdict: 'ready',
+      fix: null,
+    }];
+    const out = stripAnsi(renderAccountRows([row], { heading: false, footer: false, harnessHeadings: false, providers, harness: 'claude', localDevice: 'zion' }));
+    expect(out).toContain('my-openrouter');
+    // Provider usage cell is empty — no S:/W: there
+    const providerLine = out.split('\n').find((l) => l.includes('my-openrouter')) ?? '';
+    expect(providerLine).not.toContain('S:');
+    expect(providerLine).not.toContain('W:');
+  });
+});

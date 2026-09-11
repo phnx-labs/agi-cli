@@ -687,6 +687,7 @@ async function showInstalledVersions(
           harnessHeadings: false,
           providers,
           harness: agentId,
+          maxUsageWindows: usageWindowCap,
           localDevice: machineId(),
         }));
       } else {

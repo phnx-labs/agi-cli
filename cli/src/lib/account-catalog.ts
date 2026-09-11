@@ -23,7 +23,13 @@ import {
   type AccountProvisioning,
   type AccountVerdict,
 } from './signin-badge.js';
-import { renderBar } from './accounting/usage.js';
+import {
+  agentReportsUsage,
+  classifyUsageErrorKind,
+  formatUsageSummary,
+  isUsageHeadlessScopeError,
+  renderBar,
+} from './accounting/usage.js';
 import { padToWidth, stringWidth } from './text/width.js';
 
 export { applyUsageHonesty };
@@ -143,6 +149,17 @@ export interface NativeAccountCatalogRow {
   checkedAt: string | null;
   devices: AccountDeviceVerdict[];
   usage: QuotaSummary | null;
+  /**
+   * The live usage snapshot backing `usage`, or null when none was collected.
+   * Carried alongside the collapsed `QuotaSummary` so the per-window bars
+   * (S: session 5h, W: week 7d, etc.) can render via the canonical
+   * `formatUsageSummary` / `pickCompactUsageWindows` path instead of the
+   * single max-percent bar. Added non-breaking: JSON clients keep `usage`
+   * and may read this when present.
+   */
+  usageSnapshot?: import('./accounting/usage.js').UsageSnapshot | null;
+  /** Raw usage fetch error, for headless/unverified labeling alongside the bars. */
+  usageError?: string | null;
   fix: string | null;
 }
 
@@ -232,6 +249,9 @@ export interface AccountListEntryJson {
     verdict: AccountDeviceVerdict['verdict'];
   }>;
   usage: QuotaSummary | null;
+  /** The live usage snapshot backing `usage`, when available — additive, not breaking. */
+  usageSnapshot?: import('./accounting/usage.js').UsageSnapshot | null;
+  usageError?: string | null;
   fix: string | null;
 }
 
@@ -369,6 +389,8 @@ export function buildNativeCatalog(
       checkedAt: null,
       devices: [],
       usage: null,
+      usageSnapshot: null,
+      usageError: null,
       fix: fixFor({
         agent: group.agent,
         verdict: signedIn ? 'unverified' : 'missing',
@@ -475,6 +497,9 @@ export async function loadAccountCatalog(): Promise<AccountCatalog> {
     );
     row.verdict = honest.verdict;
     row.usage = honest.usage;
+    const inv = localHome ? inventoryByHome.get(`${row.agent}:${localHome.label}`) : undefined;
+    row.usageSnapshot = inv?.snapshot ?? null;
+    row.usageError = inv?.usageError ?? null;
     row.fix = fixFor({
       agent: row.agent,
       verdict: row.verdict,
@@ -560,6 +585,8 @@ export function accountListJson(
         checkedAt: row.checkedAt,
         devices: row.devices.map(({ device, authMode, verdict }) => ({ device, authMode, verdict })),
         usage: row.usage,
+        ...(row.usageSnapshot ? { usageSnapshot: row.usageSnapshot } : {}),
+        ...(row.usageError ? { usageError: row.usageError } : {}),
         fix: row.fix,
       })),
       ...providers.flatMap((row) => providerJsonEntries(row, harness)),
@@ -588,7 +615,51 @@ function whereText(row: NativeAccountCatalogRow, localDevice: string): string {
   return '—';
 }
 
-function usageText(row: NativeAccountCatalogRow): string {
+export const OVERVIEW_MAX_USAGE_WINDOWS = 2;
+
+function usageText(row: NativeAccountCatalogRow, maxWindows?: number): string {
+  // Prefer the per-window compact bars when the underlying snapshot is
+  // available — reuse the canonical formatUsageSummary path so S/W labels,
+  // stale markers, and reset hints render identically to the old version rows.
+  if (row.usageSnapshot) {
+    const headless = row.usageError ? isUsageHeadlessScopeError(row.usageError) : false;
+    const unverified = !headless && !!row.usageSnapshot && !!row.usageError;
+    const rendered = formatUsageSummary(null, row.usageSnapshot, 3, {
+      unverified,
+      headless,
+      maxWindows,
+      expectedWindows: row.agent === 'claude'
+        ? [{ key: 'session', shortLabel: 'S' }, { key: 'week', shortLabel: 'W' }]
+        : undefined,
+      errorKind: row.usageError ? classifyUsageErrorKind(row.usageError) : null,
+      errorDetail: row.usageError,
+    });
+    if (rendered && stripAnsi(rendered).trim().length > 0) {
+      // formatUsageSummary pads plan width (3) with gray spaces; trim that
+      // leading pad when plan is null so the USAGE column starts with S:
+      const trimmed = rendered.trimStart();
+      if (stripAnsi(trimmed).length > 0) return trimmed;
+    }
+    // If snapshot exists but format produced nothing (e.g., empty windows with
+    // no stale and no plan), fall through to the single-bar legacy path below
+    // so "limited" / "no credits" still surface.
+  }
+  if (row.usageError && !row.usageSnapshot) {
+    const headless = isUsageHeadlessScopeError(row.usageError);
+    const signedIn = row.state === 'connected';
+    const rendered = formatUsageSummary(null, null, 3, {
+      unavailable: agentReportsUsage(row.agent) && signedIn && !headless,
+      headless,
+      maxWindows,
+      expectedWindows: row.agent === 'claude'
+        ? [{ key: 'session', shortLabel: 'S' }, { key: 'week', shortLabel: 'W' }]
+        : undefined,
+      errorKind: classifyUsageErrorKind(row.usageError),
+      errorDetail: row.usageError,
+    });
+    const trimmed = rendered.trimStart();
+    if (stripAnsi(trimmed).length > 0) return trimmed;
+  }
   if (row.usage?.status === 'rate_limited' && (row.usage.usedPercent === null || row.usage.usedPercent === undefined)) {
     return 'limited';
   }
@@ -596,6 +667,10 @@ function usageText(row: NativeAccountCatalogRow): string {
   if (row.usage?.usedPercent === null || row.usage?.usedPercent === undefined) return '';
   const percent = `${row.usage.usedPercent}%${row.usage.stale ? '*' : ''}`;
   return `${renderBar(row.usage.usedPercent, LISTING_USAGE_BAR_LEN)} ${percent}`;
+}
+
+function stripAnsi(s: string): string {
+  return s.replace(/\x1b\[[0-9;]*m/g, '');
 }
 
 interface ListingLine {
@@ -608,14 +683,14 @@ interface ListingLine {
   isDefault: boolean;
 }
 
-function nativeLine(row: NativeAccountCatalogRow, localDevice: string): ListingLine {
+function nativeLine(row: NativeAccountCatalogRow, localDevice: string, maxWindows?: number): ListingLine {
   return {
     name: row.name ?? 'unnamed',
     identityLabel: row.identityLabel,
     verdict: row.verdict,
     where: whereText(row, localDevice),
     fix: row.fix,
-    usage: usageText(row),
+    usage: usageText(row, maxWindows),
     isDefault: row.isDefault,
   };
 }
@@ -681,6 +756,12 @@ export function renderAccountRows(
     /** When set, emit only this harness's group — never a sibling or empty group. */
     harness?: AgentId;
     /**
+     * Cap for compact usage windows — overview (no harness filter) passes 2,
+     * single-harness view leaves it undefined to show all blocking windows.
+     * Mirrors `OVERVIEW_MAX_USAGE_WINDOWS` in view.ts.
+     */
+    maxUsageWindows?: number;
+    /**
      * Device name treated as "this box" in WHERE when it is the only reporter.
      * The command layer passes `machineId()`; this renderer never resolves it.
      */
@@ -711,10 +792,11 @@ export function renderAccountRows(
         if (!harnessFilter || agent === harnessFilter) harnesses.add(agent);
       }
     }
+    const maxWindows = opts.maxUsageWindows ?? (opts.harness ? undefined : OVERVIEW_MAX_USAGE_WINDOWS);
     const grouped = new Map<AgentId, ListingLine[]>();
     for (const harness of [...harnesses].sort((a, b) => a.localeCompare(b))) {
       const lines = [
-        ...visibleNative.filter((row) => row.agent === harness).map((row) => nativeLine(row, localDevice)),
+        ...visibleNative.filter((row) => row.agent === harness).map((row) => nativeLine(row, localDevice, maxWindows)),
         ...visibleProviders.filter((row) => row.harnesses.includes(harness)).map((row) => providerLine(row, harness)),
       ];
       if (lines.length === 0) continue;
