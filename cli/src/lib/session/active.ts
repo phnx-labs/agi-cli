@@ -169,7 +169,7 @@ type ActiveContext = 'terminal' | 'teams' | 'cloud' | 'headless';
 /** The SessionMeta fields the live-row backfill reads — the enrichment a running process cannot report. */
 export type BackfillMeta = Pick<SessionMeta,
   'version' | 'account' | 'timestamp' | 'label' | 'firstUserMessage' | 'lastUserMessage' | 'ticketId' | 'prUrl' | 'prNumber' | 'origin' | 'routineName' | 'harness' |
-  'tokenCount' | 'durationMs' | 'subAgentCount'
+  'tokenCount' | 'durationMs' | 'subAgentCount' | 'lastActivity'
 >;
 
 export function backfillActiveRowsFromMeta(
@@ -197,6 +197,12 @@ export function backfillActiveRowsFromMeta(
     if (s.tokenCount == null && m.tokenCount != null) s.tokenCount = m.tokenCount;
     if (s.durationMs == null && m.durationMs != null) s.durationMs = m.durationMs;
     if (s.subAgentCount == null && m.subAgentCount != null) s.subAgentCount = m.subAgentCount;
+    // A pane kept open for days has a start time but no activity signal of its
+    // own; the index's last transcript write is what "idle 14d" is read from.
+    if (s.lastActivityMs == null && m.lastActivity) {
+      const ts = Date.parse(m.lastActivity);
+      if (!Number.isNaN(ts)) s.lastActivityMs = ts;
+    }
   }
 }
 

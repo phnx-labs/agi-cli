@@ -489,6 +489,19 @@ describe('backfillActiveRowsFromMeta (firstUserMessage rides live rows, PHNX-362
     expect(rows[0].version).toBe('2.1.207');
   });
 
+  it('backfills lastActivityMs from the index for a live row with no activity signal of its own', () => {
+    const rows: ActiveSession[] = [
+      { context: 'terminal', kind: 'claude', sessionId: 's1', status: 'running', startedAtMs: 1_000 },
+      { context: 'terminal', kind: 'claude', sessionId: 's2', status: 'running', lastActivityMs: 5_000 },
+    ];
+    backfillActiveRowsFromMeta(rows, new Map([
+      ['s1', { lastActivity: '2026-09-11T10:00:00.000Z' }],
+      ['s2', { lastActivity: '2026-09-11T10:00:00.000Z' }],
+    ]));
+    expect(rows[0].lastActivityMs).toBe(Date.parse('2026-09-11T10:00:00.000Z'));
+    expect(rows[1].lastActivityMs).toBe(5_000);
+  });
+
   it('never clobbers a firstUserMessage the row already carries', () => {
     const rows: ActiveSession[] = [
       { context: 'terminal', kind: 'claude', sessionId: 's1', status: 'running', firstUserMessage: 'live value' },

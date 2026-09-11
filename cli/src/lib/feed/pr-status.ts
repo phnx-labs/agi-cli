@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { ActiveSession } from '../session/active.js';
 import type { DetectedPr } from '../session/state.js';
+import type { GhExec } from '../github/pr-mergeable.js';
 import type { PullRequestAttentionSignal } from './attention.js';
 
 const execFileAsync = promisify(execFile);
@@ -28,7 +29,7 @@ function needsHuman(value: Omit<PullRequestStatus, 'needsHuman'>): boolean {
 /** CLI-owned bounded-TTL source shared by feed attention and PR-board consumers. */
 export async function readPullRequestStatus(
   session: ActiveSession,
-  options: { nowMs?: number; ttlMs?: number } = {},
+  options: { nowMs?: number; ttlMs?: number; gh?: GhExec } = {},
 ): Promise<PullRequestStatus | undefined> {
   const ref = session.pr?.url ?? session.pr?.number;
   if (!ref || !session.cwd) return undefined;
@@ -36,12 +37,11 @@ export async function readPullRequestStatus(
   const now = options.nowMs ?? Date.now();
   const hit = cache.get(key);
   if (hit && hit.expiresAt > now) return hit.value;
+  const cwd = session.cwd;
+  const gh: GhExec = options.gh ?? (async (args) =>
+    (await execFileAsync('gh', args, { cwd, timeout: 15_000, maxBuffer: 1024 * 1024 })).stdout);
   try {
-    const { stdout } = await execFileAsync('gh', ['pr', 'view', String(ref), '--json', PR_STATUS_FIELDS], {
-      cwd: session.cwd,
-      timeout: 15_000,
-      maxBuffer: 1024 * 1024,
-    });
+    const stdout = await gh(['pr', 'view', String(ref), '--json', PR_STATUS_FIELDS]);
     const raw = JSON.parse(stdout) as Omit<PullRequestStatus, 'needsHuman'>;
     const value: PullRequestStatus = { ...raw, url: session.pr?.url, needsHuman: needsHuman(raw) };
     cache.set(key, { expiresAt: now + (options.ttlMs ?? PR_STATUS_TTL_MS), value });
@@ -59,15 +59,19 @@ export async function projectPullRequestBoard(sessions: ActiveSession[]): Promis
 
 export function resetPullRequestStatusCache(): void { cache.clear(); }
 
-/** The check rollup folded to one verdict; undefined when the PR has no checks. */
+/**
+ * The check rollup folded to one verdict; undefined when the PR has no checks.
+ * `statusCheckRollup` mixes Checks-API runs (`conclusion` + `status`) with
+ * legacy Status-API contexts (`state` only), so both shapes are read.
+ */
 export function checksVerdict(rollup?: unknown[]): DetectedPr['checks'] {
   if (!rollup || rollup.length === 0) return undefined;
   let pending = false;
   for (const check of rollup) {
-    const row = check as { conclusion?: string; status?: string };
-    const conclusion = (row.conclusion ?? '').toUpperCase();
-    if (['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE'].includes(conclusion)) return 'failing';
-    if (!conclusion && (row.status ?? '').toUpperCase() !== 'COMPLETED') pending = true;
+    const row = check as { conclusion?: string; status?: string; state?: string };
+    const verdict = (row.conclusion || row.state || '').toUpperCase();
+    if (['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE'].includes(verdict)) return 'failing';
+    if (verdict === '' ? (row.status ?? '').toUpperCase() !== 'COMPLETED' : ['PENDING', 'EXPECTED', 'STALE'].includes(verdict)) pending = true;
   }
   return pending ? 'pending' : 'passing';
 }

@@ -13,6 +13,7 @@ import { reconcileAttention, type AttentionItem } from './attention.js';
 import { type ActivityEvent } from './activity.js';
 import { ActivityStream } from './activity-stream.js';
 import { PR_STATUS_TTL_MS, readPullRequestStatus, withPullRequestStatus, type PullRequestStatus } from './pr-status.js';
+import type { GhExec } from '../github/pr-mergeable.js';
 
 export const FEED_WATCH_VERSION = 1 as const;
 type Base = { v: 1; type: string; streamId: string; sequence: number; scope: string };
@@ -55,9 +56,9 @@ function reconcilerSession(agent: SessionWatchRow): import('../session/active.js
 }
 
 /** One `gh pr view` (cached 45 s) feeds both the attention verdict and the row's `pr` status. */
-async function pullRequestFor(agent: SessionWatchRow): Promise<PullRequestStatus | undefined> {
+async function pullRequestFor(agent: SessionWatchRow, gh?: GhExec): Promise<PullRequestStatus | undefined> {
   if (!isLive(agent) || !agent.pr) return undefined;
-  return readPullRequestStatus(reconcilerSession(agent));
+  return readPullRequestStatus(reconcilerSession(agent), { gh });
 }
 
 function attentionFor(agent: SessionWatchRow, pullRequest: PullRequestStatus | undefined): AttentionItem | undefined {
@@ -71,19 +72,19 @@ function attentionFor(agent: SessionWatchRow, pullRequest: PullRequestStatus | u
 }
 
 /** The row as the feed projects it: the session row with its PR status attached. */
-async function projectAgent(agent: SessionWatchRow): Promise<{ agent: SessionWatchRow; attention: AttentionItem | undefined }> {
-  const pullRequest = await pullRequestFor(agent);
+async function projectAgent(agent: SessionWatchRow, gh?: GhExec): Promise<{ agent: SessionWatchRow; attention: AttentionItem | undefined }> {
+  const pullRequest = await pullRequestFor(agent, gh);
   return { agent: withPullRequestStatus(agent, pullRequest), attention: attentionFor(agent, pullRequest) };
 }
 
-export async function projectSessionEnvelope(event: SessionWatchEnvelope, state: FeedWatchState): Promise<FeedWatchEnvelope[]> {
+export async function projectSessionEnvelope(event: SessionWatchEnvelope, state: FeedWatchState, gh?: GhExec): Promise<FeedWatchEnvelope[]> {
   if (event.type === 'reset') {
-    const projected = await Promise.all(event.rows.map(projectAgent));
+    const projected = await Promise.all(event.rows.map((row) => projectAgent(row, gh)));
     const attention = projected.map((p) => p.attention).filter((item): item is AttentionItem => item !== undefined);
     return [state.emit({ type: 'reset', capturedAt: event.capturedAt, scope: event.scope, agents: projected.map((p) => p.agent), attention })];
   }
   if (event.type === 'upsert') {
-    const { agent, attention } = await projectAgent(event.row);
+    const { agent, attention } = await projectAgent(event.row, gh);
     return [
       state.emit({ type: 'agent.upsert', scope: event.scope, rowKey: event.rowKey, agent }),
       attention
@@ -131,6 +132,8 @@ export interface WatchLocalFeedOptions {
   reconcileMs?: number;
   /** Session-watch inputs, forwarded verbatim to {@link watchLocalSessions}. */
   sessions?: Pick<WatchLocalOptions, 'readCache' | 'readPrevious' | 'journalPath' | 'journalPollMs' | 'heartbeatMs'>;
+  /** The `gh` runner behind PR status; a test passes a recorded table. */
+  gh?: GhExec;
 }
 
 export async function watchLocalFeed(options: WatchLocalFeedOptions): Promise<void> {
@@ -150,7 +153,7 @@ export async function watchLocalFeed(options: WatchLocalFeedOptions): Promise<vo
   let pending = Promise.resolve();
   const reconcileRows = async () => {
     for (const [rowKey, raw] of agents) {
-      const { agent, attention: item } = await projectAgent(raw);
+      const { agent, attention: item } = await projectAgent(raw, options.gh);
       const nextPr = agent.pr ? JSON.stringify(agent.pr) : '';
       if (agent.pr && prStatus.get(rowKey) !== nextPr) {
         prStatus.set(rowKey, nextPr);
@@ -196,7 +199,7 @@ export async function watchLocalFeed(options: WatchLocalFeedOptions): Promise<vo
         for (const row of event.rows) agents.set(row.rowKey, row);
       } else if (event.type === 'upsert') agents.set(event.rowKey, event.row);
       else if (event.type === 'remove') { agents.delete(event.rowKey); attention.delete(event.rowKey); prStatus.delete(event.rowKey); }
-      pending = pending.then(() => projectSessionEnvelope(event, state)).then((events) => {
+      pending = pending.then(() => projectSessionEnvelope(event, state, options.gh)).then((events) => {
         for (const projected of events) {
           if (projected.type === 'reset') {
             attention.clear();
