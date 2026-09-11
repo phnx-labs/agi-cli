@@ -16,7 +16,7 @@
  */
 
 import type { FleetStatusRow } from './fleet-status.js';
-import { AUTH_PROBE_MAX_AGE_MS, type AuthProbeRow } from './auth-health.js';
+import { AUTH_PROBE_MAX_AGE_MS, authTargetKey, type AuthProbeRow } from './auth-health.js';
 export { AUTH_PROBE_MAX_AGE_MS } from './auth-health.js';
 
 export function isFreshFleetAuthSnapshot(
@@ -43,16 +43,41 @@ export function isFreshFleetAuthSnapshot(
  * publishes every tick — it does not ride that endpoint.
  */
 /**
- * True when every cached auth row was probed within {@link AUTH_PROBE_MAX_AGE_MS}
- * — i.e. reusing them would not let a verdict get staler than one probe window.
- * Empty cache is never fresh (nothing to reuse). Pure — unit-tested.
+ * The cached rows still backed by a home on this device, by `authTargetKey`.
+ *
+ * A row for an uninstalled version is an ORPHAN: the probe enumerates installed
+ * homes + account slots, so nothing re-probes it and its `checkedAt` is frozen
+ * at whatever the last probe left. Pure — unit-tested.
+ */
+export function installedAuthRows(
+  authRows: readonly AuthProbeRow[],
+  installedTargets: ReadonlySet<string>,
+): AuthProbeRow[] {
+  return authRows.filter((r) => installedTargets.has(authTargetKey(r.agent, r.version)));
+}
+
+/**
+ * True when every cached auth row FOR AN INSTALLED HOME was probed within
+ * {@link AUTH_PROBE_MAX_AGE_MS} — i.e. reusing them would not let a verdict get
+ * staler than one probe window. No installed row is never fresh (nothing to
+ * reuse). Pure — unit-tested.
+ *
+ * Orphan rows are excluded rather than counted stale (PHNX-4051). Counting them
+ * made this permanently false on any box that had ever uninstalled a version:
+ * the orphan can never be re-probed, so the tick live-probed the rate-limited
+ * `/api/oauth/usage` for every account every 3 minutes, re-arming the per-account
+ * 429 backoff and parking the usage refresher — the RUSH-2998 failure the reuse
+ * window exists to prevent. Observed on yosemite-m0 (rows dated Sep 2 / Sep 6 for
+ * uninstalled Claude versions).
  */
 export function isCachedFleetAuthProbeFresh(
-  authRows: AuthProbeRow[],
+  authRows: readonly AuthProbeRow[],
   now: number,
+  installedTargets: ReadonlySet<string>,
   maxAgeMs: number = AUTH_PROBE_MAX_AGE_MS,
 ): boolean {
-  return authRows.length > 0 && authRows.every((r) => now - r.health.checkedAt < maxAgeMs);
+  const installed = installedAuthRows(authRows, installedTargets);
+  return installed.length > 0 && installed.every((r) => now - r.health.checkedAt < maxAgeMs);
 }
 
 /**
@@ -65,11 +90,12 @@ export function isCachedFleetAuthProbeFresh(
  */
 export function shouldReuseCachedAuthProbe(
   force: boolean,
-  cached: AuthProbeRow[],
+  cached: readonly AuthProbeRow[],
   now: number,
+  installedTargets: ReadonlySet<string>,
   maxAgeMs: number = AUTH_PROBE_MAX_AGE_MS,
 ): boolean {
-  return !force && isCachedFleetAuthProbeFresh(cached, now, maxAgeMs);
+  return !force && isCachedFleetAuthProbeFresh(cached, now, installedTargets, maxAgeMs);
 }
 
 /**
@@ -87,7 +113,7 @@ export async function refreshLocalFleetAuthState(
   const force = opts?.force === true;
   const signal = opts?.signal;
   const { machineId } = await import('./machine-id.js');
-  const { probeLocalFleetAuth, readFleetAuthRows, writeFleetAuthRows } = await import('./auth-health.js');
+  const { probeLocalFleetAuth, readFleetAuthRows, writeFleetAuthRows, localAuthTargetKeys } = await import('./auth-health.js');
   const { getCliVersion } = await import('./version.js');
   const self = machineId();
   const requestedAt = Date.now();
@@ -110,10 +136,15 @@ export async function refreshLocalFleetAuthState(
       // Re-probe the rate-limited /oauth/usage endpoint at most every
       // AUTH_PROBE_MAX_AGE_MS; reuse the last real verdict in between (RUSH-2998).
       // Fleet status publishes every tick regardless — it does not ride that endpoint.
+      const installed = localAuthTargetKeys();
       const cached = readFleetAuthRows(self);
-      const reuse = shouldReuseCachedAuthProbe(force, cached, requestedAt);
-      const authRows = reuse ? cached : await probeLocalFleetAuth({ cliVersion: getCliVersion(), forceLive: force, signal });
-      if (!reuse) writeFleetAuthRows(self, authRows);
+      const live = installedAuthRows(cached, installed);
+      const reuse = shouldReuseCachedAuthProbe(force, cached, requestedAt, installed);
+      const authRows = reuse ? live : await probeLocalFleetAuth({ cliVersion: getCliVersion(), forceLive: force, signal });
+      // Write when we probed, and ALSO when the cache holds orphan rows for homes
+      // that are gone: a reusing tick is the common case, so leaving the prune on
+      // the probe branch would keep them in `agents view` indefinitely (PHNX-4051).
+      if (!reuse || live.length !== cached.length) writeFleetAuthRows(self, authRows, installed);
       const row = await publishLocalFleetStatus(self);
       return { row, authRows };
     },
