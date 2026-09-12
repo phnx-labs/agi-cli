@@ -2,14 +2,14 @@
  * The fd-3 context is the engine's input contract, so its SHAPE is the thing
  * under test: the engine accepts `version`/`permissions`/`peers`/`target`/
  * `session` and nothing else. A field the engine does not read is not a
- * harmless extra — it is a second, drifting copy of an answer that already
- * travels in the environment.
+ * harmless extra — it is a second, drifting copy of an answer the engine
+ * already resolves for itself (the transport it hydrates from its own tunnel
+ * state, for one).
  */
 import { describe, expect, it, afterEach } from 'vitest';
-import { buildComputerContext, computerTransportEnv } from './context.js';
+import { buildComputerContext } from './context.js';
 
 const ENV_KEYS = [
-  'COMPUTER_HELPER_TCP',
   'CODEX_THREAD_ID',
   'CLAUDE_CODE_SESSION_ID',
   'CLAUDE_SESSION_ID',
@@ -63,25 +63,5 @@ describe('buildComputerContext', () => {
 
   it('omits the target for a local invocation', async () => {
     expect((await buildComputerContext()).target).toBeUndefined();
-  });
-});
-
-describe('computerTransportEnv', () => {
-  it('overlays nothing for a local invocation, leaving the inherited env alone', () => {
-    for (const key of ENV_KEYS) setEnv(key, undefined);
-    expect(computerTransportEnv()).toEqual({});
-  });
-
-  it('publishes a freshly opened tunnel endpoint on the var the engine reads', () => {
-    // `start --device` has just opened a tunnel and knows its port before any
-    // state file is re-read; only the fleet layer can know it at all.
-    for (const key of ENV_KEYS) setEnv(key, undefined);
-    expect(computerTransportEnv({ tcpOverride: { host: '127.0.0.1', port: 51234 } }))
-      .toEqual({ COMPUTER_HELPER_TCP: '127.0.0.1:51234' });
-  });
-
-  it('does not overlay a device with no live tunnel — the engine keeps the ambient transport', () => {
-    for (const key of ENV_KEYS) setEnv(key, undefined);
-    expect(computerTransportEnv({ device: 'no-such-device-tunnel' })).toEqual({});
   });
 });

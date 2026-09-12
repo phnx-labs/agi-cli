@@ -18,6 +18,13 @@
  *
  * Transport — inherited-fd passthrough, not request/response:
  *
+ * The engine's ENVIRONMENT is inherited verbatim — no overlay. Transport
+ * selection (`COMPUTER_HELPER_TCP`, `COMPUTER_HELPER_VNC`,
+ * `COMPUTER_HELPER_SOCKET`) is the engine's: it opens the `--device` tunnel and
+ * hydrates its own endpoint AND the auth token that goes with it. Publishing a
+ * bare endpoint from here would hand the daemon a connection it then rejects
+ * with `auth_failed`.
+ *
  *   - stdio 0/1/2 are INHERITED. The engine owns the user's terminal: its
  *     stdout is the command's stdout, its `--json` is the command's `--json`,
  *     its prompts reach a real tty. agents-cli never re-formats engine output,
@@ -165,16 +172,6 @@ export interface RunComputerOptions {
   /** Called once per action event the engine reports on fd 4. */
   onEvent?: (event: ComputerActionEvent) => void;
   /**
-   * Environment overlay on top of the inherited environment.
-   *
-   * The engine reads its transport and its home from env, which it inherits
-   * unchanged; this overlay is for the one value it cannot inherit — the
-   * loopback endpoint of a `--device` tunnel agents-cli just opened
-   * (`computerTransportEnv` in `lib/computer/context.ts`). It is never a second
-   * channel for the context: that is fd 3.
-   */
-  env?: NodeJS.ProcessEnv;
-  /**
    * Capture the engine's stdout instead of inheriting the terminal.
    *
    * Used only where agents-cli must READ an answer rather than show it — the
@@ -207,7 +204,6 @@ export async function runComputer(opts: RunComputerOptions): Promise<RunComputer
     stdio: ['inherit', opts.capture ? 'pipe' : 'inherit', 'inherit', 'pipe', 'pipe'],
     env: {
       ...process.env,
-      ...opts.env,
       COMPUTER_CONTEXT_FD: String(COMPUTER_CONTEXT_FD),
       COMPUTER_EVENTS_FD: String(COMPUTER_EVENTS_FD),
     },

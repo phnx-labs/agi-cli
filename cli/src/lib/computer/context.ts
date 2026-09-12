@@ -12,17 +12,21 @@
  *                would have to re-learn resource layering to compute this.
  *   peers        which executables the daemon accepts a connection from.
  *   target       the `--device <name>` target, resolved against the fleet:
- *                devices registry, ssh identity, platform. Absent for a local
- *                invocation.
+ *                devices registry, ssh identity, platform. The engine matches
+ *                its own `--device <alias>` against this instead of reading a
+ *                registry it does not have. Absent for a local invocation.
  *   session      who is acting — actor id and agent session — so an action
  *                lands in the right session history.
  *
  * WHAT IS DELIBERATELY NOT HERE. The transport (`COMPUTER_HELPER_TCP`,
- * `COMPUTER_HELPER_VNC`, `COMPUTER_HELPER_SOCKET`) and the policy-file paths
- * travel in the environment the engine already inherits from this process —
- * putting them in the context too would be a second, drifting copy of the same
- * answer. Service-manager safety (launchd/systemd registration under a
- * redirected HOME) is the standalone's own: it inherits `HOME` and
+ * `COMPUTER_HELPER_VNC`, `COMPUTER_HELPER_SOCKET`), the remote helper's auth
+ * token, and the policy-file paths are the ENGINE's: it provisions the Windows
+ * helper, mints and stores the token, opens the `ssh -L` tunnel and hydrates its
+ * own transport from the state it wrote. agents-cli publishing a loopback
+ * endpoint here (or on `COMPUTER_HELPER_TCP`) would be a second, drifting copy
+ * of that answer — and a copy without the token, which the daemon rejects with
+ * `auth_failed`. Service-manager safety (launchd/systemd registration under a
+ * redirected HOME) is likewise the standalone's own: it inherits `HOME` and
  * `AGENTS_REAL_HOME` and renders its own manifest, so agents-cli neither
  * computes a label nor issues a verdict for it.
  *
@@ -33,7 +37,6 @@
 
 import { resolveActor } from '../actor.js';
 import { loadComputerAllowList, loadDefaultPeers } from './policy.js';
-import { resolveDeviceEndpoint } from './remote.js';
 import { resolveRemoteDevice } from '../ssh-tunnel.js';
 
 /** A `--device <name>` target, resolved against the fleet. */
@@ -84,39 +87,6 @@ export interface BuildContextOptions {
   device?: string;
   /** Resolved path of the standalone executable, for the peer allow list. */
   computerBin?: string;
-}
-
-/**
- * Inputs to the transport overlay, deliberately a DIFFERENT type from
- * {@link BuildContextOptions}: a transport hint must not be passable to the
- * context builder, which would silently ignore it.
- */
-export interface TransportEnvOptions {
-  /** `--device <name>`, if given. */
-  device?: string;
-  /** An endpoint the caller just created (`start --device`), before state is re-read. */
-  tcpOverride?: { host: string; port: number };
-}
-
-/**
- * The transport overlay for the engine's environment.
- *
- * Transport selection is env-driven and the engine reads it directly — a user
- * who exported `COMPUTER_HELPER_TCP` or `COMPUTER_HELPER_VNC` needs nothing from
- * us, since the child inherits this process's environment. The ONE endpoint
- * agents-cli computes is the loopback port a `--device` tunnel landed on: only
- * the fleet layer opened that tunnel, so only it knows the port. It is published
- * on the same env var the engine already reads, rather than as a second
- * transport channel in the context.
- *
- * Returns an empty overlay for a local invocation, so the inherited environment
- * is left exactly as the user set it.
- */
-export function computerTransportEnv(opts: TransportEnvOptions = {}): NodeJS.ProcessEnv {
-  const endpoint = opts.tcpOverride
-    ?? (opts.device ? resolveDeviceEndpoint(opts.device) : null);
-  if (!endpoint) return {};
-  return { COMPUTER_HELPER_TCP: `${endpoint.host}:${endpoint.port}` };
 }
 
 /**

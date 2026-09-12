@@ -11,31 +11,20 @@
  * devices registry, the hardened ssh baseline, a local loopback port — and
  * belongs in the fleet layer, not under a feature.
  *
- * Both remaining callers are thin:
- *   - `browser/drivers/ssh.ts` holds a foreground tunnel for one CDP session.
- *   - `commands/computer.ts` opens a DETACHED tunnel for `--device` and hands
- *     the resulting loopback endpoint to the standalone engine in its context
- *     (`lib/computer/context.ts`). Fleet resolution stays on this side of the
- *     seam; the engine only ever sees `127.0.0.1:<port>`.
+ * Its callers are thin: `browser/drivers/ssh.ts` holds a tunnel for one CDP
+ * session, and `lib/computer/context.ts` uses `resolveRemoteDevice` alone —
+ * `agents computer --device` resolves the fleet name here and forwards the
+ * answer to the standalone engine, which opens and owns its own tunnel (it
+ * holds the helper token that tunnel's transport needs).
  */
 
 import { spawn, type ChildProcess } from 'child_process';
-import * as net from 'net';
 import { SSH_OPTS, assertValidSshTarget } from './ssh-exec.js';
-import { backgroundSpawnOptions } from './platform/process.js';
 import { getDevice, type DeviceProfile } from './devices/registry.js';
 import { deviceIdentityArgs, sshTargetFor } from './devices/connect.js';
 import { hostNameFor } from './devices/ssh-config.js';
 
 export interface StartTunnelOptions {
-  /**
-   * Detach the tunnel so it OUTLIVES this CLI process. Used by
-   * `agents computer start --device` — the tunnel must persist across separate
-   * verb invocations (`apps`, `click`, …) until `stop --device` tears it down.
-   * The browser driver leaves this false: it holds the tunnel for the lifetime
-   * of one CDP session and kills it on cleanup.
-   */
-  detached?: boolean;
   extraSshArgs?: string[];
 }
 
@@ -64,10 +53,9 @@ export function buildTunnelArgs(
 /**
  * Spawn `ssh -L localPort:127.0.0.1:remotePort -N user@host`.
  *
- * Foreground (default): stderr is captured so a tunnel that dies inside 500ms
- * rejects with the ssh error — the browser driver's original contract. Detached
- * mode ignores stdio and `unref`s the child so the parent can exit while the
- * tunnel lives; liveness is then confirmed by the caller probing the service.
+ * stderr is captured so a tunnel that dies inside 500ms rejects with the ssh
+ * error — the browser driver's original contract. The tunnel is held by this
+ * process for the lifetime of the session that opened it.
  */
 export function startSSHTunnel(
   user: string,
@@ -91,8 +79,9 @@ export function startSSHTunnel(
     const args = buildTunnelArgs(user, host, localPort, remotePort, opts.extraSshArgs);
 
     const tunnel = spawn('ssh', args, {
-      stdio: opts.detached ? 'ignore' : ['ignore', 'ignore', 'pipe'],
-      ...(opts.detached ? backgroundSpawnOptions() : { detached: false, windowsHide: true }),
+      stdio: ['ignore', 'ignore', 'pipe'],
+      detached: false,
+      windowsHide: true,
     });
 
     let stderr = '';
@@ -105,27 +94,9 @@ export function startSSHTunnel(
     });
 
     setTimeout(() => {
-      if (tunnel.killed) {
-        reject(new Error(`SSH tunnel died: ${stderr}`));
-      } else {
-        // Let the CLI exit without waiting on a persistent tunnel.
-        if (opts.detached) tunnel.unref();
-        resolve(tunnel);
-      }
+      if (tunnel.killed) reject(new Error(`SSH tunnel died: ${stderr}`));
+      else resolve(tunnel);
     }, 500);
-  });
-}
-
-/** Reserve a free local TCP port by binding :0 and reading the assigned port. */
-export function pickFreePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = net.createServer();
-    srv.once('error', reject);
-    srv.listen(0, '127.0.0.1', () => {
-      const addr = srv.address();
-      const port = typeof addr === 'object' && addr ? addr.port : 0;
-      srv.close(() => (port ? resolve(port) : reject(new Error('could not reserve a local port'))));
-    });
   });
 }
 

@@ -40,7 +40,7 @@ agent process
      ▼
   agents-cli  (commands/computer.ts)
      │         · permissions  → the allow + peer lists            (lib/computer/policy.ts)
-     │         · --device     → fleet resolution + ssh -L tunnel  (lib/computer/remote.ts)
+     │         · --device     → fleet resolution (forwarded + on fd 3)
      │         · actor/session identity                           (lib/computer/context.ts)
      │
      │  spawn, env INHERITED (transport + HOME travel there), stdio 0/1/2 INHERITED
@@ -50,7 +50,7 @@ agent process
   computer  (@phnx-labs/computer-cli)
      │
      │  JSON-RPC over UNIX socket ~/.agents/.cache/helpers/computer.sock  (macOS)
-     │  JSON-RPC over loopback TCP through the tunnel                     (--device)
+     │  JSON-RPC over loopback TCP through the tunnel IT opens             (--device)
      │  RFB                                                               (--vnc)
      ▼
   helper daemon  →  the app
@@ -67,7 +67,8 @@ feed and the session ledger — that is what `agents computer sessions` and
 | Helper daemons, RPC, RFB/VNC, `run` loop | the engine | It is the automation; it releases on its own cadence |
 | Helper download + signature/notarization checks | the engine | It resolves its own helper releases; agents-cli version-pins nothing |
 | App allow list (`Computer(<bundle-id>)` rules) | agents-cli | Derived from the agents permissions resource layer |
-| `--device` resolution and the ssh tunnel | agents-cli | It owns the devices registry, ssh identity, and the fleet |
+| `--device` name → a resolved ssh target | agents-cli | It owns the devices registry, ssh identity, and the fleet |
+| Windows provisioning, the helper token, the ssh tunnel | the engine | It mints the token and holds the tunnel state the transport needs; a half-connection from outside would auth-fail |
 | Action history, feed events, actor identity | agents-cli | It owns `sessions.db` and the feed |
 | Daemon service registration (launchd/systemd) | the engine | It writes its own manifest and inherits the redirected `HOME` |
 | Per-verb flags and their `--help` | the engine | One surface, not a drifting copy |
@@ -90,9 +91,13 @@ the transport (`COMPUTER_HELPER_TCP`, `COMPUTER_HELPER_VNC`,
 `COMPUTER_HELPER_SOCKET`), the policy-file paths, and `HOME` / `AGENTS_REAL_HOME`
 all travel in the environment the child inherits. Restating any of them in the
 context would be a second copy of the same answer, free to drift from the first.
-The one endpoint agents-cli must publish is the loopback port a `--device` tunnel
-just landed on — only the fleet layer opened it — and that goes out on
-`COMPUTER_HELPER_TCP`, the var the engine already reads, not as a context field.
+That includes the remote endpoint: the engine opens the `--device` tunnel and
+hydrates its own `COMPUTER_HELPER_TCP` **together with the helper token it
+minted at setup**, so a loopback endpoint published from agents-cli would be a
+port without the secret the daemon demands — the verb would fail `auth_failed`
+against a healthy tunnel. agents-cli's half is the NAME → target resolution in
+`target` above, plus the same `--device <name>` on the engine's argv so it
+selects the remote path at all.
 
 Service-manager safety is the standalone's own. It renders and registers its own
 launchd/systemd manifest, and it inherits the redirected `HOME` directly, so it
@@ -358,21 +363,28 @@ the full text.
 ## Remote Windows (`--device`)
 
 Every verb takes `--device <device>` to drive a Windows machine registered with
-`agents devices`: `setup --device` pushes the C# daemon
-(`computer-helper-win.exe`) and registers a LOGON scheduled task,
-`start --device` opens an `ssh -L` tunnel to its loopback port, and every other
-verb reconnects through that tunnel. The daemon mirrors the macOS wire
-contract, with these Windows specifics:
+`agents devices`. agents-cli resolves the name against the fleet — registry, ssh
+identity, platform — and forwards both the resolved target (on fd 3) and the
+`--device` flag itself to the engine; the engine owns the rest. `setup --device`
+pushes the C# daemon (`computer-helper-win.exe`), registers a LOGON scheduled
+task and mints the helper's auth token, `start --device` opens an `ssh -L`
+tunnel to its loopback port, and every other verb reconnects through that
+tunnel — provisioning and starting it on demand if no live one is recorded, so a
+plain verb against a fresh device works without a separate `start`. The daemon
+mirrors the macOS wire contract, with these Windows specifics:
 
 - **Screenshots are pid-scoped, PNG-encoded.** `--list` enumerates the target
   pid's top-level windows (`window_id` is the Win32 HWND — the same id
   `raise --window-id` takes), the default capture crops to the pid's largest
   on-screen window, `--window-id` shoots one window, `--display` the whole
   display the app is on. `--quality` is ignored (lossless PNG).
-- **Lifecycle:** `status --device <device>` reports the recorded tunnel and a
-  live daemon probe; `reload --device <device>` restarts the daemon's scheduled
-  task (the way to pick up a freshly pushed exe) and confirms it answers.
-  There is no allow-list policy on Windows — the daemon is tunnel-gated.
+- **Lifecycle:** `status --device <device>` reports the target, the transport
+  and a live daemon probe; `reload --device <device>` restarts the daemon's
+  scheduled task (the way to pick up a freshly pushed exe) and confirms it
+  answers; `stop --device <device>` closes the tunnel and unregisters the task.
+  There is no allow-list policy on Windows — the daemon is token- and
+  tunnel-gated, so `agents computer reload` renders this machine's allow list
+  only for the LOCAL helper.
 - **`--require-frontmost` is enforced:** Windows synthetic input lands in the
   *focused* window, so `type-text`/`key` report `frontmost` and the flag turns
   a non-foreground target into a hard `not_frontmost` error.
@@ -385,7 +397,7 @@ contract, with these Windows specifics:
 ```bash
 agents computer setup --device win-mini      # push exe + register LOGON task
 agents computer start --device win-mini      # open the tunnel
-agents computer status --device win-mini     # tunnel + daemon liveness
+agents computer status --device win-mini     # target, transport + daemon liveness
 agents computer screenshot --device win-mini --pid 27180 --list
 agents computer reload --device win-mini     # restart the remote daemon
 agents computer stop --device win-mini       # tear down tunnel + task
