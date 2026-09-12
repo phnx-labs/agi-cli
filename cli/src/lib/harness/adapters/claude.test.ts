@@ -186,7 +186,12 @@ describe('claudeWorkerLoginTrapPreflight — refuse the worker login-screen trap
     );
   });
 
-  it('treats an UNMARKED device (undefined role) as a worker — still refuses', () => {
+  it('does NOT gate an UNMARKED device (undefined role) — may be an unconfigured personal box whose first-run login is legitimate', () => {
+    // Only an EXPLICIT role:worker box is gated. An unmarked box could be a
+    // laptop not yet marked/logged-in, where Claude Code's login screen is the
+    // correct first-run flow — and we must not probe its native login on the hot
+    // path (a macOS keychain auth sheet). `--device auto` only lands on explicit
+    // workers, so the dispatched trap is still caught.
     expect(
       claudeWorkerLoginTrapPreflight({
         agent: 'claude',
@@ -194,7 +199,7 @@ describe('claudeWorkerLoginTrapPreflight — refuse the worker login-screen trap
         deviceRole: undefined,
         hasSetupToken: false,
       }),
-    ).toBeTruthy();
+    ).toBeNull();
   });
 
   it('allows the run when a durable setup-token DID resolve on the worker', () => {

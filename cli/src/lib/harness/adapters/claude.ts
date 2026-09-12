@@ -139,9 +139,9 @@ fi
 
 /**
  * Fail-loud preflight for the worker login-screen trap — the sibling of the
- * PHNX-3502 fix. On a worker (non-headed) device every Claude run authenticates
- * from the synced `setup-token`, never an interactive login (owner rule /
- * credential-management invariant 7). When NO setup-token resolves for the
+ * PHNX-3502 fix. On an EXPLICIT `role: worker` device every Claude run
+ * authenticates from the synced `setup-token`, never an interactive login (owner
+ * rule / credential-management invariant 7). When NO setup-token resolves for the
  * account this run selected, `applyExecConfigEnv` strips any ambient token and
  * the harness launches with no credential. A HEADLESS run then fails loud with a
  * 401 — but an INTERACTIVE dispatched TUI (`agents run claude --interactive
@@ -168,9 +168,17 @@ export function claudeWorkerLoginTrapPreflight(args: {
   // A headless run with no token fails loud with a 401 already; only an
   // interactive run falls through to Claude Code's login screen.
   if (!args.interactive) return null;
-  // A headed box (personal/desktop) authenticates from its own native login, so
-  // Claude Code's login prompt there is the correct, expected first-run flow.
-  if (isHeadedDeviceRole(args.deviceRole)) return null;
+  // Gate ONLY an EXPLICIT `role: worker` box — not a headed box, and NOT an
+  // UNMARKED one. The owner rule guarantees a real worker holds no native login
+  // (it authenticates from the synced setup-token), so no token there genuinely
+  // means the login screen with nothing behind it. A headed box authenticates
+  // from its own native login (its login prompt is the correct first-run flow),
+  // and an UNMARKED box is ambiguous — an unconfigured personal laptop whose
+  // first-run login IS legitimate, or one with a native login we must not probe
+  // for on the hot path (a macOS keychain probe raises an auth sheet per version,
+  // the exact cost applyExecConfigEnv avoids). `--device auto` only ever lands on
+  // an explicit worker (filterAutoPool), so the dispatched trap is still caught.
+  if (args.deviceRole !== 'worker') return null;
   // A durable worker credential resolved for the selected account — proceed.
   if (args.hasSetupToken) return null;
 
