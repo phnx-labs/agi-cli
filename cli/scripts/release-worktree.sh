@@ -20,7 +20,8 @@ DEFAULT_BRANCH="$(git -C "$REPO_ROOT" symbolic-ref --quiet --short refs/remotes/
 
 WORKTREE="$REPO_ROOT/.agents/worktrees/release-v$TARGET-$$"
 cleanup() {
-  git -C "$REPO_ROOT" worktree remove --force "$WORKTREE" >/dev/null 2>&1 || true
+  git -C "$REPO_ROOT" worktree remove "$WORKTREE" >/dev/null 2>&1 \
+    || printf 'Retained release worktree for inspection: %s\n' "$WORKTREE" >&2
 }
 trap cleanup EXIT
 
