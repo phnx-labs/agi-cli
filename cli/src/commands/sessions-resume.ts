@@ -42,7 +42,7 @@ import { confirm } from '@inquirer/prompts';
 import { spawn } from 'node:child_process';
 import { looksLikeSessionId } from '../lib/session/discover.js';
 import { machineId } from '../lib/session/sync/config.js';
-import { sessionOriginDevice, sessionRecoveryDestinationMatches } from '../lib/session/recovery.js';
+import { sessionOriginDevice, sessionRecoveryDestinationMatches, sessionTranscriptReadable } from '../lib/session/recovery.js';
 import { runStrictResume, wantsStrictResume, type StrictResumeOptions } from './resume.js';
 import { attachLocalLiveSelector } from '../lib/session/local-tmux-attach.js';
 
@@ -245,11 +245,26 @@ export async function sessionsResumeAction(
   }
 
   // 2. Route every selection through the owning device's recovery resolver.
+  // A pick with no transcript behind it is dropped HERE rather than given a tab:
+  // recovery would refuse it anyway (assertRecoverableTranscript), and a batch
+  // should not spend a terminal tab per doomed id just to print that. Same
+  // predicate, one hop earlier — the refusal itself still lives in recovery.
   const items: Array<SurfaceItem & { session: SessionMeta }> = [];
   for (const s of chosen) {
+    if (!sessionTranscriptReadable(s)) {
+      console.log(chalk.yellow(
+        `Skipping ${s.shortId} — no transcript to resume (registered as live, but none was written).`,
+      ));
+      continue;
+    }
     const command = buildSessionRecoveryCommand(s, !!options.device);
     const cwd = s.cwd && fs.existsSync(s.cwd) ? s.cwd : process.cwd();
     items.push({ session: s, cwd, command });
+  }
+  if (items.length === 0) {
+    console.error(chalk.red('Nothing to resume — every selected session lacks a transcript.'));
+    process.exitCode = 1;
+    return;
   }
 
   // 3. Resolve the backend (and host).

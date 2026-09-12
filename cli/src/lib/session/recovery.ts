@@ -322,25 +322,33 @@ export function resolveSessionRecoveryFromCandidates(
 /**
  * Whether a session has a transcript recovery could read.
  *
- * Two distinct misses, only one of which this device can judge:
+ * Only ONE of the ways a transcript can be absent is this device's to judge.
  *
- * - **No path at all.** `activeSessionToSessionMeta` synthesizes a
- *   `SessionMeta` with `filePath: ''` for a live-registry row that has not
- *   written a transcript (RUSH-2682, deliberately, so `preview` can render a
- *   just-started session). Honest for reading, useless for recovery, and true
- *   regardless of which device asks.
- * - **A path this box cannot see.** A row resolved from a peer carries the
- *   PEER's absolute path, which need not exist here (`/Users/…` vs `/home/…`).
- *   That is not a missing transcript, so existence is only checked for a row
- *   this device owns — the PHNX-3626 "owner unreachable → /continue replay from
- *   the synced mirror" fallback must keep working.
+ * - **A path this box cannot see.** A row pulled over the live fan-out
+ *   (`parseRemoteList`) carries the PEER's absolute path, which need not exist
+ *   here (`/Users/…` vs `/home/…`). `_remote` marks exactly that case.
+ * - **A peer's fleet-synced mirror stub.** `upsertMirrorSession`
+ *   (`db.ts:4142`) writes `file_path = ''` by design — the row carries the
+ *   peer's metadata and preview digest, not its transcript. `mirrorSyncedAt` is
+ *   set for precisely these rows and "absent for a genuine local or
+ *   host-dispatch row" (PHNX-3792), and it survives the PHNX-3626 fallback,
+ *   which rewrites only `machine`. Judging such a row's empty path locally
+ *   would refuse the owner-unreachable `/continue` replay this device is
+ *   supposed to fall back to.
+ * - **No path, no peer behind it.** What is left is a live-registry row:
+ *   `activeSessionToSessionMeta` synthesizes `filePath: ''` for a session the
+ *   registry calls running (RUSH-2682, deliberately, so `preview` can render a
+ *   just-started one) and sets no mirror fields. That is the only shape this
+ *   device can honestly call "no transcript" — see
+ *   {@link assertRecoverableTranscript}.
  */
 export function sessionTranscriptReadable(
-  session: Pick<SessionMeta, 'filePath' | '_remote'>,
+  session: Pick<SessionMeta, 'filePath' | '_remote' | 'mirrorSyncedAt'>,
   exists: (file: string) => boolean = (file) => fs.existsSync(file),
 ): boolean {
-  if (!session.filePath) return false;
-  return session._remote ? true : exists(session.filePath);
+  if (session._remote) return true;
+  if (!session.filePath) return session.mirrorSyncedAt !== undefined;
+  return exists(session.filePath);
 }
 
 /**

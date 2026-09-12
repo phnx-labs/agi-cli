@@ -350,14 +350,41 @@ describe('resolveSessionRecovery transcript guard', () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  it('still recovers a peer row whose path does not exist on this box (PHNX-3626 mirror replay)', async () => {
-    // A peer's absolute path is meaningless here (/Users vs /home); existence is
-    // the owner's to judge, so the local /continue replay must not be refused.
+  it('still recovers a fan-out row whose peer path does not exist on this box', async () => {
+    // parseRemoteList rows carry the PEER's absolute path, meaningless here
+    // (/Users vs /home); existence is the owner's to judge.
     const target = await resolveSessionRecovery(
       session({ filePath: '/home/muqsit/.agents/peer.jsonl', _remote: true }),
       healthy,
     );
     expect(target.mode).toBe('continue');
+  });
+
+  it('still recovers a fleet-synced mirror stub after the owner goes unreachable (PHNX-3626)', async () => {
+    // The real input shape of the owner-unreachable fallback, which the
+    // `_remote` exemption alone did NOT cover: upsertMirrorSession writes
+    // file_path='' and rowToMeta sets no `_remote`, so the stub arrives with an
+    // empty path and only `mirrorSyncedAt` to identify it. resumeLocalFallbackSource
+    // then rewrites `machine` to self — so machine is NOT a usable discriminator
+    // here, and refusing this row would break the documented replay.
+    const stub = session({
+      filePath: '',
+      _remote: undefined,
+      mirrorSyncedAt: Date.parse('2026-09-12T17:00:00.000Z'),
+      mirrorSource: 'yosemite-s0',
+      machine: 'zion',
+    });
+    const target = await resolveSessionRecovery(stub, healthy);
+    expect(target.mode).toBe('continue');
+  });
+
+  it('refuses a path-less row that carries no mirror provenance, even on the fallback shape', async () => {
+    // Same machine rewrite, no mirror fields → a live-registry phantom, not a
+    // mirror stub. This is the pair that proves mirrorSyncedAt is doing the work.
+    await expect(resolveSessionRecovery(
+      session({ filePath: '', mirrorSyncedAt: undefined, machine: 'zion' }),
+      healthy,
+    )).rejects.toThrowError(SessionRecoveryError);
   });
 
   it('leaves a real on-disk transcript on the ordinary path', async () => {
