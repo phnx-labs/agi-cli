@@ -1,35 +1,9 @@
-/**
- * policy.ts — what `agents computer` is ALLOWED to touch, and where the
- * standalone engine finds that answer on disk.
- *
- * This is consumer-owned on purpose. The allow list is derived from
- * `Computer(<bundle-id>)` rules in the agents permissions resource layer
- * (`~/.agents/permissions/groups/`), which is an agents-cli concept the
- * standalone `computer` CLI has no business reimplementing — it would have to
- * re-learn resource layering, user-over-system precedence, and the rule grammar
- * to do it. So agents-cli resolves the allow lists and hands them to the engine
- * in its fd-3 context (`context.ts`), and ALSO renders them to the files the
- * long-lived daemon re-reads at startup and on SIGHUP. Both readers, one source.
- *
- * Moved out of the deleted `computer-rpc.ts` during the PHNX-4075 extraction
- * with its behavior intact: same file locations, same 0600 modes, same strict
- * line-wise rule grammar. Only the RPC transport left. The engine's own paths —
- * its socket, its daemon log, its per-session admission cache — went with it and
- * are deliberately NOT named here: a second copy of a path agents-cli no longer
- * reads is a drift waiting to happen.
- */
+/** Resolve Agents permission groups and caller identities for the standalone
+ * engine. The engine alone writes helper policy and peer files. */
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { getHelpersDir, getUserPermissionsDir, getPermissionsDir } from '../state.js';
-
-// Policy file the helper reads at startup and on SIGHUP. Sibling of
-// computer.sock under ~/.agents/.cache/helpers/. Allow-list of bare bundle
-// ids (e.g. "com.apple.mail"), derived from Computer(...) patterns in
-// ~/.agents/permissions/groups/.
-export function resolvePolicyPath(): string {
-  return path.join(getHelpersDir(), 'computer-policy.json');
-}
+import { getUserPermissionsDir, getPermissionsDir } from '../state.js';
 
 // Walk all permission group YAMLs (user dir wins on name collision) and
 // collect Computer(<bundle-id>) patterns from each group's `allow:` list.
@@ -92,27 +66,6 @@ export function loadComputerAllowList(): string[] {
   return [...allowed].sort();
 }
 
-// Write the policy file the helper reads at startup and on SIGHUP.
-// Mode 0600 — same lockdown as the socket (lives in the user-owned cache
-// dir, but be explicit).
-export function writeComputerPolicy(allowedBundleIds: string[]): void {
-  const dir = getHelpersDir();
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-  const policy = { allow: allowedBundleIds };
-  fs.writeFileSync(resolvePolicyPath(), JSON.stringify(policy, null, 2), { mode: 0o600 });
-}
-
-// Peer-auth (F5): the helper reads a list of executable paths it will
-// accept connections from. Anything else — `nc`, `/usr/bin/python3`, a
-// random electron app — gets the socket closed before its first RPC.
-// File mirrors computer-policy.json: JSON, mode 0600, missing/unparseable
-// means deny-everything.
-export function resolvePeersPath(): string {
-  return path.join(getHelpersDir(), 'computer-peers.json');
-}
-
 /**
  * Default peer set: the standalone `computer` executable, this `agents` CLI's
  * own runtime, plus Rush.app if it's installed. realpath() the symlink chain so
@@ -160,16 +113,6 @@ export function loadDefaultPeers(opts: { computerBin?: string } = {}): string[] 
   }
 
   return [...out].sort();
-}
-
-// Write the peer-auth allow list. Same mode 0600 + atomic-ish semantics
-// as the policy file. The daemon picks it up at startup and on SIGHUP.
-export function writeComputerPeers(allowedExecPaths: string[]): void {
-  const dir = getHelpersDir();
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-  fs.writeFileSync(resolvePeersPath(), JSON.stringify({ allow: allowedExecPaths }, null, 2), { mode: 0o600 });
 }
 
 /**
