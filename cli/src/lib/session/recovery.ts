@@ -369,9 +369,15 @@ export function assertRecoverableTranscript(
 ): void {
   if (sessionTranscriptReadable(session, exists)) return;
   const device = sessionOriginDevice(session);
+  // Three shapes reach here with no path, and the message has to be true for
+  // all of them: a live-registry row that never wrote a transcript, a
+  // host-dispatch shim whose peer never answered the sweep, and a cloud task
+  // row whose transcript lives in the cloud (`cloud/session-index.ts:57`).
+  // "No transcript was written on <device>" holds for each; "registered as
+  // live" would only hold for the first.
   const why = session.filePath
     ? `its transcript is gone from ${device} (${session.filePath})`
-    : `it is registered as live on ${device} but never wrote one`;
+    : `no transcript for it was ever written on ${device}`;
   throw new SessionRecoveryError(
     `Session ${session.shortId} has no transcript to resume — ${why}. `
     + `A recovered agent would open an empty conversation. `

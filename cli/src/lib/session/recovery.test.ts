@@ -333,7 +333,7 @@ describe('resolveSessionRecovery transcript guard', () => {
     const phantom = session({ filePath: '', version: undefined, machine: 'zion' });
     await expect(resolveSessionRecovery(phantom, healthy)).rejects.toThrowError(SessionRecoveryError);
     await expect(resolveSessionRecovery(phantom, healthy))
-      .rejects.toThrow(/14567b8a.*registered as live on zion but never wrote one/s);
+      .rejects.toThrow(/14567b8a.*no transcript for it was ever written on zion/s);
   });
 
   it('names the harness and cwd a replacement run would need', async () => {
