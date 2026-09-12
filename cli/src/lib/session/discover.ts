@@ -16,7 +16,6 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import Database from '../sqlite.js';
 import { getAgentsDir, getUserAgentsDir, getHistoryDir, getRunsDir } from '../state.js';
-import { shortCodexHome } from '../codex-home.js';
 import { parseTimeFilter } from './relative-time.js';
 
 const execFileAsync = promisify(execFile);
@@ -36,6 +35,8 @@ import { parseAntigravity, parseCursor, splitSessionFilePath } from './parse.js'
 import { extractPrUrl, detectWorktree, detectTicket, isPrCreateCommand, detectSpawnedTeam, isTicketCreateTool, extractCreatedTicket, extractRecentDirectoriesTouched, extractTodoProgressFromEvents } from './state.js';
 import { costOfUsage, costOfUsageNoCache } from '../pricing/index.js';
 import { machineId } from './sync/config.js';
+import { isSelfHost } from '../devices/self-host.js';
+import { readSessionActorRecord } from './actor-sidecar.js';
 import { machineForSessionFile } from './origin-machine.js';
 export { machineForSessionFile } from './origin-machine.js';
 import { mapBounded } from '../concurrency.js';
@@ -390,6 +391,59 @@ export async function discoverSessions(options?: DiscoverOptions): Promise<Sessi
   });
 }
 
+/** Read only matching Claude/Codex transcripts on a cold ID lookup; indexing stays with the daemon. */
+export async function findLocalSessionTranscripts(selector: string, agent?: SessionAgentId): Promise<SessionMeta[]> {
+  const matches = new Map<string, SessionMeta>();
+  const seen = new Set<string>();
+  for (const harness of ['claude', 'codex'] as const) {
+    if (agent && agent !== harness) continue;
+    const subdir = harness === 'claude' ? 'projects' : 'sessions';
+    const roots = [...getAgentSessionDirs(harness, subdir), ...getRoutineArchiveSessionDirs(harness, subdir)];
+    for (const root of roots) {
+      for (const file of walkForFilesWithStat(root, '.jsonl', Number.MAX_SAFE_INTEGER)) {
+        const name = path.basename(file.path, '.jsonl');
+        const id = harness === 'claude' ? name : name.match(/([0-9a-f]{8}-[0-9a-f-]{27})$/i)?.[1];
+        if (!id?.toLowerCase().startsWith(selector.toLowerCase())) continue;
+        const real = fs.realpathSync(file.path);
+        if (seen.has(real)) continue;
+        seen.add(real);
+        const result = harness === 'claude'
+          ? await readClaudeMeta(real, id, { fileMtimeMs: Math.floor(file.mtimeMs), fileSize: file.size }, undefined)
+          : await readCodexMeta(real);
+        if (!result?.meta.id.toLowerCase().startsWith(selector.toLowerCase())) continue;
+        const sidecar = readSessionActorRecord(result.meta.id);
+        const row = { ...result.meta, accountId: sidecar?.accountId, machine: machineForSessionFile(real, harness) };
+        const prior = matches.get(row.id);
+        if (!prior || new Date(row.lastActivity ?? row.timestamp) > new Date(prior.lastActivity ?? prior.timestamp)) matches.set(row.id, row);
+      }
+    }
+  }
+  return [...matches.values()];
+}
+
+/** Repair local metadata before deciding that a conversation has no context. */
+export async function hydrateSessionTranscript(session: SessionMeta): Promise<SessionMeta> {
+  const accountId = session.accountId ?? readSessionActorRecord(session.id)?.accountId;
+  if (accountId && !session.accountId) session = { ...session, accountId };
+  const file = splitSessionFilePath(session.filePath).container;
+  try {
+    if (file && fs.statSync(file).isFile() && fs.statSync(file).size > 0) return session;
+  } catch { /* A moved account home needs a canonical rescan. */ }
+  if (session.machine && !isSelfHost(session.machine)) return session;
+  if (session.agent === 'claude' || session.agent === 'codex') {
+    const local = (await findLocalSessionTranscripts(session.id, session.agent)).find(row => row.id === session.id);
+    return local ? { ...session, ...local, accountId: session.accountId ?? local.accountId } : session;
+  }
+  let { claimed } = await scanSessionsIncremental({ agent: session.agent });
+  if (!claimed) {
+    if (!await waitForScanToSettle()) throw new Error(`Transcript verification for ${session.shortId} is incomplete: another index scan is still running. Retry when it finishes.`);
+    ({ claimed } = await scanSessionsIncremental({ agent: session.agent }));
+    if (!claimed) throw new Error(`Transcript verification for ${session.shortId} is incomplete: the index is busy. Retry shortly.`);
+  }
+  const indexed = getSessionById(session.id);
+  return indexed ? { ...session, ...indexed, accountId: session.accountId ?? indexed.accountId } : session;
+}
+
 /** What one incremental scan actually did. */
 interface IncrementalScanResult {
   /** True when this process won the single-flight claim and ran the scan. */
@@ -663,8 +717,16 @@ export function isManagedSessionFile(filePath: string): boolean {
     path.join(getHistoryDir(), 'backups'),
     // Codex's managed home is not always under versions/. On macOS the versioned path
     // overflows SUN_LEN for codex's control socket, so the shim relocates it to
-    // `<agentsUserDir>/.codex-homes/<version>/` (lib/codex-home.ts).
+    // `<agentsUserDir>/.codex-homes/<key>/` (lib/codex-home.ts) — keyed by version OR
+    // by account short key (`a-<accountId prefix>`, lib/codex-home.ts `codexShortKey`).
     path.join(getUserAgentsDir(), '.codex-homes'),
+    // Account slots (PHNX-3940): a named account's HOME-shaped dir under
+    // `<historyDir>/accounts/<agent>/<accountId>/` (lib/accounts/slots.ts
+    // `slotDir`), sharing the one managed install rather than owning a version
+    // home of its own. Without this root, every account-slot transcript read as
+    // unmanaged the moment any version was managed, hiding a fully registered,
+    // runnable account's entire history from the default listing.
+    path.join(getHistoryDir(), 'accounts'),
     // Routine archives are agents-cli's OWN run output — managed by definition.
     getRunsDir(),
   ];
@@ -1134,20 +1196,46 @@ export function getAgentSessionDirs(agent: string, subdir: string): string[] {
     try {
       for (const version of fs.readdirSync(versionsBase)) {
         addDir(path.join(versionsBase, version, 'home', configDirName, subdir));
-        // Codex's managed home is not always where the version layout says. On macOS
-        // the versioned path overflows SUN_LEN (104 bytes) for codex's control
-        // socket, so the shim relocates the home to
-        // `<agentsUserDir>/.codex-homes/<version>/.codex` (lib/codex-home.ts). Every
-        // transcript an isolated codex writes lands there, and nothing scanned it —
-        // `agents sessions --roots` listed only the user's own ~/.codex, so a managed
-        // copy's own history was invisible. addDir skips what does not exist, so this
-        // is inert on Linux and for versions that never needed relocating.
-        if (agent === 'codex') {
-          addDir(path.join(shortCodexHome(getUserAgentsDir(), version), subdir));
-        }
       }
     } catch { /* dir unreadable */ }
   }
+
+  // Codex's managed home is not always where the version layout says. On macOS
+  // the versioned path overflows SUN_LEN (104 bytes) for codex's control socket,
+  // so the shim relocates the home to `<agentsUserDir>/.codex-homes/<key>/.codex`
+  // (lib/codex-home.ts) — `<key>` is the version for a version home, or
+  // `a-<accountId prefix>` (`codexShortKey`) for an account slot under
+  // `<historyDir>/accounts/codex/`. Walking `.codex-homes/` directly — rather
+  // than deriving keys from the installed-version list — is what catches BOTH:
+  // an account short key is not a vendor version and never appears in
+  // `versions/codex/`, so iterating only installed versions silently dropped
+  // every transcript a codex account slot wrote. addDir skips what does not
+  // exist, so this is inert on Linux and for homes that never needed relocating.
+  if (agent === 'codex') {
+    const codexHomesBase = path.join(getUserAgentsDir(), '.codex-homes');
+    try {
+      for (const key of fs.readdirSync(codexHomesBase)) {
+        addDir(path.join(codexHomesBase, key, '.codex', subdir));
+      }
+    } catch { /* dir absent or unreadable */ }
+  }
+
+  // Account slots (PHNX-3940): a named account gets its own HOME-shaped dir
+  // under `<historyDir>/accounts/<agent>/<accountId>/`, sharing the one managed
+  // binary install rather than owning a version home of its own
+  // (lib/accounts/slots.ts `slotDir`). A slot-launched transcript lives ONLY
+  // there — never under `versions/` — so without this root it is fully
+  // discoverable by the account machinery (the account is registered and
+  // runnable) yet invisible to `agents sessions`, reading as if the history had
+  // vanished. `addDir` follows the realpath, so a codex slot whose `.codex` is a
+  // symlink onto its `.codex-homes/<key>` short home (SUN_LEN relocation, above)
+  // is deduplicated against that same target rather than double-counted.
+  const accountsBase = path.join(getHistoryDir(), 'accounts', agent);
+  try {
+    for (const accountId of fs.readdirSync(accountsBase)) {
+      addDir(path.join(accountsBase, accountId, configDirName, subdir));
+    }
+  } catch { /* dir absent or unreadable */ }
 
   const backupsBase = path.join(getHistoryDir(), 'backups', agent);
   if (fs.existsSync(backupsBase)) {
@@ -1555,7 +1643,7 @@ async function readClaudeMeta(
   // Which account produced this transcript. Resolved from the path plus the version
   // recorded inside the file, so rows under the mutable ~/.claude symlink are
   // attributed to the version that actually wrote them. See claude-accounts.ts.
-  const acct = resolveClaudeAccount(claudeAccountIndex(), filePath, scan.version);
+  const acct = resolveClaudeAccount(claudeAccountIndex(), filePath, scan.version, readSessionActorRecord(sessionId)?.accountId);
 
   let meta: SessionMeta;
   if (scan.timestamp) {
@@ -5152,7 +5240,7 @@ export function extractVersionFromManagedPath(agent: SessionAgentId, sourcePath?
       const start = normalized.indexOf(marker);
       if (start === -1) continue;
       const version = normalized.slice(start + marker.length).split('/')[0];
-      if (version) return version;
+      if (version && !(marker.endsWith('/.codex-homes/') && version.startsWith('a-'))) return version;
     }
   }
 

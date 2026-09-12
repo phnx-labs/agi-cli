@@ -40,7 +40,7 @@ const DB_PATH = getSessionsDbPath();
 /** Current schema version; bumped when migrations are added. Exported so tests
  * assert against the constant instead of hardcoding a number that every bump
  * then has to chase (docs/sessions.md calls the constant the source of truth). */
-export const SCHEMA_VERSION = 48;
+export const SCHEMA_VERSION = 49;
 
 /**
  * Bump to force the content extractor (assistant-answer text, alongside the
@@ -109,6 +109,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   version TEXT,
   account TEXT,
   account_key TEXT,
+  account_id TEXT,
   account_org TEXT,
   mode TEXT,
   timestamp TEXT NOT NULL,
@@ -553,6 +554,7 @@ interface SessionRow {
   version: string | null;
   account: string | null;
   account_key: string | null;
+  account_id: string | null;
   account_org: string | null;
   mode: string | null;
   timestamp: string;
@@ -1481,6 +1483,13 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     // block (fresh DBs skip migrations), alongside idx_sessions_last_activity.
   }
 
+  if (fromVersion < 49) {
+    const cols = new Set(
+      (db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map(c => c.name),
+    );
+    if (!cols.has('account_id')) db.exec(`ALTER TABLE sessions ADD COLUMN account_id TEXT`);
+  }
+
   if (fromVersion < 48) {
     // v47 -> v48: retain the LATEST genuine user turn beside the first
     // (PHNX-3939). For a /continue, a redirect, or an interrupted-and-restated
@@ -1549,7 +1558,7 @@ function backfillClaudeAccounts(
     `UPDATE sessions SET account_key = ?, account_org = ?, account = ? WHERE id = ?`,
   );
   for (const row of rows) {
-    const bucket = resolveClaudeAccount(index, row.file_path ?? '', row.version);
+    const bucket = resolveClaudeAccount(index, row.file_path ?? '', row.version, readSessionActorRecord(row.id)?.accountId);
     update.run(bucket.key, bucket.orgName, bucket.email, row.id);
   }
 }
@@ -1603,6 +1612,9 @@ export function getDB(): Database.Database {
   // scan column here rather than in SCHEMA (PHNX-3792).
   db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_mirror_synced ON sessions(mirror_synced_at)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_routine_run_id ON sessions(routine_run_id)`);
+  const sessionColumns = db.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>;
+  if (!sessionColumns.some(column => column.name === 'account_id')) db.exec('ALTER TABLE sessions ADD COLUMN account_id TEXT');
+
   // Account attribution repair. Two ways a Claude row ends up wrong even at v33:
   // an older CLI (whose INSERT does not name the column) writes NULL, and a DB
   // migrated by a build that predates the "clear the stale email on a dark row" fix
@@ -2136,7 +2148,7 @@ export function recordDirScans(
 const upsertSessionStmt = (db: Database.Database) => db.prepare(`
   INSERT INTO sessions (
     id, short_id, agent, harness, origin, routine_name, routine_run_id,
-    version, account, account_key, account_org, mode, timestamp, last_activity,
+    version, account, account_key, account_id, account_org, mode, timestamp, last_activity,
     project, cwd, git_branch, topic, first_user_message, last_user_message, label, message_count, token_count,
     output_tokens, input_tokens, cache_read_tokens, cache_write_tokens,
     cost_usd, cost_usd_nocache, duration_ms, model, tool_call_count,
@@ -2147,7 +2159,7 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     actor, initiated_by, phoenix_id, used_browser, used_computer
   ) VALUES (
     @id, @short_id, @agent, @harness, @origin, @routine_name, @routine_run_id,
-    @version, @account, @account_key, @account_org, @mode, @timestamp, @last_activity,
+    @version, @account, @account_key, @account_id, @account_org, @mode, @timestamp, @last_activity,
     @project, @cwd, @git_branch, @topic, @first_user_message, @last_user_message, @label, @message_count, @token_count,
     @output_tokens, @input_tokens, @cache_read_tokens, @cache_write_tokens,
     @cost_usd, @cost_usd_nocache, @duration_ms, @model, @tool_call_count,
@@ -2178,6 +2190,7 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     account = excluded.account,
     account_key = excluded.account_key,
     account_org = excluded.account_org,
+    account_id = COALESCE(sessions.account_id, excluded.account_id),
     mode = COALESCE(excluded.mode, sessions.mode),
     timestamp = excluded.timestamp,
     last_activity = excluded.last_activity,
@@ -2517,7 +2530,7 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
   // person. The ON CONFLICT COALESCEs actor/initiated_by, so this fills a fresh
   // row AND backfills one indexed null-first (before its sidecar existed), while a
   // rescan carrying no actor still keeps the stored owner.
-  const actorRec = meta.actor ? undefined : readSessionActorRecord(meta.id);
+  const actorRec = meta.actor && meta.accountId ? undefined : readSessionActorRecord(meta.id);
   const toolUsage = detectToolUsage(meta.id);
   const db = getDB();
   const { upsert, delText, insText, readLabel } = stmts(db);
@@ -2536,6 +2549,7 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
     version: meta.version ?? actorRec?.version ?? null,
     account: meta.account ?? null,
     account_key: meta.accountKey ?? null,
+    account_id: meta.accountId ?? actorRec?.accountId ?? null,
     account_org: meta.accountOrg ?? null,
     mode: meta.mode ?? actorRec?.mode ?? null,
     timestamp: meta.timestamp,
@@ -2815,6 +2829,7 @@ export function upsertSessionsBatch(
         version: meta.version ?? actorIndex.get(meta.id)?.version ?? null,
         account: meta.account ?? null,
         account_key: meta.accountKey ?? null,
+        account_id: meta.accountId ?? actorIndex.get(meta.id)?.accountId ?? null,
         account_org: meta.accountOrg ?? null,
         mode: meta.mode ?? actorIndex.get(meta.id)?.mode ?? null,
         timestamp: meta.timestamp,
@@ -3087,6 +3102,7 @@ function rowToMeta(row: SessionRow): SessionMeta {
     version: row.version ?? undefined,
     account: row.account ?? undefined,
     accountKey: row.account_key ?? undefined,
+    accountId: row.account_id ?? undefined,
     accountOrg: row.account_org ?? undefined,
     mode: isSessionRunMode(row.mode) ? row.mode : undefined,
     topic: row.topic ?? undefined,

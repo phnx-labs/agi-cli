@@ -21,6 +21,7 @@ import {
   signInRecoverableCandidates,
   matchAccountVersion,
   matchAccountCandidate,
+  candidateAccountKey,
   isUsageVerified,
   buildRotationDecisionEvent,
   isLaunchableSignedIn,
@@ -41,6 +42,8 @@ import {
   deriveUsageStatusFromSnapshot,
   mergeClaudeUsageCacheWindows,
   noteClaudeSessionLimit,
+  noteClaudeModelRefusal,
+  claudeModelRefusalKey,
   readClaudeUsageCache,
   setClaudeUsageCachePathForTest,
   type UsageSnapshot,
@@ -581,6 +584,89 @@ function snapshot(windows: Array<{ key: UsageWindowKey; usedPercent: number }>):
     })),
   };
 }
+
+describe('candidateAccountKey (PHNX-3940 — native id wins over the org-shared usageKey)', () => {
+  it('prefers a stable native account id over usageKey/accountKey/email', () => {
+    const c = candidate({ version: '1.0.0', nativeAccountId: 'acct-1', usageKey: 'claude:org=shared' });
+    expect(candidateAccountKey(c)).toBe('native:acct-1');
+  });
+
+  it('two sibling accounts under the same org usageKey stay distinct once nativeAccountId is known', () => {
+    const a = candidate({ version: '1.0.0', nativeAccountId: 'acct-a', usageKey: 'claude:org=shared' });
+    const b = candidate({ version: '1.0.1', nativeAccountId: 'acct-b', usageKey: 'claude:org=shared' });
+    expect(candidateAccountKey(a)).not.toBe(candidateAccountKey(b));
+  });
+
+  it('falls back to providerAccount, then usageKey, when no native id is known', () => {
+    const provider = candidate({ version: '1.0.0', nativeAccountId: undefined, usageKey: null, providerAccount: 'setup-token-1' });
+    expect(candidateAccountKey(provider)).toBe('provider:setup-token-1');
+    const orgOnly = candidate({ version: '1.0.0', nativeAccountId: undefined, providerAccount: undefined, usageKey: 'claude:org=shared' });
+    expect(candidateAccountKey(orgOnly)).toBe('claude:org=shared');
+  });
+});
+
+describe('readinessFromCandidate / pickBalancedCandidate — per-model refusal (PHNX-3940)', () => {
+  let root: string;
+  let previous: string | null;
+
+  afterEach(() => {
+    setClaudeUsageCachePathForTest(previous);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('A/Fable is blocked while A/Sonnet and B/Fable (same org) stay eligible', () => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'rotate-model-refusal-'));
+    previous = setClaudeUsageCachePathForTest(path.join(root, 'usage.json'));
+
+    const a = candidate({ version: '1.0.0', nativeAccountId: 'acct-a', usageKey: 'claude:org=shared' });
+    const b = candidate({ version: '1.0.1', nativeAccountId: 'acct-b', usageKey: 'claude:org=shared' });
+    noteClaudeModelRefusal(claudeModelRefusalKey(a.nativeAccountId)!, 'claude-fable-5-1', { family: 'Fable' });
+
+    // Generic (model-unaware) readiness is completely unaffected by the
+    // model-only marker — a caller that never opts in never sees it.
+    expect(readinessFromCandidate(a)).toEqual({ ready: true });
+
+    // A's Fable is blocked...
+    expect(readinessFromCandidate(a, Date.now(), 'claude-fable-5-1')).toEqual({
+      ready: false, reason: 'model_limited', email: a.email,
+    });
+    // ...but A's Sonnet is untouched...
+    expect(readinessFromCandidate(a, Date.now(), 'claude-sonnet-5')).toEqual({ ready: true });
+    // ...and B's Fable — a SIBLING account sharing the same org usageKey — is
+    // untouched too, proving the marker never poisoned the shared org bucket.
+    expect(readinessFromCandidate(b, Date.now(), 'claude-fable-5-1')).toEqual({ ready: true });
+
+    const result = pickBalancedCandidate([a, b], Date.now(), 'claude-fable-5-1');
+    expect(result?.picked.version).toBe('1.0.1');
+    expect(result?.excluded.map((c) => c.version)).toEqual(['1.0.0']);
+
+    // Without the model filter, both remain eligible.
+    const unfiltered = pickBalancedCandidate([a, b]);
+    expect(unfiltered?.healthy.map((c) => c.version).sort()).toEqual(['1.0.0', '1.0.1']);
+  });
+
+  it.each(['balanced', 'available'] as const)('production %s routing excludes a refused model', async (strategy) => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'rotate-model-route-'));
+    previous = setClaudeUsageCachePathForTest(path.join(root, 'usage.json'));
+    const a = candidate({ version: '1.0.0', nativeAccountId: 'acct-a' });
+    const b = candidate({ version: '1.0.1', nativeAccountId: 'acct-b' });
+    noteClaudeModelRefusal(claudeModelRefusalKey(a.nativeAccountId)!, 'claude-fable-5-1', { family: 'Fable' });
+    const result = await resolveRunVersion('claude', strategy, root, async () => [a, b], 'claude-fable-5-1');
+    expect(result.rotation?.picked.nativeAccountId).toBe('acct-b');
+  });
+
+  it('a model refusal with a future reset expires on its own clock', () => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'rotate-model-refusal-reset-'));
+    previous = setClaudeUsageCachePathForTest(path.join(root, 'usage.json'));
+
+    const a = candidate({ version: '1.0.0', nativeAccountId: 'acct-a' });
+    const resetsAt = new Date(Date.now() + 60_000);
+    noteClaudeModelRefusal(claudeModelRefusalKey(a.nativeAccountId)!, 'claude-fable-5-1', { family: 'Fable', resetsAt });
+
+    expect(readinessFromCandidate(a, Date.now(), 'claude-fable-5-1').ready).toBe(false);
+    expect(readinessFromCandidate(a, resetsAt.getTime() + 1, 'claude-fable-5-1').ready).toBe(true);
+  });
+});
 
 describe('readinessFromCandidate (pre-flight warning for version-pinned teammates)', () => {
   it('healthy account (auth ok, no snapshot, cached available) is ready', () => {

@@ -16,6 +16,7 @@ import { providerAuthenticatesHarness } from '../account-provider-registry.js';
 
 /** A provider account record as stored in the registry (identity captured separately). */
 export interface RegistryAccountRecord {
+  id?: string;
   name: string;
   provider: string;
   auth: AccountAuthKind;
@@ -33,6 +34,7 @@ export interface RegistryAccountRecord {
 
 /** A registry account eligible to run one harness, ready to map to a candidate. */
 export interface RegistryAccountInput {
+  id?: string;
   /** Agent-scoped key so `(claude, X)` and `(codex, X)` stay distinct. */
   accountKey: string;
   email: string | null;
@@ -68,6 +70,7 @@ export function registryPoolCandidates(
   for (const r of records) {
     if (!providerAuthenticatesHarness(r.provider, r.auth, agent)) continue;
     out.push({
+      id: r.id,
       accountKey: `${agent}:name=${r.name}`,
       email: null,
       name: r.name,

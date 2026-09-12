@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { randomBytes } from 'node:crypto';
 import {
+  buildSelectedResumeArgs,
   buildSessionLifecycleArgs,
   isDirectResumeSelector,
   resolveResumePacking,
@@ -183,5 +184,40 @@ describe('sessionsResumeAction — the PHNX-3292 local gate wiring (real tmux so
       errSpy.mockRestore();
       process.exitCode = priorExitCode;
     }
+  });
+});
+
+
+describe('selected resume argv', () => {
+  it('consumes placement already applied by the outer terminal surface', () => {
+    expect(buildSelectedResumeArgs('abc12345', undefined, { device: 'worker', runArgs: ['run', 'claude#work', '--resume', '--device', 'worker', '--mode', 'plan'] })).toEqual(['run', 'claude#work', '--resume', 'abc12345', '--mode', 'plan']);
+  });
+
+  it.each([['-D', 'worker'], ['-Dworker'], ['--on', 'worker'], ['--computer=worker']])('consumes placement alias %j and applies remote cwd', (...placement) => {
+    const runArgs = ['run', 'claude', '--resume', ...placement, '--cwd', '/local', '--remote-cwd', '/srv/repo', '--', '--verbose'];
+    expect(buildSelectedResumeArgs('abc12345', undefined, { device: 'worker', runArgs })).toEqual([
+      'run', 'claude', '--resume', 'abc12345', '--cwd', '/local', '--cwd', '/srv/repo', '--', '--verbose',
+    ]);
+  });
+
+  it('rejects attach-only options that would launch a copy before lookup', async () => {
+    await expect(sessionsResumeAction('abc12345', undefined, { attachOnly: true, mode: 'edit' })).rejects.toThrow('--attach-only cannot');
+  });
+
+  it('retains run flags and native passthrough while filling the selected identity', () => {
+    const runArgs = ['run', 'claude#work', '--resume', '--raw', '--env', 'FEATURE=on', '--timeout', '3m', '--effort', 'high', '--', '--verbose'];
+    expect(buildSelectedResumeArgs('abc12345', undefined, { runArgs })).toEqual([
+      'run', 'claude#work', '--resume', 'abc12345', '--raw', '--env', 'FEATURE=on', '--timeout', '3m', '--effort', 'high', '--', '--verbose',
+    ]);
+    expect(runArgs[3]).toBe('--raw');
+  });
+
+  it('consumes surface flags while retaining attach-only and local scope', () => {
+    expect(buildSelectedResumeArgs('abc12345', undefined, { tmux: true, local: true, attachOnly: true })).toEqual([
+      'sessions', 'resume', 'abc12345', '--local', '--attach-only',
+    ]);
+    expect(buildSelectedResumeArgs('abc12345', undefined, { vscodium: true, here: true })).toEqual([
+      'sessions', 'resume', 'abc12345', '--here',
+    ]);
   });
 });

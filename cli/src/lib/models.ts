@@ -1113,11 +1113,11 @@ export interface ConfiguredModel {
  * Each layer is a real source the agent consults; `version` must be concrete.
  * Returns null only when the agent exposes no model catalog at all.
  */
-export function resolveConfiguredModel(agent: AgentId, version: string): ConfiguredModel | null {
+export function resolveConfiguredModel(agent: AgentId, version: string, home?: string): ConfiguredModel | null {
   const runModel = resolveRunDefaults(agent, version).model;
   if (runModel && runModel.trim() !== '') return { model: runModel, source: 'run-default' };
 
-  const nativeModel = readNativeConfigModel(agent, version);
+  const nativeModel = readNativeConfigModel(agent, version, home);
   if (nativeModel) return { model: nativeModel, source: 'config' };
 
   const catalog = getModelCatalog(agent, version);
@@ -1134,10 +1134,10 @@ export function resolveConfiguredModel(agent: AgentId, version: string): Configu
  * (e.g. `~/.agents/.history/versions/claude/<ver>/home/.claude/settings.json`).
  * A missing/malformed file is a fall-through, not an error.
  */
-function readNativeConfigModel(agent: AgentId, version: string): string | null {
+function readNativeConfigModel(agent: AgentId, version: string, home?: string): string | null {
   try {
     const settingsPath = path.join(
-      getVersionHomePath(agent, version),
+      home ?? getVersionHomePath(agent, version),
       agentConfigDirName(agent),
       'settings.json',
     );

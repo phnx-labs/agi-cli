@@ -41,6 +41,7 @@ describe('SessionStart hook launch metadata', () => {
         AGENTS_HISTORY_DIR: history,
         AGENTS_RUN_MODE: 'edit',
         AGENTS_RUN_VERSION: '0.146.0',
+        AGENTS_RUN_ACCOUNT_ID: 'account-original',
         AGENTS_ACTOR: 'muqsit',
         AGENTS_ACTOR_KIND: 'human',
       },
@@ -53,6 +54,7 @@ describe('SessionStart hook launch metadata', () => {
       // Origin version recorded at launch so native resume can pin it even when
       // the transcript carries no derivable version (PHNX-3626).
       version: '0.146.0',
+      accountId: 'account-original',
       actor: 'muqsit',
       initiatedBy: 'human',
     });

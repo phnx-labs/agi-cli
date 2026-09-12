@@ -728,7 +728,7 @@ export function registerRunCommand(program: Command): void {
     .option('--list-tasks', 'With --broadcast: list available broadcast task ids')
     .option('--results [run-id]', 'With --broadcast: show one saved matrix run, or list saved runs newest first')
     .option('--concurrency <n>', 'With --broadcast: maximum cells running at once', '3')
-    .option('--resume [id]', 'Recover a previous conversation on its origin device. The exact healthy origin uses native resume; otherwise a healthy version of the same harness replays via /continue. Pair with a prompt to continue headlessly.')
+    .option('--resume [id]', 'Resume a conversation with its account on the origin device. Omit the id for the shared session picker; #account filters the history. Pair an id with a prompt to continue headlessly.')
     .option('--session-id <id>', 'Force a NEW conversation to use this exact session UUID (Claude only). This CREATES a session — to resume an existing one, use --resume.', parseExplicitSessionId)
     .option('--name <slug>', 'Name the run — seeds the session label so it shows up as `<name>` in `agents sessions` and resolves by it (and `agents hosts logs <name>` for --device runs) instead of an opaque id. An agent-generated title later refines the label; your name shows until then. Optional.')
     .option('--notify', 'Post a desktop notification when a headless run finishes. Fired by this process on exit, so it survives whatever launched the run (the menu bar dispatching it, a terminal you closed).')
@@ -971,7 +971,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         given. --cloud is mutually exclusive with --device/--lease and with
         local-run flags (--loop, --resume, --secrets, --terminal, …).
 
-      Resume: --resume <id> resolves full IDs locally first, then fleet-wide, and recovers on the source device with its cwd/mode. The exact healthy origin version uses native resume; otherwise a healthy version of the same harness replays via /continue. agents sessions resume <id> infers the harness too.
+      Resume: --resume <id> resolves full IDs locally first, then fleet-wide, and recovers on the source device with its cwd/mode. Resume preserves the conversation account and uses the installed binary; starting a new conversation from archived context requires an explicit choice. agents sessions resume <id> infers the harness too.
 
       Passthrough: everything after -- is forwarded verbatim to the underlying agent CLI.
         agents run kimi -- --plan --some-native-flag value
@@ -1148,6 +1148,28 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         if (specAccountLabel) options.account = specAccountLabel;
       }
 
+      // Bare resume is a session selection request, before fresh-run defaults or placement.
+      // Concrete IDs re-enter the executor below, so this cannot recurse.
+      if (options.resume === true || options.resume === '') {
+        if (options.sessionId || options.loop || options.fallback || options.resumeCheckpoint || options.lease) {
+          throw new Error('--resume cannot be combined with --session-id, --loop, --fallback, --resume-checkpoint, or --lease.');
+        }
+        const { sessionsResumeAction } = await import('./sessions-resume.js');
+        await sessionsResumeAction(undefined, prompt, {
+          agent: normalizedAgentSpec.split('#')[0] === RUN_AUTO_KEYWORD ? undefined : normalizedAgentSpec.split('#')[0],
+          account: options.account,
+          model: options.model,
+          mode: command.getOptionValueSource('mode') === 'default' ? undefined : options.mode,
+          interactive: options.interactive,
+          headless: options.headless,
+          cwd: options.cwd,
+          quiet: options.quiet,
+          device: options.host || options.device || options.on || options.computer,
+          runArgs: rawArgs.slice(2),
+        });
+        return;
+      }
+
       // Hard-deprecated harnesses cannot be run — point the user at the successor.
       const runBaseAgentName = normalizedAgentSpec.split('#')[0].split('@')[0];
       const runBaseAgentId = resolveAgentName(runBaseAgentName);
@@ -1201,7 +1223,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         delete process.env.AGENTS_RESUME_SOURCE_JSON;
         const outcome = injectedSource
           ? { kind: 'resolved' as const, session: injectedSource }
-          : await (await import('./sessions.js')).resolveSessionMetadataValue(selector);
+          : await (await import('./sessions.js')).resolveSessionMetadataValue(selector, { agent: runBaseAgentId ?? undefined });
         if (outcome.kind === 'partial') {
           // RUSH-2492: an unreachable peer is a warning, not a hard failure. The
           // resolver already resolves an id found on the reachable fleet (SES-9a),
@@ -1223,7 +1245,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         }
         resolvedResumeSource = outcome.session;
 
-        const [requestedAgent, requestedVersion] = normalizedAgentSpec.split('#')[0].split('@');
+        const [requestedAgent] = normalizedAgentSpec.split('#')[0].split('@');
         if (!autoHarnessRequested && requestedAgent !== resolvedResumeSource.agent) {
           console.error(chalk.red(
             `Session ${resolvedResumeSource.shortId} belongs to ${resolvedResumeSource.agent}, not ${requestedAgent}. ` +
@@ -1231,13 +1253,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           ));
           process.exit(1);
         }
-        if (!autoHarnessRequested && requestedVersion && requestedVersion !== resolvedResumeSource.version) {
-          console.error(chalk.red(
-            `Session ${resolvedResumeSource.shortId} started with ${resolvedResumeSource.agent}@${resolvedResumeSource.version ?? 'unknown'}, ` +
-            `not @${requestedVersion}.`,
-          ));
-          process.exit(1);
-        }
+
 
         // Omitted --mode inherits the effective source mode. Commander keeps
         // the normal new-run default as a real value, so consult its provenance
@@ -1265,7 +1281,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         } else if (sourcePeer && explicitPlacement && !hostTargetGiven(options).some((host) =>
           sessionRecoveryDestinationMatches(resolvedResumeSource!, host))) {
           console.error(chalk.red(
-            `Session ${resolvedResumeSource.shortId} must recover on ${sourcePeer}, where its indexed transcript and version history are owned; ` +
+            `Session ${resolvedResumeSource.shortId} must recover on ${sourcePeer}, where its conversation state is stored; ` +
             `the requested device was ${hostTargetGiven(options).join(', ')}.`,
           ));
           process.exit(1);
@@ -1279,7 +1295,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         if (!sourcePeer) {
           try {
             const { resolveSessionRecovery } = await import('../lib/session/recovery.js');
-            resolvedRecoveryTarget = await resolveSessionRecovery(resolvedResumeSource);
+            resolvedRecoveryTarget = await resolveSessionRecovery(resolvedResumeSource, undefined, { account: options.account, model: options.model ?? resolvedResumeSource.model });
           } catch (err) {
             console.error(chalk.red((err as Error).message));
             process.exit(1);
@@ -1287,7 +1303,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           normalizedAgentSpec = `${resolvedRecoveryTarget.agent}@${resolvedRecoveryTarget.version}`;
           autoHarnessRequested = false;
           if (!options.quiet) process.stderr.write(chalk.gray(
-            `[agents] session recovery → ${resolvedRecoveryTarget.mode} ${normalizedAgentSpec} on ${sourceMachine ?? machineId()} · ${resolvedRecoveryTarget.reason}\n`,
+            `[agents] session recovery → ${resolvedRecoveryTarget.mode} ${resolvedRecoveryTarget.agent} on ${sourceMachine ?? machineId()} · ${resolvedRecoveryTarget.reason}\n`,
           ));
         } else if (autoHarnessRequested) {
           normalizedAgentSpec = sourceAgent;
@@ -1738,7 +1754,6 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         if (options.secretsKeys) hostRejects.push(RUN_OPTION_REJECT_MESSAGES.secretsKeys);
         if (options.allowExpired) hostRejects.push(RUN_OPTION_REJECT_MESSAGES.allowExpired);
         if (options.resumeCheckpoint) hostRejects.push(RUN_OPTION_REJECT_MESSAGES.resumeCheckpoint);
-        if (options.resume === true) hostRejects.push(RUN_OPTION_REJECT_MESSAGES.resumeBare);
         if (hostRejects.length > 0) {
           for (const msg of hostRejects) console.error(chalk.red(msg));
           process.exit(1);
@@ -1892,7 +1907,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
               version: resumeId ? undefined : runVersion,
               accountPicker: accountPickerRequested,
               strategy: resumeId ? undefined : runStrategy,
-              account: resumeId ? undefined : options.account,
+              account: options.account,
               fallback: options.fallback,
               prompt,
               mode: forwardedMode,
@@ -2003,7 +2018,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
             agent: runAgent,
             version: resumeId ? undefined : runVersion,
             strategy: resumeId ? undefined : runStrategy,
-            account: resumeId ? undefined : options.account,
+            account: options.account,
             fallback: options.fallback,
             prompt,
             mode: forwardedMode,
@@ -2570,86 +2585,94 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
 
       version = resolveVersionAlias(agent, version);
 
-      // Account selection follows the binding order: explicit --account → exact
-      // `agent@version` binding → device-scoped `agent` binding → per-harness
-      // default. The exact-installation binding needs the concrete launch
-      // version, so resolve it (default when the run named no version).
       const { resolveSpawnAccount } = await import('../lib/account-registry.js');
-      // Binding key: a custom harness keys on its own profile name; a native /
-      // global run keys on the exact `agent@version` (default when unpinned).
-      const bindingTarget = fromProfile ? rawAgent : (version ? `${agent}@${version}` : `${agent}@${getGlobalDefault(agent) ?? ''}`);
       let spawnAccount: import('../lib/account-registry.js').SpawnAccount | null = null;
-      try {
-        spawnAccount = resolveSpawnAccount(options.account, agent, version, readMeta(), { useDefault: !fromProfile, provider: profileProvider, target: bindingTarget });
-      } catch (err) { console.error(chalk.red((err as Error).message)); process.exit(1); }
-      // Downstream rotation gating asks only "was an account selected?".
-      const configuredAccount = spawnAccount?.name;
-      if (spawnAccount) {
-        if (options.cloud || options.provider || options.lease) {
-          console.error(chalk.red('--account selects a device-local credential and cannot be combined with cloud or lease placement.'));
-          process.exit(1);
-        }
-        if (spawnAccount.kind === 'native') {
-          // `#name` / `--account` on a --device run is forwarded unchanged at
-          // dispatch time; the peer resolves ITS slot. This block is local-only.
-          const remoteTarget = options.host || options.device;
-          if (!remoteTarget) {
-            const {
-              adoptedConfigPointsAtHome,
-              adoptedSymlinkMismatchError,
-              durableSlotEnv,
-              isSymlinkAdoptedHarness,
-              resolveNativeSpawnHome,
-              symlinkAdoptedAccountError,
-            } = await import('../lib/exec-account-home.js');
-            const { readMeta } = await import('../lib/state.js');
-            const meta = readMeta();
-            if (isSymlinkAdoptedHarness(agent)) {
-              const defaultName = meta.accounts?.defaults?.[agent];
-              if (spawnAccount.name !== defaultName) {
-                console.error(chalk.red(symlinkAdoptedAccountError(agent, spawnAccount.name, defaultName)));
-                process.exit(1);
-              }
-            }
-            try {
-              const resolved = await resolveNativeSpawnHome(agent, spawnAccount, meta);
-              if (isSymlinkAdoptedHarness(agent) && !adoptedConfigPointsAtHome(agent, resolved.execHome)) {
-                console.error(chalk.red(adoptedSymlinkMismatchError(agent, spawnAccount.name, resolved.execHome)));
-                process.exit(1);
-              }
-              execHome = resolved.execHome;
-              // A worker's durable api-key slot holds no file: the pushed key
-              // rides the harness env var (CURSOR_API_KEY, …) on this launch.
-              const durable = durableSlotEnv(agent, spawnAccount, resolved, meta);
-              if (Object.keys(durable).length > 0) accountEnv = { ...accountEnv, ...durable };
-              if (resolved.source === 'legacy-home') {
-                accountConfigVersion = resolved.label;
-                // A leftover version-labeled home is both the spawn HOME and
-                // the account's installation — the pre-T5 `resolveAccountVersion`
-                // behavior. An explicit `@<label>` still controls the binary.
-                if (!version && !fromProfile && resolved.label) version = resolved.label;
-              }
-            } catch (err) {
-              console.error(chalk.red((err as Error).message));
-              process.exit(1);
-            }
-            // Slot / provisioned: binary comes from the one managed install unless `@<label>` pins it.
-            if (!version && !fromProfile) {
-              const { ensureHarnessInstallation } = await import('../lib/installations/store.js');
-              const { installation } = await ensureHarnessInstallation(agent);
-              version = installation.label;
-            }
-            if (!options.quiet) process.stderr.write(chalk.gray(`[agents] account '${spawnAccount.name}' · ${agent}\n`));
+      let launchAccount: import('../lib/accounting/account-launch.js').ResolvedLocalAccountLaunch | undefined;
+      if (resolvedRecoveryTarget) {
+        const { resolveLocalAccountLaunch } = await import('../lib/accounting/account-launch.js');
+        launchAccount = await resolveLocalAccountLaunch({
+          agent,
+          executableVersion: resolvedRecoveryTarget.version,
+          candidate: resolvedRecoveryTarget.candidate,
+          useDefault: false,
+        });
+        execHome = resolvedRecoveryTarget.mode === 'native' ? (resolvedRecoveryTarget.execHome ?? launchAccount.execHome) : launchAccount.execHome;
+        accountConfigVersion = resolvedRecoveryTarget.mode === 'native' ? (resolvedRecoveryTarget.configVersion ?? launchAccount.configVersion) : launchAccount.configVersion;
+        accountEnv = { ...accountEnv, ...launchAccount.env };
+      } else {
+        // Binding key: a custom harness keys on its own profile name; a native /
+        // global run keys on the exact `agent@version` (default when unpinned).
+        const bindingTarget = fromProfile ? rawAgent : (version ? `${agent}@${version}` : `${agent}@${getGlobalDefault(agent) ?? ''}`);
+        try {
+          spawnAccount = resolveSpawnAccount(options.account, agent, version, readMeta(), { useDefault: !fromProfile, provider: profileProvider, target: bindingTarget });
+        } catch (err) { console.error(chalk.red((err as Error).message)); process.exit(1); }
+        // Downstream rotation gating asks only "was an account selected?".
+        if (spawnAccount) {
+          if (options.cloud || options.provider || options.lease) {
+            console.error(chalk.red('--account selects a device-local credential and cannot be combined with cloud or lease placement.'));
+            process.exit(1);
           }
-        } else {
-          accountEnv = spawnAccount.env;
+          if (spawnAccount.kind === 'native') {
+            // `#name` / `--account` on a --device run is forwarded unchanged at
+            // dispatch time; the peer resolves ITS slot. This block is local-only.
+            const remoteTarget = options.host || options.device;
+            if (!remoteTarget) {
+              const {
+                adoptedConfigPointsAtHome,
+                adoptedSymlinkMismatchError,
+                durableSlotEnv,
+                isSymlinkAdoptedHarness,
+                resolveNativeSpawnHome,
+                symlinkAdoptedAccountError,
+              } = await import('../lib/exec-account-home.js');
+              const { readMeta } = await import('../lib/state.js');
+              const meta = readMeta();
+              if (isSymlinkAdoptedHarness(agent)) {
+                const defaultName = meta.accounts?.defaults?.[agent];
+                if (spawnAccount.name !== defaultName) {
+                  console.error(chalk.red(symlinkAdoptedAccountError(agent, spawnAccount.name, defaultName)));
+                  process.exit(1);
+                }
+              }
+              try {
+                const resolved = await resolveNativeSpawnHome(agent, spawnAccount, meta);
+                if (isSymlinkAdoptedHarness(agent) && !adoptedConfigPointsAtHome(agent, resolved.execHome)) {
+                  console.error(chalk.red(adoptedSymlinkMismatchError(agent, spawnAccount.name, resolved.execHome)));
+                  process.exit(1);
+                }
+                execHome = resolved.execHome;
+                // A worker's durable api-key slot holds no file: the pushed key
+                // rides the harness env var (CURSOR_API_KEY, …) on this launch.
+                const durable = durableSlotEnv(agent, spawnAccount, resolved, meta);
+                if (Object.keys(durable).length > 0) accountEnv = { ...accountEnv, ...durable };
+                if (resolved.source === 'legacy-home') {
+                  accountConfigVersion = resolved.label;
+                  // A leftover version-labeled home is both the spawn HOME and
+                  // the account's installation — the pre-T5 `resolveAccountVersion`
+                  // behavior. An explicit `@<label>` still controls the binary.
+                  if (!version && !fromProfile && resolved.label) version = resolved.label;
+                }
+              } catch (err) {
+                console.error(chalk.red((err as Error).message));
+                process.exit(1);
+              }
+              // Slot / provisioned: binary comes from the one managed install unless `@<label>` pins it.
+              if (!version && !fromProfile) {
+                const { ensureHarnessInstallation } = await import('../lib/installations/store.js');
+                const { installation } = await ensureHarnessInstallation(agent);
+                version = installation.label;
+              }
+              if (!options.quiet) process.stderr.write(chalk.gray(`[agents] account '${spawnAccount.name}' · ${agent}\n`));
+            }
+          } else {
+            accountEnv = spawnAccount.env;
+          }
         }
-      }
 
-      // --resume: resolve a prior conversation and rewrite the run target to
-      // continue it. `version` here is already the alias-resolved candidate-version
-      // FILTER (undefined for default/any, concrete for @latest/@oldest/@x.y.z);
-      // it is replaced below by the chosen session's OWN version (isolation).
+      }
+      const configuredAccount = launchAccount?.account?.name ?? spawnAccount?.name;
+
+      // The account and native context were resolved before launch defaults.
       let resumeNative = false;
       let resumeSessionId: string | undefined;
       let forceInteractive = false;
@@ -2663,105 +2686,15 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           process.exit(1);
         }
 
-        const { findSessionsById } = await import('../lib/session/db.js');
-        const { discoverSessions } = await import('../lib/session/discover.js');
-        const { pickSessionInteractive } = await import('./sessions.js');
         const { buildContinuePrompt } = await import('../lib/loop.js');
-
-        // Freshen the index for this agent before any lookup (incremental, cached).
-        // AgentId is wider than SessionAgentId (amp/goose/copilot keep no transcripts);
-        // those simply yield no matches and fall through to the not-found error.
-        const sessionAgent = agent as import('../lib/session/types.js').SessionAgentId;
-        if (!resolvedResumeSource) await discoverSessions({ agent: sessionAgent, version });
-
-        // Resume is interactive unless a follow-on prompt makes it headless.
-        const wantsInteractive = resolveInteractive({ interactive: options.interactive, headless: options.headless, prompt });
-        const idArg = typeof options.resume === 'string' ? options.resume.trim() : '';
-        let scopeCwd: string | undefined;
-        try { scopeCwd = fs.realpathSync(cwd); } catch { scopeCwd = cwd; }
-
-        let session: import('../lib/session/types.js').SessionMeta | undefined = resolvedResumeSource;
-        if (idArg) {
-          let matches = session ? [session] : findSessionsById(idArg, { agent: sessionAgent, version, cwd: scopeCwd });
-          if (matches.length === 0) {
-            const wide = findSessionsById(idArg, { agent: sessionAgent, version });
-            if (wide.length > 0) {
-              if (!options.quiet) process.stderr.write(chalk.gray(`No match for "${idArg}" in this project; widened to all projects.\n`));
-              matches = wide;
-            }
-          }
-          if (matches.length === 0) {
-            console.error(chalk.red(`No ${agent} session matching "${idArg}".`));
-            console.error(chalk.gray(`Browse sessions: agents sessions ${idArg}`));
-            process.exit(1);
-          } else if (matches.length === 1) {
-            session = matches[0];
-          } else if (wantsInteractive) {
-            const picked = await pickSessionInteractive(matches, `Multiple sessions match "${idArg}":`);
-            if (!picked) process.exit(0);
-            session = picked.session;
-          } else {
-            console.error(chalk.red(`"${idArg}" is ambiguous — ${matches.length} sessions match:`));
-            for (const m of matches.slice(0, 10)) {
-              console.error(chalk.gray(`  ${m.shortId}  ${m.timestamp.slice(0, 16).replace('T', ' ')}  ${m.topic ?? m.label ?? ''}`));
-            }
-            console.error(chalk.gray('Pass more of the id, or resume interactively (drop the prompt).'));
-            process.exit(1);
-          }
-        } else {
-          // Bare --resume: pick from recent sessions in scope. Needs a TTY.
-          if (!wantsInteractive) {
-            console.error(chalk.red('--resume with no id needs an interactive terminal. Pass a session id (full or prefix), or run without --headless.'));
-            process.exit(1);
-          }
-          const recent = await discoverSessions({ agent: sessionAgent, version, limit: 200 });
-          if (recent.length === 0) {
-            console.error(chalk.red(`No ${agent} sessions found to resume in this project.`));
-            console.error(chalk.gray('Browse all: agents sessions'));
-            process.exit(1);
-          }
-          const picked = await pickSessionInteractive(recent, `Resume which ${agent} session?`);
-          if (!picked) process.exit(0);
-          session = picked.session;
-          forceInteractive = true; // bare resume always lands in the agent's TUI
+        const session = resolvedResumeSource;
+        if (!session || !resolvedRecoveryTarget) {
+          throw new Error('Session recovery did not resolve a conversation on this device.');
         }
-
-        // Bare `run <harness> --resume` learns the chosen SessionMeta only after
-        // the host-placement phase above. If the picker chose a synced session
-        // from another device, route the recovery command now; resolving local
-        // candidates would otherwise native-resume through this device's
-        // unrelated isolated home.
-        if (!resolvedResumeSource) {
-          const {
-            sessionRecoveryPeer,
-            sessionRecoveryRunArgs,
-          } = await import('../lib/session/recovery.js');
-          const peer = sessionRecoveryPeer(session);
-          if (peer) {
-            const { runOnPeer } = await import('../lib/session/remote-list.js');
-            const routed = await runOnPeer(sessionRecoveryRunArgs(session), peer, { tty: true, sessionId: session.id });
-            if (routed === 'no-target') {
-              console.error(chalk.red(
-                `Cannot recover session ${session.shortId}: origin device ${peer} is not a registered reachable peer.`,
-              ));
-              process.exitCode = 1;
-            }
-            return;
-          }
-        }
-
-        // Bare interactive --resume selects the SessionMeta only down here, so
-        // it has not gone through the early concrete-id resolver. Resolve it now;
-        // concrete ids reuse the exact same target chosen above.
-        if (!resolvedRecoveryTarget) {
-          try {
-            const { resolveSessionRecovery } = await import('../lib/session/recovery.js');
-            resolvedRecoveryTarget = await resolveSessionRecovery(session);
-          } catch (err) {
-            console.error(chalk.red((err as Error).message));
-            process.exit(1);
-          }
-        }
+        if (!options.cwd) options.cwd = resolvedRecoveryTarget.mode === 'native'
+          ? resolvedRecoveryTarget.cwd ?? session.cwd
+          : session.cwd;
+        forceInteractive = resolveInteractive({ interactive: options.interactive, headless: options.headless, prompt });
         if (resolvedRecoveryTarget.agent !== agent) {
           console.error(chalk.red(
             `Session ${session.shortId} belongs to ${resolvedRecoveryTarget.agent}, not ${agent}. ` +
@@ -2770,25 +2703,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           process.exit(1);
         }
         version = resolvedRecoveryTarget.version;
-        // Account rotation (PHNX-3626 / PHNX-3674): recovery picked a healthy
-        // provider of the SAME harness. Inject that credential through the
-        // `--account` path so spawn does not authenticate as the version home's
-        // native login (the exhausted origin when the continue pick is a
-        // provider). An explicit --account (configuredAccount) always wins.
-        const rotatedAccount = resolvedRecoveryTarget.account;
-        if (rotatedAccount && !configuredAccount) {
-          try {
-            const picked = resolveSpawnAccount(rotatedAccount.providerAccount, agent, version, readMeta(), { useDefault: false });
-            if (picked?.kind === 'provider') accountEnv = picked.env;
-          } catch {
-            // Account-registry errors can carry provider credential material;
-            // never relay them onto the terminal from this automatic path.
-            console.error(chalk.red('Could not prepare the rotated provider account for session recovery.'));
-            process.exit(1);
-          }
-        }
         if (resolvedRecoveryTarget.mode === 'native') {
-          version = session.version;
           resumeNative = true;
           resumeSessionId = session.id;
           // The centralized recovery decision proves the transcript belongs to
@@ -2796,25 +2711,20 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           // Claude's indexed `session.cwd` is the first user-turn cwd, which may
           // differ from the earlier cwd that selected projects/<cwd-key>.
           if (!options.cwd && resolvedRecoveryTarget.cwd) options.cwd = resolvedRecoveryTarget.cwd;
-          if (rotatedAccount && !configuredAccount && !options.quiet) {
-            process.stderr.write(chalk.gray(
-              `[agents] origin ${agent} account limited → rotated to ${rotatedAccount.label} (native resume)\n`,
-            ));
-          }
           if (!options.quiet) process.stderr.write(chalk.gray(
-            `Resuming ${agent} ${session.shortId} (native)${version ? ` @${version}` : ''} in ${options.cwd ?? cwd}\n`,
+            `Resuming ${agent} ${session.shortId} (native) in ${options.cwd ?? cwd}\n`,
           ));
         } else {
-          // Tier-2: launch fresh with a /continue <id> first message; the agent
-          // loads the transcript via `agents sessions <id>` and picks up.
+          if (!isInteractiveTerminal() || options.headless) {
+            console.error(chalk.red(`Native resume is unavailable: ${resolvedRecoveryTarget.reason}. To start a new conversation with this context, explicitly run: agents run ${agent} "/continue ${session.id}"`));
+            process.exit(1);
+          }
+          const { confirm } = await import('@inquirer/prompts');
+          const replay = await confirm({ message: `${resolvedRecoveryTarget.reason}. Start a new conversation using this transcript?`, default: false }).catch(() => false);
+          if (!replay) return;
           prompt = buildContinuePrompt(session.id, prompt);
           if (prompt.trim() === `/continue ${session.id}`) forceInteractive = true;
-          if (rotatedAccount && !configuredAccount && !options.quiet) {
-            process.stderr.write(chalk.gray(
-              `[agents] origin ${agent} account limited → rotated to ${rotatedAccount.label} (/continue)\n`,
-            ));
-          }
-          if (!options.quiet) process.stderr.write(chalk.gray(`Resuming ${agent} ${session.shortId} (/continue replay)${version ? ` @${version}` : ''}\n`));
+          if (!options.quiet) process.stderr.write(chalk.gray(`Resuming ${agent} ${session.shortId} (/continue replay)\n`));
         }
       }
 
@@ -2871,7 +2781,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
             // picker's other callers keep the native-only collector.
             const { collectRunCandidatesForRun } = await import('../lib/accounting/account-pool-collect.js');
             bootMark('resolve-version:start');
-            const resolved = await resolveRunVersion(agent, strategy, cwd, collectRunCandidatesForRun);
+            const routingModel = options.model ?? resolvedResumeSource?.model ?? workflowModel
+              ?? (options.fallback ? undefined : resolveRunDefaults(agent, resolveVersion(agent, cwd), cwd).model);
+            const resolved = await resolveRunVersion(agent, strategy, cwd, collectRunCandidatesForRun, routingModel);
             bootMark('resolve-version:done');
             if (resolved.exhausted) {
               // Zero healthy accounts splits two ways, and conflating them is what
@@ -3026,19 +2938,6 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
             console.error(chalk.red(`agents: ${agent}@${launchTarget} is not runnable and could not be repaired. Try: ${hint}`));
             process.exit(1);
           }
-          if (resolvedRecoveryTarget && healed !== launchTarget) {
-            console.error(chalk.red(
-              `agents: session recovery target ${agent}@${launchTarget} became unavailable on ` +
-              `${resolvedResumeSource?.machine ?? 'this device'}; refusing to resume through another version home. ` +
-              `Retry the command so recovery can select a healthy ${agent} version.`,
-            ));
-            process.exit(1);
-          }
-          // Always adopt the healed version explicitly. In the version-undefined
-          // path a fallback re-pins the GLOBAL default, but `resolveVersion`
-          // prefers a PROJECT pin — so leaving `version` undefined would let the
-          // shim re-resolve the still-broken project pin and crash anyway. Pinning
-          // the runnable version here is a no-op when nothing changed.
           version = healed;
         }
       }
@@ -3108,13 +3007,13 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           // `signInLaunch` means the zero-healthy path already reported this exact
           // account as logged out and named the login command, so re-probing here
           // only prints a second, near-identical warning.
-          rotated: !!rotationResult || accountPickerRequested || signInLaunch || spawnAccount?.kind === 'provider',
+          rotated: !!rotationResult || accountPickerRequested || signInLaunch || (launchAccount?.account?.kind ?? spawnAccount?.kind) === 'provider',
         });
         if (preflight) {
           try {
             const { getAccountInfo } = await import('../lib/agents.js');
             const authVersion = accountConfigVersion ?? version;
-            const info = await getAccountInfo(agent, authVersion ? getVersionHomePath(agent, authVersion) : undefined);
+            const info = await getAccountInfo(agent, execHome ?? (authVersion ? getVersionHomePath(agent, authVersion) : undefined));
             // Claude authenticates interactively from a per-version setup-token on a
             // keychain-less worker (the shim's .oauth_token fallback), which the
             // native-credential probe above can't see — so don't warn "logged out" when
@@ -3128,8 +3027,8 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
             }
             if (!info.signedIn && !authedViaSetupToken) {
               const { addSupported } = await import('../lib/accounts/add.js');
-              const hint = spawnAccount?.kind === 'native'
-                ? `agents accounts login ${agent}#${spawnAccount.name}`
+              const hint = (launchAccount?.account?.kind ?? spawnAccount?.kind) === 'native'
+                ? `agents accounts login ${agent}#${configuredAccount}`
                 : addSupported(agent)
                   ? `agents accounts add ${agent} <name>`
                   : loginHint(agent);
@@ -3193,7 +3092,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
       // `--mode plan` is respected for genuine read-only command runs.
       const stallCmd = headlessPlanStallCommand({
         prompt,
-        interactive: options.interactive,
+        interactive: resolveInteractive({ prompt, headless: options.headless, interactive: options.interactive || forceInteractive }),
         mode: resolvedMode as ExecMode,
         modeIsDefault,
       });
@@ -3302,6 +3201,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
 
       const modelSource = runCmd.getOptionValueSource('model');
       let model = options.model
+        ?? resolvedResumeSource?.model
         ?? (!fromProfile && modelSource === undefined
           ? (workflowModel ?? (options.fallback ? undefined : runDefaults.model))
           : undefined);
@@ -3321,6 +3221,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
       const execOptions: ExecOptions = {
         agent,
         harnessName: profileName,
+        accountId: launchAccount?.account?.kind === 'legacy-native' ? undefined : (launchAccount?.account?.id ?? spawnAccount?.id),
         version,
         configVersion: accountConfigVersion,
         execHome,

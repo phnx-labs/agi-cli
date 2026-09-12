@@ -201,6 +201,7 @@ export async function resolveNativeSpawnHome(
   agent: AgentId,
   account: { id: string; name: string; agent: AgentId },
   meta: Pick<Meta, 'accounts' | 'deviceAccounts'> = { accounts: undefined, deviceAccounts: undefined },
+  options: { readOnly?: boolean } = {},
 ): Promise<NativeSpawnHome> {
   const slot = readSlots(meta)[account.id];
   if (slot && fs.existsSync(slot.slotDir)) {
@@ -208,7 +209,7 @@ export async function resolveNativeSpawnHome(
   }
 
   const row = nativeRow(account.id, meta);
-  if (row && isProvisionableWorker(row)) {
+  if (!options.readOnly && row && isProvisionableWorker(row)) {
     const provisioned = provisionWorkerSlot(row);
     return { execHome: provisioned.slotDir, source: 'provisioned', slot: provisioned };
   }

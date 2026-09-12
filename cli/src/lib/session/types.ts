@@ -416,6 +416,8 @@ export interface SessionMeta {
    * See lib/session/claude-accounts.ts for how a transcript is attributed.
    */
   accountKey?: string;
+  /** Stable credential account recorded at launch; independent of organization quota and binary release. */
+  accountId?: string;
   /** Organization display name of the producing account, when known. */
   accountOrg?: string;
   /** Effective normalized launch mode captured by the SessionStart hook. */

@@ -148,14 +148,15 @@ RUN_MODE="${AGENTS_RUN_MODE:-}"
 # carries no derivable version (codex's `.codex-homes/<version>/` home) still
 # resumes natively instead of degrading to `/continue` (PHNX-3626).
 RUN_VERSION="${AGENTS_RUN_VERSION:-}"
+RUN_ACCOUNT_ID="${AGENTS_RUN_ACCOUNT_ID:-}"
 TMUX_SESSION_NAME="${AGENT_TMUX_SESSION_NAME:-}"
-if [ -n "$HISTORY_DIR" ] && { [ -n "$RUN_MODE" ] || [ -n "$RUN_VERSION" ] || [ -n "$TMUX_SESSION_NAME" ]; }; then
+if [ -n "$HISTORY_DIR" ] && { [ -n "$RUN_MODE" ] || [ -n "$RUN_VERSION" ] || [ -n "$RUN_ACCOUNT_ID" ] || [ -n "$TMUX_SESSION_NAME" ]; }; then
   BY_SESSION_DIR="$HISTORY_DIR/by-session"
   mkdir -p "$BY_SESSION_DIR"
   SID_TMP="$(mktemp "$BY_SESSION_DIR/.${SID}.XXXXXX")"
-  python3 - "$SID" "$RUN_MODE" "${AGENTS_ACTOR:-}" "${AGENTS_ACTOR_KIND:-}" "$TMUX_SESSION_NAME" "$BY_SESSION_DIR/$SID.json" "$RUN_VERSION" > "$SID_TMP" <<'PY'
+  python3 - "$SID" "$RUN_MODE" "${AGENTS_ACTOR:-}" "${AGENTS_ACTOR_KIND:-}" "$TMUX_SESSION_NAME" "$BY_SESSION_DIR/$SID.json" "$RUN_VERSION" "$RUN_ACCOUNT_ID" > "$SID_TMP" <<'PY'
 import json, re, sys, time
-sid, mode, actor, initiated_by, tmux_name, existing_path, version = sys.argv[1:8]
+sid, mode, actor, initiated_by, tmux_name, existing_path, version, account_id = sys.argv[1:9]
 out = {}
 try:
     with open(existing_path) as existing:
@@ -169,6 +170,8 @@ if mode in ('plan', 'edit', 'auto', 'skip'):
     out['mode'] = mode
 if version:
     out['version'] = version
+if account_id:
+    out.setdefault('accountId', account_id)
 out['startedAtMs'] = int(time.time() * 1000)
 if actor:
     out['actor'] = actor

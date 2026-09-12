@@ -1214,41 +1214,43 @@ SSH access (§7); rendering sessions that no harness produced.
   (`commands/sessions-browser.ts` `runSessionBrowser`; tests
   `lib/picker.test.ts`, `commands/sessions-browser.test.ts`,
   `commands/__tests__/sessions-team-lineage.test.ts`).
-- **SES-39 (MUST).** Focus MUST query tmux `#{pane_dead}` immediately before
-  attach. A dead or missing pane MUST NOT attach. Session recovery MUST run on
-  the origin device and MUST choose native resume only for the exact healthy
-  origin version when its active isolated home owns the indexed transcript.
-  Claude native resume MUST launch from the earliest existing absolute cwd in
-  that transcript, because it is the directory that selected
-  `projects/<cwd-key>`; the later first-turn `SessionMeta.cwd` is not sufficient.
-  When the origin version home is installed, native-capable, and still owns the
-  transcript but its origin account is rate/usage-limited,
-  recovery MUST first rotate to a healthy INJECTABLE (provider setup-token/API-key,
-  RUSH-3182) account of the SAME harness and stay NATIVE in that origin home
-  (`RecoveryAccount`, injected via `--account`); a native login in another
-  isolated home MUST NOT be used for this, since it cannot authenticate a resume
-  that reads the origin home's transcript. Only an absent, signed-out, revoked,
-  non-native, trash-retained, backup-only, or same-number reinstalled origin — OR
-  a limited origin whose transcript is not in the origin home, or that has no
-  healthy injectable account — MUST select a healthy account of the same harness
-  and use `/continue <id>` against the indexed transcript; it MUST NOT
-  native-resume from another version home or choose another harness. When that
-  `/continue` pick is a provider account, the target MUST carry `RecoveryAccount`
-  and exec MUST inject it the same way native rotation does (PHNX-3674), so spawn
-  MUST NOT authenticate as the exhausted origin login. The origin version MUST be recorded forward at launch
-  (`AGENTS_RUN_VERSION` → SessionStart-hook sidecar → index via the row-build
-  join `meta.version ?? actorRec.version` plus a write-once COALESCE, the same
-  launch-metadata treatment as mode/harness/actor) so a transcript with no
-  derivable version (codex's `.codex-homes/<version>/` home) still native-resumes. With no usable version it MUST fail with the device,
-  origin version, and account-health reason
-  (`commands/go.ts` `probeAttachRail`; `lib/tmux/session.ts` `paneExitStatus`;
-  `lib/session/recovery.ts`; `commands/exec.ts`; tests
-  `lib/session/recovery.test.ts`, `commands/focus.test.ts`).
+- **SES-39 (MUST).** Focus MUST check that a tmux pane is alive before attach.
+  Recovery MUST use the conversation's origin device, account and readable native
+  context. The installed executable is independent of the originating account:
+  a vendor update or shared binary MUST NOT move a conversation to another login.
+  Native resume MUST preserve its native session ID and prove that its transcript
+  is reachable from the actual launch home. Claude MUST restore the earliest
+  existing launch cwd from that transcript. Explicit account and model selectors
+  MUST survive local materialization and remote dispatch. Account matching MUST
+  use recorded stable account identity or proved home ownership, never an
+  organization quota key or the recorded vendor release alone.
+  Origin account identity MUST be preserved through the SessionStart sidecar,
+  alias updates and session-index rescans. Missing launch provenance MUST remain
+  unknown rather than borrowing the current login in a reused home.
+  A verified missing transcript MUST fail before starting a harness; cold local
+  metadata MUST first be hydrated through canonical discovery. Remote metadata
+  and mirror stubs MUST defer native verification to the owner.
+  When native recovery is unavailable, context replay MUST be an explicit choice,
+  disclose the reason, and create a new conversation ID. An unattended caller
+  MUST request replay directly rather than silently receive a new conversation.
+  Model-specific refusals MUST affect only the executed account and model;
+  unknown model capacity MUST NOT be described as verified healthy.
+  (`lib/session/recovery.ts`; `commands/exec.ts`; `lib/session/actor-sidecar.ts`;
+  tests `lib/session/recovery.test.ts`, `commands/resume.test.ts`).
+- **SES-39a (MUST).** Bare `run <harness> --resume` and
+  `sessions resume --agent <harness>` MUST open the same interactive history
+  picker. `run <harness>#<account> --resume` adds the same account filter as
+  `sessions resume --agent <harness> --account <account>`. Session titles,
+  descriptions and conversation previews MUST remain available before selection.
+  Concrete identities bypass selection. A selected row MUST preserve explicit
+  run arguments, native passthrough arguments, recorded mode/model/cwd and
+  lifecycle constraints. Explicit terminal backends MUST work with concrete IDs
+  and MUST be consumed before the child re-enters resume.
 - **SES-40 (MUST).** Focus, single and multi-session resume, attach, and both
   concrete-id and picker forms of `run --resume` MUST route through SES-39's one
   origin-device recovery decision, preferring the origin device. When that origin
   device is genuinely unreachable, single-session resume MAY fall back to a
-  clearly-announced local `/continue` replay from the synced mirror
+  clearly-announced, explicitly chosen local `/continue` replay from the synced mirror
   (`resumeLocalFallbackSource` rewrites `machine` to self); it MUST NOT do so
   silently, and MUST NOT fall back while the origin is reachable (RUSH-2022). A
   host-dispatched session row MUST persist the dispatch host as `machine`. Cross-device attach MUST route before reading
