@@ -133,6 +133,7 @@ export function registerSessionsResumeCommand(sessionsCmd: Command): void {
       - --vscodium opens each session as an agent terminal tab in VSCodium via the swarm-ext extension (works with --device too).
       - --device <alias> opens the terminal surface on that device only when it is the selected sessions' origin; recovery never migrates a session to another device.
       - Recovery runs on the session's origin device: exact healthy origin uses native resume; otherwise a healthy version of the same harness receives /continue <id>.
+      - A session id with no transcript is refused, not resumed: recovery would open an empty conversation, so it names the harness and cwd to start fresh with instead.
     `,
   });
 

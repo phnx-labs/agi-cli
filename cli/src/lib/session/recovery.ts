@@ -320,7 +320,64 @@ export function resolveSessionRecoveryFromCandidates(
 }
 
 /**
+ * Whether a session has a transcript recovery could read.
+ *
+ * Two distinct misses, only one of which this device can judge:
+ *
+ * - **No path at all.** `activeSessionToSessionMeta` synthesizes a
+ *   `SessionMeta` with `filePath: ''` for a live-registry row that has not
+ *   written a transcript (RUSH-2682, deliberately, so `preview` can render a
+ *   just-started session). Honest for reading, useless for recovery, and true
+ *   regardless of which device asks.
+ * - **A path this box cannot see.** A row resolved from a peer carries the
+ *   PEER's absolute path, which need not exist here (`/Users/…` vs `/home/…`).
+ *   That is not a missing transcript, so existence is only checked for a row
+ *   this device owns — the PHNX-3626 "owner unreachable → /continue replay from
+ *   the synced mirror" fallback must keep working.
+ */
+export function sessionTranscriptReadable(
+  session: Pick<SessionMeta, 'filePath' | '_remote'>,
+  exists: (file: string) => boolean = (file) => fs.existsSync(file),
+): boolean {
+  if (!session.filePath) return false;
+  return session._remote ? true : exists(session.filePath);
+}
+
+/**
+ * Refuse recovery for a session with no transcript behind it.
+ *
+ * Both recovery modes read the prior conversation: `native` replays the
+ * harness's own state file, and `continue` hands `/continue <id>` to a fresh
+ * agent that reads the indexed transcript. With no transcript, `native` is
+ * already rejected by {@link inspectNativeResumeSession} — but `continue` was
+ * not, so a registry row that never produced a transcript resolved to
+ * `mode: 'continue'` and burned a live agent on an id with nothing to read.
+ * That agent then does the only thing it can: report that there is nothing to
+ * continue. Fail loud here instead, at the boundary that knows why.
+ */
+export function assertRecoverableTranscript(
+  session: SessionMeta,
+  exists: (file: string) => boolean = (file) => fs.existsSync(file),
+): void {
+  if (sessionTranscriptReadable(session, exists)) return;
+  const device = sessionOriginDevice(session);
+  const why = session.filePath
+    ? `its transcript is gone from ${device} (${session.filePath})`
+    : `it is registered as live on ${device} but never wrote one`;
+  throw new SessionRecoveryError(
+    `Session ${session.shortId} has no transcript to resume — ${why}. `
+    + `A recovered agent would open an empty conversation. `
+    + `Start a new session instead: agents run ${session.agent}`
+    + (session.cwd ? ` --cwd ${session.cwd}` : ''),
+  );
+}
+
+/**
  * Resolve recovery for a durable session, reading the live account pool.
+ *
+ * Refuses a session with no transcript up front (see
+ * {@link assertRecoverableTranscript}) — neither recovery mode can read one
+ * that was never written.
  *
  * Uses {@link collectRunCandidatesForRun} (native version-home logins PLUS
  * durable provider accounts, RUSH-3182) rather than the native-only
@@ -333,6 +390,7 @@ export async function resolveSessionRecovery(
   collect: (agent: AgentId) => Promise<RotateCandidate[]> = collectRunCandidatesForRun,
 ): Promise<SessionRecoveryTarget> {
   const agent = runnableSessionAgent(session);
+  assertRecoverableTranscript(session);
   return resolveSessionRecoveryFromCandidates(session, await collect(agent));
 }
 

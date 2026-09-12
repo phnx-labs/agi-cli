@@ -7,6 +7,7 @@ import type { SessionMeta } from './types.js';
 import {
   SessionRecoveryError,
   inspectNativeResumeSession,
+  resolveSessionRecovery,
   resolveSessionRecoveryFromCandidates,
   sessionOriginDevice,
   sessionRecoveryDestinationMatches,
@@ -320,5 +321,52 @@ describe('session recovery placement', () => {
   it('matches explicit user@host placement only to the origin', () => {
     expect(sessionRecoveryDestinationMatches(session(), 'muqsit@yosemite-s0', 'zion')).toBe(true);
     expect(sessionRecoveryDestinationMatches(session(), 'zion', 'zion')).toBe(false);
+  });
+});
+
+describe('resolveSessionRecovery transcript guard', () => {
+  const healthy = async () => [candidate('2.1.200')];
+
+  it('refuses a live-registry row that never wrote a transcript', async () => {
+    // The exact shape activeSessionToSessionMeta synthesizes for a session the
+    // registry calls running before (or without) any transcript on disk.
+    const phantom = session({ filePath: '', version: undefined, machine: 'zion' });
+    await expect(resolveSessionRecovery(phantom, healthy)).rejects.toThrowError(SessionRecoveryError);
+    await expect(resolveSessionRecovery(phantom, healthy))
+      .rejects.toThrow(/14567b8a.*registered as live on zion but never wrote one/s);
+  });
+
+  it('names the harness and cwd a replacement run would need', async () => {
+    const phantom = session({ filePath: '', machine: 'zion', cwd: '/Users/x/src/agents-cli' });
+    await expect(resolveSessionRecovery(phantom, healthy))
+      .rejects.toThrow('agents run claude --cwd /Users/x/src/agents-cli');
+  });
+
+  it('refuses a locally owned session whose transcript is gone', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-recovery-gone-'));
+    const missing = path.join(root, 'deleted.jsonl');
+    await expect(resolveSessionRecovery(session({ filePath: missing }), healthy))
+      .rejects.toThrow(/transcript is gone from yosemite-s0/);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('still recovers a peer row whose path does not exist on this box (PHNX-3626 mirror replay)', async () => {
+    // A peer's absolute path is meaningless here (/Users vs /home); existence is
+    // the owner's to judge, so the local /continue replay must not be refused.
+    const target = await resolveSessionRecovery(
+      session({ filePath: '/home/muqsit/.agents/peer.jsonl', _remote: true }),
+      healthy,
+    );
+    expect(target.mode).toBe('continue');
+  });
+
+  it('leaves a real on-disk transcript on the ordinary path', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-recovery-present-'));
+    const filePath = path.join(root, 'transcript.jsonl');
+    fs.writeFileSync(filePath, '{}\n');
+    const target = await resolveSessionRecovery(session({ filePath }), healthy);
+    expect(target.mode).toBe('continue');
+    expect(target.version).toBe('2.1.200');
+    fs.rmSync(root, { recursive: true, force: true });
   });
 });
