@@ -37,7 +37,7 @@ import {
 } from './usage.js';
 import { readAccountHeadroom } from '../fleet-cache.js';
 import { machineId } from '../machine-id.js';
-import { AUTH_PROBE_MAX_AGE_MS, readAuthHealthCache, authCacheKey, isDeadVerdict, type AuthVerdict } from '../auth-health.js';
+import { AUTH_PROBE_MAX_AGE_MS, readAuthHealthCache, authCacheKey, slotAuthVersionKey, isDeadVerdict, type AuthVerdict } from '../auth-health.js';
 
 function getRotateDir(): string {
   const dir = path.join(getHelpersDir(), 'rotate');
@@ -1004,10 +1004,12 @@ export async function collectRunCandidates(agent: AgentId): Promise<RotateCandid
       const slot = resolved.slot;
       const home = resolved.execHome;
       const version = resolved.label ?? binaryLabel;
-      const authHealth = authCache[authCacheKey(localHost, agent, version)];
+      const cachedHealth = authCache[authCacheKey(localHost, agent, slot ? slotAuthVersionKey(account.id) : version)];
+      const authHealth = cachedHealth && Date.now() - cachedHealth.checkedAt <= AUTH_PROBE_MAX_AGE_MS ? cachedHealth : undefined;
+      const effectiveVerdict = authHealth?.verdict ?? slot?.verdict ?? null;
       const info = await getAccountInfo(agent, home);
       const launchable = isLaunchableSignedIn(info.signedIn, credentialPresence(agent, home));
-      const slotOk = !slot || isLaunchableSlotVerdict(slot.verdict);
+      const slotOk = !slot || isLaunchableSlotVerdict(effectiveVerdict);
       return {
         agent,
         version,
@@ -1019,10 +1021,11 @@ export async function collectRunCandidates(agent: AgentId): Promise<RotateCandid
         usageStatus: launchable ? info.usageStatus : null,
         plan: launchable ? info.plan : null,
         signedIn: launchable && slotOk,
-        authVerdict: slot?.verdict ?? authHealth?.verdict ?? null,
+        authVerdict: effectiveVerdict,
         authCheckedAt: (() => {
+          if (authHealth) return authHealth.checkedAt;
           const ts = slot?.checkedAt ? Date.parse(slot.checkedAt) : NaN;
-          return Number.isFinite(ts) ? ts : authHealth?.checkedAt ?? null;
+          return Number.isFinite(ts) ? ts : null;
         })(),
         lastActive: info.lastActive,
         nativeAccount: account.name,

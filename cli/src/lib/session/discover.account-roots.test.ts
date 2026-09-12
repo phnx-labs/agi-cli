@@ -21,9 +21,10 @@ process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 
 // Imported after HOME/USERPROFILE is redirected: state.ts captures HOME at load.
-const { getAgentSessionDirs, isManagedSessionFile, hydrateSessionTranscript } = await import('./discover.js');
+const { getAgentSessionDirs, isManagedSessionFile, hydrateSessionTranscript, findLocalSessionTranscripts } = await import('./discover.js');
 
 const { upsertSession, getSessionById, closeDB } = await import('./db.js');
+const { writeSessionActorRecord } = await import('./actor-sidecar.js');
 
 function historyDir(): string {
   return path.join(TEST_HOME, '.agents', '.history');
@@ -143,4 +144,19 @@ describe('hydrateSessionTranscript', () => {
     expect(hydrated.accountId).toBe('recorded-origin');
     expect(getSessionById(id)?.filePath).toBe(oldPath); // Read-through does not compete with the index writer.
   });
+});
+
+it('cold lookup preserves saved permissions and prefers the live copy over a newer backup', async () => {
+  const id = '11111111-2222-3333-4444-555555555553';
+  const live = path.join(TEST_HOME, '.codex', 'sessions', `rollout-${id}.jsonl`);
+  const backup = path.join(agentsUserDir(), '.codex-homes', 'a-newer-copy', '.codex', 'sessions', `rollout-${id}.jsonl`);
+  for (const [file, timestamp] of [[live, '2026-09-12T00:00:00Z'], [backup, '2026-09-13T00:00:00Z']]) {
+    writeFile(file, [
+      { type: 'session_meta', payload: { id, cwd: TEST_HOME, timestamp, cli_version: '0.154.0' } },
+      { type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Saved mode fixture.' }] } },
+    ].map(row => JSON.stringify(row)).join('\n') + '\n');
+  }
+  writeSessionActorRecord({ sessionId: id, accountId: 'origin-account', mode: 'auto', startedAtMs: Date.now() });
+  const [match] = await findLocalSessionTranscripts(id, 'codex');
+  expect(match).toMatchObject({ filePath: fs.realpathSync(live), mode: 'auto', accountId: 'origin-account' });
 });
