@@ -17,6 +17,7 @@ import {
   isInsideGitWorkTree,
   parseRunPickerMarkers,
   runAccountPickerConflicts,
+  runDevicePickerConflicts,
   runAutoDefaultsToAffinity,
   hostInteractiveNeedsCorrelationId,
   parseExplicitSessionId,
@@ -239,7 +240,17 @@ describe('run picker markers (# account, @ device)', () => {
       lease: true,
       box: 'warm-one',
     })).toEqual(['--resume', '--strategy', '--balanced', '--lease', '--box']);
-    expect(runAccountPickerConflicts({ device: 'yosemite-s0' })).toEqual([]);
+    expect(runAccountPickerConflicts({ device: 'worker-1' })).toEqual([]);
+    // `#` asks for the account; naming one as well is the same contradiction.
+    expect(runAccountPickerConflicts({ account: 'work' })).toEqual(['--account work']);
+  });
+
+  it('rejects placement selectors alongside the device picker, but not account selectors', () => {
+    expect(runDevicePickerConflicts({ device: 'worker-1' })).toEqual(['--device worker-1']);
+    expect(runDevicePickerConflicts({ on: 'worker-1', computer: 'worker-2' }))
+      .toEqual(['--device worker-1', '--device worker-2']);
+    expect(runDevicePickerConflicts({ lease: true, box: 'warm-one' })).toEqual(['--lease', '--box']);
+    expect(runDevicePickerConflicts({})).toEqual([]);
   });
 });
 

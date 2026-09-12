@@ -10,11 +10,11 @@
 d               unverified  Week 57% left
 [agents] selected icloud · claude@2.1.260 for this run
 ? Select a device for this run (fleet state as of 20 min ago):
-❯ yosemite-m1        · linux   · this machine · light   · 29% load  · 11% mem · 
+❯ worker-1        · linux   · this machine · light   · 29% load  · 11% mem · 
 worker · ✓ icloud
-  yosemite-m4        · linux   · online       · idle    · 1% load   · 5% mem  ·
+  worker-2        · linux   · online       · idle    · 1% load   · 5% mem  ·
 worker
-  yosemite-m5        · linux   · online       · idle    · 2% load   · 6% mem  ·
+  worker-3        · linux   · online       · idle    · 2% load   · 6% mem  ·
 worker · ✓ icloud
-  yosemite-m6        · linux   · online       · idle    · 2% load   · 8% mem  ·
+  worker-4        · linux   · online       · idle    · 2% load   · 8% mem  ·
 ↑↓ navigate • ⏎ select
