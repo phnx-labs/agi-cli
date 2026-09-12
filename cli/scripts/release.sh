@@ -270,7 +270,7 @@ deploy_share_worker() {
     gray "share Worker deploy: skipped (--deploy-worker=off)"
     return 0
   fi
-  local cli=(npx --yes "$PHNX_PKG@$TARGET" --)
+  local cli=(npx --yes --package "$PHNX_PKG@$TARGET" -- agents)
   bold "Deploying the managed share Worker from $PHNX_PKG@$TARGET (mode: $DEPLOY_WORKER)..."
   if [[ "$DEPLOY_WORKER" == "auto" ]]; then
     # Change detection is a pure local render+hash and needs no CF creds; skip the
