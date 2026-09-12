@@ -28,6 +28,7 @@ import { compareVersions } from '../agent-spec/primitives.js';
 import { namespacedServiceLabel, serviceManifestHomeEnv, serviceManagerRegistrationAllowed } from '../service-manifest.js';
 import { downloadMenubarHelperApp, menubarHelperCacheDir } from './download-menubar.js';
 import { helperFloor } from '../helper-versions.js';
+import { cachedMenubarVersion, resolveMenubarVersion } from './resolve-version.js';
 
 const APP_BUNDLE_NAME = 'MenubarHelper.app';
 const INSTALL_DIR_NAME = 'agents-cli';
@@ -537,7 +538,7 @@ function startMenubarServiceFromSource(opts: { clearOptOut?: boolean; sourceAppP
 export async function enableMenubarService(opts: { clearOptOut?: boolean } = { clearOptOut: true }): Promise<boolean> {
   if (!onDarwin()) return false;
   let src = sourceAppPath();
-  if (!src) src = await downloadMenubarHelperApp(helperFloor('menubar'));
+  if (!src) src = await downloadMenubarHelperApp(await resolveMenubarVersion());
   return startMenubarServiceFromSource({ ...opts, sourceAppPath: src });
 }
 
@@ -582,8 +583,10 @@ export function stampVersionLabel(stamp: MenubarStamp | null): string | null {
 function availableStamp(): MenubarStamp {
   const src = sourceAppPath();
   // No local bundle means the release path: what would be installed is the
-  // helper version the floor names.
-  return src ? stampFor(src) : { source: 'release', helperVersion: helperFloor('menubar') };
+  // newest published helper this machine has resolved (cached, day-old at
+  // most), never below the floor — and the floor itself before the first
+  // resolution or offline.
+  return src ? stampFor(src) : { source: 'release', helperVersion: cachedMenubarVersion() };
 }
 
 /** The helper version this install would put on disk right now, for display. */
@@ -1149,7 +1152,7 @@ export async function runMenubarSetup(): Promise<SetupResult> {
   let src = sourceAppPath();
   if (!src) {
     try {
-      src = await downloadMenubarHelperApp(helperFloor('menubar'));
+      src = await downloadMenubarHelperApp(await resolveMenubarVersion());
     } catch (e) {
       step('bundle', 'failed', `no AGI Menu bundle ships with this install, and the release-asset download failed: ${(e as Error).message}`);
       return { steps, configured: false, status: before };
@@ -1481,4 +1484,60 @@ export function buildMenubarDoctorReport(): MenubarDoctorReport {
     staleRunningProcess,
     accessibilityHintNeeded: signingIdentity === 'ad-hoc' || staleRunningProcess.some((p) => p.stale),
   };
+}
+
+/** Outcome of one auto-update pass (`updateMenubarHelperIfNewer`). */
+export interface MenubarUpdateResult {
+  outcome: 'updated' | 'current' | 'skipped' | 'failed';
+  installed: string | null;
+  available: string;
+  detail: string;
+}
+
+/**
+ * Bring an installed release helper up to the newest published build, without
+ * a human running `agents menubar setup`.
+ *
+ * Runs from the daemon's self-heal tick and right after `agents upgrade`. It
+ * only ever moves a RELEASE install forward: a machine whose helper came from a
+ * local build (a dev checkout) keeps it, a machine that never enabled the menu
+ * bar or opted out is left alone, and the ownership contest that bounds
+ * multi-install churn (`mayInstallMenubarHelper`) still applies. The bundle is
+ * downloaded and verified by the same path every install uses (sha256,
+ * codesign, Team, designated-requirement pin, notarization), swapped
+ * atomically under the install lock at the same path and identity — which is
+ * what keeps the Accessibility grant — and the running helper is restarted
+ * from the new binary (`restartMenubarHelperAfterSwap`; launchd's KeepAlive
+ * relaunches it within seconds). `dryRun` reports what would happen. Never
+ * throws.
+ */
+export async function updateMenubarHelperIfNewer(opts: { dryRun?: boolean; force?: boolean } = {}): Promise<MenubarUpdateResult> {
+  const installedStamp = readInstalledMenubarStamp();
+  const installed = stampVersionLabel(installedStamp);
+  const skip = (detail: string, available = cachedMenubarVersion()): MenubarUpdateResult =>
+    ({ outcome: 'skipped', installed, available, detail });
+  if (!onDarwin()) return skip('macOS only');
+  if (menubarDisabledByUser()) return skip('the menu bar is disabled (agents menubar disable)');
+  if (!menubarServiceInstalled()) return skip('the menu bar is not installed on this Mac');
+  if (sourceAppPath()) return skip('this install ships its own helper bundle; the startup self-heal owns it');
+  if (!installedStamp || installedStamp.source !== 'release') return skip(`installed helper is ${installed ?? 'unstamped'}, not a release`);
+
+  const available = await resolveMenubarVersion({ force: opts.force });
+  if (compareVersions(available, installedStamp.helperVersion) <= 0) {
+    return { outcome: 'current', installed, available, detail: `AGI Menu ${installed} is the newest published build` };
+  }
+  if (!mayHealMenubar(false)) return skip(`another install owns the helper; it will update on its own cooldown`, available);
+  if (opts.dryRun) return { outcome: 'updated', installed, available, detail: `would update AGI Menu ${installed} → ${available}` };
+
+  try {
+    const src = await downloadMenubarHelperApp(available);
+    const exec = ensureMenubarAppInstalled({ forceReinstall: true, sourceAppPath: src });
+    if (!exec) return { outcome: 'failed', installed, available, detail: 'the verified bundle could not be installed' };
+    try { fs.writeFileSync(installedVersionMarkerPath(), JSON.stringify(stampFor(src))); } catch { /* best effort */ }
+    stampMenubarHeal();
+    restartMenubarHelperAfterSwap(process.getuid?.() ?? 0, liveMenubarProcesses().own);
+    return { outcome: 'updated', installed, available, detail: `AGI Menu ${installed} → ${available}` };
+  } catch (e) {
+    return { outcome: 'failed', installed, available, detail: (e as Error).message };
+  }
 }

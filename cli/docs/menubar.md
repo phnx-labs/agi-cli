@@ -62,6 +62,19 @@ flowchart LR
 3. **Install** (on a user's Mac): `agents menubar setup` / `enable` (and the
    startup self-heal, from a bundled or cached copy only) download, verify, and
    install it. No build happens on any user machine.
+4. **Update, unattended.** Installed release helpers move to the newest
+   published build on their own: `resolveMenubarVersion`
+   (`src/lib/menubar/resolve-version.ts`) reads the public release list once a
+   day (cached at `~/.agents/.cache/menubar/latest.json`, floor as the offline
+   answer, never below the floor), and `updateMenubarHelperIfNewer` downloads
+   and verifies that build, swaps it atomically at the same path and identity
+   (bundle id + Team, so the Accessibility grant survives), and restarts the
+   helper. Two triggers: the daemon's periodic self-heal check `menubar-helper`
+   (every six hours; `agents doctor` shows it, `agents doctor --fix` runs it)
+   and the end of `agents upgrade`. A local-build install, an opted-out Mac and
+   a Mac that never enabled the menu bar are left alone; the multi-install
+   ownership contest still applies. The floor bump in step 2 is therefore the
+   *tested-against* record and the offline answer, not the release switch.
 
 ### Staging a bundle in this repo
 
@@ -123,6 +136,7 @@ helper polls. Full flag reference: [command-index.md](command-index.md#menubar--
 | `~/.agents/.cache/state/menubar.disabled` | sticky opt-out marker |
 | `~/.agents/.cache/helpers/menubar/menubar.log` | helper stdout / stderr |
 | `~/.agents/.cache/menubar/mac-helper/v<x.y.z>/` | downloaded + verified release cache, one dir per tag |
+| `~/.agents/.cache/menubar/latest.json` | newest published helper version resolved from the release list, with the time it was read (day-old at most) |
 
 The helper's own state files (`~/.agents/.history/menubar/…`, the feed
 notification ledger, the screenshot OCR index) are documented in agi-menu.
