@@ -51,16 +51,19 @@ Both primitives spawn one `secrets __serve` per call:
 | Primitive | Transport |
 |---|---|
 | `secretsRequest(op, args?, context?)` | `spawn`; write+end `child.stdio[3]`, read `child.stdio[4]` to EOF. |
-| `secretsRequestSync(op, args?, context?)` | `spawnSync` under a POSIX **shell**, so only stdio 0-2 cross the `spawnSync` boundary (numbered fds 3+ are **dropped by the Bun runtime**, and this repo runs its whole CLI suite as `bun src/index.ts`). The shell does the fd wiring: the request rides `spawnSync`'s **stdin** (a real pipe/socketpair on every runtime), dup'd onto fd 3 (`3<&0`), and fd 4 is redirected onto the child's stdout (`4>&1`), captured natively as `result.stdout`. Both fds are then the **same anonymous pipe/socketpair the async path hands the standalone** — load-bearing, because the standalone wraps fd 3 in a `net.Socket` and a Socket over a **named FIFO** reads the request but never fires EOF on macOS, so the older FIFO wiring hung the read loop until the timeout. The standalone still requires a pipe or socket for both (it refuses a plain file or tty, so no secret is staged to disk). Bounded by `SYNC_SERVE_TIMEOUT_MS` (**3 s**), not the async path's 65 s. POSIX only — Windows fails loud, pointing at the async path. |
+| `secretsRequestSync(op, args?, context?)` | `spawnSync` under a POSIX **shell**, so only stdio 0-2 cross the `spawnSync` boundary (numbered fds 3+ are **dropped by the Bun runtime**, and this repo runs its whole CLI suite as `bun src/index.ts`). The shell does the fd wiring: the request rides `spawnSync`'s **stdin** (a real pipe/socketpair on every runtime), dup'd onto fd 3 (`3<&0`), and fd 4 is redirected onto the child's stdout (`4>&1`), captured natively as `result.stdout`. Both fds are then the **same anonymous pipe/socketpair the async path hands the standalone** — load-bearing, because the standalone wraps fd 3 in a `net.Socket` and a Socket over a **named FIFO** reads the request but never fires EOF on macOS, so the older FIFO wiring hung the read loop until the timeout. The standalone still requires a pipe or socket for both (it refuses a plain file or tty, so no secret is staged to disk). Bounded by `SYNC_SERVE_TIMEOUT_MS` (**30 s** — every request is a cold `secrets __serve` process, so the bound covers a Node boot on a loaded box, not just the op), not the async path's 65 s. POSIX only — Windows fails loud, pointing at the async path. |
 
 `secretsRequestSync` exists for the read-only STATUS surfaces that resolve secrets
 on a synchronous path — `agents view`, the account-catalog rows, run-config and
 account-rotation resolution on the `agents run` hot path. There is no request-size
 bound (`spawnSync` services stdin and the fd-4 response concurrently, so a large
 request never deadlocks on a full pipe buffer — the standalone drains fd 3 to EOF
-while `spawnSync` is still writing it), and the 3 s
-timeout means a missing or unreachable standalone **fails fast**, never blocking
-the whole render/launch for the standalone's own 60 s deadline. Those callers
+while `spawnSync` is still writing it), and the 30 s
+timeout means a missing or unreachable standalone **fails before** the
+standalone's own 60 s deadline, while a healthy one that merely boots slowly on a
+loaded machine (each request is a cold process: 0.4–2.6 s at load average ~100,
+where the old 3 s bound killed `agents run claude` with `spawnSync sh ETIMEDOUT`)
+still answers. Those callers
 catch the resulting `SecretsClientError` and surface one clear line while
 rendering the rest (`secretsUnavailableNote`, `account-catalog.ts`); DIST-1 still
 holds — there is no fallback to the embedded engine, the standalone just could not

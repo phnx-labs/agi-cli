@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.22.103
+
+- **`agents run claude` no longer dies with `secrets request failed: spawnSync sh ETIMEDOUT` on a loaded machine.** Every synchronous secrets request spawns a fresh `secrets __serve` process, so its bound has to cover a cold Node boot of the standalone, not just the tens-of-milliseconds operation. The bound was 3 s; on a desktop at load average ~100 each spawn measured 0.4–2.6 s and sometimes more, so the account listing on the launch path timed out and the run aborted before Claude started (also the reason AGI EXT tabs opened to a bare shell there). The sync bound is now 30 s — enough to boot under load, still well under the standalone's own 60 s self-deadline — and a timeout names the cause ("the standalone secrets CLI did not answer within 30s … check with secrets --version") instead of the raw `spawnSync` errno. Source: `cli/src/lib/secrets-client.ts`, `cli/src/lib/secrets-client.test.ts`, `cli/docs/secrets-client.md`.
+
 ## 1.22.102
 
 - **AGI Menu updates itself on npm-installed Macs (PHNX-4036).** The npm tarball ships no helper bundle, and the startup self-heal is network-free by design, so an `npm i -g` Mac kept whatever helper it had — the crashing 1.1.2, a dead 0.1.0 — until someone ran `agents menubar setup` by hand. The detached background sync now downloads and verifies the floor release into the helper cache whenever the installed helper is behind it (or no service exists yet and the user has not opted out), and the self-heal treats that cached bundle as a source, so the next `agents` invocation installs it with no foreground network. `agents menubar status` names the pending download instead of "missing (cannot enable)". Source: `cli/src/lib/menubar/install-menubar.ts`, `cli/src/lib/auto-pull-worker.ts`.
