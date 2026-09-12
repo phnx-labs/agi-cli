@@ -5,62 +5,125 @@ Drive native macOS apps from AI agents via the Accessibility API.
 
 ## Overview
 
-`agents computer` controls macOS applications through the Accessibility
-(`AXUIElement`) framework, ScreenCaptureKit, and HID-tap event synthesis. It
-requires a separate helper app (Agents Computer) installed in
-`/Applications/Computer Helper.app` with two macOS TCC grants: Accessibility and Screen Recording.
+`agents computer` controls native applications through the Accessibility
+(`AXUIElement`) framework, ScreenCaptureKit, and HID-tap event synthesis on
+macOS; a UI Automation daemon on Windows over `--device`; or any GUI desktop
+over RFB/VNC with `--vnc`.
 
-The helper runs as a launchd user agent, listening on a UNIX socket. Agents
-send JSON-RPC calls through the CLI; the helper translates them into AX
-actions and synthesized input events on running apps.
+Use this when you need to drive an app that has no web interface and no CDP
+endpoint — a desktop finance tool, a native editor, a VM window, or an app that
+Electron automation cannot reach cleanly. For the web, use
+[`agents browser`](browser.md).
 
-Use this when you need to drive a macOS app that has no web interface and no
-CDP endpoint — a desktop finance tool, a native editor, a VM window, or an app
-that Electron automation cannot reach cleanly.
+**The engine is a separate CLI.** Since PHNX-4075 the helper daemons, the
+JSON-RPC transport, the RFB/VNC client, and the autonomous `run` loop all live
+in the standalone `computer` CLI. `agents computer` is a thin consumer of it:
 
-This is macOS-only. The daemon, socket, and all TCC plumbing are specific to
-macOS APIs (`launchctl`, `AXUIElement`, `ScreenCaptureKit`, `CoreGraphics`).
+```bash
+npm i -g @phnx-labs/computer-cli    # the engine — required
+agents setup computer               # installs the helper + walks the TCC grants
+```
+
+Without it, every verb fails loud with that install line. There is deliberately
+**no fallback engine** bundled in agents-cli — a fallback would re-couple two
+release trains the split exists to separate.
 
 ## Architecture
+
+agents-cli contributes what only the fleet CLI can know; the engine does the
+driving. The two meet over three inherited file descriptors on one spawn.
 
 ```
 agent process
      │
-     │  agents computer <verb>
+     │  agents computer <verb> [--device <name>] [--vnc <host:port>]
      ▼
-  CLI (computer.ts / computer-actions.ts)
+  agents-cli  (commands/computer.ts)
+     │         · permissions  → the allow-list + peer files       (lib/computer/policy.ts)
+     │         · --device     → fleet resolution + ssh -L tunnel  (lib/computer/remote.ts)
+     │         · actor/session identity                           (lib/computer/context.ts)
      │
-     │  JSON-RPC over UNIX socket
-     │  ~/.agents/.cache/helpers/computer.sock
-     │  (per-call timeout 30s; COMPUTER_HELPER_RPC_TIMEOUT_MS overrides)
-     │
-     │  Fallback: spawn helper binary as child process
-     │            (for dev builds without setup)
+     │  spawn, stdio 0/1/2 INHERITED (the engine owns the terminal)
+     │    fd 3  COMPUTER_CONTEXT_FD  →  one JSON context object, then EOF
+     │    fd 4  COMPUTER_EVENTS_FD   ←  NDJSON action events, one per line
      ▼
-  Agents Computer
-  /Applications/Computer Helper.app
-  [launchd: com.phnx-labs.computer-helper]
+  computer  (@phnx-labs/computer-cli)
      │
-     │  AXUIElement  (Accessibility framework)
-     │  ScreenCaptureKit  (window/display capture)
-     │  CGEvent via HID tap  (clicks, drags, keystrokes)
+     │  JSON-RPC over UNIX socket ~/.agents/.cache/helpers/computer.sock  (macOS)
+     │  JSON-RPC over loopback TCP through the tunnel                     (--device)
+     │  RFB                                                               (--vnc)
      ▼
-  macOS app process
-  (any app in the allow list)
+  helper daemon  →  the app
 ```
+
+The action events on fd 4 come back to agents-cli, which records them in the
+feed and the session ledger — that is what `agents computer sessions` and
+`agents sessions --computer` read.
+
+### What lives where
+
+| Concern | Owner | Why |
+|---|---|---|
+| Helper daemons, RPC, RFB/VNC, `run` loop | the engine | It is the automation; it releases on its own cadence |
+| Helper download + signature/notarization checks | the engine | It resolves its own helper releases; agents-cli version-pins nothing |
+| App allow list (`Computer(<bundle-id>)` rules) | agents-cli | Derived from the agents permissions resource layer |
+| `--device` resolution and the ssh tunnel | agents-cli | It owns the devices registry, ssh identity, and the fleet |
+| Action history, feed events, actor identity | agents-cli | It owns `sessions.db` and the feed |
+| Per-verb flags and their `--help` | the engine | One surface, not a drifting copy |
+
+### The context (fd 3)
+
+One JSON object, written and closed immediately, so the engine reads to EOF and
+proceeds. `version: 1` is what the engine matches on; fields added later are
+optional so an older engine keeps working.
+
+| Field | Meaning |
+|---|---|
+| `transport` | `socket` / `tcp` / `vnc`, already decided — including the loopback port a `--device` tunnel landed on |
+| `device` | The resolved ssh target (`sshTarget`, `user`, `host`, `sshArgs`) so the engine can provision a remote helper without the devices registry |
+| `policy` | `policyPath`, `peersPath`, the allowed bundle ids and peer exec paths, the gated verb classes, the admission cache path, and the exact grant hint |
+| `identity` | `actor`, `sessionId`, `launchId`, and the `invocationId` that groups one run's actions |
+| `logPath` | Where the daemon log belongs, so `status` and the engine agree |
+
+### The action events (fd 4)
+
+One JSON object per line, each an action the engine actually performed. A line
+needs at least a `verb`; `targetPid`, `bundle`, `device`, and free-form detail
+(a `task` preview, coordinates) are optional. An unreadable line is dropped
+rather than failing the command — the action it describes already happened and
+already reported its own success or failure. agents-cli bounds the `task`
+preview itself, so an engine cannot write an unbounded string into the ledger.
+
+The engine must never block on this pipe; emitting nothing is valid.
+
+## Permissions
 
 The helper reads an allow-list policy file
 (`~/.agents/.cache/helpers/computer-policy.json`) at startup and on SIGHUP.
 By default the policy is deny-all. You must explicitly whitelist each app the
 daemon may drive.
 
+agents-cli renders that file from `Computer(<bundle-id>)` rules in
+`~/.agents/permissions/groups/` before any lifecycle verb, so an edit is in
+force after `agents computer reload`. The rule grammar is an agents-cli
+concept, which is why the engine is handed the rendered answer rather than the
+rules.
+
 A peer-auth list (`~/.agents/.cache/helpers/computer-peers.json`) controls
-which caller executables may connect to the socket. The CLI writes this list
-at `start` time based on the currently installed Node binary path. This
-prevents a malicious npm postinstall from connecting to the socket through a
-different process.
+which caller executables may connect to the socket — the standalone engine, the
+runtime running agents-cli, and Rush.app when installed. This prevents a
+malicious npm postinstall from connecting to the socket through a different
+process.
 
 ## Setup
+
+### 0. Install the engine
+
+```bash
+npm i -g @phnx-labs/computer-cli
+```
+
+Required once per machine. Every `agents computer` verb runs through it.
 
 ### 1. Install the helper
 
@@ -68,7 +131,7 @@ different process.
 agents computer setup        # alias: install-helper
 ```
 
-This installs the helper at `/Applications/Computer Helper.app`,
+The engine installs the helper at `/Applications/Computer Helper.app`,
 verifies its codesign signature, writes a LaunchAgent plist at
 `~/Library/LaunchAgents/com.phnx-labs.computer-helper.plist`, and prints
 the next steps. It does **not** start the daemon.
@@ -312,10 +375,13 @@ agents computer stop --device win-mini       # tear down tunnel + task
 
 ## Recipes
 
-### 1. Install helper and grant accessibility
+### 1. Install engine + helper and grant accessibility
 
 ```bash
-# Install
+# The engine (once per machine)
+npm i -g @phnx-labs/computer-cli
+
+# Install the helper
 agents computer setup
 
 # Grant permissions in System Settings (manual step)

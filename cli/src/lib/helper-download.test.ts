@@ -188,7 +188,8 @@ describe('download sha256 gate (real hash + parse used in downloadHelperApp)', (
 });
 
 // RUSH-3113 regression. `helper-download.ts` must be importable as the FIRST
-// local module in a fresh process. It used to reach `computer/ssh-tunnel.ts`
+// local module in a fresh process. It used to reach the computer subsystem's
+// ssh-tunnel module (since extracted, PHNX-4075)
 // for two sha256 helpers, and that graph ran through the (now-removed, PHNX-3989)
 // in-repo secrets engine's own keychain-helper downloader, which imported back
 // into this module while it was still evaluating — before `EXPECTED_TEAM_ID`

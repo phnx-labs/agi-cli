@@ -2,7 +2,8 @@
  * On-demand download + verification of the macOS menu-bar helper
  * ("MenubarHelper.app").
  *
- * Mirrors the ComputerHelper download model (`../computer/download.ts`): the
+ * Mirrors the ComputerHelper download model the computer subsystem used before
+ * it was extracted (PHNX-4075): the
  * helper ships as a signed + notarized `.app` zipped as a GitHub release asset
  * on the helper's own `menubar/v<x.y.z>` tag, NOT the CLI's tag (see
  * `helper-versions.ts`). A fresh `npm i -g` machine whose tarball lacks a

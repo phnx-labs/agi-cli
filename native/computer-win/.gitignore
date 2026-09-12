@@ -1,6 +1,0 @@
-# .NET build outputs — the daemon exe is staged into the npm tarball at
-# release time by scripts, not committed.
-bin/
-obj/
-dist/
-build.log

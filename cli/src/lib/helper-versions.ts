@@ -28,7 +28,7 @@
  */
 
 /** The helpers that have their own release train. */
-export type HelperName = 'menubar' | 'computer-mac' | 'computer-win';
+export type HelperName = 'menubar';
 
 /** One helper's release identity. */
 export interface HelperRelease {
@@ -46,17 +46,17 @@ export interface HelperRelease {
  *
  * `menubar` starts at 1.0.0 — the first build published under its own tag
  * rather than the CLI's. It is not "version 1 of the helper"; it is version 1
- * of its independent release train. The keychain helper moved with the
- * standalone `secrets` engine (PHNX-3989) — it downloads and verifies its own
- * helper release now, off this table entirely.
+ * of its independent release train.
+ *
+ * Two helper families have since left this table entirely, both for the same
+ * reason: their engine became a standalone CLI that resolves and verifies its
+ * OWN helper release. The keychain helper went with `secrets` (PHNX-3989); the
+ * macOS and Windows computer helpers went with `computer` (PHNX-4075). A floor
+ * recorded here for a helper this CLI never downloads would be a lying table —
+ * it would claim a distribution responsibility agents-cli no longer has.
  */
 export const HELPER_RELEASES: Readonly<Record<HelperName, HelperRelease>> = {
   menubar: { tagPrefix: 'menubar', floor: '1.3.0' },
-  'computer-mac': { tagPrefix: 'computer-mac', floor: '1.0.0' },
-  // The Windows helper is a bare .exe, not an .app bundle, so it does not share
-  // helper-download.ts's zip/codesign/notarize machinery -- but it has the same
-  // URL problem, so it shares the tag namespace and the floor.
-  'computer-win': { tagPrefix: 'computer-win', floor: '1.0.0' },
 };
 
 /** The release tag for one helper at one version, e.g. `menubar/v1.0.0`. */

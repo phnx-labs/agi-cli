@@ -12,7 +12,7 @@ export { shellQuote };
 // The `ssh -L` tunnel spawn is shared with `agents computer --device`; it lives in
 // the single ssh-tunnel helper. Calling it with no options preserves this
 // driver's original foreground, stderr-captured behavior exactly.
-import { startSSHTunnel } from '../../computer/ssh-tunnel.js';
+import { startSSHTunnel } from '../../ssh-tunnel.js';
 import { encodePwshBase64 } from '../../pwsh.js';
 
 export interface SSHConnection {

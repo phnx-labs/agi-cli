@@ -58,6 +58,9 @@ groups:
       - cli/src/bootstrap.ts
       - cli/src/index.ts
       - cli/src/browser.ts
+      # cli/src/computer.ts (the `computer` npm bin) and build-win.sh went with
+      # the standalone `computer` engine (PHNX-4075); kept mapped so those
+      # deletions never read as unmapped, same as demo/ and openspec/ below.
       - cli/src/computer.ts
       - cli/scripts/build.sh
       - cli/scripts/build-bin.sh
