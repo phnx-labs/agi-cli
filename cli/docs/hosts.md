@@ -150,18 +150,38 @@ claude, ignored with a stderr note otherwise.
 
 ### Choose an account after device placement
 
-A trailing `@` on a concrete harness composes with device routing. agents-cli
-resolves the device first, then renders the installed versions/accounts reported
-by that device:
+A trailing `#` on a concrete harness composes with device routing. agents-cli
+forwards the marker unchanged, so the peer — not the launcher — lists and
+selects from the installed versions/accounts it reported:
 
 ```bash
-agents run claude@ --device auto         # auto-place, then choose an account
-agents run claude@ --device yosemite-s0  # choose from yosemite-s0 only
+agents run claude# --device auto         # auto-place, then choose an account there
+agents run claude# --device yosemite-s0  # choose from yosemite-s0 only
 ```
 
-The picker remains interactive, and the selected version applies only to that
-run. Account selection cannot be combined with another account selector such as
-`--strategy`, `--balanced`, `--resume`, `--lease`, or `--box`.
+### Pick the device (`@`), or both (`#@`)
+
+A trailing `@` opens the device picker instead: every registered fleet device,
+rendered from the last cached fleet state (this machine first, offline rows
+disabled, state age in the prompt). The pick becomes the run's `--device`;
+choosing this machine is a plain local run. `#@` (or `@#`) asks both, in
+order — the account picker runs first against this machine's slots, then the
+device picker shows a ✓/– mark for the picked account on each device, and the
+run dispatches to the chosen device with `claude#<label>` so the peer
+resolves its own slot:
+
+```bash
+agents run claude@    # pick the device; the account stays balanced
+agents run claude#@   # pick the account, then the device that runs it
+```
+
+The pickers remain interactive, and a cancelled menu launches nothing.
+Account selection (`#`) cannot be combined with another account selector such
+as `--account`, `--strategy`, `--balanced`, `--resume`, `--lease`, or `--box`;
+device selection (`@`) cannot be combined with `--device`/`--on`/`--computer`/
+`--host` or with `--lease`/`--box`. A pin for the same dimension is equally
+invalid (`claude@2.1.218#`, `claude#work#`); `claude#work@` is the valid
+spelling for "account work, device picker".
 
 For `--device auto`, picker placement prefers a signed-in device but keeps a
 reachable device with the harness installed eligible when every account there

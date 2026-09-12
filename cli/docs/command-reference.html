@@ -2908,8 +2908,16 @@ so concurrent agents each show a different one and it stays stable within a sess
       # interactive (tui) with the pinned default version
       agents run claude
 
-      # pick a signed-in account/version for only this run
+      # pick a signed-in account/version for only this run (# = account picker)
+      agents run claude#
+
+      # pick the device this run lands on (@ = device picker); this machine
+      # first, offline rows disabled, fleet state aged in the prompt
       agents run claude@
+
+      # ask both, account first, then device — the run dispatches with the
+      # picked account to the picked device
+      agents run claude#@
 
       # full-auto: affinity-pick the host, then the harness with the most
       # account headroom, then a balanced account on it
@@ -2992,9 +3000,13 @@ agents run auto --device yosemite-s0 &quot;fix the flaky test&quot;   # pin the 
       best-account headroom), and the account (the strategy above). zero
       healthy accounts on any harness exits nonzero with the earliest reset.
 
-      account picker: append @ with no version (agents run claude@) to choose one
-        installed account for this run. rows show identity, login state, plan,
-        and available limits; unsafe accounts stay visible but disabled.
+      pickers: a trailing # opens the account picker (agents run claude#) to
+        choose one installed account for this run — rows show identity, login
+        state, plan, and available limits; unsafe accounts stay visible but
+        disabled. a trailing @ opens the device picker (agents run claude@);
+        #@ asks both, account first, then device. the pickers cannot combine
+        with an explicit pin of the same thing (--account, --device/--on/
+        --computer/--host) or with --strategy/--balanced/--resume/--lease/--box.
 
       fallback: --fallback codex,antigravity retries on rate-limit failure via /continue handoff. each entry accepts @version.
 
@@ -3019,8 +3031,16 @@ agents run auto --device yosemite-s0 &quot;fix the flaky test&quot;   # pin the 
       # Interactive (TUI) with the pinned default version
       agents run claude
 
-      # Pick a signed-in account/version for only this run
+      # Pick a signed-in account/version for only this run (# = account picker)
+      agents run claude#
+
+      # Pick the device this run lands on (@ = device picker); this machine
+      # first, offline rows disabled, fleet state aged in the prompt
       agents run claude@
+
+      # Ask both, account first, then device — the run dispatches with the
+      # picked account to the picked device
+      agents run claude#@
 
       # Full-auto: affinity-pick the host, then the harness with the most
       # account headroom, then a balanced account on it
@@ -3103,9 +3123,13 @@ agents run auto --device yosemite-s0 &quot;fix the flaky test&quot;   # pin the 
       best-account headroom), and the account (the strategy above). Zero
       healthy accounts on any harness exits nonzero with the earliest reset.
 
-      Account picker: append @ with no version (agents run claude@) to choose one
-        installed account for this run. Rows show identity, login state, plan,
-        and available limits; unsafe accounts stay visible but disabled.
+      Pickers: a trailing # opens the account picker (agents run claude#) to
+        choose one installed account for this run — rows show identity, login
+        state, plan, and available limits; unsafe accounts stay visible but
+        disabled. A trailing @ opens the device picker (agents run claude@);
+        #@ asks both, account first, then device. The pickers cannot combine
+        with an explicit pin of the same thing (--account, --device/--on/
+        --computer/--host) or with --strategy/--balanced/--resume/--lease/--box.
 
       Fallback: --fallback codex,antigravity retries on rate-limit failure via /continue handoff. Each entry accepts @version.
 

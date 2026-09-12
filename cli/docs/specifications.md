@@ -2447,7 +2447,7 @@ schema (`--json` passes through each agent's native stream format).
   exit code written to a sidecar `.exit` file (`lib/hosts/dispatch.ts`:
   `launchDetached`/`buildDetachedLaunchCommand`); an interactive `--device`
   run streams the same style invocation live via `sshStream` instead
-  (`runInteractiveOnHost`). A trailing account-picker marker (`<agent>@`) MUST
+  (`runInteractiveOnHost`). A trailing account-picker marker (`<agent>#`) MUST
   survive that interactive re-exec so the peer, not the launcher, lists and
   selects from its device-local versions/accounts. Picker-aware automatic
   placement MUST prefer signed-in devices while retaining reachable devices
