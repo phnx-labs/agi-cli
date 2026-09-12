@@ -3,6 +3,7 @@ import {
   COMPUTER_PASSTHROUGH_VERBS,
   parseTrustFromStatusJson,
   shouldBlockOffPlatform,
+  withDeviceFlag,
 } from './computer.js';
 
 // The `computer` preAction hook calls process.exit(1) exactly when
@@ -25,7 +26,7 @@ describe('shouldBlockOffPlatform', () => {
   });
 
   it('does NOT block off macOS when a --device remote device is given', () => {
-    // The remote path resolves its own endpoint before the engine is spawned.
+    // The engine resolves and hydrates the endpoint for that device itself.
     expect(shouldBlockOffPlatform({ platform: 'linux', tcpConfigured: false, device: 'win-mini' })).toBe(false);
   });
 
@@ -50,7 +51,7 @@ describe('COMPUTER_PASSTHROUGH_VERBS', () => {
     ]);
   });
 
-  it('does NOT include the lifecycle verbs — those wrap the engine with policy/tunnel work', () => {
+  it('does NOT include the lifecycle verbs — those render the allow list before forwarding', () => {
     for (const lifecycle of ['setup', 'start', 'stop', 'reload', 'status']) {
       expect(names).not.toContain(lifecycle);
     }
@@ -93,5 +94,24 @@ describe('parseTrustFromStatusJson', () => {
   it('treats a missing or non-boolean `trusted` as untrusted', () => {
     expect(parseTrustFromStatusJson('{"pid":1}')).toBe(false);
     expect(parseTrustFromStatusJson('{"trusted":"yes"}')).toBe(false);
+  });
+});
+
+// The engine selects the remote path from its OWN argv, but commander consumes
+// the `--device` each verb declares — so the consumer has to put it back. This
+// is the regression that made `agents computer setup --device win-mini` install
+// the macOS helper locally instead of provisioning the Windows box.
+describe('withDeviceFlag', () => {
+  it('re-inserts --device right after the verb so the engine sees the remote selector', () => {
+    expect(withDeviceFlag(['setup'], 'win-mini')).toEqual(['setup', '--device', 'win-mini']);
+  });
+
+  it('keeps the verb\'s own operands, after the flag', () => {
+    expect(withDeviceFlag(['screenshot', '-o', '/tmp/win.png'], 'win-mini'))
+      .toEqual(['screenshot', '--device', 'win-mini', '-o', '/tmp/win.png']);
+  });
+
+  it('leaves a local invocation untouched', () => {
+    expect(withDeviceFlag(['apps', '--json'])).toEqual(['apps', '--json']);
   });
 });

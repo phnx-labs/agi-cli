@@ -1482,10 +1482,11 @@ src/
     cloud/             # Provider registry (Rush / Codex / Factory / Antigravity)
     teams/             # `agents teams` orchestration
     computer/          # `agents computer` CONSUMER of the standalone `computer` engine (PHNX-4075):
-                       #   policy.ts (permissions → the allow-list file), remote.ts (--device fleet resolution
-                       #   + the ssh -L tunnel), context.ts (the fd-3 JSON handed to the engine),
-                       #   record.ts (fd-4 action events → feed + session history), sessions-list.ts (the ledger
-                       #   reader). The daemons, RPC, RFB/VNC and the model loop all live in the engine.
+                       #   policy.ts (permissions → the allow-list file), context.ts (the fd-3 JSON handed to
+                       #   the engine, incl. the --device target resolved against the fleet), record.ts (fd-4
+                       #   action events → feed + session history), sessions-list.ts (the ledger reader). The
+                       #   daemons, RPC, RFB/VNC, the model loop AND the whole remote path — Windows
+                       #   provisioning, the helper token, the ssh -L tunnel — live in the engine.
     menubar/           # AGI Menu installer/downloader/snapshot (the helper's SOURCE is phnx-labs/agi-menu, PHNX-4036)
     profiles.ts        # Host CLI + endpoint + model bundles
 ```

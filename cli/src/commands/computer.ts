@@ -15,9 +15,15 @@
  *      `agents computer sessions` and `agents sessions --computer` keep their
  *      history (`lib/computer/record.ts`).
  *
- * The `ssh -L` tunnel a `--device` invocation needs is opened here too
- * (`lib/computer/remote.ts`); its loopback endpoint reaches the engine on the
- * transport env var the engine already reads, not as a second context field.
+ * The remote path is the ENGINE's. `--device <name>` is resolved against the
+ * fleet here — that is what the registry, ssh identity and platform check are
+ * for — and then forwarded to the engine verbatim, which matches the alias
+ * against `context.target` and owns everything downstream of it: pushing the
+ * Windows helper, minting and storing its auth token, opening the `ssh -L`
+ * tunnel, and hydrating its own transport from the state it wrote. agents-cli
+ * keeps no tunnel state and publishes no endpoint: a `COMPUTER_HELPER_TCP` from
+ * here would carry a port without the token the daemon demands, so the verb
+ * would fail `auth_failed` against a tunnel that was up the whole time.
  *
  * WHY VERB FLAGS ARE NOT REDECLARED HERE. Each passthrough verb declares only
  * `--device` — the one flag the consumer must intercept — and takes everything
@@ -45,13 +51,7 @@ import {
   writeComputerPeers,
   writeComputerPolicy,
 } from '../lib/computer/policy.js';
-import {
-  isTunnelAlive,
-  readRemoteState,
-  startRemoteTunnel,
-  stopRemoteTunnel,
-} from '../lib/computer/remote.js';
-import { buildComputerContext, computerTransportEnv } from '../lib/computer/context.js';
+import { buildComputerContext } from '../lib/computer/context.js';
 import { recordComputerAction } from '../lib/computer/record.js';
 import {
   isComputerClientError,
@@ -97,12 +97,6 @@ export const COMPUTER_PASSTHROUGH_VERBS: ReadonlyArray<{ name: string; descripti
   { name: 'focus', description: 'Move keyboard focus to an element' },
   { name: 'wait', description: 'Wait for an element or condition to appear before continuing' },
 ];
-
-// Subcommands that manage the `--device` remote path themselves (tunnel
-// lifecycle, or daemon-state reporting that must degrade gracefully when no
-// tunnel is recorded). Every other `--device`-bearing subcommand is a plain verb
-// that just needs the endpoint resolved into its context before it runs.
-const REMOTE_LIFECYCLE = new Set(['setup', 'start', 'stop', 'status', 'reload']);
 
 /**
  * Pure platform gate. The computer subsystem is macOS-only for LOCAL driving
@@ -153,6 +147,24 @@ function renderPolicyFiles(opts: { computerBin?: string; quiet?: boolean } = {})
 }
 
 /**
+ * Put `--device <name>` back on the argv handed to the engine.
+ *
+ * commander CONSUMES the `--device` it declares, so a verb that only read
+ * `opts.device` forwarded an argv with no remote selector in it and the engine
+ * — which selects the remote path from its own argv — ran the invocation
+ * LOCALLY. That is how `setup --device win-mini` installed the macOS helper on
+ * the laptop. The flag is re-inserted immediately after the verb rather than
+ * appended, so a verb whose operands are variadic cannot swallow it.
+ *
+ * Pure, so the re-insertion is testable without spawning the engine.
+ */
+export function withDeviceFlag(argv: string[], device?: string): string[] {
+  if (!device) return argv;
+  const [verb, ...rest] = argv;
+  return [verb, '--device', device, ...rest];
+}
+
+/**
  * Forward one invocation to the engine and propagate its exit code.
  *
  * A missing standalone is the one failure agents-cli reports itself, because it
@@ -162,7 +174,6 @@ function renderPolicyFiles(opts: { computerBin?: string; quiet?: boolean } = {})
 export async function forwardToComputer(opts: {
   argv: string[];
   device?: string;
-  tcpOverride?: { host: string; port: number };
   /** Skip recording — lifecycle verbs are not user actions. */
   record?: boolean;
   /** Read the engine's stdout instead of letting it reach the terminal. */
@@ -182,12 +193,8 @@ export async function forwardToComputer(opts: {
   const context = await buildComputerContext({ device: opts.device, computerBin: bin });
 
   return runComputer({
-    argv: opts.argv,
+    argv: withDeviceFlag(opts.argv, opts.device),
     context,
-    // The engine reads its transport from the environment it inherits. The one
-    // value it cannot inherit is the loopback port a `--device` tunnel just
-    // landed on, so that is overlaid here.
-    env: computerTransportEnv({ device: opts.device, tcpOverride: opts.tcpOverride }),
     capture: opts.capture,
     onEvent: opts.record === false
       ? undefined
@@ -221,15 +228,6 @@ export function registerComputerCommand(program: Command): void {
         if (globals.vncPassword) process.env.COMPUTER_HELPER_VNC_PASSWORD = globals.vncPassword;
       }
       const device = globals.device;
-      // A plain verb against a device needs a live tunnel; the lifecycle verbs
-      // create or report on one, so they handle absence themselves.
-      if (device && !REMOTE_LIFECYCLE.has(actionCommand.name())) {
-        if (!isTunnelAlive(readRemoteState(device))) {
-          console.error(`No active remote tunnel for '${device}'.`);
-          console.error(`Run:  agents computer start --device ${device}`);
-          process.exit(1);
-        }
-      }
       if (shouldBlockOffPlatform({
         platform: process.platform,
         tcpConfigured: resolveTcpEndpoint() != null,
@@ -305,7 +303,7 @@ function registerPassthroughVerbs(program: Command): void {
     program
       .command(verb.name)
       .description(verb.description)
-      .option('--device <name>', 'Drive a remote device (requires `agents computer start --device <name>` first)')
+      .option('--device <name>', 'Drive a remote Windows device registered with `agents devices` (the engine connects or provisions it on demand)')
       .allowUnknownOption(true)
       .allowExcessArguments(true)
       .helpOption(false)
@@ -325,10 +323,11 @@ function registerSetupCommand(program: Command): void {
     .allowExcessArguments(true)
     .helpOption(false)
     .action(async (opts: { device?: string }, cmd: Command) => {
-      // Render the allow list first: a fresh install should come up with the
-      // user's current permissions already in force, not an empty deny-all that
-      // needs a second `reload` to fix.
-      renderPolicyFiles({ quiet: true });
+      // Render the allow list first: a fresh LOCAL install should come up with
+      // the user's current permissions already in force, not an empty deny-all
+      // that needs a second `reload` to fix. A Windows daemon enforces no allow
+      // list, so a remote provision has nothing to render.
+      if (!opts.device) renderPolicyFiles({ quiet: true });
       await forwardAndExit({ argv: ['setup', ...cmd.args], device: opts.device, record: false });
     });
 }
@@ -337,54 +336,17 @@ function registerStartCommand(program: Command): void {
   program
     .command('start')
     .description('Activate the helper daemon — local launchd (macOS) or a remote Windows tunnel with --device')
-    .option('--device <name>', 'Open a tunnel to the remote Windows daemon and record it for --device verbs')
+    .option('--device <name>', 'Start the remote Windows daemon and its tunnel instead of the local launchd service')
     .allowUnknownOption(true)
     .allowExcessArguments(true)
     .helpOption(false)
     .action(async (opts: { device?: string }, cmd: Command) => {
-      if (opts.device) {
-        await startRemote(opts.device);
-        return;
-      }
-      // Policy must be on disk before the daemon boots and reads it.
-      renderPolicyFiles();
-      await forwardAndExit({ argv: ['start', ...cmd.args], record: false });
+      // Policy must be on disk before the local daemon boots and reads it. A
+      // remote daemon enforces no allow list, so there is nothing to render for
+      // it — and the engine opens and reports the tunnel itself.
+      if (!opts.device) renderPolicyFiles();
+      await forwardAndExit({ argv: ['start', ...cmd.args], device: opts.device, record: false });
     });
-}
-
-/**
- * `start --device`: open the tunnel here (fleet), then let the engine prove the
- * daemon answers through it. A refusal rolls the tunnel back rather than leaving
- * a recorded endpoint that every later verb will hang on.
- */
-async function startRemote(device: string): Promise<void> {
-  let opened: Awaited<ReturnType<typeof startRemoteTunnel>>;
-  try {
-    opened = await startRemoteTunnel(device);
-  } catch (err) {
-    console.error(`error: ${(err as Error).message}`);
-    process.exit(1);
-  }
-  const { state, rollback } = opened;
-  console.log(`tunnel: 127.0.0.1:${state.localPort} -> ${state.target} (127.0.0.1:${state.remotePort})`);
-
-  const { exitCode } = await forwardToComputer({
-    argv: ['status'],
-    device,
-    tcpOverride: { host: '127.0.0.1', port: state.localPort },
-    record: false,
-  });
-  if (exitCode !== 0) {
-    rollback();
-    console.error(`tunnel to '${device}' opened but the daemon did not answer.`);
-    console.error(`Run:  agents computer setup --device ${device}`);
-    process.exit(exitCode);
-  }
-
-  console.log(`daemon: answering (ssh pid ${state.tunnelPid})`);
-  console.log('');
-  console.log(`Drive it:  agents computer apps --device ${device}`);
-  console.log(`Stop:      agents computer stop --device ${device}`);
 }
 
 function registerStopCommand(program: Command): void {
@@ -396,20 +358,9 @@ function registerStopCommand(program: Command): void {
     .allowExcessArguments(true)
     .helpOption(false)
     .action(async (opts: { device?: string }, cmd: Command) => {
-      if (opts.device) {
-        // The engine unregisters the remote task it registered; the tunnel is
-        // ours. Tear the tunnel down either way — a device that has gone offline
-        // must not leave a zombie ssh on this machine.
-        const { exitCode } = await forwardToComputer({ argv: ['stop', ...cmd.args], device: opts.device, record: false });
-        const { tunnelKilled } = stopRemoteTunnel(opts.device);
-        console.log(`tunnel: ${tunnelKilled ? 'closed' : 'not running'}`);
-        if (exitCode !== 0) {
-          console.log('task:   not removed (device offline?)');
-          process.exit(exitCode);
-        }
-        return;
-      }
-      await forwardAndExit({ argv: ['stop', ...cmd.args], record: false });
+      // The engine owns both halves of a remote stop — the tunnel it opened and
+      // the scheduled task it registered — and reports each one itself.
+      await forwardAndExit({ argv: ['stop', ...cmd.args], device: opts.device, record: false });
     });
 }
 
@@ -423,9 +374,10 @@ function registerReloadCommand(program: Command): void {
     .helpOption(false)
     .action(async (opts: { device?: string }, cmd: Command) => {
       // Reload EXISTS to re-render the allow list; doing it before the signal is
-      // the whole command. The remote daemon enforces no allow list, but the
-      // files are cheap and keep one code path.
-      renderPolicyFiles();
+      // the whole command. A `--device` reload bounces the remote daemon, which
+      // enforces no allow list — rendering (and printing) this machine's would
+      // claim a policy that device never reads.
+      if (!opts.device) renderPolicyFiles();
       await forwardAndExit({ argv: ['reload', ...cmd.args], device: opts.device, record: false });
     });
 }
@@ -440,38 +392,18 @@ function registerStatusCommand(program: Command): void {
     .helpOption(false)
     .action(async (opts: { device?: string }, cmd: Command) => {
       const json = cmd.args.includes('--json');
-      if (opts.device) {
-        const state = readRemoteState(opts.device);
-        if (!isTunnelAlive(state)) {
-          if (!json) {
-            console.log(`device:    ${opts.device}`);
-            console.log('tunnel:    none');
-            console.log('daemon:    unknown (no tunnel to probe through)');
-            console.log('');
-            console.log(`Run:  agents computer start --device ${opts.device}`);
-          } else {
-            console.log(JSON.stringify({ device: opts.device, tunnel: null, daemon: 'unknown' }, null, 2));
-          }
-          process.exit(1);
-        }
-        if (!json) {
-          console.log(`device:    ${opts.device}`);
-          console.log(`tunnel:    127.0.0.1:${state!.localPort} -> ${state!.target} (127.0.0.1:${state!.remotePort})`);
-        }
-        await forwardAndExit({ argv: ['status', ...cmd.args], device: opts.device, record: false });
-        return;
-      }
-
       // The allow list is agents-cli's answer, not the engine's — report it here
-      // so `status` stays the one place that tells you why an app is refused.
-      if (!json) {
+      // so `status` stays the one place that tells you why an app is refused. It
+      // governs the LOCAL helper only: the Windows daemon enforces none, and the
+      // engine reports that device's target, transport and liveness itself.
+      if (!json && !opts.device) {
         const allowed = loadComputerAllowList();
         const preview = allowed.slice(0, 5).join(', ');
         const suffix = allowed.length > 5 ? ` (+${allowed.length - 5} more)` : '';
         console.log(`policy:    ${allowed.length} app${allowed.length === 1 ? '' : 's'} allowed${allowed.length > 0 ? `: ${preview}${suffix}` : ''}`);
         console.log(`peers:     ${loadDefaultPeers().length} caller(s) (peer-auth on socket)`);
       }
-      await forwardAndExit({ argv: ['status', ...cmd.args], record: false });
+      await forwardAndExit({ argv: ['status', ...cmd.args], device: opts.device, record: false });
     });
 }
 
