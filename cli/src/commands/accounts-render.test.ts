@@ -69,6 +69,14 @@ describe('renderAccountList', () => {
     expect(out).toContain('agents accounts list --fleet');
   });
 
+  it('names an unregistered login by its identity, since the row has no identity column', () => {
+    const out = stripAnsi(renderAccountList([row({ name: null, id: null })], [], { localDevice: 'zion' }));
+    const data = out.split('\n').find((line) => line.includes('w@example.com'))!;
+    expect(data).toBeDefined();
+    expect(data).not.toContain('unnamed');
+    expect(data).toContain('20%');
+  });
+
   it('puts the usage bar + percent in the usage cell and leaves the trailing note empty when there is no repair', () => {
     const out = stripAnsi(renderAccountList([row({
       usage: {

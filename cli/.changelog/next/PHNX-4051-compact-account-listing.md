@@ -9,6 +9,7 @@
   them, so one throttled account no longer misaligns the table, and a stale window is
   `48%* (period ended 2h)` rather than `48% · stale (period ended 2h ago)`. The identity
   and per-device state the columns carried are still one command away —
-  `agents accounts list --fleet`, `agents accounts view <name>`, `--json`. Source:
+  `agents accounts list --fleet`, `agents accounts view <name>`, `--json`. A discovered
+  login nobody has named is listed by its identity (the email) rather than `unnamed`. Source:
   `cli/src/lib/account-catalog.ts`, `cli/src/lib/accounting/usage.ts`,
   `cli/src/commands/view.ts`, `cli/src/commands/accounts.ts`.
