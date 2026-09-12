@@ -169,8 +169,9 @@ boundary seen from two sides.
   login session (SSH, launchd, CI) — resolution takes the `agentOnly` /
   `isHeadlessSecretsContext()` path (secrets-cli `src/lib/secrets/headless.ts`,
   0.1.4+). It reads from the broker or fails loudly; it does not prompt behind the
-  user's back. An agent the user is driving (`terminal`, `teams`, a harness tool
-  shell) is not headless: its read raises one Touch ID sheet on the user's screen,
+  user's back. Any other launch in a GUI session — an agent the user is driving
+  (`AGENTS_RUNTIME=terminal` or `teams`, or a harness tool shell) — is not
+  headless: its read raises one Touch ID sheet on the user's screen,
   and the hold policy keeps the bundle silent afterwards.
 - **The broker holds resolved env in memory only.** `agents secrets unlock` caches the
   resolved bundle behind a Unix socket in a `0700` directory, with the socket file
