@@ -2905,8 +2905,10 @@ so concurrent agents each show a different one and it stays stable within a sess
       # headless, can edit: have the agent make changes
       agents run claude &quot;fix lint errors in src/&quot; --mode edit
 
-      # interactive (tui) with the pinned default version
+      # interactive (tui): a bare run places itself like --device auto (a fleet
+      # worker, tui forwarded over ssh); pin the device to stay on this machine
       agents run claude
+      agents run claude --device zion      # stay local (or pick this machine in claude@)
 
       # pick a signed-in account/version for only this run (# = account picker)
       agents run claude#
@@ -3008,6 +3010,14 @@ agents run auto --device yosemite-s0 &quot;fix the flaky test&quot;   # pin the 
         with an explicit pin of the same thing (--account, --device/--on/
         --computer/--host) or with --strategy/--balanced/--resume/--lease/--box.
 
+      interactive placement: a bare &#39;agents run &lt;harness&gt;&#39; (no prompt, real tty)
+        places itself like --device auto — a fleet worker runs it, with the tui
+        forwarded over ssh. headless runs (any prompt, --json, no tty) are
+        unchanged: they run in place. to stay on this machine, pass
+        --device &lt;this machine&gt;, or pick this machine (listed first) in the
+        &#39;&lt;harness&gt;@&#39; device picker. when placement finds no healthy device the
+        run fails loud and names the local spellings.
+
       fallback: --fallback codex,antigravity retries on rate-limit failure via /continue handoff. each entry accepts @version.
 
       cloud placement: --cloud sends the run to the agent&#39;s native vendor cloud
@@ -3028,8 +3038,10 @@ agents run auto --device yosemite-s0 &quot;fix the flaky test&quot;   # pin the 
       # Headless, can edit: have the agent make changes
       agents run claude &quot;fix lint errors in src/&quot; --mode edit
 
-      # Interactive (TUI) with the pinned default version
+      # Interactive (TUI): a bare run places itself like --device auto (a fleet
+      # worker, TUI forwarded over SSH); pin the device to stay on this machine
       agents run claude
+      agents run claude --device zion      # stay local (or pick this machine in claude@)
 
       # Pick a signed-in account/version for only this run (# = account picker)
       agents run claude#
@@ -3130,6 +3142,14 @@ agents run auto --device yosemite-s0 &quot;fix the flaky test&quot;   # pin the 
         #@ asks both, account first, then device. The pickers cannot combine
         with an explicit pin of the same thing (--account, --device/--on/
         --computer/--host) or with --strategy/--balanced/--resume/--lease/--box.
+
+      Interactive placement: a bare &#39;agents run &lt;harness&gt;&#39; (no prompt, real TTY)
+        places itself like --device auto — a fleet worker runs it, with the TUI
+        forwarded over SSH. Headless runs (any prompt, --json, no TTY) are
+        unchanged: they run in place. To stay on this machine, pass
+        --device &lt;this machine&gt;, or pick this machine (listed first) in the
+        &#39;&lt;harness&gt;@&#39; device picker. When placement finds no healthy device the
+        run fails loud and names the local spellings.
 
       Fallback: --fallback codex,antigravity retries on rate-limit failure via /continue handoff. Each entry accepts @version.
 
