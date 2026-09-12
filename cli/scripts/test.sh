@@ -227,7 +227,7 @@ fi
 # shard fan-out can reuse it N times instead of duplicating the rsync/bind/run
 # sequence -- one place to fix, and the shard path cannot drift from the single
 # -device path it is built on.
-ship_and_run() {
+ship_and_run() (
   local device="$1"; shift
   local addr remote_dir extra
   extra="$*"
@@ -240,20 +240,25 @@ ship_and_run() {
   ssh -o BatchMode=yes -o ConnectTimeout=15 "$addr" true 2>/dev/null \
     || die "cannot reach '$device' ($addr) over ssh"
 
-  # Per-device dir so two shards on ONE box (or a stale run) cannot collide.
-  remote_dir="\$HOME/.cache/agents-cli/test-runs/tree"
-  ssh "$addr" "mkdir -p $remote_dir" >/dev/null
-  rsync -az --delete \
+  remote_dir="$(ssh "$addr" 'mkdir -p "$HOME/.cache/agents-cli/test-runs" && mktemp -d "$HOME/.cache/agents-cli/test-runs/run.XXXXXXXX"')" \
+    || die "could not allocate a test workspace on '$device'"
+  [[ "$remote_dir" == /*/test-runs/run.* && "$remote_dir" != *$'\n'* ]] \
+    || die "unexpected test workspace from '$device'"
+  local remote_path
+  printf -v remote_path '%q' "$remote_dir"
+  trap 'ssh -o BatchMode=yes -o ConnectTimeout=15 "$addr" "rm -rf -- $remote_path && test ! -e $remote_path" || gray "Retained test workspace: $device:$remote_dir" >&2' EXIT
+  gray "  workspace: $device:$remote_dir"
+  rsync -az \
     --exclude '.git' --exclude 'node_modules' --exclude 'dist' \
     --exclude '.agents/worktrees' --exclude '.release-attestations' \
-    "$TREE_ROOT/" "$addr:${remote_dir#\$HOME/}/"
-  ssh "$addr" "bash $remote_dir/cli/scripts/bound-repo-root.sh $remote_dir" \
+    "$TREE_ROOT/" "$addr:$remote_path/"
+  ssh "$addr" "bash $remote_path/cli/scripts/bound-repo-root.sh $remote_path" \
     || die "could not give the shipped tree a git repo on '$device'"
-  ssh "$addr" "cd $remote_dir/cli \
+  ssh "$addr" "cd $remote_path/cli \
     && bun install --silent \
     && bun run build >/dev/null \
     && bun run test$(vitest_suffix)${extra:+ $extra}"
-}
+)
 
 case "$MODE" in
   here|here-worker)

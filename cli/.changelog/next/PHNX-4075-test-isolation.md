@@ -1,0 +1,1 @@
+- Fleet test runs use separate temporary workspaces and clean up their own copies. Router account fixtures run only with isolated file-backed secret storage, preserving native keyrings.

@@ -8,13 +8,14 @@ import * as state from '../lib/state.js';
 import { registerRouteCommands } from './route.js';
 import { readRouter, routerExists } from '../lib/routers.js';
 import { addAccount } from '../lib/account-registry.js';
-import { useFreshSecretsHome } from '../../tests/secrets-standalone.js';
+import { standaloneKeychainIsFileBacked, useFreshSecretsHome } from '../../tests/secrets-standalone.js';
 
 let TEST_ROOT: string;
 let USER_DIR: string;
 let PROJECT_DIR: string;
 
 useFreshSecretsHome();
+const fileBacked = await standaloneKeychainIsFileBacked();
 
 beforeEach(() => {
   TEST_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'route-cmd-test-'));
@@ -71,7 +72,7 @@ async function runRoute(args: string[], noun: 'route' | 'routes' = 'route'): Pro
   return { stdout: chunks.join('\n'), exitCode };
 }
 
-describe('agents route add (alias create)', () => {
+describe.skipIf(!fileBacked)('agents route add (alias create)', () => {
   it('writes a router yml with the given harnesses and tiers', async () => {
     const result = await runRoute(['add', 'research', '--harness', 'gemini,kimi', '--tier', 'cheap,default', '--task', 'research']);
     expect(result.exitCode).toBeNull();
@@ -119,7 +120,7 @@ describe('agents route add (alias create)', () => {
   });
 });
 
-describe('agents route allow', () => {
+describe.skipIf(!fileBacked)('agents route allow', () => {
   it('replaces (narrows) a harness model set, preserving existing accounts', async () => {
     await runRoute(['create', 'research', '--harness', 'gemini,kimi', '--tier', 'cheap,default']);
     await runRoute(['link-account', 'research', 'kimi', 'work']);
@@ -151,7 +152,7 @@ describe('agents route allow', () => {
   });
 });
 
-describe('agents route link-account / unlink-account', () => {
+describe.skipIf(!fileBacked)('agents route link-account / unlink-account', () => {
   it('link-account adds an account; unlink-account removes it', async () => {
     await runRoute(['create', 'research', '--harness', 'gemini']);
 
@@ -191,7 +192,7 @@ describe('agents route link-account / unlink-account', () => {
   });
 });
 
-describe('agents route edit verbs refuse a non-user-layer router (layer-shadow safety)', () => {
+describe.skipIf(!fileBacked)('agents route edit verbs refuse a non-user-layer router (layer-shadow safety)', () => {
   function writeProjectRouter(): void {
     fs.mkdirSync(path.join(PROJECT_DIR, 'routers'), { recursive: true });
     fs.writeFileSync(
@@ -233,7 +234,7 @@ describe('agents route edit verbs refuse a non-user-layer router (layer-shadow s
   });
 });
 
-describe('agents route list --json', () => {
+describe.skipIf(!fileBacked)('agents route list --json', () => {
   it('emits one summary object per router', async () => {
     await runRoute(['create', 'zeta', '--harness', 'gemini', '--tier', 'cheap']);
     await runRoute(['create', 'alpha', '--harness', 'kimi,claude', '--tier', 'best']);
@@ -267,7 +268,7 @@ describe('agents route list --json', () => {
   });
 });
 
-describe('agents route view --json (alias show)', () => {
+describe.skipIf(!fileBacked)('agents route view --json (alias show)', () => {
   it('emits the full router object', async () => {
     await runRoute(['add', 'research', '--harness', 'gemini,kimi', '--tier', 'cheap,default', '--task', 'research']);
     await runRoute(['link-account', 'research', 'gemini', 'personal']);
@@ -292,7 +293,7 @@ describe('agents route view --json (alias show)', () => {
   });
 });
 
-describe('agents route rename', () => {
+describe.skipIf(!fileBacked)('agents route rename', () => {
   it('re-keys the stored router, preserving every field', async () => {
     await runRoute(['add', 'research', '--harness', 'gemini,kimi', '--tier', 'cheap,default', '--task', 'research']);
     await runRoute(['link-account', 'research', 'gemini', 'personal']);
@@ -349,7 +350,7 @@ describe('agents route rename', () => {
   });
 });
 
-describe('agents route remove (alias rm)', () => {
+describe.skipIf(!fileBacked)('agents route remove (alias rm)', () => {
   it('removes the router file via the canonical verb', async () => {
     await runRoute(['create', 'research', '--harness', 'gemini']);
     const result = await runRoute(['remove', 'research']);
