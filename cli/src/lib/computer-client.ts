@@ -38,6 +38,8 @@
  */
 
 import { spawn } from 'node:child_process';
+import { realpathSync } from 'node:fs';
+import * as path from 'node:path';
 import { findInPath } from './agent-spec/agents.js';
 
 const INSTALL_HINT = 'npm i -g @phnx-labs/computer-cli';
@@ -62,6 +64,12 @@ export function isComputerClientError(err: unknown): err is ComputerClientError 
 
 let cachedBin: string | undefined;
 
+export function isStandaloneComputer(bin: string): boolean {
+  let real = bin;
+  try { real = realpathSync(bin); } catch { /* spawn reports missing explicit paths */ }
+  return !real.endsWith(path.join('dist', 'computer.js'));
+}
+
 /**
  * Resolve the standalone executable. `COMPUTER_BIN` wins so a dev build can be
  * driven without touching PATH.
@@ -74,7 +82,7 @@ let cachedBin: string | undefined;
 export function resolveComputerBin(): string {
   if (cachedBin) return cachedBin;
   const explicit = process.env.COMPUTER_BIN?.trim();
-  const resolved = explicit && explicit.length > 0 ? explicit : findInPath('computer');
+  const resolved = explicit && explicit.length > 0 ? (isStandaloneComputer(explicit) ? explicit : null) : findInPath('computer', { accept: isStandaloneComputer });
   if (!resolved) {
     throw new ComputerClientError(
       'COMPUTER_BIN_MISSING',

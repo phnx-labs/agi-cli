@@ -10,6 +10,8 @@
  */
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import * as path from 'node:path';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
 import {
   COMPUTER_CONTEXT_FD,
   COMPUTER_EVENTS_FD,
@@ -32,6 +34,30 @@ describe('resolveComputerBin', () => {
   it('prefers $COMPUTER_BIN so a dev build needs no PATH surgery', () => {
     process.env.COMPUTER_BIN = '/opt/dev/computer';
     expect(resolveComputerBin()).toBe('/opt/dev/computer');
+  });
+
+  it('skips the old npm computer bin and resolves a later standalone', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'computer-resolution-'));
+    const prevPath = process.env.PATH;
+    try {
+      const old = path.join(root, 'old');
+      const next = path.join(root, 'next');
+      const dist = path.join(root, 'agents-cli', 'dist');
+      for (const dir of [old, next, dist]) fs.mkdirSync(dir, { recursive: true });
+      const legacy = path.join(dist, 'computer.js');
+      fs.writeFileSync(legacy, '', { mode: 0o755 });
+      fs.symlinkSync(legacy, path.join(old, 'computer'));
+      fs.writeFileSync(path.join(next, 'computer'), '', { mode: 0o755 });
+      process.env.COMPUTER_BIN = '';
+      process.env.PATH = [old, next].join(path.delimiter);
+      expect(resolveComputerBin()).toBe(fs.realpathSync(path.join(next, 'computer')));
+      _resetComputerClientForTest();
+      process.env.COMPUTER_BIN = path.join(old, 'computer');
+      expect(() => resolveComputerBin()).toThrow(ComputerClientError);
+    } finally {
+      process.env.PATH = prevPath;
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('fails LOUD with install guidance when the standalone is absent — there is no fallback engine', () => {

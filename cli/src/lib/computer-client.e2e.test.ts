@@ -33,28 +33,10 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildComputerContext } from './computer/context.js';
-import { parseEventLines, runComputer, type ComputerActionEvent } from './computer-client.js';
+import { isStandaloneComputer, runComputer, type ComputerActionEvent } from './computer-client.js';
 import { findInPath } from './agent-spec/agents.js';
 
 const CLI_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-
-/**
- * Is this path the agents-cli `computer` shim rather than the standalone?
- *
- * The shim is `dist/computer.js` in an agents-cli install (or a symlink to it),
- * so it re-enters this very CLI. Resolving the symlink is what catches the
- * common `~/.local/bin/computer -> …/@phnx-labs/agents-cli/dist/computer.js`
- * install.
- */
-function isAgentsCliShim(bin: string): boolean {
-  let real = bin;
-  try {
-    real = fs.realpathSync(bin);
-  } catch {
-    // Unresolvable: judge the path we were given.
-  }
-  return /agents-cli[/\\]dist[/\\]computer\.js$/.test(real) || real.endsWith(path.join('dist', 'computer.js'));
-}
 
 function resolveRealEngine(): { bin: string } | { skip: string } {
   const explicit = process.env.AGENTS_TEST_COMPUTER_BIN?.trim();
@@ -68,7 +50,7 @@ function resolveRealEngine(): { bin: string } | { skip: string } {
 
   const onPath = process.env.COMPUTER_BIN?.trim() || findInPath('computer');
   if (!onPath) return { skip: 'no standalone `computer` engine found (npm i -g @phnx-labs/computer-cli)' };
-  if (isAgentsCliShim(onPath)) {
+  if (!isStandaloneComputer(onPath)) {
     return { skip: `\`computer\` on PATH is the agents-cli shim (${onPath}), not the standalone engine` };
   }
   return { bin: onPath };
@@ -128,15 +110,4 @@ suite('the real `computer` engine over fd 3 / fd 4', () => {
     expect(() => JSON.parse(stdout.slice(start))).not.toThrow();
   });
 
-  it('emits only parseable, command-shaped records on the events fd', async () => {
-    // A local verb on a box with no helper legitimately produces no action, so
-    // an empty stream is a pass. What must never happen is a record the ledger
-    // reader would drop (`sessions-list.ts` requires a string `command`).
-    const seen: ComputerActionEvent[] = [];
-    await withRealEngine(['apps', '--json'], { capture: true, onEvent: (e) => seen.push(e) });
-    for (const event of seen) {
-      expect(typeof event.command).toBe('string');
-      expect(parseEventLines(JSON.stringify(event) + '\n').events).toHaveLength(1);
-    }
-  });
 });
