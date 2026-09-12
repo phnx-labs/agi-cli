@@ -23,7 +23,7 @@ agents accounts                           Browse and manage harness accounts
 agents accounts add <target> [name]       Add an account. Harness form: add <harness> [name] runs the native login in a fresh credential slot and provisions workers. Provider form: add <name> --provider <p> --auth <t> stores a durable credential.
 agents accounts clear-default <agent>     Return a harness to native login or balanced account selection
 agents accounts default <harness> [name]  Set the fleet-wide default account for a harness (picker when no name)
-agents accounts list [harness]            List accounts with authentication verdict, device coverage, usage, and exact repair command
+agents accounts list [harness]            List accounts as name + usage, with the state and repair command only when one is needed
 agents accounts login <account>           Re-authenticate an account into its slot on this device (<harness>#<name>); re-mints and re-syncs the worker credential
 agents accounts logout <target>           Sign out a harness-native OAuth login by <harness>, <harness>@<label>, <harness>#<account>, or account name. API-key / setup-token / bearer accounts use `accounts remove` instead.
 agents accounts migrate                   Fold leftover per-account installations into 1 harness install + N credential slots

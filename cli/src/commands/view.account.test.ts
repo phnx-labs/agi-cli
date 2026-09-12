@@ -35,8 +35,8 @@ import { padToWidth, stringWidth } from '../lib/session/width.js';
 
 const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '');
 
-describe('account-first view — one header per harness block', () => {
-  it('prints ACCOUNT IDENTITY STATE WHERE USAGE FIX once for native + provider groups', () => {
+describe('account-first view — name and usage, nothing ceremonial', () => {
+  it('prints no column header and no identity/state columns for native + provider groups', () => {
     const native: NativeAccountCatalogRow = {
       kind: 'native',
       agent: 'codex',
@@ -85,10 +85,12 @@ describe('account-first view — one header per harness block', () => {
       harness: 'codex',
       localDevice: 'zion',
     }));
-    const headers = out.split('\n').filter((line) => /ACCOUNT\s+IDENTITY\s+STATE\s+WHERE\s+USAGE\s+FIX/.test(line));
-    expect(headers).toHaveLength(1);
+    expect(out).not.toMatch(/ACCOUNT|IDENTITY|STATE|WHERE|USAGE|FIX/);
     expect(out).toContain('work');
     expect(out).toContain('legacy-openrouter-work');
+    // The identity the old IDENTITY column carried is gone from the row.
+    expect(out).not.toContain('w@example.com');
+    expect(out).not.toContain('openrouter\n');
     expect(out).not.toContain('claude');
     expect(out).not.toContain('opencode');
   });

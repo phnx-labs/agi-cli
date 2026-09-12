@@ -78,7 +78,7 @@ import { isCapable } from '../lib/capabilities.js';
 import { discoverPlugins, pluginSupportsAgent } from '../lib/plugins/plugins.js';
 import { getAgentsDir, getUserAgentsDir, getEffectivePromptcutsPath, readMergedPromptcuts, readMeta } from '../lib/state.js';
 import { findNativeAccountByIdentity } from '../lib/account-registry.js';
-import { accountListJson, loadAccountCatalog, renderAccountRows, secretsUnavailableNote, type NativeAccountCatalogRow } from '../lib/account-catalog.js';
+import { ACCOUNT_LISTING_LEGEND, accountListJson, loadAccountCatalog, renderAccountRows, secretsUnavailableNote, type NativeAccountCatalogRow } from '../lib/account-catalog.js';
 import { addSupported } from '../lib/accounts/add.js';
 import { readInstallation } from '../lib/installations/store.js';
 import { isAutoUpdateEnabledForAgent } from '../lib/installations/update-policy.js';
@@ -668,11 +668,10 @@ async function showInstalledVersions(
     }
     if (filterAgentId) {
       console.log(chalk.gray(`  Add an account: agents accounts add ${filterAgentId} [name]`));
-      console.log(chalk.gray('  STATE: LIVE ready · LIMITED rate-limited · EXPIRED needs refresh · REVOKED needs login · UNVERIFIED unconfirmed · MISSING not provisioned · * stale usage\n'));
-    } else {
-      // Overview also renders account tables (footer:false) — explain STATE there too.
-      console.log(chalk.gray('  STATE: LIVE ready · LIMITED rate-limited · EXPIRED needs refresh · REVOKED needs login · UNVERIFIED unconfirmed · MISSING not provisioned · * stale usage\n'));
     }
+    // Overview renders the same account rows with footer:false, so both paths
+    // need the legend the shared renderer would otherwise have printed.
+    console.log(chalk.gray(`  ${ACCOUNT_LISTING_LEGEND}\n`));
   }
   if (versionManaged.length > 0 && viewOpts?.versions) {
     // Calculate column widths across all agents for alignment

@@ -1008,11 +1008,13 @@ export function formatUsageSummary(
   }
 
   if (snapshot) {
-    if (snapshot.unavailable?.reason === 'out_of_credits') {
-      parts.push(chalk.red('out of credits'));
-    } else if (snapshot.unavailable?.reason === 'session_limit' && snapshot.unavailable.resetsAt) {
-      parts.push(chalk.yellow(`session-limited (${formatResetHint(snapshot.unavailable.resetsAt)})`));
-    }
+    // A blocking marker renders AFTER the bars: leading it pushed every gauge
+    // out of its column, so one throttled account misaligned the whole table.
+    const blocked = snapshot.unavailable?.reason === 'out_of_credits'
+      ? chalk.red('out of credits')
+      : snapshot.unavailable?.reason === 'session_limit' && snapshot.unavailable.resetsAt
+        ? chalk.yellow(`session-limited (${formatResetHint(snapshot.unavailable.resetsAt)})`)
+        : null;
     // Compact rows show BLOCKING windows — the same set
     // deriveUsageStatusFromSnapshot uses for the rate-limited badge — so an
     // account throttled by its month window (Droid meters on 5h/week/month)
@@ -1081,6 +1083,7 @@ export function formatUsageSummary(
     } else if (opts?.unverified) {
       parts.push(chalk.yellow('unverified'));
     }
+    if (blocked) parts.push(blocked);
   } else if (opts?.headless) {
     // No bars at all: still name the scope gap so "usage pending" is not
     // mistaken for a missing setup-token or seeding failure (RUSH-2392).
@@ -2971,7 +2974,7 @@ function formatAgeShort(diffMs: number): string {
  * Staleness suffix for a last-known window the freshness gate dropped. A window
  * whose reset/period boundary passed while the sample itself is still inside its
  * `windowMinutes` rolled OVER — the number describes a period that is done, so
- * name it ("period ended 1h ago", e.g. Grok's weekly billing period). A window
+ * name it ("period ended 1h", e.g. Grok's weekly billing period). A window
  * that aged past its own `windowMinutes` (Claude's 5h session read never
  * refreshed in time) is a stale sample of a still-rolling window, so report the
  * capture age ("6h old"). Falls back to the reset age, then a bare "stale".
@@ -2987,18 +2990,19 @@ function formatStaleWindowSuffix(
     window.windowMinutes !== null &&
     capturedAt.getTime() + window.windowMinutes * 60 * 1000 <= now.getTime();
   if (resetPassed && !captureExpired) {
-    return `stale (period ended ${formatAgeShort(now.getTime() - window.resetsAt!.getTime())} ago)`;
+    return `period ended ${formatAgeShort(now.getTime() - window.resetsAt!.getTime())}`;
   }
   if (capturedAt) return `${formatAgeShort(now.getTime() - capturedAt.getTime())} old`;
-  if (resetPassed) return `stale (period ended ${formatAgeShort(now.getTime() - window.resetsAt!.getTime())} ago)`;
+  if (resetPassed) return `period ended ${formatAgeShort(now.getTime() - window.resetsAt!.getTime())}`;
   return 'stale';
 }
 
 /**
- * Render a dropped-but-last-known window as "S: ▍░░░░ 30% · 6h old": the gauge
- * and percentage exactly as a live bar, then a dim staleness suffix so the
- * number is always visible and unmistakably not current. VIEW-ONLY — these
- * windows are never in `snapshot.windows`, so routing never sees them.
+ * Render a dropped-but-last-known window as "S: ▍░░░░ 30%* (6h old)": the gauge
+ * and percentage exactly as a live bar, then the `*` stale marker the listing
+ * legend explains and a dim age, so the number is always visible and
+ * unmistakably not current. VIEW-ONLY — these windows are never in
+ * `snapshot.windows`, so routing never sees them.
  */
 function renderStaleUsageWindow(
   window: UsageWindow,
@@ -3009,7 +3013,7 @@ function renderStaleUsageWindow(
   const bar = renderCompactUsageBar(window.usedPercent);
   const pct = colorUsage(`${Math.round(window.usedPercent)}%`, window.usedPercent);
   const suffix = formatStaleWindowSuffix(window, capturedAt, now);
-  return `${chalk.gray(`${shortLabel}:`)} ${bar} ${pct} ${chalk.dim(`· ${suffix}`)}`;
+  return `${chalk.gray(`${shortLabel}:`)} ${bar} ${pct}${chalk.dim('*')} ${chalk.dim(`(${suffix})`)}`;
 }
 
 /** Format a reset timestamp as a human-readable relative or absolute time. */

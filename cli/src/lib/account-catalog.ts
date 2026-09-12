@@ -592,33 +592,56 @@ export function accountListJson(
   };
 }
 
-function verdictText(verdict: AccountVerdict): string {
-  if (verdict === 'rate_limited') return 'LIMITED';
-  return verdict.toUpperCase();
+/**
+ * A state worth an operator's attention, rendered at the END of the row.
+ * `live`, `ready`, `unverified` and `per-device` are the ordinary cases: they
+ * were on every row of the old table and pushed it past the terminal width
+ * without telling anyone anything. They stay in `accounts list --fleet`,
+ * `accounts view <name>` and `--json`.
+ */
+export function verdictNote(verdict: AccountVerdict): string | null {
+  if (verdict === 'rate_limited') return chalk.yellow('rate-limited');
+  if (verdict === 'expired' || verdict === 'revoked' || verdict === 'missing') {
+    return chalk.red(verdict);
+  }
+  return null;
 }
 
-export function whereText(row: NativeAccountCatalogRow, localDevice: string): string {
+/**
+ * Device coverage, but only when it SPLITS the fleet: some boxes can use the
+ * account and some cannot. Full coverage is the ordinary case, and "none of
+ * them" is already exactly what the row's state note says, so both render
+ * nothing — `accounts list --fleet` is the per-device table.
+ */
+export function coverageNote(row: NativeAccountCatalogRow, localDevice: string): string | null {
   const names = [...new Set(row.devices.map((device) => device.device))];
   // Peers on an older release do not publish slot verdicts, so the only
-  // observation is this box — say so rather than a coverage count.
-  if (names.length === 1 && names[0] === localDevice) return 'this box';
-  // Per-device accounts are provisioned per box; show which boxes are present
-  // rather than a live/total fraction — the fraction would hide that each box
+  // observation is this box — that is a gap in what we can see, not a gap in
+  // provisioning, so it is not an alarm.
+  if (names.length === 1 && names[0] === localDevice) return null;
+  // Per-device accounts are provisioned per box; name the boxes it is NOT on
+  // rather than a usable/total fraction — the fraction would hide that each box
   // is its own account.
   if (row.provisioning === 'per-device') {
-    const present = row.devices
-      .filter((device) => device.verdict !== 'missing')
-      .map((device) => device.device);
-    return present.join(', ') || 'this box';
+    const absent = row.devices.filter((device) => device.verdict === 'missing').map((device) => device.device);
+    return absent.length > 0 && absent.length < row.devices.length ? `not on ${absent.join(', ')}` : null;
   }
   const provisioned = row.devices.filter((device) => device.verdict !== 'missing').length;
-  if (provisioned === 0) return '—';
   const usable = row.devices.filter((device) => device.verdict === 'live' || device.verdict === 'rate_limited' || device.verdict === 'unverified').length;
-  if (usable === provisioned) return `on ${usable} ${usable === 1 ? 'box' : 'boxes'}`;
-  return `on ${usable} of ${provisioned} boxes`;
+  if (usable === 0 || usable === provisioned) return null;
+  return `usable on ${usable} of ${provisioned} boxes`;
 }
 
 export const OVERVIEW_MAX_USAGE_WINDOWS = 2;
+
+/**
+ * The one line under an account listing. It explains the two marks a row can
+ * carry and names where the columns the listing no longer prints — identity,
+ * per-device state — still live. Shared with `agents view` so the two surfaces
+ * cannot drift.
+ */
+export const ACCOUNT_LISTING_LEGEND =
+  '* stale usage · a healthy account carries no state · identity + per-box state: agents accounts list --fleet';
 
 function usageText(row: NativeAccountCatalogRow, maxWindows?: number): string {
   if (row.usageSnapshot) {
@@ -641,21 +664,33 @@ function usageText(row: NativeAccountCatalogRow, maxWindows?: number): string {
 
 interface ListingLine {
   name: string;
-  identityLabel: string;
-  verdict: AccountVerdict;
-  where: string;
-  fix: string | null;
+  /** Trailing notes, already colored: state, coverage, then the repair command. */
+  notes: string[];
   usage: string;
   isDefault: boolean;
+}
+
+/**
+ * True when the USAGE cell itself already names the throttle ('out of credits',
+ * 'session-limited', 'limited', 'no credits'). The `rate-limited` state note is
+ * derived from exactly this data, so emitting both says the same thing twice.
+ * A verdict thrown by a maxed WINDOW has no marker in the cell — only a red
+ * percentage — so that one still earns the note.
+ */
+function usageCellNamesThrottle(row: NativeAccountCatalogRow): boolean {
+  return row.usage?.status === 'rate_limited'
+    || row.usage?.status === 'out_of_credits'
+    || !!row.usageSnapshot?.unavailable;
 }
 
 function nativeLine(row: NativeAccountCatalogRow, localDevice: string, maxWindows?: number): ListingLine {
   return {
     name: row.name ?? 'unnamed',
-    identityLabel: row.identityLabel,
-    verdict: row.verdict,
-    where: whereText(row, localDevice),
-    fix: row.fix,
+    notes: [
+      usageCellNamesThrottle(row) && row.verdict === 'rate_limited' ? null : verdictNote(row.verdict),
+      coverageNote(row, localDevice),
+      row.fix ? chalk.gray(`fix: ${row.fix}`) : null,
+    ].filter((note): note is string => !!note),
     usage: usageText(row, maxWindows),
     isDefault: row.isDefault,
   };
@@ -664,32 +699,21 @@ function nativeLine(row: NativeAccountCatalogRow, localDevice: string, maxWindow
 function providerLine(row: ProviderAccountCatalogRow, harness?: AgentId): ListingLine {
   return {
     name: row.name,
-    identityLabel: row.identityLabel,
-    verdict: row.verdict,
-    where: '—',
-    fix: row.fix,
+    notes: [
+      verdictNote(row.verdict),
+      row.fix ? chalk.gray(`fix: ${row.fix}`) : null,
+    ].filter((note): note is string => !!note),
     usage: '',
     isDefault: harness ? row.defaultFor.includes(harness) : false,
   };
 }
 
-function formatListingLine(
-  line: ListingLine,
-  nameW: number,
-  identityW: number,
-  stateW: number,
-  whereW: number,
-  usageW: number,
-): string {
+function formatListingLine(line: ListingLine, nameW: number, usageW: number): string {
   const marker = line.isDefault ? '*' : ' ';
-  const fix = line.fix ? `fix: ${line.fix}` : '';
   return (
     `  ${chalk.green(marker)} ${chalk.cyan(line.name.padEnd(nameW))}  `
-    + `${line.identityLabel.padEnd(identityW)}  `
-    + `${verdictText(line.verdict).padEnd(stateW)}  `
-    + `${line.where.padEnd(whereW)}  `
     + `${padToWidth(line.usage, usageW)}  `
-    + `${fix ? chalk.gray(fix) : ''}`
+    + line.notes.join(chalk.gray(' · '))
   ).trimEnd();
 }
 
@@ -697,16 +721,13 @@ function pushGroup(
   out: string[],
   title: string,
   lines: ListingLine[],
-  widths: { nameW: number; identityW: number; stateW: number; whereW: number; usageW: number },
+  widths: { nameW: number; usageW: number },
   harnessHeadings: boolean,
 ): void {
   if (lines.length === 0) return;
   if (harnessHeadings) out.push(chalk.bold(title));
-  out.push(chalk.gray(
-    `  ${'ACCOUNT'.padEnd(widths.nameW + 2)}${'IDENTITY'.padEnd(widths.identityW + 2)}${'STATE'.padEnd(widths.stateW + 2)}${'WHERE'.padEnd(widths.whereW + 2)}${'USAGE'.padEnd(widths.usageW + 2)}FIX`,
-  ));
   for (const line of lines) {
-    out.push(formatListingLine(line, widths.nameW, widths.identityW, widths.stateW, widths.whereW, widths.usageW));
+    out.push(formatListingLine(line, widths.nameW, widths.usageW));
   }
   out.push('');
 }
@@ -774,9 +795,6 @@ export function renderAccountRows(
     const allLines = [...grouped.values()].flat().concat(orphans);
     const widths = {
       nameW: Math.max(7, ...allLines.map((line) => line.name.length)),
-      identityW: Math.max(8, ...allLines.map((line) => line.identityLabel.length)),
-      stateW: Math.max(5, ...allLines.map((line) => verdictText(line.verdict).length)),
-      whereW: Math.max(5, ...allLines.map((line) => line.where.length)),
       usageW: Math.max(5, ...allLines.map((line) => stringWidth(line.usage))),
     };
     for (const [harness, lines] of grouped) {
@@ -791,7 +809,7 @@ export function renderAccountRows(
     const count = visibleNative.filter((row) => !!row.fix).length
       + visibleProviders.filter((row) => !!row.fix).length;
     out.push(chalk.gray(`${count} accounts need you · add: agents accounts add <harness>`));
-    out.push(chalk.gray('STATE: LIVE ready · LIMITED rate-limited · EXPIRED needs refresh · REVOKED needs login · UNVERIFIED unconfirmed · MISSING not provisioned · * stale usage'));
+    out.push(chalk.gray(ACCOUNT_LISTING_LEGEND));
   }
   return out.join('\n').trimEnd();
 }
