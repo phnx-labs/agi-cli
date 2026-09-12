@@ -276,10 +276,12 @@ describe.skipIf(process.platform === 'win32')('synchronous status path is bounde
     // 0.4–2.6s against the old 3s bound. A standalone that answers after a slow
     // boot must still be accepted.
     // The handshake answers at once; only the operation spawn boots slowly, so
-    // the test pays one slow spawn rather than two.
+    // the test pays one slow spawn rather than two. Like the real standalone,
+    // the mock drains the request on fd 3 before answering — a mock that exits
+    // without reading races `spawnSync`'s stdin write and surfaces as EPIPE.
     const marker = path.join(dir, 'handshake-done');
     plantServe(
-      `if [ -e '${marker}' ]; then sleep 4; else : > '${marker}'; fi; ` +
+      `cat <&3 >/dev/null; if [ -e '${marker}' ]; then sleep 4; else : > '${marker}'; fi; ` +
         `printf '%s' '{"v":1,"id":"x","ok":true,"result":{"protocol":1,"operations":{}}}' >&4`,
     );
     expect(SYNC_SERVE_TIMEOUT_MS).toBeGreaterThanOrEqual(30_000);
