@@ -60,6 +60,18 @@ describe('resolveComputerBin', () => {
     }
   });
 
+  it('resolves an npm batch shim to the standalone JavaScript launcher', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'computer-npm-'));
+    try {
+      const launcher = path.join(root, 'node_modules', '@phnx-labs', 'computer-cli', 'bin', 'computer.cjs');
+      fs.mkdirSync(path.dirname(launcher), { recursive: true });
+      fs.writeFileSync(launcher, '');
+      process.env.COMPUTER_BIN = path.join(root, 'computer.cmd');
+      expect(resolveComputerBin()).toBe(launcher);
+      expect(invocation(resolveComputerBin())).toEqual({ command: process.execPath, prefix: [launcher] });
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+
   it('fails LOUD with install guidance when the standalone is absent — there is no fallback engine', () => {
     process.env.COMPUTER_BIN = '';
     // An empty PATH is the honest "not installed" shape; findInPath finds nothing.
