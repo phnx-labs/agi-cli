@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.22.106
+
+- Fixed release packages omitting the session-tracking hook. Release qualification now uses the complete CLI build, so installed agents can record the account that owns each native session.
+
+- **Resume conversations by account with one shared picker (PHNX-3940).** `ag run claude --resume` opens the same history picker as `agents sessions resume --agent claude`; `claude#work` applies `--account work`. Selected conversations retain their account, model, permissions, cwd and run options while using the installed binary. Canonical account homes and short Codex homes are discovered independently of version installs. Explicit terminal backends work with session IDs. Native context is verified after cold discovery, and archived replay requires an explicit choice. Origin account identity survives alias updates and index rescans; a model refusal does not disable unrelated models or accounts.
+
 ## 1.22.105
 
 - Computer setup installs standalone Computer CLI 0.1.2, whose application code is obfuscated before compilation to increase inspection effort. Agents continues to provide permissions and session tracking through its adapter.
