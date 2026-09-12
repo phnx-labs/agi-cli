@@ -15,7 +15,7 @@ import {
   hostTargetGiven,
   isAlwaysFreshRepo,
   isInsideGitWorkTree,
-  parseRunAccountPickerRequest,
+  parseRunPickerMarkers,
   runAccountPickerConflicts,
   runAutoDefaultsToAffinity,
   hostInteractiveNeedsCorrelationId,
@@ -153,22 +153,82 @@ describe('degraded run governance mode', () => {
   });
 });
 
-describe('trailing-@ account picker request', () => {
-  it('distinguishes a terminal picker marker from a concrete version pin', () => {
-    expect(parseRunAccountPickerRequest('claude@')).toEqual({
-      requested: true,
+describe('run picker markers (# account, @ device)', () => {
+  it('parses each marker and strips them from the spec', () => {
+    expect(parseRunPickerMarkers('claude')).toEqual({
+      accountPicker: false,
+      devicePicker: false,
       normalizedAgentSpec: 'claude',
       valid: true,
     });
-    expect(parseRunAccountPickerRequest('claude@2.1.207')).toEqual({
-      requested: false,
-      normalizedAgentSpec: 'claude@2.1.207',
+    expect(parseRunPickerMarkers('claude#')).toEqual({
+      accountPicker: true,
+      devicePicker: false,
+      normalizedAgentSpec: 'claude',
       valid: true,
     });
-    expect(parseRunAccountPickerRequest('claude@@')).toMatchObject({
-      requested: true,
-      valid: false,
+    expect(parseRunPickerMarkers('claude@')).toEqual({
+      accountPicker: false,
+      devicePicker: true,
+      normalizedAgentSpec: 'claude',
+      valid: true,
     });
+    expect(parseRunPickerMarkers('claude#@')).toEqual({
+      accountPicker: true,
+      devicePicker: true,
+      normalizedAgentSpec: 'claude',
+      valid: true,
+    });
+    expect(parseRunPickerMarkers('claude@#')).toEqual({
+      accountPicker: true,
+      devicePicker: true,
+      normalizedAgentSpec: 'claude',
+      valid: true,
+    });
+  });
+
+  it('keeps pins intact: no marker on a version pin or a labeled account', () => {
+    expect(parseRunPickerMarkers('claude@2.1.218')).toMatchObject({
+      accountPicker: false,
+      devicePicker: false,
+      normalizedAgentSpec: 'claude@2.1.218',
+      valid: true,
+    });
+    expect(parseRunPickerMarkers('claude#work')).toMatchObject({
+      accountPicker: false,
+      devicePicker: false,
+      normalizedAgentSpec: 'claude#work',
+      valid: true,
+    });
+    expect(parseRunPickerMarkers('claude@2.1.218#work')).toMatchObject({
+      normalizedAgentSpec: 'claude@2.1.218#work',
+      valid: true,
+    });
+  });
+
+  it('allows the device picker after an account label (#work@)', () => {
+    expect(parseRunPickerMarkers('claude#work@')).toEqual({
+      accountPicker: false,
+      devicePicker: true,
+      normalizedAgentSpec: 'claude#work',
+      valid: true,
+    });
+  });
+
+  it('rejects a pin combined with the picker for the same thing', () => {
+    // The account picker chooses the version — a version pin conflicts.
+    expect(parseRunPickerMarkers('claude@2.1.218#')).toMatchObject({ valid: false });
+    // An explicit account label conflicts with the account picker.
+    expect(parseRunPickerMarkers('claude#work#')).toMatchObject({ valid: false });
+    // Same rule as today's claude@2.1.218@ for the device marker.
+    expect(parseRunPickerMarkers('claude@2.1.218@')).toMatchObject({ valid: false });
+    // Doubled markers are malformed.
+    expect(parseRunPickerMarkers('claude##')).toMatchObject({ valid: false });
+    expect(parseRunPickerMarkers('claude@@')).toMatchObject({ valid: false });
+    expect(parseRunPickerMarkers('claude#@#')).toMatchObject({ valid: false });
+    // Markers with no agent at all.
+    expect(parseRunPickerMarkers('#')).toMatchObject({ valid: false });
+    expect(parseRunPickerMarkers('#@')).toMatchObject({ valid: false });
   });
 
   it('rejects selectors that would override the selected account but allows device routing', () => {

@@ -503,7 +503,7 @@ export function runAgentSpecArg(opts: {
   account?: string;
   accountPicker?: boolean;
 }): string {
-  if (opts.accountPicker) return `${opts.agent}@`;
+  if (opts.accountPicker) return `${opts.agent}#`;
   let spec = opts.agent;
   if (opts.version) spec += `@${opts.version}`;
   if (opts.account) spec += `#${opts.account}`;
@@ -547,7 +547,7 @@ export interface InteractiveDispatchOptions {
   agent: string;
   /** Explicit agent version pin (e.g. "2.1.207") to forward as `agent@version`. */
   version?: string;
-  /** Preserve the trailing-@ account picker so selection happens on the execution host. */
+  /** Preserve the trailing-# account picker so selection happens on the execution host. */
   accountPicker?: boolean;
   /** Explicit run strategy (e.g. "balanced") to forward as `--strategy <strategy>`. */
   strategy?: string;

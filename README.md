@@ -202,11 +202,15 @@ agents run claude "refactor auth module" --mode edit --fallback codex,antigravit
 # Picks the signed-in account you haven't used recently.
 agents run claude "summarize recent commits" --strategy balanced
 
-# Or choose one account/version interactively for only this run.
-agents run claude@
-agents run codex@ "review this branch"
-agents run claude@ --device auto        # pick the device, then choose there
-agents run claude@ --device yosemite-s0 # choose from one device's accounts
+# Or choose one account/version interactively for only this run (# = account picker).
+agents run claude#
+agents run codex# "review this branch"
+agents run claude# --device auto        # pick the device, then choose there
+agents run claude# --device yosemite-s0 # choose from one device's accounts
+
+# @ picks the device instead; #@ asks both (account first, then device).
+agents run claude@                      # pick the device for this run
+agents run claude#@                     # pick the account, then the device
 ```
 
 `--strategy balanced` spreads work across available versions of the same agent -- useful when you have multiple accounts and want to avoid burning through one. When a Claude run reports a session limit, agents-cli records the stated reset time, shows `session-limited` in `agents view`, and excludes that account until the reset. When every account is rate-limited, the run exits nonzero naming each excluded account and the earliest window reset (use `--strategy pinned` to force a rate-limited default) -- it never launches into an exhausted account. A logged-out default is never forced: unpinned dispatch picks a signed-in version on the execution device instead of dying on a credential-less default home.

@@ -143,21 +143,50 @@ export function parseExplicitSessionId(value: string): string {
   return value;
 }
 
-export interface RunAccountPickerRequest {
-  requested: boolean;
+export interface RunPickerMarkers {
+  accountPicker: boolean;
+  devicePicker: boolean;
   normalizedAgentSpec: string;
   valid: boolean;
+  reason?: string;
 }
 
-/** Distinguish a terminal account-picker marker from an explicit @version pin. */
-export function parseRunAccountPickerRequest(agentSpec: string): RunAccountPickerRequest {
-  const requested = agentSpec.endsWith('@');
-  const normalizedAgentSpec = requested ? agentSpec.slice(0, -1) : agentSpec;
-  return {
-    requested,
-    normalizedAgentSpec,
-    valid: !requested || (!!normalizedAgentSpec && !normalizedAgentSpec.includes('@')),
-  };
+/**
+ * Parse the trailing picker markers on an `agents run` agent spec. A terminal
+ * run of `#`/`@` characters requests the account picker (`#`) and/or the
+ * device picker (`@`) — each at most once, in either order (`claude#@`,
+ * `claude@#`). Stripping them yields the normalized spec (`claude#work@` →
+ * `claude#work`, version pins and `#label` account pins intact). A picker
+ * cannot combine with an explicit pin of what it picks: `claude@2.1.218#`
+ * (the account picker already chooses the version — the old `claude@2.1.218@`
+ * rule), `claude#work#`, `claude@@`.
+ */
+export function parseRunPickerMarkers(agentSpec: string): RunPickerMarkers {
+  let rest = agentSpec;
+  let accountPicker = false;
+  let devicePicker = false;
+  let reason: string | undefined;
+  while (rest.endsWith('#') || rest.endsWith('@')) {
+    const marker = rest.endsWith('#') ? '#' : '@';
+    if (marker === '#') {
+      if (accountPicker && reason === undefined) reason = `the # picker marker may appear at most once in '${agentSpec}'`;
+      accountPicker = true;
+    } else {
+      if (devicePicker && reason === undefined) reason = `the @ picker marker may appear at most once in '${agentSpec}'`;
+      devicePicker = true;
+    }
+    rest = rest.slice(0, -1);
+  }
+  if (reason === undefined) {
+    if (!rest) {
+      reason = `'${agentSpec}' names no agent before the picker markers`;
+    } else if (accountPicker && (rest.includes('@') || rest.includes('#'))) {
+      reason = `an explicit pin in '${rest}' already selects what the # account picker chooses`;
+    } else if (devicePicker && rest.includes('@')) {
+      reason = `an explicit pin in '${rest}' cannot combine with the @ device picker`;
+    }
+  }
+  return { accountPicker, devicePicker, normalizedAgentSpec: rest, valid: reason === undefined, reason };
 }
 
 /**
@@ -601,7 +630,7 @@ async function handleTerminalHandoff(
   // isValidAgent / profileExists / resolveWorkflowRef chain below), so this must
   // accept all three. Gating on the agent table alone rejected every profile —
   // the whole Kimi/DeepSeek/Qwen/GLM path — for `--terminal` runs only.
-  const rawTarget = parseRunAccountPickerRequest(agentSpec).normalizedAgentSpec.split('#')[0].split('@')[0];
+  const rawTarget = parseRunPickerMarkers(agentSpec).normalizedAgentSpec.split('#')[0].split('@')[0];
   const knownAgent = resolveAgentName(rawTarget);
   const [{ profileExists }, { resolveWorkflowRef }] = await Promise.all([
     import('../lib/profiles.js'),
@@ -869,8 +898,16 @@ export function registerRunCommand(program: Command): void {
       # Interactive (TUI) with the pinned default version
       agents run claude
 
-      # Pick a signed-in account/version for only this run
+      # Pick a signed-in account/version for only this run (# = account picker)
+      agents run claude#
+
+      # Pick the device this run lands on (@ = device picker); this machine
+      # first, offline rows disabled, fleet state aged in the prompt
       agents run claude@
+
+      # Ask both, account first, then device — the run dispatches with the
+      # picked account to the picked device
+      agents run claude#@
 
       # Full-auto: affinity-pick the host, then the harness with the most
       # account headroom, then a balanced account on it
@@ -956,9 +993,13 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
       best-account headroom), and the account (the strategy above). Zero
       healthy accounts on any harness exits nonzero with the earliest reset.
 
-      Account picker: append @ with no version (agents run claude@) to choose one
-        installed account for this run. Rows show identity, login state, plan,
-        and available limits; unsafe accounts stay visible but disabled.
+      Pickers: a trailing # opens the account picker (agents run claude#) to
+        choose one installed account for this run — rows show identity, login
+        state, plan, and available limits; unsafe accounts stay visible but
+        disabled. A trailing @ opens the device picker (agents run claude@);
+        #@ asks both, account first, then device. The pickers cannot combine
+        with an explicit pin of the same thing (--account, --device/--on/
+        --computer/--host) or with --strategy/--balanced/--resume/--lease/--box.
 
       Fallback: --fallback codex,antigravity retries on rate-limit failure via /continue handoff. Each entry accepts @version.
 
@@ -1121,19 +1162,27 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         });
       }
 
-      // A trailing @ is an explicit request to choose one installed account.
-      // Strip only that terminal marker; concrete agent@version pins retain
-      // their existing meaning in every dispatch path below.
-      const accountPicker = parseRunAccountPickerRequest(agentSpec);
-      const accountPickerRequested = accountPicker.requested;
-      let normalizedAgentSpec = accountPicker.normalizedAgentSpec;
-      if (!accountPicker.valid) {
-        console.error(chalk.red(`Invalid account picker target: ${agentSpec}. Use agents run <agent>@.`));
+      // Trailing picker markers request an interactive choice: `#` picks the
+      // account (and the version it signs in with), `@` picks the device, and
+      // `#@`/`@#` ask both. Strip only those terminal markers; concrete
+      // agent@version pins and `#label` account pins retain their meaning in
+      // every dispatch path below.
+      const pickerMarkers = parseRunPickerMarkers(agentSpec);
+      const accountPickerRequested = pickerMarkers.accountPicker;
+      const devicePickerRequested = pickerMarkers.devicePicker;
+      let normalizedAgentSpec = pickerMarkers.normalizedAgentSpec;
+      if (!pickerMarkers.valid) {
+        console.error(chalk.red(
+          `Invalid run picker target: ${agentSpec}. ` +
+          `${pickerMarkers.reason ?? 'unrecognized picker markers'}. ` +
+          'Use agents run <agent># to pick an account, <agent>@ to pick a device, <agent>#@ for both.',
+        ));
         process.exit(1);
       }
       // Peel `#name` off before --device dispatch so the selector rides the hop
       // unchanged and the peer resolves ITS slot (PHNX-3940 T5). The later local
-      // parse is idempotent when the values match.
+      // parse is idempotent when the values match. A bare trailing `#` was the
+      // picker marker above, so it can never land here as an empty label.
       {
         const labelParts = normalizedAgentSpec.split('#');
         if (labelParts.length > 2 || labelParts[1] === '') {
@@ -1179,15 +1228,41 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         process.exit(1);
       }
 
-      // Account-picker conflict check runs BEFORE device=auto may set balanced,
-      // so an implicit balanced preference never surfaces as a fake
-      // "cannot be combined with --balanced" when the user only typed trailing @.
+      // Picker conflict checks run BEFORE --resume/--device auto may place the
+      // run implicitly, so an implied placement never surfaces as a fake
+      // "cannot be combined with --device" when the user only typed a marker.
       if (accountPickerRequested) {
         const conflicts = runAccountPickerConflicts(options);
         if (conflicts.length > 0) {
           console.error(chalk.red(
             `Account selection with ${agentSpec} cannot be combined with ${conflicts.join(', ')}. ` +
-            'Remove the conflicting selector, or use an explicit agent@version target.',
+            'Remove the conflicting selector, or pin the target explicitly (agent@version or agent#label).',
+          ));
+          process.exit(1);
+        }
+        if (options.account) {
+          console.error(chalk.red(
+            `Account selection with ${agentSpec} cannot be combined with --account '${options.account}'. ` +
+            'Remove one — the picker already chooses the account.',
+          ));
+          process.exit(1);
+        }
+      }
+      if (devicePickerRequested) {
+        const hostConflicts = hostTargetGiven(options);
+        if (hostConflicts.length > 0) {
+          console.error(chalk.red(
+            `Device selection with ${agentSpec} cannot be combined with ${hostConflicts.map((h) => `--device ${h}`).join(', ')}. ` +
+            'Remove one — the picker already chooses the device.',
+          ));
+          process.exit(1);
+        }
+        // --lease/--box own placement outright; a device menu against them
+        // would be silently ignored by the lease path below.
+        if (options.lease || options.box) {
+          console.error(chalk.red(
+            `Device selection with ${agentSpec} cannot be combined with ${options.lease ? '--lease' : '--box'}. ` +
+            'Remove one — both pick where the run lands.',
           ));
           process.exit(1);
         }
@@ -1322,7 +1397,13 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         }
         if (accountPickerRequested) {
           console.error(chalk.red(
-            `agents run auto picks the harness and account itself — the trailing-@ account picker needs a concrete harness (agents run <harness>@).`,
+            `agents run auto picks the harness and account itself — the trailing-# account picker needs a concrete harness (agents run <harness>#).`,
+          ));
+          process.exit(1);
+        }
+        if (devicePickerRequested) {
+          console.error(chalk.red(
+            `agents run auto picks the harness and its placement itself — the trailing-@ device picker needs a concrete harness (agents run <harness>@).`,
           ));
           process.exit(1);
         }
@@ -1330,6 +1411,73 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         // affinity pick. Skipped on a device-dispatched run — its dispatcher
         // already resolved this layer (see runAutoDefaultsToAffinity).
         if (!resolvedResumeSource && runAutoDefaultsToAffinity(options)) options.device = 'auto';
+      }
+
+      // The picker menus run HERE — after every conflict check, before
+      // placement resolves — so the picked account labels the device rows and
+      // the picked device is concrete for every host branch below.
+      //   `#@`/`@#`: account first, against THIS machine's slots; the picked
+      //     account becomes options.account and the device menu shows its
+      //     ✓/– per-device mark. A remote device pick dispatches with
+      //     `<agent>#<label>` so the peer resolves its own slot.
+      //   `@`: just the device menu; picking this machine is a plain local run.
+      // Either menu cancelled (Esc/Ctrl-C) launches nothing and exits 0.
+      let upFrontAccountPick: import('../lib/accounting/rotate.js').RotateCandidate | null = null;
+      if (accountPickerRequested && devicePickerRequested) {
+        const baseName = normalizedAgentSpec.split('#')[0].split('@')[0];
+        const baseAgentId = resolveAgentName(baseName);
+        const { profileExists: baseProfileExists } = await import('../lib/profiles.js');
+        if (!baseAgentId || baseProfileExists(baseName)) {
+          console.error(chalk.red(
+            baseProfileExists(baseName)
+              ? `Account selection is not available for custom harness '${baseName}'. Run its concrete host agent with # instead.`
+              : `Account selection is not available for '${baseName}'. Run a concrete agent with # instead.`,
+          ));
+          process.exit(1);
+        }
+        const { supportsAccountInspection: baseSupportsInspection, agentLabel: baseAgentLabel, ACCOUNT_INSPECTION_AGENT_IDS: inspectionAgentIds } = await import('../lib/agents.js');
+        if (!baseSupportsInspection(baseAgentId)) {
+          console.error(chalk.red(
+            `${baseAgentLabel(baseAgentId)} does not expose local account state, so agents-cli cannot safely select an account.`,
+          ));
+          console.error(chalk.gray(
+            `Supported account pickers: ${inspectionAgentIds.join(', ')}`,
+          ));
+          process.exit(1);
+        }
+        const { pickRunAccountCandidate } = await import('./run-account-picker.js');
+        const selected = await pickRunAccountCandidate(baseAgentId);
+        if (!selected) return; // Esc/Ctrl-C: launch nothing.
+        if (selected.nativeAccount) options.account = selected.nativeAccount;
+        upFrontAccountPick = selected;
+        if (!options.quiet) {
+          const identity = selected.accountLabel || 'signed-in account';
+          process.stderr.write(chalk.gray(
+            `[agents] selected ${identity} · ${baseAgentId}@${selected.version} for this run\n`,
+          ));
+        }
+      }
+      if (devicePickerRequested) {
+        // --resume above may have pinned the host implicitly (recovery to the
+        // source peer); a device menu against it would be a silent no-op.
+        const impliedHost = hostTargetGiven(options);
+        if (impliedHost.length > 0) {
+          console.error(chalk.red(
+            `Device selection with ${agentSpec} cannot be combined with the placement --resume already chose (${impliedHost.join(', ')}). ` +
+            'Remove one — both pick where the run lands.',
+          ));
+          process.exit(1);
+        }
+        const { pickRunDevice } = await import('./run-device-picker.js');
+        const baseName = normalizedAgentSpec.split('#')[0].split('@')[0];
+        const pickedDevice = await pickRunDevice({
+          agent: (resolveAgentName(baseName) ?? baseName) as AgentId,
+          accountLabel: options.account,
+        });
+        if (pickedDevice === null) return; // Esc/Ctrl-C: launch nothing.
+        const { isSelfHost } = await import('../lib/devices/self-host.js');
+        // Picking this machine is a plain local run — leave options.device unset.
+        if (!isSelfHost(pickedDevice)) options.device = pickedDevice;
       }
 
       // --device auto (and deprecated --smart): live fleet pick.
@@ -1836,10 +1984,12 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           }
           const interactiveHost = options.interactive === true || (prompt === undefined && options.headless !== true);
 
-          if (accountPickerRequested && !interactiveHost) {
+          // When the account was already picked up front (`#@`), the dispatch
+          // forwards `#label` and the peer needs no interactive picker.
+          if (accountPickerRequested && !upFrontAccountPick && !interactiveHost) {
             console.error(chalk.red(
               `Account selection with ${agentSpec} requires an interactive host run. ` +
-              `Use agents run ${runAgent}@ --device ${host.name} --interactive.`,
+              `Use agents run ${runAgent}# --device ${host.name} --interactive.`,
             ));
             process.exit(1);
           }
@@ -1905,7 +2055,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
             const exitCode = await runInteractiveOnHost(host, {
               agent: runAgent,
               version: resumeId ? undefined : runVersion,
-              accountPicker: accountPickerRequested,
+              accountPicker: accountPickerRequested && !upFrontAccountPick,
               strategy: resumeId ? undefined : runStrategy,
               account: options.account,
               fallback: options.fallback,
@@ -2257,14 +2407,14 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
 
       if (accountPickerRequested && profileExists(rawAgent)) {
         console.error(chalk.red(
-          `Account selection is not available for custom harness '${rawAgent}'. Run its concrete host agent with @ instead.`,
+          `Account selection is not available for custom harness '${rawAgent}'. Run its concrete host agent with # instead.`,
         ));
         process.exit(1);
       }
       if (accountPickerRequested && !isValidAgent(rawAgent)) {
         if (resolveWorkflowRef(rawAgent, cwd)) {
           console.error(chalk.red(
-            `Account selection is not available for workflow '${rawAgent}'. Run a concrete agent with @ instead.`,
+            `Account selection is not available for workflow '${rawAgent}'. Run a concrete agent with # instead.`,
           ));
           process.exit(1);
         }
@@ -2554,7 +2704,10 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         }
       }
 
-      if (accountPickerRequested) {
+      // `#@` already asked the account up front (before the device menu) — a
+      // remote device pick never reaches here, so apply the local pick's
+      // version/home and skip the on-the-spot menu.
+      if (accountPickerRequested && !upFrontAccountPick) {
         if (!supportsAccountInspection(agent)) {
           console.error(chalk.red(
             `${agentLabel(agent)} does not expose local account state, so agents-cli cannot safely select an account.`,
@@ -2581,6 +2734,10 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           console.error(chalk.red((err as Error).message));
           process.exit(1);
         }
+      }
+      if (upFrontAccountPick) {
+        version = upFrontAccountPick.version;
+        if (upFrontAccountPick.slotDir) execHome = upFrontAccountPick.slotDir;
       }
 
       version = resolveVersionAlias(agent, version);
@@ -2798,7 +2955,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
               // - NEEDS A SIGN-IN (signed_out / revoked) -> launching IS the fix,
               //   because the harness's own TUI is the login surface. So on a TTY we
               //   carry the user into that login instead of erroring. Exiting here
-              //   made `agents run <agent>`, `agents run <agent>@`, and `agents use`
+              //   made `agents run <agent>`, `agents run <agent>#`, and `agents use`
               //   all dead-end with no reachable way to authenticate.
               const recoverable = signInRecoverableCandidates(resolved.exhausted);
               const { signInLaunchDecision } = await import('./run-account-picker.js');
@@ -2811,7 +2968,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
                 const { pickSignInLaunchVersion } = await import('./run-account-picker.js');
                 const signInVersion = await pickSignInLaunchVersion(agent, recoverable, !!options.quiet);
                 // A cancelled prompt launches nothing — same contract as the
-                // trailing-@ account picker above.
+                // trailing-# account picker above.
                 if (!signInVersion) return;
                 version = signInVersion;
                 // We just told the user this account is logged out and why we're
@@ -2848,7 +3005,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
               if (decision === 'picker') {
                 const selected = await pickRunAccountCandidate(agent);
                 // A cancelled picker launches nothing — same contract as the
-                // trailing-@ account picker and the sign-in launch above.
+                // trailing-# account picker and the sign-in launch above.
                 if (!selected) return;
                 version = selected.version;
                 // Source the run.launch verdict from the account the user ACTUALLY
