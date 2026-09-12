@@ -671,16 +671,23 @@ interface ListingLine {
 }
 
 /**
- * True when the USAGE cell itself already names the throttle ('out of credits',
- * 'session-limited', 'limited', 'no credits'). The `rate-limited` state note is
- * derived from exactly this data, so emitting both says the same thing twice.
- * A verdict thrown by a maxed WINDOW has no marker in the cell — only a red
- * percentage — so that one still earns the note.
+ * True only when the USAGE cell is certain to print a throttle marker, so the
+ * `rate-limited` note would say the same thing twice. Mirrors `usageText`
+ * branch for branch: with a snapshot, `formatUsageSummary` appends
+ * 'out of credits' or 'session-limited (…)' exactly for these `unavailable`
+ * reasons; without one, `usageText` prints 'limited' or 'no credits'. A verdict
+ * thrown by a maxed WINDOW is deliberately NOT here: the overview caps the cell
+ * at `OVERVIEW_MAX_USAGE_WINDOWS`, so the window that tripped it can be hidden
+ * behind the `+N` count with no color at all, and the note is the only signal.
  */
 function usageCellNamesThrottle(row: NativeAccountCatalogRow): boolean {
-  return row.usage?.status === 'rate_limited'
-    || row.usage?.status === 'out_of_credits'
-    || !!row.usageSnapshot?.unavailable;
+  if (row.usageSnapshot) {
+    const unavailable = row.usageSnapshot.unavailable;
+    return unavailable?.reason === 'out_of_credits'
+      || (unavailable?.reason === 'session_limit' && !!unavailable.resetsAt);
+  }
+  return row.usage?.status === 'out_of_credits'
+    || (row.usage?.status === 'rate_limited' && (row.usage.usedPercent === null || row.usage.usedPercent === undefined));
 }
 
 function nativeLine(row: NativeAccountCatalogRow, localDevice: string, maxWindows?: number): ListingLine {

@@ -177,6 +177,48 @@ describe('renderAccountList', () => {
     expect(data).not.toContain('rate-limited');
   });
 
+  it('keeps the rate-limited note when the maxed window is hidden behind the overview +N count', () => {
+    // Droid meters on 5h/week/month. The overview renders two windows and
+    // always seats session + week first, so a month window at 100% is folded
+    // into "+1" with no color — the trailing note is the only signal left.
+    const window = (key: 'session' | 'week' | 'month', shortLabel: string, usedPercent: number) => ({
+      key, label: key, shortLabel, usedPercent, resetsAt: new Date('2026-09-07T00:00:00.000Z'), windowMinutes: null,
+    });
+    const throttled = row({
+      agent: 'droid',
+      verdict: 'rate_limited',
+      fix: null,
+      usage: {
+        status: 'rate_limited',
+        verdict: 'unavailable',
+        usedPercent: 100,
+        stale: false,
+        capturedAt: '2026-09-06T00:00:00.000Z',
+        resetsAt: null,
+        unavailableReason: null,
+      },
+      usageSnapshot: {
+        source: 'live',
+        sourceLabel: 'live',
+        capturedAt: new Date('2026-09-06T00:00:00.000Z'),
+        windows: [window('session', 'S', 10), window('week', 'W', 20), window('month', 'M', 100)],
+      },
+    });
+    const out = stripAnsi(renderAccountList([throttled], [], { localDevice: 'zion', maxUsageWindows: 2 }));
+    const data = out.split('\n').find((line) => line.includes('work'))!;
+    expect(data).toContain('+1');
+    expect(data).toContain('rate-limited');
+    // With the snapshot itself refusing (out of credits), the cell carries the
+    // marker and the note stays suppressed.
+    const refused = stripAnsi(renderAccountList([row({
+      ...throttled,
+      usageSnapshot: { ...throttled.usageSnapshot!, unavailable: { reason: 'out_of_credits' } },
+    })], [], { localDevice: 'zion', maxUsageWindows: 2 }));
+    const refusedLine = refused.split('\n').find((line) => line.includes('work'))!;
+    expect(refusedLine).toContain('out of credits');
+    expect(refusedLine).not.toContain('rate-limited');
+  });
+
   it('never exposes reserved credential stores in account output', () => {
     const out = stripAnsi(renderAccountList([row()]));
     expect(out.toLowerCase()).not.toContain('bundle');
