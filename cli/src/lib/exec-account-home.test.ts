@@ -9,6 +9,7 @@ import { getVersionDir, getVersionHomePath, invalidateInstalledVersionsCache } f
 import { getHistoryDir, getVersionsDir, readMeta, updateMeta } from './state.js';
 import { seedReservedStoreKey, workerCredentialStoreKey } from './auth-mint.js';
 import { collectRunCandidates } from './accounting/rotate.js';
+import { authCacheKey, slotAuthVersionKey, writeAuthHealthEntries } from './auth-health.js';
 import {
   adoptedConfigPointsAtHome,
   adoptedSymlinkMismatchError,
@@ -157,6 +158,11 @@ describe('resolveNativeSpawnHome', () => {
     expect(candidates.find(candidate => candidate.nativeAccountId === account.id)).toMatchObject({
       nativeAccount: account.name, slotDir: home, version: label, signedIn: true,
     });
+    recordSlot(account.id, { accountId: account.id, slotDir: home, authMode: 'native', verdict: 'unconfigured' });
+    const checkedAt = Date.now();
+    writeAuthHealthEntries({ [authCacheKey('t5-spawn-box', 'claude', slotAuthVersionKey(account.id))]: { verdict: 'unverified', checkedAt, accountId: account.id } });
+    const refreshed = (await collectRunCandidates('claude')).find(candidate => candidate.nativeAccountId === account.id);
+    expect(refreshed).toMatchObject({ signedIn: true, authVerdict: 'unverified', authCheckedAt: checkedAt });
     removeAccount(account.name);
     invalidateInstalledVersionsCache('claude');
   });

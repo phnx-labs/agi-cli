@@ -410,11 +410,15 @@ export async function findLocalSessionTranscripts(selector: string, agent?: Sess
         const result = harness === 'claude'
           ? await readClaudeMeta(real, id, { fileMtimeMs: Math.floor(file.mtimeMs), fileSize: file.size }, undefined)
           : await readCodexMeta(real);
-        if (!result?.meta.id.toLowerCase().startsWith(selector.toLowerCase())) continue;
+        if (!result?.meta.id.toLowerCase().startsWith(selector.toLowerCase()) || !result.meta.messageCount) continue;
         const sidecar = readSessionActorRecord(result.meta.id);
-        const row = { ...result.meta, accountId: sidecar?.accountId, machine: machineForSessionFile(real, harness) };
-        const prior = matches.get(row.id);
-        if (!prior || new Date(row.lastActivity ?? row.timestamp) > new Date(prior.lastActivity ?? prior.timestamp)) matches.set(row.id, row);
+        const row = {
+          ...result.meta, accountId: sidecar?.accountId, mode: sidecar?.mode,
+          actor: sidecar?.actor, initiatedBy: sidecar?.initiatedBy,
+          phoenixId: sidecar?.phoenixId, harness: sidecar?.harness ?? result.meta.harness,
+          machine: machineForSessionFile(real, harness),
+        };
+        if (!matches.has(row.id)) matches.set(row.id, row);
       }
     }
   }

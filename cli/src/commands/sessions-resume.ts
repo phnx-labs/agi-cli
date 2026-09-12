@@ -232,7 +232,10 @@ export async function sessionsResumeAction(
       const { sessionMatchesAccount } = await import('../lib/session/recovery.js');
       const account = findUnifiedAccount(options.account, readMeta(), undefined, agent as import('../lib/types.js').AgentId | undefined);
       if (!account) throw new Error(`Unknown account '${options.account}'.`);
-      sessions = sessions.filter(session => sessionMatchesAccount(session, account)).slice(0, limit);
+      const context = account.kind === 'native'
+        ? await (await import('../lib/exec-account-home.js')).resolveNativeSpawnHome(account.agent, account, readMeta(), { readOnly: true }).catch(() => null)
+        : null;
+      sessions = sessions.filter(session => sessionMatchesAccount(session, account, context?.execHome)).slice(0, limit);
     }
 
     if (sessions.length === 0) {
