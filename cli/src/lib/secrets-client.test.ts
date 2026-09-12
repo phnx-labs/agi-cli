@@ -275,18 +275,54 @@ describe.skipIf(process.platform === 'win32')('synchronous status path is bounde
     // desktop at load average ~100, where each cold `secrets __serve` spawn took
     // 0.4–2.6s against the old 3s bound. A standalone that answers after a slow
     // boot must still be accepted.
-    // The handshake answers at once; only the operation spawn boots slowly, so
-    // the test pays one slow spawn rather than two. Like the real standalone,
-    // the mock drains the request on fd 3 before answering — a mock that exits
-    // without reading races `spawnSync`'s stdin write and surfaces as EPIPE.
-    const marker = path.join(dir, 'handshake-done');
+    // One request is one spawn, so the single spawn IS the slow cold boot. Like
+    // the real standalone, the mock drains the request on fd 3 before answering
+    // — a mock that exits without reading races `spawnSync`'s stdin write and
+    // surfaces as EPIPE.
     plantServe(
-      `cat <&3 >/dev/null; if [ -e '${marker}' ]; then sleep 4; else : > '${marker}'; fi; ` +
+      `cat <&3 >/dev/null; sleep 4; ` +
         `printf '%s' '{"v":1,"id":"x","ok":true,"result":{"protocol":1,"operations":{}}}' >&4`,
     );
     expect(SYNC_SERVE_TIMEOUT_MS).toBeGreaterThanOrEqual(30_000);
     const result = secretsRequestSync<{ protocol: number }>('handshake', []);
     expect(result.protocol).toBe(PROTOCOL_VERSION);
+  });
+
+  it('one request is one spawn — no handshake round trip precedes the first op', () => {
+    // Every request is a cold `secrets __serve` process (a full Node boot for
+    // the real standalone: 0.3-2.6s on a box at load average ~100). A separate
+    // version-negotiation spawn therefore charged one whole boot to the first
+    // secrets read of EVERY command — 1 of the 7 spawns an `agents run claude`
+    // launch made (PHNX-4082). Counting real executions of a planted standalone
+    // is what pins that: N requests MUST be exactly N spawns.
+    const tally = path.join(dir, 'spawns');
+    plantServe(
+      `cat <&3 >/dev/null; echo x >> '${tally}'; ` +
+        `printf '%s' '{"v":1,"id":"x","ok":true,"result":{"protocol":1,"operations":{}}}' >&4`,
+    );
+    secretsRequestSync('handshake', []);
+    expect(fs.readFileSync(tally, 'utf8').trim().split('\n')).toHaveLength(1);
+    secretsRequestSync('bundles.listBundles', []);
+    expect(fs.readFileSync(tally, 'utf8').trim().split('\n')).toHaveLength(2);
+  });
+
+  it('a standalone speaking another protocol is named, on any op, not called malformed', () => {
+    // The version check rides every response now, so a standalone that speaks a
+    // version this client does not gets the actionable error on whatever op it
+    // answered — the old handshake-only check reported a later mismatch as a
+    // malformed envelope.
+    plantServe(
+      `cat <&3 >/dev/null; printf '%s' '{"v":2,"id":"x","ok":true,"result":{}}' >&4`,
+    );
+    try {
+      secretsRequestSync('bundles.listBundles', []);
+      throw new Error('expected PROTOCOL_UNSUPPORTED');
+    } catch (error) {
+      expect(error).toBeInstanceOf(SecretsClientError);
+      expect((error as SecretsClientError).code).toBe('PROTOCOL_UNSUPPORTED');
+      expect((error as SecretsClientError).message).toContain('secrets speaks protocol 2');
+      expect((error as SecretsClientError).message).toContain('@phnx-labs/secrets-cli');
+    }
   });
 
   it('a standalone that writes nothing to fd 4 is surfaced as an empty response', () => {
