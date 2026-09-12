@@ -19,6 +19,7 @@ export function resumeLocalFallbackSource(session: SessionMeta, self: string = m
 }
 
 export interface StrictResumeOptions {
+  agent?: string;
   mode?: string;
   account?: string;
   model?: string;
@@ -45,6 +46,7 @@ export function buildResumeRemoteArgs(
   options: StrictResumeOptions,
 ): string[] {
   const args = ['sessions', 'resume', sessionId, ...(prompt === undefined ? [] : [prompt])];
+  if (options.agent) args.push('--agent', options.agent);
   if (options.account) args.push('--account', options.account);
   if (options.model) args.push('--model', options.model);
   if (options.mode) args.push('--mode', options.mode);
@@ -126,7 +128,7 @@ export async function runStrictResume(
   }
   // An owner hop must inspect only the owner's index. Fleet fan-out here can
   // rediscover the dispatcher's synthetic row and bounce the same id forever.
-  const outcome = await resolveSessionMetadataValue(sessionId.trim(), (pinnedHere || options.local) ? { local: true } : {});
+  const outcome = await resolveSessionMetadataValue(sessionId.trim(), { agent: options.agent, local: pinnedHere || options.local });
   if (outcome.kind === 'partial') {
     // RUSH-2492: an unreachable peer is a warning, not a hard failure. The
     // resolver already resolves an id found on the reachable fleet (SES-9a),
@@ -190,7 +192,7 @@ export async function runStrictResume(
     return;
   }
 
-  process.exitCode = await delegateLocalResume(outcome.session, prompt, options);
+  process.exitCode = await delegateLocalResume(pinnedHere ? resumeLocalFallbackSource(outcome.session) : outcome.session, prompt, options);
 }
 
 /**
