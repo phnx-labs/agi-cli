@@ -143,11 +143,16 @@ describeRelease('release.sh: an ordinary release is CLI-only', () => {
     return { calls, status: r.status, out: `${r.stdout}${r.stderr}` };
   }
 
-  it('does NOT touch the helper manifest on an ordinary release', () => {
+  it('does NOT stage the helper manifest on an ordinary release', () => {
     const { calls, out } = runUpload(false);
     expect(calls.some((c) => c.startsWith('release-manifest.sh')), out).toBe(false);
+    // Assert on what is UPLOADED, not only on which scripts ran: the upload
+    // globs $dest, so the manifest's absence there is the observable fact.
+    const upload = calls.find((c) => c.startsWith('gh release upload')) ?? '';
+    expect(upload, out).not.toContain('release-manifest.json');
     // …and still does the CLI work, so this is not passing by dying early.
     expect(calls.some((c) => c.startsWith('gh release')), out).toBe(true);
+    expect(upload, out).toContain('.tgz');
   });
 
   it('aborts when the attestation lookup fails, rather than uploading unproven bytes', () => {
@@ -170,11 +175,24 @@ describeRelease('release.sh: an ordinary release is CLI-only', () => {
     expect(calls.some((c) => c.startsWith('gh release')), 'must not upload without a tarball').toBe(false);
   });
 
-  it('DOES stage the computer-mac asset with --with-helpers', () => {
+  it('DOES stage the helper manifest with --with-helpers', () => {
+    // Before PHNX-4075 this also asserted a `release-manifest.sh copy-asset
+    // --helper computer-mac` call. That helper left the repo with the standalone
+    // `computer` engine, which resolves its own releases, so the manifest JSON is
+    // now the only helper artifact a --with-helpers release stages.
     const { calls, out } = runUpload(true);
-    const manifest = calls.filter((c) => c.startsWith('release-manifest.sh'));
-    expect(manifest.length, out).toBeGreaterThan(0);
-    expect(manifest.join(' ')).toContain('--helper computer-mac');
+    const upload = calls.find((c) => c.startsWith('gh release upload')) ?? '';
+    expect(upload, out).toContain('release-manifest.json');
+    expect(upload, out).toContain('.tgz');
+  });
+
+  it('never stages an asset for a helper this CLI no longer distributes', () => {
+    // Staging `ComputerHelper.app.zip` onto v<version> would put an extracted
+    // helper back on this CLI's release path, and no client requests that URL.
+    const { calls, out } = runUpload(true);
+    const joined = calls.join(' ');
+    expect(joined, out).not.toContain('ComputerHelper.app.zip');
+    expect(joined, out).not.toContain('computer-mac');
   });
 
   it('defaults the flag OFF, so CLI-only is what you get without asking', () => {
