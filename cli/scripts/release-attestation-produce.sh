@@ -347,9 +347,8 @@ else
   gray "Not a macOS signing box -- nothing to do: the tarball ships no helper bundle."
 fi
 
-bold "Building (bun run build)..."
-rm -rf dist
-bun run build || die "build failed for ${SHA:0:12}"
+bold "Building the complete CLI package..."
+scripts/build.sh --clean --skip-tests || die "build failed for ${SHA:0:12}"
 
 bold "Packing the pretested tarball (npm pack)..."
 TGZ_NAME="$(npm pack --silent 2>&1 | tail -1)"

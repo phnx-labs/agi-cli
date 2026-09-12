@@ -1,0 +1,1 @@
+- Fixed release packages omitting the session-tracking hook. Release qualification now uses the complete CLI build, so installed agents can record the account that owns each native session.

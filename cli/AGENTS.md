@@ -1880,6 +1880,11 @@ path — it runs nightly, not on the release PR, so a release no longer waits on
 Run it on demand via `workflow_dispatch` before a risky release. `--skip-tests`
 skips only the Linux suite run.
 
+**Release attestations package the complete CLI build.** The producer calls
+`scripts/build.sh --clean --skip-tests` after its suite gate. This includes the
+session-tracker installer and hook under `dist/session-tracker/dist/`; plain
+`bun run build` only compiles the CLI and omits those installed resources.
+
 **The attestation producer shards by default.** `release-attestation-produce.sh`
 (the suite run that mints the attestation) now fans the ~13k-test suite across the
 fleet via `test.sh --shard N` instead of pinning one box — the suite is
@@ -1898,7 +1903,8 @@ tree, once for the `chore(release)` commit tree — even though the second diffe
 from the first only by the version bump, the folded changelog, and the
 regenerated command-index. `release-attestation-produce.sh --inherit-suite-from
 <base-attestation.json>` mints the release-tree record from an already-green base
-**without re-running the suite**: it still `bun run build` + `npm pack`s (so the
+**without re-running the suite**: it still runs `scripts/build.sh --clean --skip-tests`
+and `npm pack` (so the
 recorded tarball is the real release tree's, carrying the new version), but the
 expensive suite run is inherited. The soundness gate is
 `release-attestation.sh derive` — it fails **closed** unless the tree diff between

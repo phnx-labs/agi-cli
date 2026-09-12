@@ -24,9 +24,9 @@ function packedEntries(): string[] {
   // beside today's output, and `npm pack` ships them: this test then fails on a
   // tree that is actually clean (the 1.22.85 attestation run on a shard box).
   // Wiping `dist/` first is not an option either — other tests in the same run
-  // exec `dist/index.js`. So the build goes to a fresh dir, mirroring what
-  // `release-attestation-produce.sh` does (`rm -rf dist` before its build):
-  // the listing proves the checked-out tree, not whatever the box had lying around.
+  // exec `dist/index.js`. Build into a fresh dir to check the CLI allowlist and
+  // secrets exclusion. The release producer's build.sh also bundles the session
+  // tracker; release-attestation-produce.test.ts covers that packaging step.
   const stage = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-pack-'));
   try {
     execFileSync(
