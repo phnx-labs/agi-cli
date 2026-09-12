@@ -208,13 +208,18 @@ export function hostTargetGiven(options: {
   );
 }
 
-/** Return every option whose selection semantics conflict with an account choice. */
+/**
+ * Return every option whose selection semantics conflict with an account
+ * choice (`agent#`). Device routing is deliberately absent: the marker rides
+ * the hop and the peer picks from ITS slots.
+ */
 export function runAccountPickerConflicts(options: {
   resume?: string | boolean;
   strategy?: string;
   balanced?: boolean;
   lease?: string | boolean;
   box?: string;
+  account?: string;
   host?: string;
   device?: string;
   on?: string;
@@ -224,6 +229,26 @@ export function runAccountPickerConflicts(options: {
   if (options.resume !== undefined) conflicts.push('--resume');
   if (options.strategy !== undefined) conflicts.push('--strategy');
   if (options.balanced) conflicts.push('--balanced');
+  if (options.lease) conflicts.push('--lease');
+  if (options.box) conflicts.push('--box');
+  if (options.account) conflicts.push(`--account ${options.account}`);
+  return conflicts;
+}
+
+/**
+ * Return every option that already decides where the run lands, so a device
+ * choice (`agent@`) would be silently ignored: any explicit host flag, and the
+ * lease/box paths, which own placement outright.
+ */
+export function runDevicePickerConflicts(options: {
+  lease?: string | boolean;
+  box?: string;
+  host?: string;
+  device?: string;
+  on?: string;
+  computer?: string;
+}): string[] {
+  const conflicts = hostTargetGiven(options).map((h) => `--device ${h}`);
   if (options.lease) conflicts.push('--lease');
   if (options.box) conflicts.push('--box');
   return conflicts;
@@ -1240,29 +1265,13 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           ));
           process.exit(1);
         }
-        if (options.account) {
-          console.error(chalk.red(
-            `Account selection with ${agentSpec} cannot be combined with --account '${options.account}'. ` +
-            'Remove one — the picker already chooses the account.',
-          ));
-          process.exit(1);
-        }
       }
       if (devicePickerRequested) {
-        const hostConflicts = hostTargetGiven(options);
-        if (hostConflicts.length > 0) {
+        const conflicts = runDevicePickerConflicts(options);
+        if (conflicts.length > 0) {
           console.error(chalk.red(
-            `Device selection with ${agentSpec} cannot be combined with ${hostConflicts.map((h) => `--device ${h}`).join(', ')}. ` +
-            'Remove one — the picker already chooses the device.',
-          ));
-          process.exit(1);
-        }
-        // --lease/--box own placement outright; a device menu against them
-        // would be silently ignored by the lease path below.
-        if (options.lease || options.box) {
-          console.error(chalk.red(
-            `Device selection with ${agentSpec} cannot be combined with ${options.lease ? '--lease' : '--box'}. ` +
-            'Remove one — both pick where the run lands.',
+            `Device selection with ${agentSpec} cannot be combined with ${conflicts.join(', ')}. ` +
+            'Remove one — the picker already chooses where the run lands.',
           ));
           process.exit(1);
         }
