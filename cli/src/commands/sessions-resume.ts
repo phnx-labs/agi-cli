@@ -142,6 +142,26 @@ export function registerSessionsResumeCommand(sessionsCmd: Command): void {
   });
 }
 
+/**
+ * Split picker selections into the ones recovery can actually replay and the
+ * ones it would refuse.
+ *
+ * A pick with no transcript behind it is dropped HERE rather than given a
+ * terminal tab: `assertRecoverableTranscript` would refuse it one hop later
+ * anyway, and a batch should not spend a tab per doomed id just to print that.
+ * This is the SAME predicate, not a second opinion — the refusal itself still
+ * lives in recovery, which is what the non-picker paths reach.
+ */
+export function partitionResumableSelections(
+  chosen: SessionMeta[],
+  readable: (s: SessionMeta) => boolean = sessionTranscriptReadable,
+): { resumable: SessionMeta[]; skipped: SessionMeta[] } {
+  const resumable: SessionMeta[] = [];
+  const skipped: SessionMeta[] = [];
+  for (const s of chosen) (readable(s) ? resumable : skipped).push(s);
+  return { resumable, skipped };
+}
+
 export async function sessionsResumeAction(
   query: string | undefined,
   prompt: string | undefined,
@@ -245,26 +265,20 @@ export async function sessionsResumeAction(
   }
 
   // 2. Route every selection through the owning device's recovery resolver.
-  // A pick with no transcript behind it is dropped HERE rather than given a tab:
-  // recovery would refuse it anyway (assertRecoverableTranscript), and a batch
-  // should not spend a terminal tab per doomed id just to print that. Same
-  // predicate, one hop earlier — the refusal itself still lives in recovery.
+  const { resumable, skipped } = partitionResumableSelections(chosen);
+  for (const s of skipped) {
+    console.log(chalk.yellow(`Skipping ${s.shortId} — nothing to resume (no transcript was written).`));
+  }
+  if (resumable.length === 0) {
+    console.error(chalk.red('Nothing to resume — no selected session has a transcript.'));
+    process.exitCode = 1;
+    return;
+  }
   const items: Array<SurfaceItem & { session: SessionMeta }> = [];
-  for (const s of chosen) {
-    if (!sessionTranscriptReadable(s)) {
-      console.log(chalk.yellow(
-        `Skipping ${s.shortId} — no transcript to resume (registered as live, but none was written).`,
-      ));
-      continue;
-    }
+  for (const s of resumable) {
     const command = buildSessionRecoveryCommand(s, !!options.device);
     const cwd = s.cwd && fs.existsSync(s.cwd) ? s.cwd : process.cwd();
     items.push({ session: s, cwd, command });
-  }
-  if (items.length === 0) {
-    console.error(chalk.red('Nothing to resume — every selected session lacks a transcript.'));
-    process.exitCode = 1;
-    return;
   }
 
   // 3. Resolve the backend (and host).
