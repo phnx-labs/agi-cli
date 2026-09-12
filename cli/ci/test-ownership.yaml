@@ -58,13 +58,14 @@ groups:
       - cli/src/bootstrap.ts
       - cli/src/index.ts
       - cli/src/browser.ts
-      # cli/src/computer.ts (the `computer` npm bin) and build-win.sh went with
-      # the standalone `computer` engine (PHNX-4075); kept mapped so those
-      # deletions never read as unmapped, same as demo/ and openspec/ below.
-      - cli/src/computer.ts
+      # There is no cli/src/computer.ts or build-win.sh entry: the `computer` npm
+      # bin and the Windows helper build went with the standalone `computer`
+      # engine (PHNX-4075). A `when:` glob that matches nothing is a DEAD glob and
+      # the impact gate rejects it, so a removed file leaves this list rather than
+      # lingering — their deletions still map through the `cli/` and
+      # `cli/scripts/` prefix rules above.
       - cli/scripts/build.sh
       - cli/scripts/build-bin.sh
-      - cli/scripts/build-win.sh
     tests:
       - cli/tests/non-interactive.test.ts
       - cli/src/index.command-star-routing.test.ts
