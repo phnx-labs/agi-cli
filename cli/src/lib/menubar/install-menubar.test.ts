@@ -16,6 +16,9 @@ import {
   installMenubarLaunchAgentOnUpgrade,
   isMenubarStale,
   cachedFloorBundlePath,
+  cachedReleaseBundlePath,
+  menubarUpdateSkipReason,
+  menubarUpdateOutcome,
   menubarHelperPrefetchNeeded,
   stampVersionLabel,
   LOCAL_BUILD_LABEL,
@@ -1088,5 +1091,44 @@ describe('menubarHelperPrefetchNeeded', () => {
   });
   it('never runs off macOS', () => {
     expect(menubarHelperPrefetchNeeded({ ...base, darwin: false })).toBe(false);
+  });
+});
+
+describe('auto-update decision (menubarUpdateSkipReason / menubarUpdateOutcome)', () => {
+  const release = { source: 'release' as const, helperVersion: '1.2.3' };
+  const base = { darwin: true, disabledByUser: false, serviceInstalled: true, shipped: false, installed: release };
+
+  it('proceeds for an installed release helper with no shipped bundle', () => {
+    expect(menubarUpdateSkipReason(base)).toBeNull();
+  });
+
+  it('a downloaded release cache is NOT a shipped bundle: the pass still proceeds', () => {
+    // The floor prefetch fills the download cache; `shipped` covers only the
+    // bundles that ship with the install (dist sibling, repo bin, Bun layout).
+    // Keying the skip on the cache would pin every npm-global Mac to the floor.
+    expect(menubarUpdateSkipReason({ ...base, shipped: false })).toBeNull();
+  });
+
+  it('skips: not darwin, opted out, not installed, shipped bundle, local or legacy or missing stamp', () => {
+    expect(menubarUpdateSkipReason({ ...base, darwin: false })).toMatch(/macOS/);
+    expect(menubarUpdateSkipReason({ ...base, disabledByUser: true })).toMatch(/disabled/);
+    expect(menubarUpdateSkipReason({ ...base, serviceInstalled: false })).toMatch(/not installed/);
+    expect(menubarUpdateSkipReason({ ...base, shipped: true })).toMatch(/ships its own/);
+    expect(menubarUpdateSkipReason({ ...base, installed: { source: 'local', sourceStamp: 'x@1' } })).toMatch(/local, not a release/);
+    expect(menubarUpdateSkipReason({ ...base, installed: { source: 'legacy', raw: '1.22.0' } })).toMatch(/not a release/);
+    expect(menubarUpdateSkipReason({ ...base, installed: null })).toMatch(/unstamped/);
+  });
+
+  it('updates only when the available build is strictly newer', () => {
+    expect(menubarUpdateOutcome('1.2.3', '1.3.0')).toBe('updated');
+    expect(menubarUpdateOutcome('1.3.0', '1.3.0')).toBe('current');
+    expect(menubarUpdateOutcome('1.3.0', '1.2.3')).toBe('current');
+  });
+});
+
+describe('cachedReleaseBundlePath', () => {
+  it('is the floor cache until a newer version has been resolved', () => {
+    // No resolve cache in the test HOME → cachedMenubarVersion() is the floor.
+    expect(cachedReleaseBundlePath()).toBe(cachedFloorBundlePath());
   });
 });

@@ -190,15 +190,29 @@ export function menubarServiceInstalled(): boolean {
  *      binary: `import.meta.url` is a virtual `/$bunfs/` path, so the sibling
  *      candidates above can't see the on-disk bundle; recover it via the
  *      `agents` launcher symlink.
- *   4. the verified download cache for the FLOOR release — the npm tarball ships
- *      no bundle (PHNX-4036), so on an `npm i -g` machine this is the only
- *      source there is. It is filled by `agents menubar setup` or by the
- *      detached background worker (`prefetchMenubarHelper`), never here: this
- *      resolver stays network-free so the startup self-heal stays cheap. Last
- *      so a bundle that ships with the build always wins; keyed by the floor
- *      version so an older cached release is never picked up.
+ *   4. the verified download cache for the RELEASE this machine has resolved
+ *      (`cachedMenubarVersion`: the newest published build it last saw, never
+ *      below the floor, the floor itself before any resolution) — the npm
+ *      tarball ships no bundle (PHNX-4036), so on an `npm i -g` machine this is
+ *      the only source there is. It is filled by `agents menubar setup` or by
+ *      the detached background worker (`prefetchMenubarHelper`), never here:
+ *      this resolver stays network-free so the startup self-heal stays cheap.
+ *      Last so a bundle that ships with the build always wins; keyed by the
+ *      resolved version so an older cached release is never picked up.
+ *
+ * `shippedAppPath` is candidates 1–3 alone: a bundle that ships WITH this
+ * install, which CLI upgrades own. The auto-update pass replaces a cached
+ * release (candidate 4) but never a shipped bundle.
  */
 function sourceAppPath(): string | null {
+  const shipped = shippedAppPath();
+  if (shipped) return shipped;
+  const cached = cachedReleaseBundlePath();
+  if (fs.existsSync(cached)) return cached;
+  return null;
+}
+
+function shippedAppPath(): string | null {
   const candidates: string[] = [];
   try {
     const here = path.dirname(fileURLToPath(import.meta.url));
@@ -219,14 +233,33 @@ function sourceAppPath(): string | null {
     const p = path.join(layout.distDir, 'lib', 'menubar', APP_BUNDLE_NAME);
     if (fs.existsSync(p)) return p;
   }
-  const cached = cachedFloorBundlePath();
-  if (fs.existsSync(cached)) return cached;
   return null;
 }
 
 /** Where a downloaded copy of the floor release sits once fetched and verified. */
 export function cachedFloorBundlePath(): string {
   return path.join(menubarHelperCacheDir(helperFloor('menubar')), APP_BUNDLE_NAME);
+}
+
+/**
+ * Where the downloaded copy of the RESOLVED release sits (`cachedMenubarVersion`,
+ * so the floor's cache dir until this machine has resolved something newer).
+ * The startup self-heal installs from here, network-free.
+ */
+export function cachedReleaseBundlePath(): string {
+  return path.join(menubarHelperCacheDir(cachedMenubarVersion()), APP_BUNDLE_NAME);
+}
+
+/**
+ * The release version an explicit install should fetch: the newest published
+ * build, but never below what this Mac already runs — a release deleted after
+ * it was installed must not roll the helper back through `setup`/`enable`.
+ */
+export async function menubarVersionToInstall(opts: { force?: boolean } = {}): Promise<string> {
+  const resolved = await resolveMenubarVersion({ force: opts.force });
+  const installed = readInstalledMenubarStamp();
+  if (installed?.source === 'release' && compareVersions(installed.helperVersion, resolved) > 0) return installed.helperVersion;
+  return resolved;
 }
 
 /** Resolve the compiled CLI entry (dist/index.js) so the helper can exec node directly. */
@@ -537,8 +570,10 @@ function startMenubarServiceFromSource(opts: { clearOptOut?: boolean; sourceAppP
  */
 export async function enableMenubarService(opts: { clearOptOut?: boolean } = { clearOptOut: true }): Promise<boolean> {
   if (!onDarwin()) return false;
-  let src = sourceAppPath();
-  if (!src) src = await downloadMenubarHelperApp(await resolveMenubarVersion());
+  // A shipped bundle wins; otherwise fetch the newest published build (a cache
+  // hit when the background prefetch already has it), never below what runs.
+  let src = shippedAppPath();
+  if (!src) src = await downloadMenubarHelperApp(await menubarVersionToInstall());
   return startMenubarServiceFromSource({ ...opts, sourceAppPath: src });
 }
 
@@ -715,7 +750,7 @@ export async function prefetchMenubarHelper(): Promise<string | null> {
     stale: menubarSetupStale(),
   });
   if (!needed) return null;
-  return downloadMenubarHelperApp(helperFloor('menubar'));
+  return downloadMenubarHelperApp(await menubarVersionToInstall());
 }
 
 /**
@@ -1149,10 +1184,10 @@ export async function runMenubarSetup(): Promise<SetupResult> {
   // notarized release asset for this CLI version. Verified (sha256 + codesign +
   // Team + designated-requirement pin + notarization) before install; the
   // cached copy is the source for `ensureMenubarAppInstalled` below.
-  let src = sourceAppPath();
+  let src = shippedAppPath();
   if (!src) {
     try {
-      src = await downloadMenubarHelperApp(await resolveMenubarVersion());
+      src = await downloadMenubarHelperApp(await menubarVersionToInstall({ force: true }));
     } catch (e) {
       step('bundle', 'failed', `no AGI Menu bundle ships with this install, and the release-asset download failed: ${(e as Error).message}`);
       return { steps, configured: false, status: before };
@@ -1511,19 +1546,50 @@ export interface MenubarUpdateResult {
  * relaunches it within seconds). `dryRun` reports what would happen. Never
  * throws.
  */
+/**
+ * Pure (no I/O): whether an auto-update pass should proceed, and why not.
+ * `shipped` is a bundle that ships WITH this install (never a downloaded
+ * release cache) — CLI upgrades own that one. Returns null to proceed.
+ */
+export function menubarUpdateSkipReason(opts: {
+  darwin: boolean;
+  disabledByUser: boolean;
+  serviceInstalled: boolean;
+  shipped: boolean;
+  installed: MenubarStamp | null;
+}): string | null {
+  if (!opts.darwin) return 'macOS only';
+  if (opts.disabledByUser) return 'the menu bar is disabled (agents menubar disable)';
+  if (!opts.serviceInstalled) return 'the menu bar is not installed on this Mac';
+  if (opts.shipped) return 'this install ships its own helper bundle; the startup self-heal owns it';
+  if (!opts.installed || opts.installed.source !== 'release') {
+    return `installed helper is ${stampVersionLabel(opts.installed) ?? 'unstamped'}, not a release`;
+  }
+  return null;
+}
+
+/** Pure (no I/O): what the pass does given the installed and available versions. */
+export function menubarUpdateOutcome(installed: string, available: string): 'current' | 'updated' {
+  return compareVersions(available, installed) > 0 ? 'updated' : 'current';
+}
+
 export async function updateMenubarHelperIfNewer(opts: { dryRun?: boolean; force?: boolean } = {}): Promise<MenubarUpdateResult> {
   const installedStamp = readInstalledMenubarStamp();
   const installed = stampVersionLabel(installedStamp);
   const skip = (detail: string, available = cachedMenubarVersion()): MenubarUpdateResult =>
     ({ outcome: 'skipped', installed, available, detail });
-  if (!onDarwin()) return skip('macOS only');
-  if (menubarDisabledByUser()) return skip('the menu bar is disabled (agents menubar disable)');
-  if (!menubarServiceInstalled()) return skip('the menu bar is not installed on this Mac');
-  if (sourceAppPath()) return skip('this install ships its own helper bundle; the startup self-heal owns it');
-  if (!installedStamp || installedStamp.source !== 'release') return skip(`installed helper is ${installed ?? 'unstamped'}, not a release`);
+  const reason = menubarUpdateSkipReason({
+    darwin: onDarwin(),
+    disabledByUser: menubarDisabledByUser(),
+    serviceInstalled: menubarServiceInstalled(),
+    shipped: Boolean(shippedAppPath()),
+    installed: installedStamp,
+  });
+  if (reason) return skip(reason);
+  const release = installedStamp as { source: 'release'; helperVersion: string };
 
   const available = await resolveMenubarVersion({ force: opts.force });
-  if (compareVersions(available, installedStamp.helperVersion) <= 0) {
+  if (menubarUpdateOutcome(release.helperVersion, available) === 'current') {
     return { outcome: 'current', installed, available, detail: `AGI Menu ${installed} is the newest published build` };
   }
   if (!mayHealMenubar(false)) return skip(`another install owns the helper; it will update on its own cooldown`, available);
