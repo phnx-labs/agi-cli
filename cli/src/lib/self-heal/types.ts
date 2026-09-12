@@ -19,7 +19,8 @@ export type HealCheckId =
   | 'shims'
   | 'shadowing'
   | 'path'
-  | 'install-staging';
+  | 'install-staging'
+  | 'menubar-helper';
 
 /** When the daemon schedules a check. */
 export type HealCadence = 'startup' | 'frequent' | 'periodic';

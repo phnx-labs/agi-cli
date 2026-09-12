@@ -449,6 +449,20 @@ async function installResolvedPackage(metadata: NpmPackageMetadata): Promise<voi
   // The macOS Keychain helper this used to force-refresh on upgrade moved with
   // the standalone `secrets` engine (PHNX-3989) — it downloads and verifies its
   // own helper release now, off this CLI's upgrade path entirely.
+  //
+  // The menu-bar helper still rides this path: an installed release build moves
+  // to the newest published one (verified download, atomic swap at the same
+  // path and identity so the Accessibility grant survives, restart). The new
+  // package is on disk, so the import resolves the fresh module. Best-effort;
+  // the daemon's self-heal tick repeats it every six hours.
+  if (process.platform === 'darwin') {
+    try {
+      const { updateMenubarHelperIfNewer } = await import('./lib/menubar/install-menubar.js');
+      await updateMenubarHelperIfNewer({ force: true });
+    } catch {
+      // Non-fatal.
+    }
+  }
 }
 
 /** Present an interactive upgrade prompt (TTY) or a one-line hint (non-TTY). */

@@ -20,6 +20,7 @@ import { shimsCheck } from './checks/shims.js';
 import { shadowingCheck } from './checks/shadowing.js';
 import { pathCheck } from './checks/path.js';
 import { installStagingCheck } from './checks/install-staging.js';
+import { menubarHelperCheck } from './checks/menubar-helper.js';
 
 // Order matters: cheap structural fixes (shims, shadow adoption, PATH, generated
 // hook wrappers) before the heavier resource reconciliation, so a freshly-
@@ -34,6 +35,8 @@ export const HEAL_CHECKS: HealCheck[] = [
   hookManifestCheck,
   resourcesCheck,
   installStagingCheck,
+  // Last and network-touching: the menu-bar helper's auto-update (macOS only).
+  menubarHelperCheck,
 ];
 
 export interface SelfHealOptions {
