@@ -169,7 +169,7 @@ describe('claudeWorkerLoginTrapPreflight — refuse the worker login-screen trap
       agent: 'claude',
       interactive: true,
       deviceRole: 'worker',
-      hasSetupToken: false,
+      hasWorkerCredential: false,
       machine: 'yosemite-m5',
     });
     expect(msg).toBeTruthy();
@@ -197,18 +197,23 @@ describe('claudeWorkerLoginTrapPreflight — refuse the worker login-screen trap
         agent: 'claude',
         interactive: true,
         deviceRole: undefined,
-        hasSetupToken: false,
+        hasWorkerCredential: false,
       }),
     ).toBeNull();
   });
 
-  it('allows the run when a durable setup-token DID resolve on the worker', () => {
+  it('allows the run when a credential will reach the child (setup-token OR an explicit --env override)', () => {
+    // hasWorkerCredential is true whenever a token reaches the child. The caller
+    // (exec.ts) ORs the resolved worker setup-token with an explicit
+    // `--env CLAUDE_CODE_OAUTH_TOKEN=…` — buildExecEnv merges options.env last, so
+    // that override authenticates the run and must NOT be refused (a sanctioned
+    // escape hatch forwarded across --device dispatch).
     expect(
       claudeWorkerLoginTrapPreflight({
         agent: 'claude',
         interactive: true,
         deviceRole: 'worker',
-        hasSetupToken: true,
+        hasWorkerCredential: true,
       }),
     ).toBeNull();
   });
@@ -219,7 +224,7 @@ describe('claudeWorkerLoginTrapPreflight — refuse the worker login-screen trap
         agent: 'claude',
         interactive: false,
         deviceRole: 'worker',
-        hasSetupToken: false,
+        hasWorkerCredential: false,
       }),
     ).toBeNull();
   });
@@ -231,7 +236,7 @@ describe('claudeWorkerLoginTrapPreflight — refuse the worker login-screen trap
           agent: 'claude',
           interactive: true,
           deviceRole,
-          hasSetupToken: false,
+          hasWorkerCredential: false,
         }),
       ).toBeNull();
     }
@@ -243,7 +248,7 @@ describe('claudeWorkerLoginTrapPreflight — refuse the worker login-screen trap
         agent: 'codex',
         interactive: true,
         deviceRole: 'worker',
-        hasSetupToken: false,
+        hasWorkerCredential: false,
       }),
     ).toBeNull();
   });
