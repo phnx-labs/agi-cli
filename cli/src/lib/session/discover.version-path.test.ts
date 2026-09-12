@@ -20,6 +20,10 @@ describe('extractVersionFromManagedPath', () => {
     expect(extractVersionFromManagedPath('codex', p)).toBe('0.146.0');
   });
 
+  it('does not present an account short-home key as a vendor version', () => {
+    expect(extractVersionFromManagedPath('codex', '/home/u/.agents/.codex-homes/a-deadbeef-123/.codex/sessions/rollout.jsonl')).toBeUndefined();
+  });
+
   it('does not match the codex-homes marker for a non-codex agent', () => {
     // The relocated-home marker is codex-specific; another agent must not read a
     // version off an incidental `.codex-homes/` path segment.

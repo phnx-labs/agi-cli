@@ -3988,6 +3988,8 @@ async function renderSession(
   filters: FilterOptions,
   options: { redact?: boolean } = {},
 ): Promise<void> {
+  const { hydrateSessionTranscript, findLocalSessionTranscripts } = await import('../lib/session/discover.js');
+  session = await hydrateSessionTranscript(session);
   // OpenCode stores sessions in SQLite; filePath is "db_path#session_id"
   const realPath = session.filePath.split('#')[0];
   if (!fs.existsSync(realPath)) {
@@ -4000,7 +4002,8 @@ async function renderSession(
       renderArchivedSession(session, mode, options);
       return;
     }
-    console.log(chalk.yellow('Session transcript not available (file no longer exists).'));
+    process.exitCode = 1;
+    console.log(chalk.yellow('Session transcript is unavailable after checking its recorded home and the session index.'));
     console.log(chalk.gray(`Path: ${session.filePath}`));
     if (session.version) console.log(chalk.gray(`Version: ${sessionDisplayAgent(session)} ${session.version}`));
     if (session.project) console.log(chalk.gray(`Project: ${session.project}`));
@@ -5619,13 +5622,32 @@ export async function computeLocalMetadataMatches(
   const includeLocal = !scope.hosts?.length || shouldIncludeLocal(scope.hosts, localMachine);
   if (!includeLocal) return [];
 
-  const indexed = resolveIndexedMetadataRows(indexedRowsForSelector(selector, scope), selector, scope);
-  if (indexed.length > 0 || !looksLikeSessionId(selector)) {
+  let indexed = resolveIndexedMetadataRows(indexedRowsForSelector(selector, scope), selector, scope);
+  if (!looksLikeSessionId(selector)) {
     return indexed.map(session => ({ ...session, machine: session.machine || localMachine }));
   }
-
-  const live = await liveMetadataMatches(selector, scope, localMachine, deps);
-  return live.map(session => ({ ...session, machine: session.machine || localMachine }));
+  const { hydrateSessionTranscript, findLocalSessionTranscripts } = await import('../lib/session/discover.js');
+  if (indexed.length === 0) {
+    const disk = await findLocalSessionTranscripts(selector, scope.agent as SessionMeta['agent'] | undefined);
+    const live = disk.length ? [] : await liveMetadataMatches(selector, scope, localMachine, deps);
+    if (disk.length > 0) indexed = resolveIndexedMetadataRows(disk, selector, scope);
+    else if (live.length > 0) indexed = live;
+    else if (scope.agent !== 'claude' && scope.agent !== 'codex') {
+      const { scanSessionsIncremental, waitForScanToSettle } = await import('../lib/session/discover.js');
+      const { claimed } = await scanSessionsIncremental({ agent: scope.agent as SessionMeta['agent'] | undefined });
+      if (!claimed) {
+        if (!await waitForScanToSettle()) throw new Error('Session lookup is incomplete: another index scan is still running. Retry when it finishes.');
+        const retry = await scanSessionsIncremental({ agent: scope.agent as SessionMeta['agent'] | undefined });
+        if (!retry.claimed) throw new Error('Session lookup is incomplete: the session index is busy. Retry when the scan finishes.');
+      }
+      indexed = resolveIndexedMetadataRows(indexedRowsForSelector(selector, scope), selector, scope);
+    }
+  }
+  const hydrated: SessionMeta[] = [];
+  for (const session of indexed) {
+    hydrated.push(await hydrateSessionTranscript({ ...session, machine: session.machine || localMachine }));
+  }
+  return hydrated;
 }
 
 /**

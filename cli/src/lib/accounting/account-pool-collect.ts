@@ -21,7 +21,7 @@ function localRegistryRecords(): RegistryAccountRecord[] {
   try {
     return Object.values(readAccountRegistry().accounts)
       .filter((a) => hasKeychainTokenSync(a.secretRef))
-      .map((a) => ({ name: a.name, provider: a.provider, auth: a.auth, secretPresent: true }));
+      .map((a) => ({ id: a.id, name: a.name, provider: a.provider, auth: a.auth, secretPresent: true }));
   } catch (err) {
     if (isSecretsTransportError(err)) return [];
     throw err;
@@ -74,6 +74,7 @@ export function foldRegistryCandidates(agent: AgentId, inputs: RunCandidateInput
       authVerdict: null,
       lastActive: null,
       providerAccount: r.name,
+      providerAccountId: r.id,
     }));
 
   return [...native, ...extra];

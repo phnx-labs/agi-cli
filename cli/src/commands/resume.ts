@@ -12,32 +12,23 @@ import { machineId } from '../lib/machine-id.js';
 
 export const RESUME_SOURCE_ENV = 'AGENTS_RESUME_SOURCE_JSON';
 
-/**
- * The source a dead-remote local fallback resumes from: the same session, but
- * with `machine` rewritten to THIS box so the delegated `agents run --resume`
- * resolves recovery locally (`sessionRecoveryPeer` returns undefined) instead of
- * bouncing back to the unreachable owner. Because no local version home owns the
- * peer's transcript, that local recovery lands on a labelled `/continue` replay
- * from the synced mirror — the only way to continue a session whose owning device
- * is gone. Owner-approved prefer-device, fall-back-local (PHNX-3626).
- *
- * Safe against the RUSH-2022 "silent local resume forks live state" hazard by
- * PRECONDITION: this is reached only after `runOnPeer` proved the owner
- * unreachable, so there is no live process on the peer to fork, and the fallback
- * is announced with a log line — never silent.
- */
+/** Inspect local archived context after the owner hop fails. Recovery still
+ * requires readable content and explicit replay consent before starting a run. */
 export function resumeLocalFallbackSource(session: SessionMeta, self: string = machineId()): SessionMeta {
   return { ...session, machine: self };
 }
 
 export interface StrictResumeOptions {
   mode?: string;
+  account?: string;
+  model?: string;
   interactive?: boolean;
   headless?: boolean;
   cwd?: string;
   quiet?: boolean;
   /** Run on THIS machine even when the session belongs to a peer (escape hatch). */
   here?: boolean;
+  local?: boolean;
 }
 
 /**
@@ -54,6 +45,8 @@ export function buildResumeRemoteArgs(
   options: StrictResumeOptions,
 ): string[] {
   const args = ['sessions', 'resume', sessionId, ...(prompt === undefined ? [] : [prompt])];
+  if (options.account) args.push('--account', options.account);
+  if (options.model) args.push('--model', options.model);
   if (options.mode) args.push('--mode', options.mode);
   if (options.interactive) args.push('--interactive');
   if (options.headless) args.push('--headless');
@@ -69,29 +62,14 @@ export function buildResumeRunArgs(
   prompt: string | undefined,
   options: StrictResumeOptions,
 ): string[] {
-  const spec = session.version ? `${session.agent}@${session.version}` : session.agent;
+  const spec = session.agent;
   const args = ['run', spec, ...(prompt === undefined ? [] : [prompt]), '--resume', session.id];
+  if (options.account) args.push('--account', options.account);
+  if (options.model) args.push('--model', options.model);
   if (options.mode) args.push('--mode', options.mode);
   if (options.interactive) args.push('--interactive');
   if (options.headless) args.push('--headless');
   if (options.cwd) args.push('--cwd', options.cwd);
-  if (options.quiet) args.push('--quiet');
-  return args;
-}
-
-/** Recreate a remote Claude launch whose forced id never materialized a transcript. */
-export function buildProvisionalRunArgs(
-  session: { id: string; agent: string; version?: string; cwd?: string },
-  prompt: string | undefined,
-  options: StrictResumeOptions,
-): string[] {
-  const spec = session.version ? `${session.agent}@${session.version}` : session.agent;
-  const args = ['run', spec, ...(prompt === undefined ? [] : [prompt]), '--session-id', session.id];
-  if (options.mode) args.push('--mode', options.mode);
-  if (options.interactive) args.push('--interactive');
-  if (options.headless) args.push('--headless');
-  const cwd = options.cwd ?? session.cwd;
-  if (cwd) args.push('--cwd', cwd);
   if (options.quiet) args.push('--quiet');
   return args;
 }
@@ -148,7 +126,7 @@ export async function runStrictResume(
   }
   // An owner hop must inspect only the owner's index. Fleet fan-out here can
   // rediscover the dispatcher's synthetic row and bounce the same id forever.
-  const outcome = await resolveSessionMetadataValue(sessionId.trim(), pinnedHere ? { local: true } : {});
+  const outcome = await resolveSessionMetadataValue(sessionId.trim(), (pinnedHere || options.local) ? { local: true } : {});
   if (outcome.kind === 'partial') {
     // RUSH-2492: an unreachable peer is a warning, not a hard failure. The
     // resolver already resolves an id found on the reachable fleet (SES-9a),
@@ -162,19 +140,6 @@ export async function runStrictResume(
     return;
   }
   if (outcome.kind === 'not-found') {
-    if (routedHop && routedSource?.filePath === '' && routedSource.agent === 'claude') {
-      const args = buildProvisionalRunArgs(routedSource, prompt, options);
-      const child = spawn(process.execPath, [process.argv[1], ...args], {
-        stdio: 'inherit',
-        env: process.env,
-      });
-      const exitCode = await new Promise<number>((resolve) => {
-        child.once('error', () => resolve(127));
-        child.once('exit', (code, signal) => resolve(code ?? (signal ? 1 : 0)));
-      });
-      process.exitCode = exitCode;
-      return;
-    }
     console.error(chalk.red(`No session matching "${sessionId}".`));
     process.exitCode = 1;
     return;
@@ -213,16 +178,11 @@ export async function runStrictResume(
       },
     );
     if (rc === 'no-target' || rc === 'unreachable') {
-      // Prefer-device, fall back to local (PHNX-3626): the owning device is
-      // unreachable — either not a dialable registered device ('no-target') or
-      // registered but offline/asleep so the SSH connection itself failed
-      // ('unreachable'). Either way there is no live harness to reach OR to fork,
-      // so continue the session HERE from its synced mirror rather than
-      // dead-ending. The local recovery resolves this to a labelled `/continue`
-      // replay (no local home owns the peer's transcript), the honest degradation.
+      // The owner may still be running. Only verified local content can be
+      // offered as a separate conversation after explicit replay consent.
       if (!options.quiet) {
         process.stderr.write(chalk.yellow(
-          `[agents] session ${outcome.session.shortId} belongs to ${owner}, which is unreachable → resuming locally (/continue replay from the synced transcript)\n`,
+          `[agents] session ${outcome.session.shortId} belongs to ${owner}, which is unreachable; checking for local transcript content before offering replay\n`,
         ));
       }
       process.exitCode = await delegateLocalResume(resumeLocalFallbackSource(outcome.session), prompt, options);

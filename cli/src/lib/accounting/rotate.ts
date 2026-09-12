@@ -19,16 +19,20 @@ import {
   type CredentialPresence,
 } from '../agents.js';
 import { readMeta, writeMeta, getHelpersDir } from '../state.js';
+import { resolveConfiguredModel } from '../models.js';
+import { isTierToken, resolveTier } from '../model-tiers.js';
 import { listInstalledVersions, getVersionHomePath, resolveVersion } from '../installations/versions.js';
 import { resolveManagedInstallation } from '../installations/store.js';
 import { listNativeAccounts } from '../account-registry.js';
-import { readSlots } from '../accounts/slots.js';
+import { resolveNativeSpawnHome } from '../exec-account-home.js';
 import { getProjectRunConfigs } from '../run-config.js';
 import { emit, type EventPayload } from '../feed/events.js';
 import {
   getUsageInfoByIdentity,
   getUsageLookupKey,
   deriveUsageStatusFromSnapshot,
+  getClaudeModelRefusal,
+  claudeModelRefusalKey,
   type UsageSnapshot,
 } from './usage.js';
 import { readAccountHeadroom } from '../fleet-cache.js';
@@ -98,6 +102,9 @@ export interface RotateCandidate {
    * binary (managed install) and is no longer the account identity.
    */
   nativeAccount?: string;
+  /** Stable registry id for {@link nativeAccount}; never inferred from version. */
+  nativeAccountId?: string;
+  providerAccountId?: string;
   /** Slot dir when this candidate is a slot — the spawn HOME. */
   slotDir?: string;
   /** True when this row came from `deviceAccounts.slots`, not a version home. */
@@ -198,9 +205,9 @@ function isLaunchableSlotVerdict(verdict: AuthVerdict | null): boolean {
   return verdict !== null && LAUNCHABLE_SLOT_VERDICTS.has(verdict);
 }
 
-function isRotationEligible(candidate: RotateCandidate): boolean {
+function isRotationEligible(candidate: RotateCandidate, nowMs: number = Date.now(), model?: string): boolean {
   if (candidate.fromSlot && !isLaunchableSlotVerdict(candidate.authVerdict)) return false;
-  return readinessFromCandidate(candidate).ready;
+  return readinessFromCandidate(candidate, nowMs, model).ready;
 }
 
 /**
@@ -256,10 +263,6 @@ export async function isVersionLaunchableHere(
   const info = await getAccountInfo(agent, home);
   const launchable = isLaunchableSignedIn(info.signedIn, credentialPresence(agent, home));
   return { launchable, email: launchable ? info.email : null };
-}
-
-function isAvailableEligible(candidate: RotateCandidate): boolean {
-  return isRotationEligible(candidate);
 }
 
 /**
@@ -374,7 +377,11 @@ function hasUsageAvailable(candidate: RotateCandidate): boolean {
  */
 export type AccountReadiness =
   | { ready: true }
-  | { ready: false; reason: 'rate_limited' | 'out_of_credits' | 'signed_out' | 'revoked'; email: string | null };
+  | {
+      ready: false;
+      reason: 'rate_limited' | 'out_of_credits' | 'signed_out' | 'revoked' | 'model_limited';
+      email: string | null;
+    };
 
 /**
  * Pure decision reusing the router's own eligibility gate (`hasUsageAvailable`
@@ -385,8 +392,23 @@ export type AccountReadiness =
  * snapshot never carries). When a live snapshot exists it wins over the cached
  * status — matching the gate — so a stale `out_of_credits` cache is not
  * reported while the account is actually serving requests.
+ *
+ * `model`, when supplied, additionally consults a per-(account, model)
+ * refusal Claude can surface on ONE model family ("You've reached your Fable
+ * limit…") while the account's other models and its global usage windows stay
+ * healthy — a global rate_limited/out_of_credits marker would wrongly exclude
+ * the whole account for an unrelated model. Keyed on the candidate's stable
+ * native account id (never the org-shared usageKey) via
+ * {@link candidateAccountKey}, so a model-only limit on one login can never
+ * poison a sibling account that merely shares the same org usage bucket.
+ * Omitting `model` (every existing caller) leaves generic account status
+ * completely unaffected — the model check runs only when a caller opts in.
  */
-export function readinessFromCandidate(candidate: RotateCandidate, now: number = Date.now()): AccountReadiness {
+export function readinessFromCandidate(
+  candidate: RotateCandidate,
+  now: number = Date.now(),
+  model?: string,
+): AccountReadiness {
   if (!candidate.signedIn) {
     return { ready: false, reason: 'signed_out', email: candidate.email };
   }
@@ -398,6 +420,16 @@ export function readinessFromCandidate(candidate: RotateCandidate, now: number =
     || now - candidate.authCheckedAt <= AUTH_PROBE_MAX_AGE_MS;
   if (authFresh && candidate.authVerdict !== null && isDeadVerdict(candidate.authVerdict)) {
     return { ready: false, reason: 'revoked', email: candidate.email };
+  }
+  const modelKey = claudeModelRefusalKey(candidate.nativeAccountId ?? candidate.providerAccountId, candidate.providerAccount ? undefined : candidate.slotDir ?? getVersionHomePath(candidate.agent, candidate.version));
+  if (candidate.agent === 'claude' && modelKey) {
+    const requested = model ?? resolveConfiguredModel(candidate.agent, candidate.version, candidate.slotDir)?.model;
+    const concrete = requested && isTierToken(requested)
+      ? resolveTier(candidate.agent, candidate.version, requested).model
+      : requested;
+    if (concrete && getClaudeModelRefusal(modelKey, concrete, now)) {
+      return { ready: false, reason: 'model_limited', email: candidate.email };
+    }
   }
   if (hasUsageAvailable(candidate)) {
     return { ready: true };
@@ -483,14 +515,16 @@ function compareCandidates(a: RotateCandidate, b: RotateCandidate): number {
  * are genuinely separate buckets and must stay distinct. Prefer the org usage
  * key; fall back to email only when no usage identity is available.
  */
-function candidateIdentity(c: RotateCandidate): string {
-  return c.usageKey ?? c.accountKey ?? c.email ?? `${c.agent}@${c.version}`;
+export function candidateAccountKey(c: RotateCandidate): string {
+  if (c.nativeAccountId) return `native:${c.nativeAccountId}`;
+  if (c.providerAccount) return `provider:${c.providerAccount}`;
+  return c.usageKey ?? c.accountKey ?? c.email ?? `${c.agent}:unregistered:${c.accountLabel || c.version}`;
 }
 
 function dedupeAndSortCandidates(candidates: RotateCandidate[]): RotateCandidate[] {
   const byIdentity = new Map<string, RotateCandidate>();
   for (const c of candidates) {
-    const id = candidateIdentity(c);
+    const id = candidateAccountKey(c);
     const existing = byIdentity.get(id);
     if (!existing) {
       byIdentity.set(id, c);
@@ -526,15 +560,20 @@ function dedupeAndSortCandidates(candidates: RotateCandidate[]): RotateCandidate
  *
  * Returns null if no candidate is eligible — callers fall back to the pinned
  * version so behavior stays predictable.
+ *
+ * `model`, when supplied, additionally excludes an account carrying a live
+ * per-model refusal for that exact model (see {@link readinessFromCandidate}).
+ * Omitted (every pre-existing caller), eligibility is unchanged.
  */
 export function pickBalancedCandidate(
   candidates: RotateCandidate[],
   nowMs: number = Date.now(),
+  model?: string,
 ): RotateResult | null {
   const healthy: RotateCandidate[] = [];
   const excluded: RotateCandidate[] = [];
   for (const c of candidates) {
-    if (!isRotationEligible(c)) {
+    if (!isRotationEligible(c, nowMs, model)) {
       excluded.push(c);
       continue;
     }
@@ -670,11 +709,12 @@ export function pickAvailableCandidate(
   candidates: RotateCandidate[],
   preferredVersion?: string | null,
   nowMs: number = Date.now(),
+  model?: string,
 ): RotateResult | null {
   const healthy: RotateCandidate[] = [];
   const excluded: RotateCandidate[] = [];
   for (const c of candidates) {
-    if (!isAvailableEligible(c)) {
+    if (!isRotationEligible(c, nowMs, model)) {
       excluded.push(c);
       continue;
     }
@@ -751,7 +791,7 @@ export function classifyHarnessCandidates(
 ): HarnessSummary[] {
   const summaries: HarnessSummary[] = [];
   for (const [agent, candidates] of byHarness) {
-    const eligible = candidates.filter(isRotationEligible);
+    const eligible = candidates.filter((c) => isRotationEligible(c));
     if (eligible.length === 0) {
       const counts = new Map<string, number>();
       for (const c of candidates) {
@@ -948,26 +988,29 @@ export async function collectRunCandidates(agent: AgentId): Promise<RotateCandid
     authCheckedAt: number | null;
     lastActive: Date | null;
     nativeAccount?: string;
+    nativeAccountId?: string;
+    providerAccountId?: string;
     slotDir?: string;
     fromSlot?: boolean;
   };
 
   const slotRows: CandidateRow[] = [];
-  const slotIdentities = new Set<string>();
   const slotDirs = new Set<string>();
   if (binaryLabel) {
-    const slots = readSlots(meta);
     const natives = listNativeAccounts(meta).filter((row) => row.agent === agent);
     const probed = await Promise.all(natives.map(async (account) => {
-      const slot = slots[account.id];
-      if (!slot || !fs.existsSync(slot.slotDir)) return null;
-      const home = slot.slotDir;
+      const resolved = await resolveNativeSpawnHome(agent, account, meta, { readOnly: true }).catch(() => null);
+      if (!resolved) return null;
+      const slot = resolved.slot;
+      const home = resolved.execHome;
+      const version = resolved.label ?? binaryLabel;
+      const authHealth = authCache[authCacheKey(localHost, agent, version)];
       const info = await getAccountInfo(agent, home);
       const launchable = isLaunchableSignedIn(info.signedIn, credentialPresence(agent, home));
-      const slotOk = isLaunchableSlotVerdict(slot.verdict);
+      const slotOk = !slot || isLaunchableSlotVerdict(slot.verdict);
       return {
         agent,
-        version: binaryLabel,
+        version,
         home,
         info,
         accountKey: launchable ? info.accountKey : null,
@@ -976,23 +1019,22 @@ export async function collectRunCandidates(agent: AgentId): Promise<RotateCandid
         usageStatus: launchable ? info.usageStatus : null,
         plan: launchable ? info.plan : null,
         signedIn: launchable && slotOk,
-        authVerdict: slot.verdict,
+        authVerdict: slot?.verdict ?? authHealth?.verdict ?? null,
         authCheckedAt: (() => {
-          const ts = slot.checkedAt ? Date.parse(slot.checkedAt) : NaN;
-          return Number.isFinite(ts) ? ts : null;
+          const ts = slot?.checkedAt ? Date.parse(slot.checkedAt) : NaN;
+          return Number.isFinite(ts) ? ts : authHealth?.checkedAt ?? null;
         })(),
         lastActive: info.lastActive,
         nativeAccount: account.name,
+        nativeAccountId: account.id,
         slotDir: home,
-        fromSlot: true as const,
+        fromSlot: !!slot,
       };
     }));
     for (const row of probed) {
       if (!row) continue;
       slotRows.push(row);
-      slotDirs.add(path.resolve(row.home));
-      if (row.info.accountKey) slotIdentities.add(row.info.accountKey);
-      if (row.email) slotIdentities.add(row.email.toLowerCase());
+      slotDirs.add(fs.realpathSync(row.home));
     }
   }
 
@@ -1000,10 +1042,8 @@ export async function collectRunCandidates(agent: AgentId): Promise<RotateCandid
   const versionRows: Array<CandidateRow | null> = await Promise.all(
     versions.map(async (version): Promise<CandidateRow | null> => {
       const home = getVersionHomePath(agent, version);
-      if (slotDirs.has(path.resolve(home))) return null;
+      if (fs.existsSync(home) && slotDirs.has(fs.realpathSync(home))) return null;
       const info = await getAccountInfo(agent, home);
-      if (info.accountKey && slotIdentities.has(info.accountKey)) return null;
-      if (info.email && slotIdentities.has(info.email.toLowerCase())) return null;
       // We used to additionally call isClaudeAuthValid(home), which reads
       // "Claude Code-credentials-<hash>" from the system keychain. That item is
       // written by Claude Code itself with its own process in the ACL, so our
@@ -1115,7 +1155,9 @@ export function matchAccountCandidate(
       c.signedIn &&
       (c.email?.toLowerCase() === needle
         || c.accountKey?.toLowerCase() === needle
-        || c.nativeAccount?.toLowerCase() === needle),
+        || c.nativeAccount?.toLowerCase() === needle
+        || c.nativeAccountId?.toLowerCase() === needle
+        || c.providerAccount?.toLowerCase() === needle),
   );
   return matching.find(candidate => candidate.version === preferredLabel) ?? matching[0] ?? null;
 }
@@ -1371,6 +1413,7 @@ export async function resolveRunVersion(
   strategy: RunStrategy,
   cwd: string = process.cwd(),
   collect: (agent: AgentId) => Promise<RotateCandidate[]> = collectRunCandidates,
+  model?: string,
 ): Promise<{
   version: string | null;
   rotation: RotateResult | null;
@@ -1426,7 +1469,7 @@ export async function resolveRunVersion(
     // Auth-blocked pin: the home cannot authenticate, so launching it is a
     // guaranteed miss. Prefer a signed-in sibling on this device.
     if (pinnedCandidate && isSignInRecoverable(readinessFromCandidate(pinnedCandidate))) {
-      const rotation = pickAvailableCandidate(candidates, fallback);
+      const rotation = pickAvailableCandidate(candidates, fallback, undefined, model);
       // The auth-blocked pin rotates to a sibling — an initial selection, so it
       // gets the same verified-only gate as balanced/available. Without this, a
       // revoked pin with only stale siblings launched one blind (the yosemite-s1
@@ -1446,8 +1489,8 @@ export async function resolveRunVersion(
   }
 
   const rotation = strategy === 'available'
-    ? pickAvailableCandidate(candidates, fallback)
-    : pickBalancedCandidate(candidates);
+    ? pickAvailableCandidate(candidates, fallback, undefined, model)
+    : pickBalancedCandidate(candidates, undefined, model);
 
   if (rotation && rotation.noVerifiedUsage) return refuseStaleUsage(rotation);
 

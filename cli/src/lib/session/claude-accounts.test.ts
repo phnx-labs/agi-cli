@@ -26,6 +26,7 @@ const { buildClaudeAccountIndex, resolveClaudeAccount } =
 const MODSQUAD = { org: 'org-modsquad', email: 'dev@modsquad.example', name: 'ModSquad', type: 'claude_team' };
 const TURING_TEAM = { org: 'org-turing-team', email: 'dev@turing.example', name: 'Turing Labs', type: 'claude_team' };
 const TURING_MAX = { org: 'org-turing-personal', email: 'dev@turing.example', name: "dev's Organization", type: 'claude_max' };
+const RIVER = { org: 'org-river', email: 'river@example.com', name: 'River Co', type: 'claude_max' };
 
 interface Acct { org: string; email: string; name: string; type: string }
 
@@ -54,6 +55,11 @@ function versionHome(version: string): string {
   return path.join(historyDir(), 'versions', 'claude', version, 'home');
 }
 
+/** An account-slot home (PHNX-3940): `<historyDir>/accounts/claude/<accountId>/`. */
+function slotHome(accountId: string): string {
+  return path.join(historyDir(), 'accounts', 'claude', accountId);
+}
+
 function trashHome(version: string, stamp: string): string {
   return path.join(historyDir(), 'trash', 'versions', 'claude', version, stamp, 'home');
 }
@@ -78,6 +84,9 @@ beforeAll(() => {
   // Windows CI has no Developer Mode for file symlinks; a directory junction works.
   const linkType = process.platform === 'win32' ? 'junction' : undefined;
   fs.symlinkSync(path.join(versionHome('2.1.219'), '.claude'), path.join(TEST_HOME, '.claude'), linkType);
+
+  // An account slot (PHNX-3940): its own single-tenant home, sharing no version.
+  writeHome(slotHome('acct-river-0001'), RIVER);
 });
 
 afterAll(() => {
@@ -218,5 +227,68 @@ describe('resolveClaudeAccount', () => {
       expect(bucket.key).toBeTruthy();
       expect(bucket.attributed).toBe(false);
     }
+  });
+});
+
+describe('account slots (PHNX-3940)', () => {
+  it('proves a slot-launched transcript by canonical account-root ownership (tier 1)', () => {
+    // Before this fix, buildClaudeAccountIndex only ever walked versions/claude/ and
+    // its trash — an account-slot home was never indexed, so this transcript existed
+    // (fully registered, runnable account) yet resolved as if the history had vanished.
+    const index = buildClaudeAccountIndex();
+    const bucket = resolveClaudeAccount(index, transcript(slotHome('acct-river-0001'), 'r'));
+    expect(bucket.attributed).toBe(true);
+    expect(bucket.orgName).toBe('River Co');
+    expect(bucket.evidence).toBe('version-home'); // same direct-ownership tier as a version home
+  });
+
+  it('exposes the slot by its account id for launch-recorded resolution', () => {
+    const index = buildClaudeAccountIndex();
+    const bucket = index.byAccountId.get('acct-river-0001');
+    expect(bucket?.orgName).toBe('River Co');
+  });
+
+  it('never folds an unconfigured (never signed-in) slot into a real account', () => {
+    const index = buildClaudeAccountIndex();
+    expect(index.byAccountId.has('acct-never-configured')).toBe(false);
+    // And it must not appear as a dark home either — an empty slot owns no
+    // transcript yet, so there is nothing on disk to misattribute.
+    const emptySlot = slotHome('acct-never-configured');
+    expect(index.darkHomes.some((d) => d.prefix.startsWith(emptySlot))).toBe(false);
+  });
+
+  it('accepts a launch-recorded account id (tier 1c) for a row outside every home, '
+    + 'truthfully preferring it over the CURRENT login of a shared legacy home', () => {
+    // Simulates the exact "current login in legacy home does not prove history" bug:
+    // 2.1.219's live home reports ModSquad TODAY, but this particular row was actually
+    // launched under the River account slot (recorded at launch time, e.g. an older
+    // in-place rotation through that shared home before slots existed). A recorded
+    // launch id must not be silently outranked by "whichever login is there now".
+    const index = buildClaudeAccountIndex();
+    const outsideEveryHome = path.join(historyDir(), 'runs', 'job-legacy', 'transcript.jsonl');
+
+    const withoutLaunchId = resolveClaudeAccount(index, outsideEveryHome, '2.1.219');
+    expect(withoutLaunchId.orgName).toBe('ModSquad');
+    expect(withoutLaunchId.evidence).toBe('recorded-version');
+
+    const withLaunchId = resolveClaudeAccount(index, outsideEveryHome, '2.1.219', 'acct-river-0001');
+    expect(withLaunchId.orgName).toBe('River Co');
+    expect(withLaunchId.evidence).toBe('version-home');
+  });
+
+  it('keeps a removed recorded account unknown instead of assigning current version credentials', () => {
+    const index = buildClaudeAccountIndex();
+    const outsideEveryHome = path.join(historyDir(), 'runs', 'job-legacy', 'transcript-2.jsonl');
+    const bucket = resolveClaudeAccount(index, outsideEveryHome, '2.1.220', 'acct-does-not-exist');
+    expect(bucket.attributed).toBe(false);
+    expect(bucket.evidence).toBe('none');
+  });
+
+  it('preserves launch identity after a legacy home changes credentials', () => {
+    const index = buildClaudeAccountIndex();
+    const inTuringHome = transcript(versionHome('2.1.220'), 'in-place');
+    const bucket = resolveClaudeAccount(index, inTuringHome, '2.1.220', 'acct-river-0001');
+    expect(bucket.orgName).toBe('River Co');
+    expect(bucket.evidence).toBe('version-home');
   });
 });

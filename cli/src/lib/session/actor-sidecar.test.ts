@@ -108,6 +108,17 @@ describe('upsertSession joins the actor sidecar (RUSH-2019)', () => {
     return { id, shortId: id.slice(0, 8), agent: 'claude', timestamp: '2026-08-01T10:00:00.000Z', filePath };
   }
 
+  it('retains the origin account across alias writes, binary updates and rescans', () => {
+    writeSessionActorRecord({ sessionId: 'origin-account', accountId: 'account-a', version: '1.0.0', startedAtMs: 1 });
+    writeSessionAliasRecord('origin-account', 'ag-codex-a0123456');
+    upsertSession(scanMeta('origin-account'), '');
+    expect(getSessionById('origin-account')?.accountId).toBe('account-a');
+    writeSessionActorRecord({ sessionId: 'origin-account', accountId: 'account-b', version: '2.0.0', startedAtMs: 2 });
+    expect(readSessionActorRecord('origin-account')?.accountId).toBe('account-a');
+    upsertSessionsBatch([{ meta: { ...scanMeta('origin-account'), accountId: 'account-b' }, content: '' }]);
+    expect(getSessionById('origin-account')?.accountId).toBe('account-a');
+  });
+
   it('fills harness from the sidecar so a deepseek run is not indexed as claude (PHNX-2935)', () => {
     writeSessionActorRecord({ sessionId: 'joined-harness', harness: 'deepseek', startedAtMs: 1 });
     upsertSession(scanMeta('joined-harness'), '');

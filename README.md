@@ -431,6 +431,24 @@ Both targets are on-demand backups only; neither enables background session sync
 
 ### Resume anywhere — and stay resumed
 
+Omit the session ID to choose from an interactive history picker with descriptions
+and conversation previews. These commands use the same picker and account filter:
+
+```bash
+ag run claude --resume
+agents sessions resume --agent claude
+
+ag run claude#work --resume
+agents sessions resume --agent claude --account work
+```
+
+Resume restores the conversation's account, model, mode and working directory with
+the currently installed harness. Updating that binary does not select a different
+account. `agents sessions resume <id> --vscodium` opens the selected conversation in
+VSCodium. If only archived context remains, the CLI asks before starting a new
+conversation from it; a missing transcript fails before launching an agent.
+
+
 Pick up any past conversation and drop it back into a terminal:
 
 ```bash
@@ -446,7 +464,7 @@ agents run auto --resume 019fd0c8-b3e9-77a2-a1a4-444698c4d897  # adapt if its ac
 
 ### Send an agent to the background — and bring it back
 
-Running 30 agents and drowning in terminal tabs? `agents sessions detach <id>` stops a session's interactive process and keeps it working **headless** in the background -- it drives its task to done unattended, no tab, lower cost. `agents sessions resume <id>` brings it back through the same origin-device recovery decision: native resume in the exact origin home (healthy login, or a rotated injectable account on a usage limit), or same-harness `/continue` as last resort when that home is unavailable, with the full indexed history (including whatever it did while backgrounded).
+Running 30 agents and drowning in terminal tabs? `agents sessions detach <id>` stops a session's interactive process and keeps it working **headless** in the background -- it drives its task to done unattended, no tab, lower cost. `agents sessions resume <id>` brings it back through the same origin-device recovery decision: native resume in the owned account home, or an explicitly chosen same-harness `/continue` replay when native context is unavailable.
 
 ```
 agents sessions detach a1b2c3d4     # go headless in the background, keep working

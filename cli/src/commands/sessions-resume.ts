@@ -21,8 +21,7 @@ import { buildPreview } from './sessions-picker.js';
 import {
   formatPickerLabel,
   pickerColumnsFor,
-  buildSessionRecoveryCommand,
-  resumeSessionInPlace,
+  resolveSessionMetadataValue,
   parseAgentFilter,
 } from './sessions.js';
 import { sessionMatchesQuery } from './sessions-browser.js';
@@ -43,7 +42,7 @@ import { spawn } from 'node:child_process';
 import { looksLikeSessionId } from '../lib/session/discover.js';
 import { machineId } from '../lib/session/sync/config.js';
 import { sessionOriginDevice, sessionRecoveryDestinationMatches } from '../lib/session/recovery.js';
-import { runStrictResume, wantsStrictResume, type StrictResumeOptions } from './resume.js';
+import { buildResumeRemoteArgs, runStrictResume, wantsStrictResume, type StrictResumeOptions } from './resume.js';
 import { attachLocalLiveSelector } from '../lib/session/local-tmux-attach.js';
 
 /** Opening more than this many live sessions at once asks for confirmation first. */
@@ -65,15 +64,19 @@ export interface ResumeOptions extends StrictResumeOptions {
   splits?: boolean;
   attachOnly?: boolean;
   local?: boolean;
+  /** Original run argv; only the bare resume selector changes after picking. */
+  runArgs?: string[];
 }
 
 export function registerSessionsResumeCommand(sessionsCmd: Command): void {
   const cmd = sessionsCmd
     .command('resume')
     .argument('[query]', 'Session id/tmux alias/label for strict resume, or text that filters the picker')
-    .argument('[prompt]', 'Optional follow-up prompt (strict resume with original harness/version/device)')
+    .argument('[prompt]', 'Optional follow-up prompt (same conversation, account and origin device)')
     .description('Resume a session by id (strict), or multi-select history into terminal tabs/splits.')
     .option('-a, --agent <agent>', 'Filter by agent type and version (e.g., claude, codex@0.116.0)')
+    .option('--account <account>', 'Filter by the account that owns the conversation')
+    .option('--model <model>', 'Override the resumed session model')
     .option('--all', 'Include sessions from every directory (not just current project)')
     .option('--teams', 'Include team-spawned sessions (hidden by default)')
     .option('--since <time>', 'Only sessions newer than this (e.g., 2h, 7d, 4w, or ISO date)')
@@ -121,7 +124,7 @@ export function registerSessionsResumeCommand(sessionsCmd: Command): void {
       agents sessions resume --device zion --tmux
     `,
     notes: `
-      - Strict path (id/tmux alias/label + optional prompt/--mode/--headless/--here): restores original harness, version, device, account, cwd, and mode. Searches the fleet; a local full-id hit resumes with zero SSH. Replaces the former top-level agents sessions resume.
+      - Strict path (id/tmux alias/label + optional prompt/--mode/--headless/--here): restores the harness, device, account, cwd, model, and mode using the installed binary. Searches the fleet; a local full-id hit resumes with zero SSH. Replaces the former top-level agents sessions resume.
       - Attach a live pane without forking: agents sessions focus <id>.
       - This is the ONE verb for getting back in. It detects the state: a live tmux pane is attached, a headless session comes to the foreground, an ended one recovers on its owning device.
       - A UUID/prefix or ag-<agent>-<suffix> alias bypasses the picker. A live alias attaches by name even when the session index cannot attribute it.
@@ -132,7 +135,8 @@ export function registerSessionsResumeCommand(sessionsCmd: Command): void {
       - Backend: auto-detected from the terminal you're in (iTerm / Ghostty / tmux); override with --iterm/--ghostty/--tmux/--vscodium.
       - --vscodium opens each session as an agent terminal tab in VSCodium via the swarm-ext extension (works with --device too).
       - --device <alias> opens the terminal surface on that device only when it is the selected sessions' origin; recovery never migrates a session to another device.
-      - Recovery runs on the session's origin device: exact healthy origin uses native resume; otherwise a healthy version of the same harness receives /continue <id>.
+      - Recovery uses the installed harness and the conversation's account on its origin device. Context replay requires an explicit choice.
+      - agents run claude --resume opens this same picker; claude#work filters it with --account work.
     `,
   });
 
@@ -146,20 +150,29 @@ export async function sessionsResumeAction(
   prompt: string | undefined,
   options: ResumeOptions,
 ): Promise<void> {
+  if (options.attachOnly && (prompt !== undefined || options.account || options.model || options.mode || options.interactive || options.headless || options.cwd || options.here)) {
+    throw new Error('--attach-only cannot be combined with a follow-up prompt or options that change the running session.');
+  }
   const strictOpts: StrictResumeOptions = {
+    account: options.account,
+    model: options.model,
     mode: options.mode,
     interactive: options.interactive,
     headless: options.headless,
     cwd: options.cwd,
     quiet: options.quiet,
     here: options.here,
+    local: options.local,
   };
+
+  const explicitSurface = !!(options.iterm || options.ghostty || options.tmux || options.vscodium || options.terminalApp || options.device);
+  const direct = !!query && (isDirectResumeSelector(query) || wantsStrictResume(prompt, strictOpts));
 
   // Direct id/alias (or label with prompt/strict flags) → strict resume
   // (former top-level `agents sessions resume`). `--attach-only` / `--local`
   // must go through sessions focus so they cannot silently fork a copy
   // (AGI EXT still shells `sessions resume <id> --local`).
-  if (query && (isDirectResumeSelector(query) || wantsStrictResume(prompt, strictOpts))) {
+  if (query && direct && !explicitSurface) {
     const hosts = options.device ? [options.device] : [];
     // PHNX-3292: a live LOCAL tmux pane (the exact alias, or a unique 8-hex
     // short id) attaches immediately, before any fleet SSH — the product rule
@@ -168,10 +181,10 @@ export async function sessionsResumeAction(
     // `--attach-only`: a prompt/mode/headless/cwd override still means the
     // caller wants strict resume semantics (a scripted continue), so that
     // case is excluded via wantsStrictResume.
-    if (!wantsStrictResume(prompt, strictOpts) && await attachLocalLiveSelector(query.trim(), hosts)) {
+    if (!options.account && !options.model && !wantsStrictResume(prompt, strictOpts) && await attachLocalLiveSelector(query.trim(), hosts)) {
       return;
     }
-    if (resumeUsesLifecycleDispatch(query, prompt, options)) {
+    if (!options.account && !options.model && resumeUsesLifecycleDispatch(query, prompt, options)) {
       await dispatchSessionLifecycleInPlace(query.trim(), hosts, !!options.attachOnly, !!options.local);
       return;
     }
@@ -179,55 +192,74 @@ export async function sessionsResumeAction(
     return;
   }
 
-  if (!isInteractiveTerminal()) {
+  if (!direct && !isInteractiveTerminal()) {
     console.error(chalk.red('sessions resume needs an interactive terminal (or pass a session id for strict resume).'));
     process.exitCode = 1;
     return;
   }
 
 
-  const { agent, version } = parseAgentFilter(options.agent);
-  const limit = parseInt(options.limit || '200', 10);
-  const since = options.since ?? (options.all ? undefined : '30d');
-
-  let sessions = await discoverSessions({
-    agent,
-    version,
-    all: options.all,
-    cwd: process.cwd(),
-    since,
-    sortBy: 'timestamp',
-    limit,
-    excludeTeamOrigin: !options.teams,
-  });
-  const { visible } = filterTeamSessions(sessions, !!options.teams);
-  sessions = visible;
-
-  if (sessions.length === 0) {
-    console.log(chalk.gray('No sessions found. Try --all or a different --since window.'));
-    return;
-  }
-
-  // 1. Multi-select the sessions. gutter: 6 = the multi-select cursor + checkbox
-  // ('> [x] ') that multiItemPicker prepends, so rows size to fit without wrapping.
-  const cols = { ...pickerColumnsFor(sessions), gutter: 6 };
   let chosen: SessionMeta[] | null;
-  try {
-    chosen = await multiItemPicker<SessionMeta>({
-      message: 'Select sessions to resume:',
-      items: sessions,
-      filter: (q: string) => (q.trim() ? sessions.filter((s) => sessionMatchesQuery(s, q)) : sessions),
-      labelFor: (s, q) => formatPickerLabel(s, q, cols),
-      keyFor: (s) => s.id,
-      buildPreview,
-      pageSize: 15,
-      initialSearch: query,
-      emptyMessage: 'No sessions match.',
-      enterHint: 'resume',
+  if (query && direct) {
+    const outcome = await resolveSessionMetadataValue(query, { local: options.local, hosts: options.device ? [options.device] : undefined, agent: parseAgentFilter(options.agent).agent });
+    if (outcome.kind !== 'resolved') {
+      console.error(chalk.red(`No session matching "${query}" (${outcome.kind}).`));
+      process.exitCode = 1;
+      return;
+    }
+    chosen = [outcome.session];
+  } else {
+    const { agent, version } = parseAgentFilter(options.agent);
+    const limit = parseInt(options.limit || '200', 10);
+    const since = options.since ?? (options.all ? undefined : '30d');
+
+    let sessions = await discoverSessions({
+      agent,
+      version,
+      all: options.all,
+      cwd: process.cwd(),
+      since,
+      sortBy: 'timestamp',
+      limit: options.account ? undefined : limit,
+      unbounded: !!options.account,
+      excludeTeamOrigin: !options.teams,
     });
-  } catch (err) {
-    if (isPromptCancelled(err)) return;
-    throw err;
+    const { visible } = filterTeamSessions(sessions, !!options.teams);
+    sessions = visible;
+    if (options.account) {
+      const { findUnifiedAccount } = await import('../lib/account-registry.js');
+      const { readMeta } = await import('../lib/state.js');
+      const { sessionMatchesAccount } = await import('../lib/session/recovery.js');
+      const account = findUnifiedAccount(options.account, readMeta(), undefined, agent as import('../lib/types.js').AgentId | undefined);
+      if (!account) throw new Error(`Unknown account '${options.account}'.`);
+      sessions = sessions.filter(session => sessionMatchesAccount(session, account)).slice(0, limit);
+    }
+
+    if (sessions.length === 0) {
+      console.log(chalk.gray('No sessions found. Try --all or a different --since window.'));
+      return;
+    }
+
+    // 1. Multi-select the sessions. gutter: 6 = the multi-select cursor + checkbox
+    // ('> [x] ') that multiItemPicker prepends, so rows size to fit without wrapping.
+    const cols = { ...pickerColumnsFor(sessions), gutter: 6 };
+    try {
+      chosen = await multiItemPicker<SessionMeta>({
+        message: 'Select sessions to resume:',
+        items: sessions,
+        filter: (q: string) => (q.trim() ? sessions.filter((s) => sessionMatchesQuery(s, q)) : sessions),
+        labelFor: (s, q) => formatPickerLabel(s, q, cols),
+        keyFor: (s) => s.id,
+        buildPreview,
+        pageSize: 15,
+        initialSearch: query,
+        emptyMessage: 'No sessions match.',
+        enterHint: 'resume',
+      });
+    } catch (err) {
+      if (isPromptCancelled(err)) return;
+      throw err;
+    }
   }
   if (!chosen || chosen.length === 0) return;
 
@@ -246,7 +278,7 @@ export async function sessionsResumeAction(
   // 2. Route every selection through the owning device's recovery resolver.
   const items: Array<SurfaceItem & { session: SessionMeta }> = [];
   for (const s of chosen) {
-    const command = buildSessionRecoveryCommand(s, !!options.device);
+    const command = ['agents', ...buildSelectedResumeArgs(s.id, prompt, options)];
     const cwd = s.cwd && fs.existsSync(s.cwd) ? s.cwd : process.cwd();
     items.push({ session: s, cwd, command });
   }
@@ -270,7 +302,7 @@ export async function sessionsResumeAction(
     if (items.length > 1) {
       console.log(chalk.gray(`Resuming ${items.length} sessions one at a time (no tab-capable terminal detected).`));
     }
-    for (const it of items) await resumeSessionInPlace(it.session);
+    for (const it of items) await spawnCliInPlace(buildSelectedResumeArgs(it.session.id, prompt, options));
     return;
   }
 
@@ -313,6 +345,46 @@ export async function sessionsResumeAction(
   console.log(chalk.gray(`\nOpened ${opened}/${items.length} in ${where}.`));
 }
 
+/** Preserve run options and lifecycle intent when the picker opens its selected rows. */
+export function buildSelectedResumeArgs(id: string, prompt: string | undefined, options: ResumeOptions): string[] {
+  if (options.runArgs) {
+    const args = [...options.runArgs];
+    const boundary = args.indexOf('--');
+    const index = args.findIndex((arg, i) => (boundary < 0 || i < boundary) && (arg === '--resume' || arg === '--resume='));
+    if (index < 0) throw new Error('The run command did not contain a bare --resume selector.');
+    args.splice(index, 1, '--resume', id);
+    // The outer surface already placed this terminal on the selected device.
+    if (options.device) {
+      let remoteCwd: string | undefined;
+      for (let i = 0; i < args.length && args[i] !== '--'; i++) {
+        if (args[i] === '--remote-cwd') {
+          remoteCwd = args[i + 1];
+          args.splice(i--, 2);
+        } else if (args[i].startsWith('--remote-cwd=')) {
+          remoteCwd = args[i].slice('--remote-cwd='.length);
+          args.splice(i--, 1);
+        } else if (['-D', '--device', '--host', '--where', '--on', '--computer'].includes(args[i])) {
+          args.splice(i, 2);
+          i--;
+        } else if ((/^(?:--(?:device|host|where|on|computer)=|-D.)/.test(args[i]))) {
+          args.splice(i, 1);
+          i--;
+        }
+      }
+      if (remoteCwd !== undefined) {
+        const end = args.indexOf('--');
+        args.splice(end < 0 ? args.length : end, 0, '--cwd', remoteCwd);
+      }
+    }
+    return args;
+  }
+  const args = buildResumeRemoteArgs(id, prompt, options);
+  if (options.here) args.push('--here');
+  if (options.local) args.push('--local');
+  if (options.attachOnly) args.push('--attach-only');
+  return args;
+}
+
 /** IDs and tmux aliases are actions, not picker search text. Human phrases keep
  * the existing pre-filtered picker, while an explicit identity resumes directly. */
 export function isDirectResumeSelector(query: string): boolean {
@@ -343,6 +415,7 @@ export function resumeUsesLifecycleDispatch(
     interactive: options.interactive,
     headless: options.headless,
     here: options.here,
+    local: options.local,
   });
 }
 

@@ -235,6 +235,24 @@ describe('buildExecEnv — AGENTS_EXEC_HOME (account-slot launch marker)', () =>
   });
 });
 
+describe('buildExecEnv — AGENTS_RUN_ACCOUNT_ID (PHNX-3940 model-refusal tracking)', () => {
+  it('stamps the run account id when the launch resolved one', () => {
+    const env = buildExecEnv(execOpts({ agent: 'claude', accountId: 'acct-123' }));
+    expect(env.AGENTS_RUN_ACCOUNT_ID).toBe('acct-123');
+  });
+
+  it('clears an inherited marker for a launch with no resolved account id', () => {
+    const prev = process.env.AGENTS_RUN_ACCOUNT_ID;
+    process.env.AGENTS_RUN_ACCOUNT_ID = 'parent-acct';
+    try {
+      const env = buildExecEnv(execOpts({ agent: 'claude' }));
+      expect(env.AGENTS_RUN_ACCOUNT_ID).toBeUndefined();
+    } finally {
+      if (prev === undefined) delete process.env.AGENTS_RUN_ACCOUNT_ID; else process.env.AGENTS_RUN_ACCOUNT_ID = prev;
+    }
+  });
+});
+
 describe('buildExecEnv — custom harness identity (PHNX-2935)', () => {
   it('stamps AGENTS_AGENT_NAME with the profile name, not the host CLI', () => {
     // The bug: `agents run deepseek` resolved the host to claude and then
@@ -1323,6 +1341,41 @@ describe('classifyClaudeRunRefusal (RUSH-3018 — persist/clear decision on the 
 
   it('a non-zero exit with no recognized refusal leaves the marker untouched', () => {
     expect(classifyClaudeRunRefusal('some unrelated error', 1)).toEqual({ action: 'none' });
+  });
+
+  it('the exact real Fable refusal is a distinct model-limit action, not a global clear', () => {
+    const text = "You've reached your Fable limit. Run /usage-credits to continue or switch models with /model.";
+    // The real-world evidence: this refusal commonly ends the CLI turn with
+    // exit 0. Before this fix, classifyClaudeRunRefusal fell through to
+    // `exitCode === 0 -> clear`, wrongly wiping any stale session/credits
+    // marker on the account for a refusal that was itself unrecognized.
+    expect(classifyClaudeRunRefusal(text, 0, 'claude-fable-5-1')).toEqual({
+      action: 'note_model_limit',
+      model: 'claude-fable-5-1',
+      family: 'Fable',
+    });
+    // Also true at a non-zero exit.
+    expect(classifyClaudeRunRefusal(text, 1, 'claude-fable-5-1')).toEqual({
+      action: 'note_model_limit',
+      model: 'claude-fable-5-1',
+      family: 'Fable',
+    });
+  });
+
+  it('a model-limit refusal is never classified as note_out_of_credits', () => {
+    const text = "You've reached your Fable limit. Run /usage-credits to continue or switch models with /model.";
+    const r = classifyClaudeRunRefusal(text, 1, 'claude-fable-5-1');
+    expect(r.action).not.toBe('note_out_of_credits');
+    expect(r.action).not.toBe('clear');
+  });
+
+  it('falls back to the parsed family name as the model key when no model was supplied', () => {
+    const text = "You've reached your Fable limit. Run /usage-credits to continue or switch models with /model.";
+    expect(classifyClaudeRunRefusal(text, 0)).toEqual({
+      action: 'note_model_limit',
+      model: 'Fable',
+      family: 'Fable',
+    });
   });
 });
 

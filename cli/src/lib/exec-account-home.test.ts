@@ -8,6 +8,7 @@ import { getAgentConfigPath, isSymlinkAdoptedHarness } from './installations/shi
 import { getVersionDir, getVersionHomePath, invalidateInstalledVersionsCache } from './installations/store.js';
 import { getHistoryDir, getVersionsDir, readMeta, updateMeta } from './state.js';
 import { seedReservedStoreKey, workerCredentialStoreKey } from './auth-mint.js';
+import { collectRunCandidates } from './accounting/rotate.js';
 import {
   adoptedConfigPointsAtHome,
   adoptedSymlinkMismatchError,
@@ -152,6 +153,10 @@ describe('resolveNativeSpawnHome', () => {
     expect(resolved.source).toBe('legacy-home');
     expect(resolved.execHome).toBe(home);
     expect(resolved.label).toBe(label);
+    const candidates = await collectRunCandidates('claude');
+    expect(candidates.find(candidate => candidate.nativeAccountId === account.id)).toMatchObject({
+      nativeAccount: account.name, slotDir: home, version: label, signedIn: true,
+    });
     removeAccount(account.name);
     invalidateInstalledVersionsCache('claude');
   });

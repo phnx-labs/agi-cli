@@ -34,18 +34,10 @@ export interface SessionActorRecord {
   phoenixId?: string;
   /** Effective permissions mode used by the launcher. */
   mode?: SessionRunMode;
-  /**
-   * The agents-cli version-home id this session launched under (e.g. `2.1.207`,
-   * codex `0.146.0`) — the same namespace `listInstalledVersions` /
-   * `collectRunCandidates` use, so a native resume can pin the exact origin
-   * version. Recorded at launch by the SessionStart hook (from `AGENTS_RUN_VERSION`),
-   * because a harness coins its real session id only AFTER spawn — the same reason
-   * `mode` rides the hook rather than a spawn-time `writeSessionActorRecord`. Joined
-   * onto the session index at scan time so a session whose transcript carries no
-   * embedded/derivable version (codex's `.codex-homes/<version>/` layout) no longer
-   * degrades native resume to `/continue` for lack of a recorded origin (PHNX-3626).
-   */
+  /** Installed executable label at launch; provenance only, never account identity. */
   version?: string;
+  /** Credential account used at launch, independent of the installed executable. */
+  accountId?: string;
   /**
    * Custom harness / profile name when launched via `agents run <profile>`
    * (e.g. `deepseek`). Joined onto the session index at scan time so a
@@ -86,6 +78,7 @@ function hasRecordData(record: SessionActorRecord): boolean {
     || typeof record.phoenixId === 'string'
     || typeof record.mode === 'string'
     || typeof record.version === 'string'
+    || typeof record.accountId === 'string'
     || typeof record.harness === 'string'
     || (Array.isArray(record.aliases) && record.aliases.some(alias => typeof alias === 'string'));
 }
@@ -114,6 +107,7 @@ export function writeSessionActorRecord(record: SessionActorRecord): void {
     writeRecord({
       ...previous,
       ...record,
+      accountId: previous?.accountId ?? record.accountId,
       aliases: normalizedAliases([...(previous?.aliases ?? []), ...(record.aliases ?? [])]),
     });
   } catch {
@@ -132,6 +126,7 @@ export function writeSessionAliasRecord(sessionId: string, alias: string): void 
       phoenixId: previous?.phoenixId,
       mode: previous?.mode,
       version: previous?.version,
+      accountId: previous?.accountId,
       harness: previous?.harness,
       aliases: normalizedAliases([...(previous?.aliases ?? []), alias]),
       startedAtMs: previous?.startedAtMs ?? Date.now(),

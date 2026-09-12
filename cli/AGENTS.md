@@ -1093,65 +1093,38 @@ which still falls back to the live SSH digest fetch for a never-synced session.
 
 ### 11. Session recovery is one decision on the origin device
 
-`resolveSessionRecovery` in `src/lib/session/recovery.ts` is the only place that
-chooses native resume versus `/continue`. `sessions resume` and
-`run --resume` route through it — as do the retired `focus`/`attach`/`reconnect`
-spellings, which are hidden aliases that still run the same bodies. Native resume is valid only in the exact origin version's isolated home when
-that home still owns the indexed transcript AND some injectable credential for
-this harness is healthy (the origin login, or a provider rotated in on a usage
-limit). A removed, signed-out, revoked, trashed, backup-only, or same-number
-reinstalled origin — or a limited origin whose transcript is no longer in that
-home — uses a healthy account of the same harness and reads the indexed
-transcript with `/continue`. Claude native resume uses the earliest
-recorded transcript cwd, which selected `projects/<cwd-key>`, not the later cwd
-stored from its first user turn. Never add a caller-local fallback that
-native-resumes another version home, and never let `run auto` change harnesses
-during recovery.
+`resolveSessionRecovery` in [`src/lib/session/recovery.ts`](src/lib/session/recovery.ts)
+chooses native resume versus an explicitly approved context replay. The account and
+native context are resolved before new-run defaults, then materialized through
+[`accounting/account-launch.ts`](src/lib/accounting/account-launch.ts). The selected
+executable is independent of the account home; never replace that choice with the
+transcript's recorded vendor version.
 
-**Native-first with same-harness account rotation (PHNX-3626).** An
-exhausted/rate-limited origin does NOT drop straight to `/continue`. When the
-origin version home is installed, native-resume-capable, and still owns the
-transcript, recovery first rotates to a healthy **injectable** account of the
-SAME harness — a durable provider setup-token/API-key account (RUSH-3182), the
-only kind that can authenticate a resume that must read the origin home's
-transcript, since a native login lives in its own isolated home and cannot be
-forwarded — and stays NATIVE in that same home (`RecoveryAccount`, injected via
-the `--account` spawn path). `resolveSessionRecovery` reads the provider-inclusive
-pool (`collectRunCandidatesForRun`) for exactly this. `/continue` is last-resort:
-a signed-out, revoked, trashed, backup-only, or same-number-reinstalled origin,
-or a limited origin whose transcript is no longer in that home. When that
-continue pick is a provider account, the target still carries `RecoveryAccount`
-and exec injects it the same way native does (PHNX-3674) — otherwise spawn would
-authenticate as the version home's native login, which is the exhausted origin
-when no healthy native sibling exists. The balanced picker (`--strategy
-balanced`) is the same weighted-by-headroom selector dispatch uses; there is no
-second scheduler.
+Bare `run <harness> --resume` delegates to the same picker as `sessions resume
+--agent <harness>`. `#work` carries the account filter into selection and execution.
+The selected child keeps the original run arguments; concrete IDs stay below the
+picker to avoid recursion. Explicit terminal backends are consumed once, while
+account, model, mode, cwd and lifecycle constraints survive the child command.
 
-**The origin version is recorded forward at launch.** `buildExecEnv` exports
-`AGENTS_RUN_VERSION`, the SessionStart hook joins it to the harness's real session
-id in the `by-session/<id>.json` sidecar (like `mode`), the scan joins it at row
-build (`meta.version ?? actorRec.version` in `upsertSession`), and the db upsert
-COALESCEs it — the same write-once launch-metadata treatment as `mode`/`harness`/
-`actor`. So a session whose transcript carries no derivable version (codex's
-`.codex-homes/<version>/` home, which `extractVersionFromManagedPath` also now
-reads) still native-resumes instead of degrading to `/continue` for a missing
-recorded origin. Because version is now launch metadata rather than a purely
-transcript-derived field, it is excluded from the incremental-scan parity check
-(alongside `actor`/`harness`/`mode`), since an incremental row legitimately
-preserves a recorded origin a from-scratch reparse of rewritten content cannot
-re-derive. This is what fixed the "origin version was not recorded" fallback.
+Native resume requires a readable transcript owned by the selected context home.
+Claude restores the earliest existing launch cwd from that transcript. Cold
+metadata is hydrated through `hydrateSessionTranscript` before refusal; a mirror
+stub is not native context. A verified missing conversation must not recreate its
+UUID as an empty launch. Replay asks explicitly and creates a new native ID.
 
-**Prefer-device, fall back to local.** Resume runs on the recorded owning device;
-when that device is genuinely unreachable it falls back to a LOUD local
-`/continue` replay from the synced mirror rather than dead-ending
-(`resumeLocalFallbackSource` rewrites `machine` to self so the delegated run
-resolves locally). Both unreachable shapes trigger it: `runOnPeer` → `no-target`
-(the device is not a dialable registered device) and `runOnPeer` → `unreachable`
-(a registered device whose SSH connection failed — asleep/offline, ssh exit 255,
-classified by `peerHopOutcome`). Resolving `ok` on a connect failure was the bug
-that silently no-op'd resume against an offline registered box. Safe against the
-RUSH-2022 silent-fork hazard by precondition: the owner was proven unreachable,
-so there is no live process to fork.
+The SessionStart hook records the first originating `accountId` in the existing
+actor sidecar and session index, independently of binary release. Alias writes and
+rescans preserve it. Matching may also use proved canonical account-home ownership;
+organization quota keys and current credentials in a reused old home are not
+historical login proof. Unknown ownership stays unknown. Model refusal accounting
+uses the actual executed account and requested model, without disabling unrelated
+models or accounts.
+
+**Unreachable origin.** Resume checks the owning device first. If it cannot be
+reached, local replay requires readable archived conversation content and an
+explicit interactive choice. A mirror digest alone cannot satisfy that check.
+An unreachable device does not prove its process has stopped. Headless callers
+receive an error rather than starting an empty conversation.
 
 ## Configuration surface
 
