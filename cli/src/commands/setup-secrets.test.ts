@@ -52,7 +52,7 @@ describe('agents setup secrets', () => {
   });
 
   it('pins a published package, not @latest', () => {
-    expect(SECRETS_CLI_PACKAGE).toBe('@phnx-labs/secrets-cli@0.1.2');
+    expect(SECRETS_CLI_PACKAGE).toBe('@phnx-labs/secrets-cli@0.1.4');
     expect(SECRETS_CLI_PACKAGE).not.toMatch(/@latest$/);
   });
 

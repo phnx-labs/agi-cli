@@ -164,11 +164,14 @@ boundary seen from two sides.
   running inside tmux still has one. `view --reveal` consults
   it before resolving anything and refuse outright when it is set. This is what
   makes Path B a human-only path rather than an advisory one.
-- **Headless no-prompt.** In a non-interactive/agent context, resolution takes the
-  `agentOnly` / `isHeadlessSecretsContext()` path (e.g. `src/commands/secrets.ts:1052`,
-  `:1642`) — a background agent process must not silently raise a Touch ID sheet on
-  the interactive user's screen. It reads from the broker or fails loudly; it does not
-  prompt behind the user's back.
+- **Headless no-prompt.** Where nobody could answer a sheet — an unattended launch
+  (`AGENTS_RUNTIME=headless`: routines, fleet workers) or a process outside the GUI
+  login session (SSH, launchd, CI) — resolution takes the `agentOnly` /
+  `isHeadlessSecretsContext()` path (secrets-cli `src/lib/secrets/headless.ts`,
+  0.1.4+). It reads from the broker or fails loudly; it does not prompt behind the
+  user's back. An agent the user is driving (`terminal`, `teams`, a harness tool
+  shell) is not headless: its read raises one Touch ID sheet on the user's screen,
+  and the hold policy keeps the bundle silent afterwards.
 - **The broker holds resolved env in memory only.** `agents secrets unlock` caches the
   resolved bundle behind a Unix socket in a `0700` directory, with the socket file
   itself chmod'd `0600` (`src/lib/secrets/agent.ts:145`, `:445`; `session-store.ts`) so
