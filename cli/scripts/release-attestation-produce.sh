@@ -21,10 +21,11 @@
 #      RUSH-3100 that costs nothing: the tarball carries no helper bundle, so
 #      there is nothing for `npm pack` to gate on and no unsigned bundle can ship
 #      from anywhere. No helper is built here at all: the menu-bar helper's source
-#      lives in phnx-labs/agi-menu (PHNX-4036) and computer-mac has its own
-#      publish script; both are recorded in the helper manifest from their
-#      PUBLISHED releases (step 5). The keychain helper moved with the standalone
-#      `secrets` engine (PHNX-3989). (The CLI binary left the tarball in
+#      lives in phnx-labs/agi-menu (PHNX-4036) and is recorded in the helper
+#      manifest from its PUBLISHED release (step 5). The keychain helper moved
+#      with the standalone `secrets` engine (PHNX-3989), and the computer helpers
+#      moved with the standalone `computer` engine (PHNX-4075) -- neither is a
+#      helper of this CLI any more. (The CLI binary left the tarball in
 #      RUSH-3026; the sign step below still builds it on a Mac for the
 #      per-release GitHub-asset path.)
 #   3. Packs the tarball (`npm pack`) and binds its sha256 into the record.
@@ -62,10 +63,9 @@
 # per-box flake mitigation is unchanged.
 #
 # --with-helpers (default OFF) additionally produces the helper input-digest
-# manifest: computer-mac from its published computer-mac/v<floor> release (source-
-# verified via its input-digest sidecar), menubar from its published
-# menubar/v<floor> release (scripts/stage-menubar-helper.sh --fetch-only, sha256-
-# verified; the source is not in this repo). Off by default for the same reason
+# manifest: menubar from its published menubar/v<floor> release
+# (scripts/stage-menubar-helper.sh --fetch-only, sha256-verified; the source is
+# not in this repo). Off by default for the same reason
 # release.sh's flag is: the check aborts on any helper input change, including
 # ones the tarball does not ship.
 #
@@ -96,10 +96,11 @@ TEST_TARGET=()
 # Default OFF, matching release.sh's flag of the same name. The helper manifest
 # re-derives every helper's INPUT DIGEST and fails when one moved without a
 # rebuild — correct when a release is publishing helpers, and pure obstruction
-# when it is not. Proven on 2026-08-25: a one-line COMMENT fix in
-# native/computer-mac/scripts/build.sh (an `apps/cli/` -> `cli/` path in prose)
-# changed the digest and blocked an otherwise-perfect 1.22.49 attestation, for a
-# helper the tarball no longer ships and the CLI resolves from its own tag.
+# when it is not. Proven on 2026-08-25: a one-line COMMENT fix in the then-in-repo
+# computer-mac build script (an `apps/cli/` -> `cli/` path in prose) changed the
+# digest and blocked an otherwise-perfect 1.22.49 attestation, for a helper the
+# tarball no longer ships. That helper has since left the repo entirely
+# (PHNX-4075); the hazard the flag guards against has not.
 WITH_HELPERS=false
 INHERIT_BASE=""
 while [[ $# -gt 0 ]]; do
@@ -409,11 +410,7 @@ green "Tarball at $DEST_DIR/$TGZ_NAME"
 # carried forward across producer runs: a helper whose input digest still
 # matches the recorded one keeps its already-attested record untouched; one
 # that drifted is re-recorded from its PUBLISHED release -- nothing is built
-# here. computer-mac is signed by the separate native/computer-mac release path
-# (scripts/publish-computer-helper-mac.sh), so a drifted computer-mac digest
-# with no prior record to carry forward fails closed with the exact command to
-# run unless the published release proves it was built from this source.
-# menubar has no source in this repo at all (phnx-labs/agi-menu, PHNX-4036):
+# here. menubar has no source in this repo at all (phnx-labs/agi-menu, PHNX-4036):
 # its input is the floor pin in src/lib/helper-versions.ts, and a drift means
 # the floor moved, so it is re-recorded from the published menubar/v<floor>
 # asset (sha256-verified by scripts/stage-menubar-helper.sh --fetch-only) or
@@ -422,11 +419,10 @@ green "Tarball at $DEST_DIR/$TGZ_NAME"
 # release overall.
 #
 # `gh release list --limit 1` returns whatever was published last, and not every
-# release is a CLI release: the Windows computer-helper workflow publishes
-# helper-only releases (assets `computer-helper-win.exe` + .sha256) into the same
-# `v<version>` tag namespace. One of those shadows the last real CLI release, the
-# seed misses, and EVERY helper then reads as "changed" -- hard-failing on
-# computer-mac, which this producer never rebuilds. Observed live: v1.22.48
+# release is a CLI release: helper-only releases have historically been published
+# into the same `v<version>` tag namespace. One of those shadows the last real CLI
+# release, the seed misses, and EVERY helper then reads as "changed" -- hard-failing
+# on a helper this producer never rebuilds. Observed live: v1.22.48
 # (helper-only, 09:54Z) shadowed v1.22.47 and blocked a release.
 #
 # On exhaustion this deliberately echoes the NEWEST tag rather than nothing, so
@@ -462,12 +458,10 @@ if [[ "$WITH_HELPERS" == true && -x scripts/release-manifest.sh ]]; then
   CLI_VERSION_MANIFEST="$(jq -r .version package.json)"
   if [[ ! -f "$MANIFEST_FILE" ]]; then
     # Seed from the last published release before falling back to an empty
-    # manifest. Without this, a fresh store has no recorded computer-mac
-    # inputDigest, the helper loop below reads "input changed", and the
-    # computer-mac arm dies telling the operator to run
-    # publish-computer-helper-mac.sh — which does not write a manifest, so the
-    # instruction loops forever on a byte-identical helper. Every hand-cut
-    # release hit this. RUSH-2970 trap 1.
+    # manifest. Without this, a fresh store has no recorded inputDigest, the
+    # helper loop below reads "input changed", and the recorder re-fetches a
+    # published release on every hand-cut release for a byte-identical helper.
+    # RUSH-2970 trap 1.
     # Each step is checked on its own rather than chained, so the reason a seed
     # did not happen is the reason reported. A single `&&` chain collapsed three
     # distinct outcomes into one branch: a gh that fails on auth read as "no
@@ -504,56 +498,9 @@ if [[ "$WITH_HELPERS" == true && -x scripts/release-manifest.sh ]]; then
     fi
   }
 
-  # PHNX-2943: record computer-mac from its PUBLISHED release instead of dead-ending.
-  # This producer never rebuilds computer-mac (it is signed on a separate macOS
-  # path), so when its source drifts and there is no prior record to carry forward,
-  # the old code DIED telling the operator to run publish-computer-helper-mac.sh and
-  # re-run -- but that script recorded nothing, so the re-run hit the identical die.
-  # It now records the published binary, but ONLY after proving that binary was built
-  # from THIS source: publish-computer-helper-mac.sh publishes a
-  # `computer-mac-input-digest.txt` sidecar naming the source it built from, and we
-  # require it to equal the current source digest before recording. A mismatch (or a
-  # floor release predating the sidecar, or an undownloadable release) means the
-  # published helper is stale or unverifiable -- fail CLOSED with the publish command,
-  # never bind a new source digest to an unproven binary.
-  record_computer_mac_from_published() {
-    local want_digest="$1" floor tag dl pub_digest zip sha_file want_sha got_sha
-    floor="$(bun -e "console.log((await import('./src/lib/helper-versions.ts')).helperFloor('computer-mac'))" 2>/dev/null)" \
-      || die "could not read the computer-mac floor from src/lib/helper-versions.ts"
-    tag="computer-mac/v$floor"
-    dl="$WT/.cm-helper-dl"
-    rm -rf "$dl"; mkdir -p "$dl"
-    # FAIL CLOSED on any download failure -- an unauthenticated / offline / rate-limited
-    # gh must not read as "nothing published"; that would strand a real release.
-    gh release download "$tag" \
-      --pattern 'computer-mac-input-digest.txt' \
-      --pattern 'ComputerHelper.app.zip' \
-      --pattern 'ComputerHelper.app.zip.sha256' \
-      --dir "$dl" >/dev/null 2>&1 \
-      || die "helper computer-mac input changed and the published release $tag could not be downloaded -- run 'agents secrets exec apple.com -- scripts/publish-computer-helper-mac.sh <x.y.z>' on a macOS signing box, bump the computer-mac floor in src/lib/helper-versions.ts, then re-run this producer"
-    [[ -f "$dl/computer-mac-input-digest.txt" ]] \
-      || die "helper computer-mac input changed and the published $tag carries no computer-mac-input-digest.txt (built before PHNX-2943) -- re-publish computer-mac with the current scripts/publish-computer-helper-mac.sh so the producer can verify the source it was built from, then re-run this producer"
-    pub_digest="$(tr -d '[:space:]' < "$dl/computer-mac-input-digest.txt")"
-    [[ "$pub_digest" == "$want_digest" ]] \
-      || die "helper computer-mac input changed and the published $tag was built from a DIFFERENT source (published ${pub_digest#sha256:} != current ${want_digest#sha256:}) -- recording it would attest a stale binary. Run 'agents secrets exec apple.com -- scripts/publish-computer-helper-mac.sh <x.y.z>' from THIS tree, bump the computer-mac floor, then re-run this producer"
-    zip="$dl/ComputerHelper.app.zip"
-    sha_file="$dl/ComputerHelper.app.zip.sha256"
-    [[ -f "$zip" && -f "$sha_file" ]] \
-      || die "published $tag is missing ComputerHelper.app.zip or its .sha256"
-    want_sha="$(awk '{print $1}' "$sha_file")"
-    got_sha="$(manifest_asset_sha256 "$zip")"
-    [[ "$want_sha" == "$got_sha" ]] \
-      || die "downloaded ComputerHelper.app.zip sha $got_sha != published $want_sha in $tag -- refusing to record a corrupt download"
-    scripts/release-manifest.sh put --file "$MANIFEST_FILE" --helper computer-mac \
-      --helper-version "$floor" --input-digest "$want_digest" \
-      --asset-digest "sha256:$got_sha" --asset-path "$zip" --platform darwin \
-      >/dev/null || die "failed to record computer-mac in the manifest"
-    green "Recorded computer-mac from published $tag (input ${want_digest#sha256:}, asset ${got_sha:0:12})"
-  }
-
-  # PHNX-4036: menubar is recorded from its PUBLISHED release, the same way
-  # computer-mac is -- but with no source-digest sidecar to compare, because the
-  # source is not in this repo. The proof chain is instead: the floor in
+  # PHNX-4036: menubar is recorded from its PUBLISHED release, with no
+  # source-digest sidecar to compare, because the source is not in this repo.
+  # The proof chain is instead: the floor in
   # src/lib/helper-versions.ts names one immutable tag; stage-menubar-helper.sh
   # downloads that tag's asset and refuses a sha256 that differs from the tag's
   # own .sha256; the recorded assetDigest is the sha of those bytes; and the
@@ -587,7 +534,7 @@ if [[ "$WITH_HELPERS" == true && -x scripts/release-manifest.sh ]]; then
     fi
   }
 
-  for helper in computer-mac menubar; do
+  for helper in menubar; do
     helper_digest="$(scripts/release-manifest.sh input-digest --repo-root "$WT" --helper "$helper")" \
       || die "could not compute input digest for helper $helper"
     recorded_digest="$(jq -r --arg n "$helper" '.helpers[$n].inputDigest // empty' "$MANIFEST_FILE")"
@@ -595,10 +542,9 @@ if [[ "$WITH_HELPERS" == true && -x scripts/release-manifest.sh ]]; then
       gray "helper $helper unchanged (${helper_digest#sha256:}) -- carrying forward its attested record"
       continue
     fi
-    # Neither helper is ever built here -- each is recorded from its published,
+    # The helper is never built here -- it is recorded from its published,
     # verified release, or fails closed inside its function.
     case "$helper" in
-      computer-mac) record_computer_mac_from_published "$helper_digest" ;;
       menubar) record_menubar_from_published "$helper_digest" ;;
     esac
   done

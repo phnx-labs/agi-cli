@@ -251,7 +251,7 @@ describe('applyRowDisplayLimit', () => {
 // ─── Ledger round-trip (real event log) ─────────────────────────────────────
 // listComputerActions / buildComputerSessionRows read through the REAL
 // events.ts query() path, isolated per test via _resetForTest(eventsPath()) —
-// same seam commands/computer-actions.test.ts and lib/computer/dispatch.test.ts
+// same seam lib/computer/record.ts writes through
 // already use for computer.action. `emit()` always stamps the CALLING
 // process's own pid (see events.ts sanitizePayload's reserved-key note), so
 // every event this suite writes shares one pid and collapses to one row —

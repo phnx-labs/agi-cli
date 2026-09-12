@@ -21,7 +21,7 @@
 
 import { afterAll, describe, expect, it } from 'vitest';
 import { connectSSH, type SSHConnection } from './ssh.js';
-import { resolveRemoteDevice } from '../../computer/ssh-tunnel.js';
+import { resolveRemoteDevice } from '../../ssh-tunnel.js';
 import { sshExec } from '../../ssh-exec.js';
 import { buildWindowsKillScript, encodePowerShell } from './ssh.js';
 import { CDPClient } from '../cdp.js';

@@ -10,7 +10,7 @@
  * then verifies the code signature (Developer ID Team + notarization — and, for
  * the menu-bar helper, its designated requirement) before it is ever installed.
  *
- * `computer/download.ts` (ComputerHelper) and `menubar/download-menubar.ts`
+ * `menubar/download-menubar.ts`
  * (MenubarHelper) are thin per-helper wrappers over the primitives here — one
  * download+verify machinery, two specs — so a fix to the verify/download logic
  * lands for both helpers at once.

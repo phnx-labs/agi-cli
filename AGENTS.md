@@ -7,8 +7,8 @@ Cursor, OpenCode, OpenClaw, Grok, Droid, …) from one place.
 > Phoenix Labs · FSL-1.1-Apache-2.0.
 
 **The main project here is the agents CLI** — [`cli`](cli), the
-published `@phnx-labs/agents-cli`. Everything else (`native/computer-*`,
-`packages/*`) is a **helper app / library for one feature**, not a main project.
+published `@phnx-labs/agents-cli`. Everything else (`packages/*`) is a
+**helper app / library for one feature**, not a main project.
 **AGI EXT, the VS Code extension, lives in its own repo:
 [phnx-labs/agi-ext](https://github.com/phnx-labs/agi-ext)** (private; split out
 2026-08-25, RUSH-3189). It consumes this CLI; its thin-client contract lives in
@@ -54,9 +54,6 @@ to fold away, while an idle session that is unfinished is exactly the one to rai
 ```
 apps/
   cli/        @phnx-labs/agents-cli — the `agents`/`ag` CLI (the published npm package)
-native/
-  computer-mac/   Swift daemon behind `agents computer` (Accessibility + screen capture)
-  computer-win/   C#/.NET daemon behind `agents computer` on Windows (UI Automation)
 packages/
   session-tracker/  @agents/session-tracker — SessionStart hook that WRITES live-session state
   agi-cli/          @phnx-labs/agi-cli — DEPRECATED alias; re-exports the canonical @phnx-labs/agents-cli
@@ -69,8 +66,7 @@ assets/ website/   Brand + launch demo (under assets/demo/), landing (repo-root,
 | [`cli`](cli) | The CLI — version mgmt, config sync, sessions, teams, cloud, browser, computer, secrets | [AGENTS.md](cli/AGENTS.md) · [README.md](cli/README.md) |
 | [phnx-labs/agi-ext](https://github.com/phnx-labs/agi-ext) | AGI EXT VS Code extension (own repo) — agent terminals as tabs, Fleet dashboard, dispatch | that repo's AGENTS.md |
 | [phnx-labs/agi-menu](https://github.com/phnx-labs/agi-menu) | AGI Menu, the macOS menu-bar helper (own repo) — published as `MenubarHelper.app.zip` on this repo's `menubar/v<x.y.z>` tag, installed by `agents menubar` | that repo's AGENTS.md · [cli/docs/menubar.md](cli/docs/menubar.md) (the contract) |
-| [`native/computer-mac`](native/computer-mac) | macOS `agents computer` backend (Swift) | [AGENTS.md](native/computer-mac/AGENTS.md) · [README.md](native/computer-mac/README.md) |
-| [`native/computer-win`](native/computer-win) | Windows `agents computer` backend (C#/.NET) | [AGENTS.md](native/computer-win/AGENTS.md) · [README.md](native/computer-win/README.md) |
+| `@phnx-labs/computer-cli` | The standalone `computer` engine (own repo) — the helper daemons, the RPC, and the autonomous loop behind `agents computer`. agents-cli is a thin consumer of it (PHNX-4075) | [cli/docs/computer.md](cli/docs/computer.md) (the contract) |
 | [`packages/session-tracker`](packages/session-tracker) | Live-session **writer** (SessionStart hook) | [AGENTS.md](packages/session-tracker/AGENTS.md) · [README.md](packages/session-tracker/README.md) |
 | [`packages/agi-cli`](packages/agi-cli) | Deprecated alias — re-exports the canonical CLI | [README.md](packages/agi-cli/README.md) |
 | [`packages/swarmify-mirror`](packages/swarmify-mirror) | Deprecated npm-redirect stub | [README.md](packages/swarmify-mirror/README.md) |
@@ -102,8 +98,8 @@ and [`architecture.md`](cli/docs/architecture.md).
   agent version runs in an isolated **version home** (`HOME` swapped before exec) so
   configs never bleed between versions.
 - **Real-world tool surfaces.** `agents browser` (web) and `agents computer` (native
-  desktop, backed by the `native/computer-*` daemons) are the essential tools that let an
-  agent act on real UIs — the difference between talking about a task and doing it.
+  desktop, a thin consumer of the standalone `computer` CLI) are the essential tools that
+  let an agent act on real UIs — the difference between talking about a task and doing it.
 - **Sessions.** Two things wear the name: a durable **transcript** (on disk, indexed in
   `sessions.db`, read by `agents sessions`) and an ephemeral **live identity** (which pid
   is which session right now, surfaced by `--active`). Transcripts sync across the fleet,
@@ -207,7 +203,7 @@ them (see [§Code review conventions](#code-review-conventions-the-reviewer-must
 > | **R1** | Required CI check, event → terminal state | **< 60 s** | p50 120 s · p90 133 s (26 green runs on `main`) |
 > | **R2** | Ordinary release, start → registry visible + install smoke | **< 60 s** | never completes unattended — wedges on a missing producer (PHNX-3696) |
 > | **R3** | A CLI release rebuilds **nothing** but the CLI — no menubar, no computer helper, no signing, no notarization on the ordinary path | absolute | **held and pinned** — `cli/scripts/release.test.ts` §"an ordinary release is CLI-only" behaviorally asserts no helper-manifest touch and `--with-helpers` defaulting OFF; the no-rebuild/no-notarize claim is pinned separately in §"release.sh attestation promotion (RUSH-2666)" |
-> | **R4** | AGI Menu and the computer helpers release **separately**, on their own cadence and their own tags | absolute | held — `menubar/v*`, `keychain/v*`, `computer-mac/v*`, `computer-win/v*` with floors in `cli/src/lib/helper-versions.ts` |
+> | **R4** | AGI Menu and the computer helpers release **separately**, on their own cadence and their own tags | absolute | held, and further decoupled — AGI Menu on `menubar/v*` with its floor in `cli/src/lib/helper-versions.ts`; the keychain helper ships with the standalone `secrets` CLI (PHNX-3989) and the computer helpers with the standalone `computer` CLI (PHNX-4075), each publishing from its own repo on its own cadence. Nothing about the requirement changed — the separation moved from separate tags in this repo to separate repos |
 > | **R5** | An installed CLI and its installed helpers **auto-update** from the public channel | absolute | **held** — the CLI checks `registry.npmjs.org` once per 24h and self-installs (`cli/src/lib/self-update.ts`, entered from `bootstrap.ts` `checkForUpdates()`, opt out with `AGENTS_CLI_DISABLE_AUTO_UPDATE=1`; `agents upgrade --yes` is the non-interactive path). Helpers self-download against the floors in `cli/src/lib/helper-versions.ts`. Homebrew is **not** a channel today; npm is |
 >
 > R1 and R2 are hard ceilings, not averages. R3/R4/R5 are structural and have no
@@ -289,8 +285,9 @@ executes the path, not one that greps the script.
 **A CLI release rebuilds only the CLI (R3).** No menubar build, no computer-helper
 build, no codesign, no notarization on the ordinary path. Native helpers are
 content-addressed and independently versioned on their own tags (R4), so unchanged
-helpers are reused and a helper release is its own train
-(`publish-computer-helper-mac.sh`, `publish-computer-win.sh`). Apple
+helpers are reused and a helper release is its own train. The computer helpers left
+this repo entirely with the standalone `computer` engine (PHNX-4075), so there is no
+longer a computer-helper publish script here to run. Apple
 signing/notarization runs only when a **helper's** own inputs change and is outside the
 ordinary release path entirely. The release train remains the only publisher.
 
@@ -320,9 +317,6 @@ one-off command in a PR.
 | ext / agents-dbg build + release | in [phnx-labs/agi-ext](https://github.com/phnx-labs/agi-ext) `scripts/` | AGI EXT and the agents-dbg app moved with the extension repo (RUSH-3189) |
 | AGI Menu (menubar) build + release | in [phnx-labs/agi-menu](https://github.com/phnx-labs/agi-menu) `scripts/release.sh <x.y.z>` | builds + signs + notarizes the helper there and publishes `MenubarHelper.app.zip` + `.sha256` + `menubar-source.txt` on THIS repo's `menubar/v<x.y.z>` tag (PHNX-4036). Bump the `menubar` floor in [`cli/src/lib/helper-versions.ts`](cli/src/lib/helper-versions.ts) afterwards |
 | AGI Menu (menubar) stage | [`cli/scripts/stage-menubar-helper.sh`](cli/scripts/stage-menubar-helper.sh) `[--fetch-only] [--json]` | downloads the published `menubar/v<floor>` asset, verifies its sha256 (+ codesign, Gatekeeper, and the DR-pin gate on macOS) and stages it at `cli/bin/MenubarHelper.app`; `--fetch-only` is what `release-attestation-produce.sh --with-helpers` records the helper manifest from. Never builds — there is no menubar source in this repo |
-| computer-mac build | [`native/computer-mac/scripts/build.sh`](native/computer-mac/scripts/build.sh) | Swift daemon |
-| computer-win release | [`cli/scripts/publish-computer-win.sh`](cli/scripts/publish-computer-win.sh) `<x.y.z> [--apply]` | cuts `computer-win/v<x.y.z>`, which is what triggers the exe build + upload. Dry-run by default; refuses an existing tag (helper releases are immutable — the upload uses `--clobber`). Symmetric with `publish-computer-helper-mac.sh`. Bump the `computer-win` floor in [`cli/src/lib/helper-versions.ts`](cli/src/lib/helper-versions.ts) afterwards — the tag makes the build downloadable, the floor makes a CLI ask for it |
-| computer-mac release | [`cli/scripts/publish-computer-helper-mac.sh`](cli/scripts/publish-computer-helper-mac.sh) `<x.y.z>` | builds + signs + notarizes the helper and cuts `computer-mac/v<x.y.z>`. The version is the HELPER's and is **required** — it is deliberately not defaulted from `cli/package.json`, since the helper no longer shares the CLI's version line (PHNX-3228: it published to the CLI's `v<version>` tag, an address `download.ts` never requests). Refuses an existing tag; run it under `agents secrets exec apple.com`. Bump the `computer-mac` floor in [`cli/src/lib/helper-versions.ts`](cli/src/lib/helper-versions.ts) afterwards |
 
 ### Never install a dev build over the user's `agents`
 

@@ -753,7 +753,7 @@ describeEvents('event-kind table (the drift guard for out-of-process producers)'
     // browser.navigate/browser.screenshot were declared in the EventType union
     // but never emitted anywhere — this pins them (and the new computer.action
     // kind) as accepted, info-level events now that BrowserService and the
-    // computer-actions CLI actually call emit() with them.
+    // computer action recording actually calls emit() with them.
     for (const kind of ['browser.navigate', 'browser.screenshot', 'computer.action']) {
       expect(EVENT_TYPES).toContain(kind);
       expect(isEventType(kind)).toBe(true);

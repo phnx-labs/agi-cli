@@ -5723,56 +5723,28 @@
           "negate": false
         }
       ],
+      "examples": "# One-time: install the engine, the helper, and the TCC grants\n      npm i -g @phnx-labs/computer-cli\n      agents setup computer\n\n      # Allow an app, then reload so the daemon picks it up\n      #   ~/.agents/permissions/groups/computer.yaml:  allow: [\"Computer(com.apple.notes)\"]\n      agents computer reload\n\n      # Observe, then act\n      agents computer apps --json\n      agents computer describe --bundle com.apple.notes\n      agents computer click --bundle com.apple.notes --id <element-id>\n\n      # A remote Windows device over the fleet\n      agents computer setup --device win-mini\n      agents computer start --device win-mini\n      agents computer screenshot --device win-mini -o /tmp/win.png\n      agents computer stop  --device win-mini",
+      "notes": "The engine is the standalone `computer` CLI (npm i -g @phnx-labs/computer-cli);\n      agents-cli supplies the permission allow list, --device fleet resolution, and\n      the session/feed history. Per-verb flags are the engine's — `agents computer\n      click --help` asks it directly.\n\n      Apps are deny-by-default: a verb only reaches an app named by a\n      Computer(<bundle-id>) rule in ~/.agents/permissions/groups/. Edit a group,\n      then `agents computer reload`.\n\n      `agents computer sessions` (and `agents sessions --computer`) reads the\n      action history agents-cli records — it never leaves this CLI.",
       "subcommands": [
         {
           "name": "apps",
           "path": "computer apps",
           "aliases": [],
-          "description": "List apps the daemon may drive (allow-listed + running)",
-          "args": [],
+          "description": "List running apps the policy allows, with pid and bundle id",
+          "args": [
+            {
+              "name": "args",
+              "required": false,
+              "variadic": true,
+              "description": "Arguments and flags for the verb (see `agents computer <verb> --help`)"
+            }
+          ],
           "options": [
             {
-              "flags": "--json",
-              "description": "Emit JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--bundle <id>",
-              "description": "Bundle id of the target app (default: frontmost allow-listed app)",
-              "long": "--bundle",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--pid <n>",
-              "description": "Target pid directly (overrides --bundle)",
-              "long": "--pid",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
               "flags": "--device <name>",
-              "description": "Drive a remote Windows device (requires `agents computer start --device <name>` first)",
+              "description": "Drive a remote device (requires `agents computer start --device <name>` first)",
               "long": "--device",
               "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
               "optional": false,
               "variadic": false,
               "negate": false
@@ -5784,69 +5756,21 @@
           "name": "ax-action",
           "path": "computer ax-action",
           "aliases": [],
-          "description": "Perform an arbitrary AX action (AXConfirm, AXCancel, AXRaise, ...) on an element",
-          "args": [],
+          "description": "Perform a raw accessibility action on an element",
+          "args": [
+            {
+              "name": "args",
+              "required": false,
+              "variadic": true,
+              "description": "Arguments and flags for the verb (see `agents computer <verb> --help`)"
+            }
+          ],
           "options": [
             {
-              "flags": "--id <@eN>",
-              "description": "Element id from `describe`",
-              "long": "--id",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--action <name>",
-              "description": "AX action name",
-              "long": "--action",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--json",
-              "description": "Emit JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--bundle <id>",
-              "description": "Bundle id of the target app (default: frontmost allow-listed app)",
-              "long": "--bundle",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--pid <n>",
-              "description": "Target pid directly (overrides --bundle)",
-              "long": "--pid",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
               "flags": "--device <name>",
-              "description": "Drive a remote Windows device (requires `agents computer start --device <name>` first)",
+              "description": "Drive a remote device (requires `agents computer start --device <name>` first)",
               "long": "--device",
               "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
               "optional": false,
               "variadic": false,
               "negate": false
@@ -5858,105 +5782,21 @@
           "name": "click",
           "path": "computer click",
           "aliases": [],
-          "description": "Click an element (--id) or screen coordinate (--x --y)",
-          "args": [],
+          "description": "Click an element by id, or a coordinate pair",
+          "args": [
+            {
+              "name": "args",
+              "required": false,
+              "variadic": true,
+              "description": "Arguments and flags for the verb (see `agents computer <verb> --help`)"
+            }
+          ],
           "options": [
             {
-              "flags": "--count <n>",
-              "description": "Click count (2 = double-click)",
-              "long": "--count",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--background",
-              "description": "Focus-safe postToPid delivery (plain AppKit only; skips HID tap)",
-              "long": "--background",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--raise",
-              "description": "Bring the target app to the front first (steals your foreground + keyboard focus; ignored in element mode --id)",
-              "long": "--raise",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--json",
-              "description": "Emit JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--bundle <id>",
-              "description": "Bundle id of the target app (default: frontmost allow-listed app)",
-              "long": "--bundle",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--pid <n>",
-              "description": "Target pid directly (overrides --bundle)",
-              "long": "--pid",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
               "flags": "--device <name>",
-              "description": "Drive a remote Windows device (requires `agents computer start --device <name>` first)",
+              "description": "Drive a remote device (requires `agents computer start --device <name>` first)",
               "long": "--device",
               "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--id <@eN>",
-              "description": "Element id from `describe` (focus-safe: no foreground steal, no cursor move)",
-              "long": "--id",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--x <n>",
-              "description": "X coordinate (global, points; moves your real cursor, needs app frontmost)",
-              "long": "--x",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--y <n>",
-              "description": "Y coordinate (global, points; moves your real cursor, needs app frontmost)",
-              "long": "--y",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
               "optional": false,
               "variadic": false,
               "negate": false
@@ -5968,60 +5808,21 @@
           "name": "describe",
           "path": "computer describe",
           "aliases": [],
-          "description": "Dump the accessibility tree (element ids feed click/type --id)",
-          "args": [],
+          "description": "Dump an app's accessibility tree — the element ids the interact verbs target",
+          "args": [
+            {
+              "name": "args",
+              "required": false,
+              "variadic": true,
+              "description": "Arguments and flags for the verb (see `agents computer <verb> --help`)"
+            }
+          ],
           "options": [
             {
-              "flags": "--depth <n>",
-              "description": "Max tree depth",
-              "long": "--depth",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--json",
-              "description": "Emit compact JSON (default: pretty)",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--bundle <id>",
-              "description": "Bundle id of the target app (default: frontmost allow-listed app)",
-              "long": "--bundle",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--pid <n>",
-              "description": "Target pid directly (overrides --bundle)",
-              "long": "--pid",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
               "flags": "--device <name>",
-              "description": "Drive a remote Windows device (requires `agents computer start --device <name>` first)",
+              "description": "Drive a remote device (requires `agents computer start --device <name>` first)",
               "long": "--device",
               "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
               "optional": false,
               "variadic": false,
               "negate": false
@@ -6033,97 +5834,21 @@
           "name": "drag",
           "path": "computer drag",
           "aliases": [],
-          "description": "Drag from one coordinate to another",
-          "args": [],
+          "description": "Drag from one point or element to another",
+          "args": [
+            {
+              "name": "args",
+              "required": false,
+              "variadic": true,
+              "description": "Arguments and flags for the verb (see `agents computer <verb> --help`)"
+            }
+          ],
           "options": [
             {
-              "flags": "--from <x,y>",
-              "description": "Start coordinate \"x,y\"",
-              "long": "--from",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--to <x,y>",
-              "description": "End coordinate \"x,y\"",
-              "long": "--to",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--button <left|right>",
-              "description": "Mouse button",
-              "long": "--button",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "left"
-            },
-            {
-              "flags": "--background",
-              "description": "Focus-safe postToPid delivery (plain AppKit only)",
-              "long": "--background",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--raise",
-              "description": "Bring the target app to the front first (steals your foreground + keyboard focus; ignored in element mode --id)",
-              "long": "--raise",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--json",
-              "description": "Emit JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--bundle <id>",
-              "description": "Bundle id of the target app (default: frontmost allow-listed app)",
-              "long": "--bundle",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--pid <n>",
-              "description": "Target pid directly (overrides --bundle)",
-              "long": "--pid",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
               "flags": "--device <name>",
-              "description": "Drive a remote Windows device (requires `agents computer start --device <name>` first)",
+              "description": "Drive a remote device (requires `agents computer start --device <name>` first)",
               "long": "--device",
               "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
               "optional": false,
               "variadic": false,
               "negate": false
@@ -6135,60 +5860,21 @@
           "name": "focus",
           "path": "computer focus",
           "aliases": [],
-          "description": "Set keyboard focus to an element (so type-text/key land there)",
-          "args": [],
+          "description": "Move keyboard focus to an element",
+          "args": [
+            {
+              "name": "args",
+              "required": false,
+              "variadic": true,
+              "description": "Arguments and flags for the verb (see `agents computer <verb> --help`)"
+            }
+          ],
           "options": [
             {
-              "flags": "--id <@eN>",
-              "description": "Element id from `describe`",
-              "long": "--id",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--json",
-              "description": "Emit JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--bundle <id>",
-              "description": "Bundle id of the target app (default: frontmost allow-listed app)",
-              "long": "--bundle",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--pid <n>",
-              "description": "Target pid directly (overrides --bundle)",
-              "long": "--pid",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
               "flags": "--device <name>",
-              "description": "Drive a remote Windows device (requires `agents computer start --device <name>` first)",
+              "description": "Drive a remote device (requires `agents computer start --device <name>` first)",
               "long": "--device",
               "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
               "optional": false,
               "variadic": false,
               "negate": false
@@ -6200,69 +5886,21 @@
           "name": "get-text",
           "path": "computer get-text",
           "aliases": [],
-          "description": "Extract visible text from the app (or a subtree via --id)",
-          "args": [],
+          "description": "Read the text content of an element or a whole window",
+          "args": [
+            {
+              "name": "args",
+              "required": false,
+              "variadic": true,
+              "description": "Arguments and flags for the verb (see `agents computer <verb> --help`)"
+            }
+          ],
           "options": [
             {
-              "flags": "--id <@eN>",
-              "description": "Element id from `describe` to scope the extraction",
-              "long": "--id",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--max-chars <n>",
-              "description": "Cap the extracted text length",
-              "long": "--max-chars",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--json",
-              "description": "Emit JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--bundle <id>",
-              "description": "Bundle id of the target app (default: frontmost allow-listed app)",
-              "long": "--bundle",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--pid <n>",
-              "description": "Target pid directly (overrides --bundle)",
-              "long": "--pid",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
               "flags": "--device <name>",
-              "description": "Drive a remote Windows device (requires `agents computer start --device <name>` first)",
+              "description": "Drive a remote device (requires `agents computer start --device <name>` first)",
               "long": "--device",
               "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
               "optional": false,
               "variadic": false,
               "negate": false
@@ -6274,78 +5912,21 @@
           "name": "key",
           "path": "computer key",
           "aliases": [],
-          "description": "Send a key chord, e.g. \"cmd+shift+s\", \"enter\", \"esc\"",
-          "args": [],
+          "description": "Send a key or chord (e.g. cmd+s, escape)",
+          "args": [
+            {
+              "name": "args",
+              "required": false,
+              "variadic": true,
+              "description": "Arguments and flags for the verb (see `agents computer <verb> --help`)"
+            }
+          ],
           "options": [
             {
-              "flags": "--keys <chord>",
-              "description": "Key chord",
-              "long": "--keys",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--raise",
-              "description": "Bring the target app to the front first (steals your foreground + keyboard focus; ignored in element mode --id)",
-              "long": "--raise",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--require-frontmost",
-              "description": "Fail (not warn) if the target is not the frontmost app",
-              "long": "--require-frontmost",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--json",
-              "description": "Emit JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--bundle <id>",
-              "description": "Bundle id of the target app (default: frontmost allow-listed app)",
-              "long": "--bundle",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--pid <n>",
-              "description": "Target pid directly (overrides --bundle)",
-              "long": "--pid",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
               "flags": "--device <name>",
-              "description": "Drive a remote Windows device (requires `agents computer start --device <name>` first)",
+              "description": "Drive a remote device (requires `agents computer start --device <name>` first)",
               "long": "--device",
               "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
               "optional": false,
               "variadic": false,
               "negate": false
@@ -6357,60 +5938,21 @@
           "name": "launch",
           "path": "computer launch",
           "aliases": [],
-          "description": "Launch an app by bundle id, path, or name",
-          "args": [],
+          "description": "Launch an allow-listed app by bundle id and wait for it to be ready",
+          "args": [
+            {
+              "name": "args",
+              "required": false,
+              "variadic": true,
+              "description": "Arguments and flags for the verb (see `agents computer <verb> --help`)"
+            }
+          ],
           "options": [
             {
-              "flags": "--bundle <id>",
-              "description": "Bundle id (e.g. com.apple.TextEdit)",
-              "long": "--bundle",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--path <p>",
-              "description": "Path to the .app bundle",
-              "long": "--path",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--name <s>",
-              "description": "App name (resolved via /Applications and LaunchServices)",
-              "long": "--name",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
               "flags": "--device <name>",
-              "description": "Drive a remote Windows device (requires `agents computer start --device <name>` first)",
+              "description": "Drive a remote device (requires `agents computer start --device <name>` first)",
               "long": "--device",
               "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--json",
-              "description": "Emit JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
               "optional": false,
               "variadic": false,
               "negate": false
@@ -6422,69 +5964,21 @@
           "name": "raise",
           "path": "computer raise",
           "aliases": [],
-          "description": "Bring an app (or a specific window) to the front — switches Spaces for fullscreen windows",
-          "args": [],
+          "description": "Bring an app to the front",
+          "args": [
+            {
+              "name": "args",
+              "required": false,
+              "variadic": true,
+              "description": "Arguments and flags for the verb (see `agents computer <verb> --help`)"
+            }
+          ],
           "options": [
             {
-              "flags": "--window-id <n>",
-              "description": "Raise a specific window by id (from `screenshot --list`)",
-              "long": "--window-id",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--title <s>",
-              "description": "Raise the window whose title contains this string",
-              "long": "--title",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--json",
-              "description": "Emit JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--bundle <id>",
-              "description": "Bundle id of the target app (default: frontmost allow-listed app)",
-              "long": "--bundle",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--pid <n>",
-              "description": "Target pid directly (overrides --bundle)",
-              "long": "--pid",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
               "flags": "--device <name>",
-              "description": "Drive a remote Windows device (requires `agents computer start --device <name>` first)",
+              "description": "Drive a remote device (requires `agents computer start --device <name>` first)",
               "long": "--device",
               "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
               "optional": false,
               "variadic": false,
               "negate": false
@@ -6497,23 +5991,20 @@
           "path": "computer reload",
           "aliases": [],
           "description": "Reload the allow-list policy (SIGHUP the local daemon) — or restart a remote Windows daemon with --device",
-          "args": [],
+          "args": [
+            {
+              "name": "args",
+              "required": false,
+              "variadic": true,
+              "description": ""
+            }
+          ],
           "options": [
             {
               "flags": "--device <name>",
               "description": "Restart the remote Windows daemon (its scheduled task) instead of SIGHUPing the local one",
               "long": "--device",
               "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
               "optional": false,
               "variadic": false,
               "negate": false
@@ -6525,78 +6016,21 @@
           "name": "right-click",
           "path": "computer right-click",
           "aliases": [],
-          "description": "Right-click (context menu) an element or coordinate",
-          "args": [],
+          "description": "Right-click an element by id, or a coordinate pair",
+          "args": [
+            {
+              "name": "args",
+              "required": false,
+              "variadic": true,
+              "description": "Arguments and flags for the verb (see `agents computer <verb> --help`)"
+            }
+          ],
           "options": [
             {
-              "flags": "--json",
-              "description": "Emit JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--bundle <id>",
-              "description": "Bundle id of the target app (default: frontmost allow-listed app)",
-              "long": "--bundle",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--pid <n>",
-              "description": "Target pid directly (overrides --bundle)",
-              "long": "--pid",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
               "flags": "--device <name>",
-              "description": "Drive a remote Windows device (requires `agents computer start --device <name>` first)",
+              "description": "Drive a remote device (requires `agents computer start --device <name>` first)",
               "long": "--device",
               "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--id <@eN>",
-              "description": "Element id from `describe` (focus-safe: no foreground steal, no cursor move)",
-              "long": "--id",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--x <n>",
-              "description": "X coordinate (global, points; moves your real cursor, needs app frontmost)",
-              "long": "--x",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--y <n>",
-              "description": "Y coordinate (global, points; moves your real cursor, needs app frontmost)",
-              "long": "--y",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
               "optional": false,
               "variadic": false,
               "negate": false
@@ -6608,89 +6042,21 @@
           "name": "run",
           "path": "computer run",
           "aliases": [],
-          "description": "Autonomously drive an app from a natural-language task (embedded model loop over the computer verbs)",
-          "args": [],
+          "description": "Autonomously drive an app from a natural-language task (model loop over the computer verbs)",
+          "args": [
+            {
+              "name": "args",
+              "required": false,
+              "variadic": true,
+              "description": "Arguments and flags for the verb (see `agents computer <verb> --help`)"
+            }
+          ],
           "options": [
             {
-              "flags": "--task <s>",
-              "description": "Natural-language task, e.g. \"open Notes and write a haiku\"",
-              "long": "--task",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--bundle <id>",
-              "description": "Bundle id to focus the loop on (default: frontmost allow-listed app)",
-              "long": "--bundle",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--base-url <url>",
-              "description": "Reasoning model base URL — Anthropic wire shape (default: https://api.anthropic.com; set to a local Ollama/vLLM/LiteLLM endpoint for offline parity)",
-              "long": "--base-url",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--model <id>",
-              "description": "Model id (default: claude-sonnet-4-6)",
-              "long": "--model",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--max-steps <n>",
-              "description": "Max model turns before giving up",
-              "long": "--max-steps",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": 12
-            },
-            {
-              "flags": "--max-tokens <n>",
-              "description": "Max tokens per model turn",
-              "long": "--max-tokens",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": 1024
-            },
-            {
               "flags": "--device <name>",
-              "description": "Drive a remote Windows device (requires `agents computer start --device <name>` first)",
+              "description": "Drive a remote device (requires `agents computer start --device <name>` first)",
               "long": "--device",
               "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--json",
-              "description": "Emit the final loop result as JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
               "optional": false,
               "variadic": false,
               "negate": false
@@ -6703,97 +6069,20 @@
           "path": "computer screenshot",
           "aliases": [],
           "description": "Capture a window (default: largest), enumerate windows (--list), or the whole display (--display)",
-          "args": [],
+          "args": [
+            {
+              "name": "args",
+              "required": false,
+              "variadic": true,
+              "description": "Arguments and flags for the verb (see `agents computer <verb> --help`)"
+            }
+          ],
           "options": [
             {
-              "flags": "--bundle <id>",
-              "description": "Bundle id to capture (default: frontmost allow-listed app)",
-              "long": "--bundle",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--pid <n>",
-              "description": "Target pid directly (overrides --bundle)",
-              "long": "--pid",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
               "flags": "--device <name>",
-              "description": "Drive a remote Windows device (requires `agents computer start --device <name>` first)",
+              "description": "Drive a remote device (requires `agents computer start --device <name>` first)",
               "long": "--device",
               "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--list",
-              "description": "List the app's windows (id/title/layer/bounds) instead of capturing — reveals modals/popups",
-              "long": "--list",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--window-id <n>",
-              "description": "Capture a specific window by id (from --list)",
-              "long": "--window-id",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--display",
-              "description": "Capture the whole display the app is on (composites stacked modals)",
-              "long": "--display",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--out <path>",
-              "description": "Output image path — extension auto-corrected to the encoded format (JPEG on macOS, PNG on a Windows --device)",
-              "long": "--out",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "./computer-screenshot.jpg"
-            },
-            {
-              "flags": "--quality <n>",
-              "description": "JPEG quality 1-100 (macOS capture only; the Windows helper encodes lossless PNG and ignores this)",
-              "long": "--quality",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": 85
-            },
-            {
-              "flags": "--json",
-              "description": "Emit JSON (metadata for captures; window list for --list)",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
               "optional": false,
               "variadic": false,
               "negate": false
@@ -6805,105 +6094,21 @@
           "name": "scroll",
           "path": "computer scroll",
           "aliases": [],
-          "description": "Scroll by a pixel delta at an element or coordinate",
-          "args": [],
+          "description": "Scroll an element or the window under a coordinate",
+          "args": [
+            {
+              "name": "args",
+              "required": false,
+              "variadic": true,
+              "description": "Arguments and flags for the verb (see `agents computer <verb> --help`)"
+            }
+          ],
           "options": [
             {
-              "flags": "--dy <n>",
-              "description": "Vertical delta (negative = down)",
-              "long": "--dy",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--dx <n>",
-              "description": "Horizontal delta",
-              "long": "--dx",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--raise",
-              "description": "Bring the target app to the front first (steals your foreground + keyboard focus; ignored in element mode --id)",
-              "long": "--raise",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--json",
-              "description": "Emit JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--bundle <id>",
-              "description": "Bundle id of the target app (default: frontmost allow-listed app)",
-              "long": "--bundle",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--pid <n>",
-              "description": "Target pid directly (overrides --bundle)",
-              "long": "--pid",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
               "flags": "--device <name>",
-              "description": "Drive a remote Windows device (requires `agents computer start --device <name>` first)",
+              "description": "Drive a remote device (requires `agents computer start --device <name>` first)",
               "long": "--device",
               "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--id <@eN>",
-              "description": "Element id from `describe` (focus-safe: no foreground steal, no cursor move)",
-              "long": "--id",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--x <n>",
-              "description": "X coordinate (global, points; moves your real cursor, needs app frontmost)",
-              "long": "--x",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--y <n>",
-              "description": "Y coordinate (global, points; moves your real cursor, needs app frontmost)",
-              "long": "--y",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
               "optional": false,
               "variadic": false,
               "negate": false
@@ -6974,23 +6179,20 @@
             "install-helper"
           ],
           "description": "Install the helper — locally to /Applications/ (macOS), or to a remote Windows device with --device",
-          "args": [],
+          "args": [
+            {
+              "name": "args",
+              "required": false,
+              "variadic": true,
+              "description": ""
+            }
+          ],
           "options": [
             {
               "flags": "--device <name>",
               "description": "Provision a remote Windows device (push the exe + register a LOGON task) instead of installing locally",
               "long": "--device",
               "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
               "optional": false,
               "variadic": false,
               "negate": false
@@ -7003,23 +6205,20 @@
           "path": "computer start",
           "aliases": [],
           "description": "Activate the helper daemon — local launchd (macOS) or a remote Windows tunnel with --device",
-          "args": [],
+          "args": [
+            {
+              "name": "args",
+              "required": false,
+              "variadic": true,
+              "description": ""
+            }
+          ],
           "options": [
             {
               "flags": "--device <name>",
               "description": "Open a tunnel to the remote Windows daemon and record it for --device verbs",
               "long": "--device",
               "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
               "optional": false,
               "variadic": false,
               "negate": false
@@ -7032,23 +6231,20 @@
           "path": "computer status",
           "aliases": [],
           "description": "Report install state, daemon state, and Accessibility trust — or a remote Windows daemon with --device",
-          "args": [],
+          "args": [
+            {
+              "name": "args",
+              "required": false,
+              "variadic": true,
+              "description": ""
+            }
+          ],
           "options": [
             {
               "flags": "--device <name>",
               "description": "Report the remote Windows daemon (tunnel + liveness) instead of the local helper",
               "long": "--device",
               "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
               "optional": false,
               "variadic": false,
               "negate": false
@@ -7061,23 +6257,20 @@
           "path": "computer stop",
           "aliases": [],
           "description": "Deactivate the helper daemon — local launchd (macOS) or a remote Windows tunnel with --device",
-          "args": [],
+          "args": [
+            {
+              "name": "args",
+              "required": false,
+              "variadic": true,
+              "description": ""
+            }
+          ],
           "options": [
             {
               "flags": "--device <name>",
               "description": "Tear down the remote tunnel and unregister the scheduled task",
               "long": "--device",
               "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
               "optional": false,
               "variadic": false,
               "negate": false
@@ -7089,105 +6282,21 @@
           "name": "type",
           "path": "computer type",
           "aliases": [],
-          "description": "Set a field value (--id) or paste at a coordinate (--x --y)",
-          "args": [],
+          "description": "Type into a focused element by id",
+          "args": [
+            {
+              "name": "args",
+              "required": false,
+              "variadic": true,
+              "description": "Arguments and flags for the verb (see `agents computer <verb> --help`)"
+            }
+          ],
           "options": [
             {
-              "flags": "--text <s>",
-              "description": "Text to enter",
-              "long": "--text",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--commit",
-              "description": "Commit after typing (AXConfirm / Return) so the value reaches the model",
-              "long": "--commit",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--allow-secure-field",
-              "description": "Permit typing into a password field",
-              "long": "--allow-secure-field",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--json",
-              "description": "Emit JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--bundle <id>",
-              "description": "Bundle id of the target app (default: frontmost allow-listed app)",
-              "long": "--bundle",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--pid <n>",
-              "description": "Target pid directly (overrides --bundle)",
-              "long": "--pid",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
               "flags": "--device <name>",
-              "description": "Drive a remote Windows device (requires `agents computer start --device <name>` first)",
+              "description": "Drive a remote device (requires `agents computer start --device <name>` first)",
               "long": "--device",
               "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--id <@eN>",
-              "description": "Element id from `describe` (focus-safe: no foreground steal, no cursor move)",
-              "long": "--id",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--x <n>",
-              "description": "X coordinate (global, points; moves your real cursor, needs app frontmost)",
-              "long": "--x",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--y <n>",
-              "description": "Y coordinate (global, points; moves your real cursor, needs app frontmost)",
-              "long": "--y",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
               "optional": false,
               "variadic": false,
               "negate": false
@@ -7199,96 +6308,21 @@
           "name": "type-text",
           "path": "computer type-text",
           "aliases": [],
-          "description": "Type an arbitrary unicode string into the focused field (focus first via click/focus)",
-          "args": [],
+          "description": "Type a literal string at the current focus",
+          "args": [
+            {
+              "name": "args",
+              "required": false,
+              "variadic": true,
+              "description": "Arguments and flags for the verb (see `agents computer <verb> --help`)"
+            }
+          ],
           "options": [
             {
-              "flags": "--text <s>",
-              "description": "Text to type",
-              "long": "--text",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--commit",
-              "description": "Press Return after typing",
-              "long": "--commit",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--raise",
-              "description": "Bring the target app to the front first (steals your foreground + keyboard focus; ignored in element mode --id)",
-              "long": "--raise",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--require-frontmost",
-              "description": "Fail (not warn) if the target is not the frontmost app",
-              "long": "--require-frontmost",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--char-delay <ms>",
-              "description": "Inter-character delay in ms (default 4; raise for lossy keyboard relays like VM guests, e.g. 25). Clamped to [1, 250].",
-              "long": "--char-delay",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--json",
-              "description": "Emit JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--bundle <id>",
-              "description": "Bundle id of the target app (default: frontmost allow-listed app)",
-              "long": "--bundle",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--pid <n>",
-              "description": "Target pid directly (overrides --bundle)",
-              "long": "--pid",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
               "flags": "--device <name>",
-              "description": "Drive a remote Windows device (requires `agents computer start --device <name>` first)",
+              "description": "Drive a remote device (requires `agents computer start --device <name>` first)",
               "long": "--device",
               "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
               "optional": false,
               "variadic": false,
               "negate": false
@@ -7300,114 +6334,21 @@
           "name": "wait",
           "path": "computer wait",
           "aliases": [],
-          "description": "Wait for a duration (--duration) or for an element (--id / --role/--label) to satisfy --until",
-          "args": [],
+          "description": "Wait for an element or condition to appear before continuing",
+          "args": [
+            {
+              "name": "args",
+              "required": false,
+              "variadic": true,
+              "description": "Arguments and flags for the verb (see `agents computer <verb> --help`)"
+            }
+          ],
           "options": [
             {
-              "flags": "--duration <ms>",
-              "description": "Unconditional sleep in ms (50-30000)",
-              "long": "--duration",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--id <@eN>",
-              "description": "Element id from `describe` to poll",
-              "long": "--id",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--until <cond>",
-              "description": "Condition: exists | enabled | disappears (default: exists)",
-              "long": "--until",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--role <s>",
-              "description": "Locator: AX role (e.g. AXButton)",
-              "long": "--role",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--label <s>",
-              "description": "Locator: element label",
-              "long": "--label",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--identifier <s>",
-              "description": "Locator: AX identifier",
-              "long": "--identifier",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--timeout <ms>",
-              "description": "Poll timeout in ms (default 5000)",
-              "long": "--timeout",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--json",
-              "description": "Emit JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--bundle <id>",
-              "description": "Bundle id of the target app (default: frontmost allow-listed app)",
-              "long": "--bundle",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--pid <n>",
-              "description": "Target pid directly (overrides --bundle)",
-              "long": "--pid",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
               "flags": "--device <name>",
-              "description": "Drive a remote Windows device (requires `agents computer start --device <name>` first)",
+              "description": "Drive a remote device (requires `agents computer start --device <name>` first)",
               "long": "--device",
               "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
               "optional": false,
               "variadic": false,
               "negate": false

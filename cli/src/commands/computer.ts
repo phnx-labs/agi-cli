@@ -1,45 +1,61 @@
+/**
+ * `agents computer` — the consumer surface over the standalone `computer` CLI
+ * (PHNX-4075).
+ *
+ * WHAT THIS FILE IS NOW. Every verb below forwards its arguments verbatim to the
+ * standalone engine and propagates its exit code. agents-cli contributes four
+ * things the engine cannot know, all of them delivered as one JSON context on
+ * fd 3 (`lib/computer/context.ts`):
+ *
+ *   1. the permissions allow list, rendered from `Computer(<bundle-id>)` rules
+ *      in the agents resource layer (`lib/computer/policy.ts`);
+ *   2. `--device <name>` resolved against the fleet, and the `ssh -L` tunnel
+ *      that puts a remote daemon on loopback (`lib/computer/remote.ts`);
+ *   3. the acting actor and agent session;
+ *   4. a recorder for the action events the engine streams back on fd 4, so
+ *      `agents computer sessions` and `agents sessions --computer` keep their
+ *      history (`lib/computer/record.ts`).
+ *
+ * WHY VERB FLAGS ARE NOT REDECLARED HERE. Each passthrough verb declares only
+ * `--device` — the one flag the consumer must intercept — and takes everything
+ * else as opaque operands via `allowUnknownOption`. Mirroring the engine's flags
+ * would create a second, silently drifting copy of its surface: a flag added
+ * upstream would be rejected here as unknown until someone noticed. The engine
+ * also owns per-verb `--help` for the same reason. What agents-cli keeps is the
+ * verb CATALOG — names, one-line descriptions, help groups — because that is
+ * what makes the surface discoverable from `agents computer --help`, and a
+ * verb the engine drops should fail loud here rather than silently vanish.
+ *
+ * `sessions` is the one verb that never reaches the engine: it reads agents-cli's
+ * own event ledger.
+ */
+
 import { Command } from 'commander';
-import { execFileSync } from 'child_process';
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
-import { registerCommandGroups } from '../lib/help.js';
+import { registerCommandGroups, setHelpSections } from '../lib/help.js';
 import {
-  openComputerClient,
-  resolveHelperApp,
-  resolveHelperExec,
-  resolveSocketPath,
-  resolveLogPath,
-  resolvePolicyPath,
-  resolvePeersPath,
-  describeTransport,
-  resolveTcpEndpoint,
-  resolveVncEndpoint,
   loadComputerAllowList,
   loadDefaultPeers,
-  writeComputerPolicy,
+  resolvePeersPath,
+  resolvePolicyPath,
+  resolveTcpEndpoint,
+  resolveVncEndpoint,
   writeComputerPeers,
-} from '../lib/computer/computer-rpc.js';
+  writeComputerPolicy,
+} from '../lib/computer/policy.js';
 import {
-  setupRemoteHelper,
-  startRemoteTunnel,
-  stopRemoteHelper,
-  hydrateRemoteEnvFromState,
+  isTunnelAlive,
   readRemoteState,
-  resolveRemoteDevice,
-  REMOTE_TASK_NAME,
-  WIN_HELPER_EXE,
-} from '../lib/computer/ssh-tunnel.js';
-import { sshExec } from '../lib/ssh-exec.js';
-import { encodePowershell } from '../lib/hosts/remote-cmd.js';
-import { registerActionCommands, withClient, unwrap, pickTarget, emitComputerAction, type AppInfo } from './computer-actions.js';
-import { runComputerLoop, type LoopEvent } from '../lib/computer/loop.js';
-import { makeVerbDispatcher } from '../lib/computer/dispatch.js';
-import { makeClaudeResponder, resolveApiKey, DEFAULT_CLAUDE_MODEL, DEFAULT_CLAUDE_BASE_URL } from '../lib/computer/model.js';
-import { TASK_PREVIEW_MAX_CHARS } from '../lib/computer/sessions-list.js';
+  startRemoteTunnel,
+  stopRemoteTunnel,
+} from '../lib/computer/remote.js';
+import { buildComputerContext } from '../lib/computer/context.js';
+import { recordComputerAction } from '../lib/computer/record.js';
+import {
+  isComputerClientError,
+  resolveComputerBin,
+  runComputer,
+} from '../lib/computer-client.js';
 import { runComputerSessionsCommand } from './computer-sessions-picker.js';
-import { truncate } from '../lib/feed/events.js';
-import { namespacedServiceLabel, serviceManifestHomeEnv, serviceManagerRegistrationAllowed } from '../lib/service-manifest.js';
 
 // Help groups — mirror `agents browser` so the mental model carries over.
 const COMPUTER_HELP_GROUPS = [
@@ -51,10 +67,38 @@ const COMPUTER_HELP_GROUPS = [
   { title: 'History and discovery', names: ['sessions'] },
 ] as const;
 
-// Subcommands that manage the `--device` remote path themselves (provisioning /
-// tunnel lifecycle, or daemon-state reporting that must degrade gracefully
-// when no tunnel is recorded). Every other `--device`-bearing subcommand is a
-// plain verb that just needs the TCP endpoint hydrated before it runs.
+/**
+ * The verb catalog. Descriptions are the consumer's (they appear in
+ * `agents computer --help`); flags are the engine's.
+ *
+ * This list is the contract with the engine: `computer --verbs` must report the
+ * same names. `computer.test.ts` pins it so a drift shows up as a failing test
+ * rather than a verb that quietly stops existing.
+ */
+export const COMPUTER_PASSTHROUGH_VERBS: ReadonlyArray<{ name: string; description: string }> = [
+  { name: 'run', description: 'Autonomously drive an app from a natural-language task (model loop over the computer verbs)' },
+  { name: 'apps', description: 'List running apps the policy allows, with pid and bundle id' },
+  { name: 'describe', description: 'Dump an app\'s accessibility tree — the element ids the interact verbs target' },
+  { name: 'screenshot', description: 'Capture a window (default: largest), enumerate windows (--list), or the whole display (--display)' },
+  { name: 'get-text', description: 'Read the text content of an element or a whole window' },
+  { name: 'launch', description: 'Launch an allow-listed app by bundle id and wait for it to be ready' },
+  { name: 'raise', description: 'Bring an app to the front' },
+  { name: 'click', description: 'Click an element by id, or a coordinate pair' },
+  { name: 'right-click', description: 'Right-click an element by id, or a coordinate pair' },
+  { name: 'type', description: 'Type into a focused element by id' },
+  { name: 'type-text', description: 'Type a literal string at the current focus' },
+  { name: 'key', description: 'Send a key or chord (e.g. cmd+s, escape)' },
+  { name: 'drag', description: 'Drag from one point or element to another' },
+  { name: 'scroll', description: 'Scroll an element or the window under a coordinate' },
+  { name: 'ax-action', description: 'Perform a raw accessibility action on an element' },
+  { name: 'focus', description: 'Move keyboard focus to an element' },
+  { name: 'wait', description: 'Wait for an element or condition to appear before continuing' },
+];
+
+// Subcommands that manage the `--device` remote path themselves (tunnel
+// lifecycle, or daemon-state reporting that must degrade gracefully when no
+// tunnel is recorded). Every other `--device`-bearing subcommand is a plain verb
+// that just needs the endpoint resolved into its context before it runs.
 const REMOTE_LIFECYCLE = new Set(['setup', 'start', 'stop', 'status', 'reload']);
 
 /**
@@ -78,37 +122,80 @@ export function shouldBlockOffPlatform(opts: {
 }
 
 /**
- * Sniff the image format from the leading magic bytes: PNG starts with the
- * 8-byte signature `89 50 4E 47` ("\x89PNG"), JPEG with `FF D8 FF`. Returns the
- * canonical file extension, or null for anything else.
+ * Render the policy and peer allow lists the engine's daemon reads.
+ *
+ * Called before any lifecycle verb that (re)starts or re-reads the daemon, so a
+ * permission group edited five seconds ago is in force. The daemon fails safe:
+ * a missing or unparseable policy denies everything, which is why this runs
+ * BEFORE the engine rather than alongside it.
  */
-export function detectImageFormat(buf: Buffer): '.png' | '.jpg' | null {
-  if (buf.length >= 4 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return '.png';
-  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return '.jpg';
-  return null;
+function renderPolicyFiles(opts: { computerBin?: string; quiet?: boolean } = {}): void {
+  const allowed = loadComputerAllowList();
+  writeComputerPolicy(allowed);
+  const callers = loadDefaultPeers({ computerBin: opts.computerBin });
+  writeComputerPeers(callers);
+  if (opts.quiet) return;
+
+  console.log(`policy: ${allowed.length} app${allowed.length === 1 ? '' : 's'} allowed (${resolvePolicyPath()})`);
+  if (allowed.length > 0) {
+    const preview = allowed.slice(0, 5).join(', ');
+    const more = allowed.length > 5 ? ` (+${allowed.length - 5} more)` : '';
+    console.log(`        ${preview}${more}`);
+  } else {
+    console.log('        (no Computer(...) patterns found — everything will be denied)');
+    console.log('        add to ~/.agents/permissions/groups/<name>.yaml under allow:');
+    console.log('          - "Computer(com.apple.finder)"');
+  }
+  console.log(`peers:  ${callers.length} caller${callers.length === 1 ? '' : 's'} allowed (${resolvePeersPath()})`);
 }
 
 /**
- * Make the screenshot filename honest about its bytes. The two helper backends
- * encode DIFFERENT formats and neither re-encodes to match the requested name:
- * the macOS helper (ScreenCaptureKit) returns JPEG
- * (native/computer-mac/Sources/ComputerHelper/Screenshot.swift:207,212),
- * the Windows helper returns PNG
- * (native/computer-win/Screenshot.cs:33). So a fixed default extension
- * cannot be correct for both — the only honest path is to sniff the real format
- * and swap the extension to match. Pure so it's unit-testable.
+ * Forward one invocation to the engine and propagate its exit code.
  *
- * Returns the path to write to (caller's path with its extension corrected) and
- * whether a correction was made. Unknown formats pass through unchanged.
+ * A missing standalone is the one failure agents-cli reports itself, because it
+ * is the one the engine cannot: it prints the install line and exits 1. There is
+ * no fallback engine to reach for — that is the point of the extraction.
  */
-export function reconcileScreenshotExt(outPath: string, buf: Buffer): { path: string; corrected: boolean } {
-  const actual = detectImageFormat(buf);
-  if (!actual) return { path: outPath, corrected: false };
-  const cur = path.extname(outPath).toLowerCase();
-  const alreadyMatches = cur === actual || (actual === '.jpg' && (cur === '.jpg' || cur === '.jpeg'));
-  if (alreadyMatches) return { path: outPath, corrected: false };
-  const base = outPath.slice(0, outPath.length - path.extname(outPath).length);
-  return { path: base + actual, corrected: true };
+export async function forwardToComputer(opts: {
+  argv: string[];
+  device?: string;
+  tcpOverride?: { host: string; port: number };
+  /** Skip recording — lifecycle verbs are not user actions. */
+  record?: boolean;
+  /** Read the engine's stdout instead of letting it reach the terminal. */
+  capture?: boolean;
+}): Promise<{ exitCode: number; stdout: string }> {
+  let bin: string;
+  try {
+    bin = resolveComputerBin();
+  } catch (err) {
+    if (isComputerClientError(err)) {
+      console.error(err.message);
+      return { exitCode: 1, stdout: '' };
+    }
+    throw err;
+  }
+
+  const context = await buildComputerContext({
+    device: opts.device,
+    tcpOverride: opts.tcpOverride,
+    computerBin: bin,
+  });
+
+  return runComputer({
+    argv: opts.argv,
+    context,
+    capture: opts.capture,
+    onEvent: opts.record === false
+      ? undefined
+      : (event) => recordComputerAction(event, { device: opts.device }),
+  });
+}
+
+/** Forward, then exit with the engine's status so shells and agents see the truth. */
+async function forwardAndExit(opts: Parameters<typeof forwardToComputer>[0]): Promise<void> {
+  const { exitCode } = await forwardToComputer(opts);
+  if (exitCode !== 0) process.exit(exitCode);
 }
 
 export function registerComputerCommand(program: Command): void {
@@ -131,10 +218,14 @@ export function registerComputerCommand(program: Command): void {
         if (globals.vncPassword) process.env.COMPUTER_HELPER_VNC_PASSWORD = globals.vncPassword;
       }
       const device = globals.device;
-      // Verbs with --device reconnect to the tunnel `start --device` recorded;
-      // this sets COMPUTER_HELPER_TCP so the shared client picks the TCP transport.
+      // A plain verb against a device needs a live tunnel; the lifecycle verbs
+      // create or report on one, so they handle absence themselves.
       if (device && !REMOTE_LIFECYCLE.has(actionCommand.name())) {
-        hydrateRemoteEnvFromState(device);
+        if (!isTunnelAlive(readRemoteState(device))) {
+          console.error(`No active remote tunnel for '${device}'.`);
+          console.error(`Run:  agents computer start --device ${device}`);
+          process.exit(1);
+        }
       }
       if (shouldBlockOffPlatform({
         platform: process.platform,
@@ -151,6 +242,41 @@ export function registerComputerCommand(program: Command): void {
 
   registerComputerSubcommands(computer);
   registerCommandGroups(computer, COMPUTER_HELP_GROUPS);
+  setHelpSections(computer, {
+    examples: `
+      # One-time: install the engine, the helper, and the TCC grants
+      npm i -g @phnx-labs/computer-cli
+      agents setup computer
+
+      # Allow an app, then reload so the daemon picks it up
+      #   ~/.agents/permissions/groups/computer.yaml:  allow: ["Computer(com.apple.notes)"]
+      agents computer reload
+
+      # Observe, then act
+      agents computer apps --json
+      agents computer describe --bundle com.apple.notes
+      agents computer click --bundle com.apple.notes --id <element-id>
+
+      # A remote Windows device over the fleet
+      agents computer setup --device win-mini
+      agents computer start --device win-mini
+      agents computer screenshot --device win-mini -o /tmp/win.png
+      agents computer stop  --device win-mini
+    `,
+    notes: `
+      The engine is the standalone \`computer\` CLI (npm i -g @phnx-labs/computer-cli);
+      agents-cli supplies the permission allow list, --device fleet resolution, and
+      the session/feed history. Per-verb flags are the engine's — \`agents computer
+      click --help\` asks it directly.
+
+      Apps are deny-by-default: a verb only reaches an app named by a
+      Computer(<bundle-id>) rule in ~/.agents/permissions/groups/. Edit a group,
+      then \`agents computer reload\`.
+
+      \`agents computer sessions\` (and \`agents sessions --computer\`) reads the
+      action history agents-cli records — it never leaves this CLI.
+    `,
+  });
 }
 
 export function registerComputerSubcommands(program: Command): void {
@@ -159,11 +285,146 @@ export function registerComputerSubcommands(program: Command): void {
   registerStopCommand(program);
   registerReloadCommand(program);
   registerStatusCommand(program);
-  registerRunCommand(program);
-  registerScreenshotCommand(program);
-  registerActionCommands(program);
+  registerPassthroughVerbs(program);
   registerSessionsCommand(program);
   registerCommandGroups(program, COMPUTER_HELP_GROUPS);
+}
+
+/**
+ * Register every plain verb as an opaque forwarder.
+ *
+ * `allowUnknownOption` is what makes this thin: commander stops trying to parse
+ * flags it does not own and hands them through in `cmd.args`, so the engine's
+ * flag surface can grow without a matching edit here.
+ */
+function registerPassthroughVerbs(program: Command): void {
+  for (const verb of COMPUTER_PASSTHROUGH_VERBS) {
+    program
+      .command(verb.name)
+      .description(verb.description)
+      .option('--device <name>', 'Drive a remote device (requires `agents computer start --device <name>` first)')
+      .allowUnknownOption(true)
+      .allowExcessArguments(true)
+      .helpOption(false)
+      .action(async (opts: { device?: string }, cmd: Command) => {
+        await forwardAndExit({ argv: [verb.name, ...cmd.args], device: opts.device });
+      });
+  }
+}
+
+function registerSetupCommand(program: Command): void {
+  program
+    .command('setup')
+    .alias('install-helper')
+    .description('Install the helper — locally to /Applications/ (macOS), or to a remote Windows device with --device')
+    .option('--device <name>', 'Provision a remote Windows device (push the exe + register a LOGON task) instead of installing locally')
+    .allowUnknownOption(true)
+    .allowExcessArguments(true)
+    .helpOption(false)
+    .action(async (opts: { device?: string }, cmd: Command) => {
+      // Render the allow list first: a fresh install should come up with the
+      // user's current permissions already in force, not an empty deny-all that
+      // needs a second `reload` to fix.
+      renderPolicyFiles({ quiet: true });
+      await forwardAndExit({ argv: ['setup', ...cmd.args], device: opts.device, record: false });
+    });
+}
+
+function registerStartCommand(program: Command): void {
+  program
+    .command('start')
+    .description('Activate the helper daemon — local launchd (macOS) or a remote Windows tunnel with --device')
+    .option('--device <name>', 'Open a tunnel to the remote Windows daemon and record it for --device verbs')
+    .allowUnknownOption(true)
+    .allowExcessArguments(true)
+    .helpOption(false)
+    .action(async (opts: { device?: string }, cmd: Command) => {
+      if (opts.device) {
+        await startRemote(opts.device);
+        return;
+      }
+      // Policy must be on disk before the daemon boots and reads it.
+      renderPolicyFiles();
+      await forwardAndExit({ argv: ['start', ...cmd.args], record: false });
+    });
+}
+
+/**
+ * `start --device`: open the tunnel here (fleet), then let the engine prove the
+ * daemon answers through it. A refusal rolls the tunnel back rather than leaving
+ * a recorded endpoint that every later verb will hang on.
+ */
+async function startRemote(device: string): Promise<void> {
+  let opened: Awaited<ReturnType<typeof startRemoteTunnel>>;
+  try {
+    opened = await startRemoteTunnel(device);
+  } catch (err) {
+    console.error(`error: ${(err as Error).message}`);
+    process.exit(1);
+  }
+  const { state, rollback } = opened;
+  console.log(`tunnel: 127.0.0.1:${state.localPort} -> ${state.target} (127.0.0.1:${state.remotePort})`);
+
+  const { exitCode } = await forwardToComputer({
+    argv: ['status'],
+    device,
+    tcpOverride: { host: '127.0.0.1', port: state.localPort },
+    record: false,
+  });
+  if (exitCode !== 0) {
+    rollback();
+    console.error(`tunnel to '${device}' opened but the daemon did not answer.`);
+    console.error(`Run:  agents computer setup --device ${device}`);
+    process.exit(exitCode);
+  }
+
+  console.log(`daemon: answering (ssh pid ${state.tunnelPid})`);
+  console.log('');
+  console.log(`Drive it:  agents computer apps --device ${device}`);
+  console.log(`Stop:      agents computer stop --device ${device}`);
+}
+
+function registerStopCommand(program: Command): void {
+  program
+    .command('stop')
+    .description('Deactivate the helper daemon — local launchd (macOS) or a remote Windows tunnel with --device')
+    .option('--device <name>', 'Tear down the remote tunnel and unregister the scheduled task')
+    .allowUnknownOption(true)
+    .allowExcessArguments(true)
+    .helpOption(false)
+    .action(async (opts: { device?: string }, cmd: Command) => {
+      if (opts.device) {
+        // The engine unregisters the remote task it registered; the tunnel is
+        // ours. Tear the tunnel down either way — a device that has gone offline
+        // must not leave a zombie ssh on this machine.
+        const { exitCode } = await forwardToComputer({ argv: ['stop', ...cmd.args], device: opts.device, record: false });
+        const { tunnelKilled } = stopRemoteTunnel(opts.device);
+        console.log(`tunnel: ${tunnelKilled ? 'closed' : 'not running'}`);
+        if (exitCode !== 0) {
+          console.log('task:   not removed (device offline?)');
+          process.exit(exitCode);
+        }
+        return;
+      }
+      await forwardAndExit({ argv: ['stop', ...cmd.args], record: false });
+    });
+}
+
+function registerReloadCommand(program: Command): void {
+  program
+    .command('reload')
+    .description('Reload the allow-list policy (SIGHUP the local daemon) — or restart a remote Windows daemon with --device')
+    .option('--device <name>', 'Restart the remote Windows daemon (its scheduled task) instead of SIGHUPing the local one')
+    .allowUnknownOption(true)
+    .allowExcessArguments(true)
+    .helpOption(false)
+    .action(async (opts: { device?: string }, cmd: Command) => {
+      // Reload EXISTS to re-render the allow list; doing it before the signal is
+      // the whole command. The remote daemon enforces no allow list, but the
+      // files are cheap and keep one code path.
+      renderPolicyFiles();
+      await forwardAndExit({ argv: ['reload', ...cmd.args], device: opts.device, record: false });
+    });
 }
 
 function registerStatusCommand(program: Command): void {
@@ -171,238 +432,50 @@ function registerStatusCommand(program: Command): void {
     .command('status')
     .description('Report install state, daemon state, and Accessibility trust — or a remote Windows daemon with --device')
     .option('--device <name>', 'Report the remote Windows daemon (tunnel + liveness) instead of the local helper')
-    .action(async (opts: { device?: string }) => {
+    .allowUnknownOption(true)
+    .allowExcessArguments(true)
+    .helpOption(false)
+    .action(async (opts: { device?: string }, cmd: Command) => {
+      const json = cmd.args.includes('--json');
       if (opts.device) {
-        await reportRemoteStatus(opts.device);
-        return;
-      }
-      const socketPath = resolveSocketPath();
-      const installed = fs.existsSync(HELPER_APP_DEST);
-      const socketUp = fs.existsSync(socketPath);
-
-      console.log(`installed: ${installed ? 'yes' : 'no'} (${HELPER_APP_DEST})`);
-      console.log(`daemon:    ${socketUp ? 'running' : 'stopped'}`);
-
-      // Show the current allow list — what the user has actually authorized
-      // via Computer(...) patterns in their permission groups.
-      const allowed = loadComputerAllowList();
-      const previewParts = allowed.slice(0, 5);
-      const previewSuffix = allowed.length > 5 ? ` (+${allowed.length - 5} more)` : '';
-      console.log(`policy:    ${allowed.length} app${allowed.length === 1 ? '' : 's'} allowed${allowed.length > 0 ? `: ${previewParts.join(', ')}${previewSuffix}` : ''}`);
-
-      const callers = loadDefaultPeers();
-      console.log(`peers:     ${callers.length} caller${callers.length === 1 ? '' : 's'} (peer-auth on socket)`);
-
-      if (!installed) {
-        console.log('');
-        console.log('Run:  agents computer setup');
-        return;
-      }
-      if (!socketUp) {
-        console.log('');
-        console.log('Run:  agents computer start');
-        return;
-      }
-
-      // Daemon is up — probe trust state.
-      const client = openComputerClient();
-      try {
-        const r = await client.call('trust_status');
-        if (r.error) {
-          console.error(`error: ${r.error.code}: ${r.error.message}`);
+        const state = readRemoteState(opts.device);
+        if (!isTunnelAlive(state)) {
+          if (!json) {
+            console.log(`device:    ${opts.device}`);
+            console.log('tunnel:    none');
+            console.log('daemon:    unknown (no tunnel to probe through)');
+            console.log('');
+            console.log(`Run:  agents computer start --device ${opts.device}`);
+          } else {
+            console.log(JSON.stringify({ device: opts.device, tunnel: null, daemon: 'unknown' }, null, 2));
+          }
           process.exit(1);
         }
-        const trusted = Boolean(r.result?.trusted);
-        const helperPid = r.result?.pid;
-        console.log(`trust:     ${trusted ? 'granted' : 'denied'}`);
-        if (typeof helperPid === 'number') console.log(`pid:       ${helperPid}`);
-        if (!trusted) {
-          console.log('');
-          console.log('Grant Accessibility + Screen Recording in System Settings, then `agents computer start` again.');
+        if (!json) {
+          console.log(`device:    ${opts.device}`);
+          console.log(`tunnel:    127.0.0.1:${state!.localPort} -> ${state!.target} (127.0.0.1:${state!.remotePort})`);
         }
-      } finally {
-        await client.close();
-      }
-    });
-}
-
-// status --device: the local checks (app install, launchd socket, policy files)
-// are macOS concepts — a remote Windows daemon is reported from what actually
-// exists for it: the recorded tunnel and a live trust_status probe through it.
-async function reportRemoteStatus(device: string): Promise<void> {
-  console.log(`device:    ${device}`);
-  const state = readRemoteState(device);
-  if (!state) {
-    console.log('tunnel:    none');
-    console.log('daemon:    unknown (no tunnel to probe through)');
-    console.log('');
-    console.log(`Run:  agents computer start --device ${device}`);
-    process.exit(1);
-  }
-  console.log(`tunnel:    127.0.0.1:${state.localPort} -> ${state.target} (127.0.0.1:${state.remotePort})`);
-  hydrateRemoteEnvFromState(device);
-  try {
-    const client = openComputerClient();
-    try {
-      const r = await client.call('trust_status');
-      if (r.error) {
-        console.error(`error: ${r.error.code}: ${r.error.message}`);
-        process.exit(1);
-      }
-      console.log('daemon:    running');
-      console.log(`trust:     ${r.result?.trusted ? 'granted' : 'denied'} (Windows UIAutomation needs no per-app grant)`);
-      if (typeof r.result?.pid === 'number') console.log(`pid:       ${r.result.pid}`);
-      if (typeof r.result?.path === 'string' && r.result.path) console.log(`exe:       ${r.result.path}`);
-    } finally {
-      await client.close();
-    }
-  } catch (err) {
-    console.log('daemon:    unreachable');
-    console.log(`           ${(err as Error).message}`);
-    console.log('');
-    console.log(`Run:  agents computer start --device ${device}`);
-    process.exit(1);
-  }
-}
-
-// PowerShell to bounce the remote daemon: kill the running exe (tolerating
-// "not running"), then start the LOGON scheduled task that owns its
-// lifecycle. Pure so tests can assert the exact script (mirrors the
-// ssh-tunnel script builders).
-export function buildRestartTaskScript(taskName: string, exeName: string): string {
-  const procName = exeName.replace(/\.exe$/i, '');
-  return [
-    `$ErrorActionPreference = 'Stop'`,
-    `Stop-Process -Name '${procName}' -Force -ErrorAction SilentlyContinue`,
-    `Start-ScheduledTask -TaskName '${taskName}'`,
-    `Write-Output 'restarted'`,
-  ].join('; ');
-}
-
-// reload --device: the Windows daemon has no policy file to re-read (it
-// enforces no allow-list — see TrustStatus in native/computer-win/Rpc.cs), so
-// reload means bounce the daemon via its scheduled task — the way to pick up
-// a freshly pushed exe — then prove it answers through the recorded tunnel.
-async function reloadRemoteHelper(device: string): Promise<void> {
-  const { target } = await resolveRemoteDevice(device);
-  const script = buildRestartTaskScript(REMOTE_TASK_NAME, WIN_HELPER_EXE);
-  const res = sshExec(
-    target,
-    `powershell -NoProfile -NonInteractive -EncodedCommand ${encodePowershell(script)}`,
-    { timeoutMs: 60_000 },
-  );
-  if (res.code !== 0) {
-    const msg = (res.stderr || res.stdout || '').trim();
-    console.error(`restart failed on ${target}${res.timedOut ? ' (timed out)' : ''}${msg ? `: ${msg}` : ''}`);
-    process.exit(1);
-  }
-  console.log(`task:   restarted "${REMOTE_TASK_NAME}" on ${target}`);
-
-  const state = readRemoteState(device);
-  if (!state) {
-    console.log(`(no tunnel recorded — run \`agents computer start --device ${device}\` to drive it)`);
-    return;
-  }
-  hydrateRemoteEnvFromState(device);
-  // The relaunched daemon needs a beat to rebind its port; poll through the
-  // tunnel until it answers.
-  const deadline = Date.now() + 15_000;
-  let lastErr = '';
-  while (Date.now() < deadline) {
-    try {
-      const client = openComputerClient();
-      try {
-        const r = await client.call('trust_status');
-        if (!r.error && r.result) {
-          console.log(`reloaded: daemon answering (pid ${r.result.pid ?? '?'})`);
-          return;
-        }
-        lastErr = r.error ? `${r.error.code}: ${r.error.message}` : 'empty result';
-      } finally {
-        await client.close();
-      }
-    } catch (err) {
-      lastErr = (err as Error).message;
-    }
-    await sleep(500);
-  }
-  console.error(`daemon did not answer within 15s after restart${lastErr ? ` (${lastErr})` : ''}`);
-  process.exit(1);
-}
-
-// run — the embedded observe -> act -> verify agent loop. A reasoning model
-// (Claude API by default, or any Anthropic-shaped endpoint via --base-url for
-// Ollama / vLLM / LiteLLM) drives the EXISTING computer verbs as tools over the
-// daemon socket. New subcommand: the explicit verb interface external agents
-// use is unchanged. The loop auto-switches to the screenshot/coordinate path
-// when an app's AX tree comes back opaque (WebView / canvas).
-function registerRunCommand(program: Command): void {
-  program
-    .command('run')
-    .description('Autonomously drive an app from a natural-language task (embedded model loop over the computer verbs)')
-    .requiredOption('--task <s>', 'Natural-language task, e.g. "open Notes and write a haiku"')
-    .option('--bundle <id>', 'Bundle id to focus the loop on (default: frontmost allow-listed app)')
-    .option('--base-url <url>', `Reasoning model base URL — Anthropic wire shape (default: ${DEFAULT_CLAUDE_BASE_URL}; set to a local Ollama/vLLM/LiteLLM endpoint for offline parity)`)
-    .option('--model <id>', `Model id (default: ${DEFAULT_CLAUDE_MODEL})`)
-    .option('--max-steps <n>', 'Max model turns before giving up', (v) => parseInt(v, 10), 12)
-    .option('--max-tokens <n>', 'Max tokens per model turn', (v) => parseInt(v, 10), 1024)
-    .option('--device <name>', 'Drive a remote Windows device (requires `agents computer start --device <name>` first)')
-    .option('--json', 'Emit the final loop result as JSON')
-    .action(async (opts: {
-      task: string;
-      bundle?: string;
-      baseUrl?: string;
-      model?: string;
-      maxSteps: number;
-      maxTokens: number;
-      device?: string;
-      json?: boolean;
-    }) => {
-      const apiKey = resolveApiKey({ apiKey: undefined, baseUrl: opts.baseUrl });
-      // The Claude API needs a key; a local/offline endpoint (non-default base
-      // URL) usually ignores it, so only hard-fail on the default endpoint.
-      if (!apiKey && !opts.baseUrl) {
-        console.error('no API key. Set ANTHROPIC_API_KEY (or AGENTS_COMPUTER_API_KEY), or point --base-url at a local endpoint.');
-        process.exit(1);
+        await forwardAndExit({ argv: ['status', ...cmd.args], device: opts.device, record: false });
+        return;
       }
 
-      const responder = makeClaudeResponder({
-        baseUrl: opts.baseUrl,
-        model: opts.model,
-        maxTokens: opts.maxTokens,
-      });
-
-      emitComputerRunTaskMarker({ task: opts.task, bundle: opts.bundle, device: opts.device });
-
-      await withClient(async (client) => {
-        const dispatch = makeVerbDispatcher(client, { device: opts.device });
-        const targetInput = opts.bundle ? { bundle: opts.bundle } : {};
-
-        const result = await runComputerLoop({
-          task: opts.task,
-          responder: (state) => responder({ ...state, task: describeTaskWithTarget(opts.task, opts.bundle) }),
-          dispatch: (call) => dispatch({ ...call, input: { ...targetInput, ...call.input } }),
-          maxSteps: opts.maxSteps,
-          onEvent: opts.json ? undefined : (e) => printLoopEvent(e),
-        });
-
-        if (opts.json) {
-          console.log(JSON.stringify(result, null, 2));
-          return;
-        }
-        console.log('');
-        if (result.status === 'done') {
-          console.log(`done (${result.turns} turn${result.turns === 1 ? '' : 's'}): ${result.finalText ?? ''}`);
-        } else {
-          console.log(`stopped: hit max-steps (${result.turns} turns) without a completion signal`);
-        }
-      });
+      // The allow list is agents-cli's answer, not the engine's — report it here
+      // so `status` stays the one place that tells you why an app is refused.
+      if (!json) {
+        const allowed = loadComputerAllowList();
+        const preview = allowed.slice(0, 5).join(', ');
+        const suffix = allowed.length > 5 ? ` (+${allowed.length - 5} more)` : '';
+        console.log(`policy:    ${allowed.length} app${allowed.length === 1 ? '' : 's'} allowed${allowed.length > 0 ? `: ${preview}${suffix}` : ''}`);
+        console.log(`peers:     ${loadDefaultPeers().length} caller(s) (peer-auth on socket)`);
+      }
+      await forwardAndExit({ argv: ['status', ...cmd.args], record: false });
     });
 }
 
 // sessions — task-first history over the computer.action event ledger (RUSH-2432),
 // the computer counterpart of `agents browser sessions` (RUSH-2407). `agents
 // sessions --computer` (sessions.ts) routes to the same runComputerSessionsCommand.
+// It reads agents-cli's own ledger, so it never reaches the engine.
 function registerSessionsCommand(program: Command): void {
   program
     .command('sessions')
@@ -417,620 +490,65 @@ function registerSessionsCommand(program: Command): void {
 }
 
 /**
- * Emit a `computer.action` marker for `computer run`'s whole loop process, so
- * `agents computer sessions` groups every verb the loop drives under one
- * task-labeled row instead of a bare pid with no task text (see
- * lib/computer/sessions-list.ts's "Grouping key" docblock note). The task
- * text is bounded to `TASK_PREVIEW_MAX_CHARS` — never the full unbounded
- * `--task` string — matching that module's retention/privacy note. Exported
- * so the truncation behavior is directly unit-testable against the real
- * event ledger, the same seam `computer-actions.test.ts` already uses for
- * `emitComputerAction`.
+ * Install the macOS helper through the engine. Used by the `agents setup
+ * computer` wizard, which still owns the TCC hand-holding — that is a
+ * conversation with the user, not a daemon operation.
  */
-export function emitComputerRunTaskMarker(opts: { task: string; bundle?: string; device?: string }): void {
-  emitComputerAction('run', undefined, { bundle: opts.bundle, device: opts.device }, {
-    task: truncate(opts.task, TASK_PREVIEW_MAX_CHARS),
-  });
-}
-
-// Fold the target bundle into the task text so the model biases toward it.
-function describeTaskWithTarget(task: string, bundle?: string): string {
-  return bundle ? `${task}\n(Target app bundle id: ${bundle})` : task;
-}
-
-// Human progress line per loop event — verb + a one-line result digest.
-function printLoopEvent(e: LoopEvent): void {
-  if (e.kind === 'turn') {
-    console.log(`--- turn ${e.index + 1} ---`);
-  } else if (e.kind === 'dispatch') {
-    const tag = e.visionFallback ? ' [ax opaque]' : '';
-    const status = e.result.ok ? 'ok' : `error: ${e.result.error ?? 'unknown'}`;
-    console.log(`  ${e.call.name}${tag} -> ${status}`);
-  } else if (e.kind === 'vision_switch') {
-    console.log('  (switching to vision path: screenshot + coordinate clicks)');
-  } else if (e.kind === 'done') {
-    console.log(`  model: ${e.text}`);
-  }
-}
-
-function registerScreenshotCommand(program: Command): void {
-  program
-    .command('screenshot')
-    .description('Capture a window (default: largest), enumerate windows (--list), or the whole display (--display)')
-    .option('--bundle <id>', 'Bundle id to capture (default: frontmost allow-listed app)')
-    .option('--pid <n>', 'Target pid directly (overrides --bundle)', (v) => parseInt(v, 10))
-    .option('--device <name>', 'Drive a remote Windows device (requires `agents computer start --device <name>` first)')
-    .option('--list', 'List the app\'s windows (id/title/layer/bounds) instead of capturing — reveals modals/popups')
-    .option('--window-id <n>', 'Capture a specific window by id (from --list)', (v) => parseInt(v, 10))
-    .option('--display', 'Capture the whole display the app is on (composites stacked modals)')
-    .option('--out <path>', 'Output image path — extension auto-corrected to the encoded format (JPEG on macOS, PNG on a Windows --device)', './computer-screenshot.jpg')
-    .option('--quality <n>', 'JPEG quality 1-100 (macOS capture only; the Windows helper encodes lossless PNG and ignores this)', (v) => parseInt(v, 10), 85)
-    .option('--json', 'Emit JSON (metadata for captures; window list for --list)')
-    .action(async (opts: {
-      bundle?: string;
-      pid?: number;
-      device?: string;
-      list?: boolean;
-      windowId?: number;
-      display?: boolean;
-      out: string;
-      quality: number;
-      json?: boolean;
-    }) => {
-      const quality = Math.max(1, Math.min(100, opts.quality || 85));
-
-      await withClient(async (client) => {
-        // Resolve the target pid (explicit --pid, else --bundle, else frontmost).
-        let pid = opts.pid;
-        if (pid == null) {
-          const list = (unwrap(await client.call('list_apps')).apps as AppInfo[]) || [];
-          const picked = pickTarget(list, { bundle: opts.bundle });
-          if (!picked.ok) {
-            console.error(picked.error);
-            process.exit(1);
-          }
-          pid = picked.app.pid;
-        }
-
-        // --list: enumerate windows, no image.
-        if (opts.list) {
-          const res = unwrap(await client.call('screenshot', { pid, list: true }));
-          emitComputerAction('screenshot', pid, opts, { list: true });
-          const windows = (res.windows as Array<Record<string, unknown>>) || [];
-          if (opts.json) {
-            console.log(JSON.stringify(res, null, 2));
-          } else if (windows.length === 0) {
-            console.log('(no windows)');
-          } else {
-            for (const w of windows) {
-              const b = (w.bounds as number[]) || [];
-              console.log(`${String(w.window_id).padStart(8)}  layer ${w.layer}  [${b.join(',')}]  ${w.title || '(untitled)'}`);
-            }
-          }
-          return;
-        }
-
-        // Capture: window (default / --window-id) or full display.
-        const params: Record<string, unknown> = { pid, quality };
-        if (opts.display) params.display = true;
-        else if (opts.windowId != null) params.window_id = opts.windowId;
-
-        const res = unwrap(await client.call('screenshot', params));
-        const b64 = res.image_data as string | undefined;
-        if (!b64) {
-          console.error('helper returned no image_data');
-          process.exit(1);
-        }
-        emitComputerAction('screenshot', pid, opts, { display: opts.display, windowId: opts.windowId });
-        const buf = Buffer.from(b64, 'base64');
-        // Sniff the real format and correct the extension so the filename never
-        // lies about its bytes (macOS -> JPEG, Windows helper -> PNG).
-        const requested = path.resolve(opts.out);
-        const { path: outPath, corrected } = reconcileScreenshotExt(requested, buf);
-        fs.writeFileSync(outPath, buf);
-
-        if (opts.json) {
-          // Drop the heavy base64 from the metadata echo; report where it went.
-          const meta = { ...res, image_data: `<saved to ${outPath}>` };
-          console.log(JSON.stringify(meta, null, 2));
-        } else {
-          if (corrected) {
-            console.log(`note: bytes are ${path.extname(outPath).slice(1).toUpperCase()}; corrected extension from ${path.basename(requested)}`);
-          }
-          const origin = (res.origin as number[]) || [];
-          const originStr = origin.length === 2 ? `, origin [${origin.join(',')}], scale ${res.scale ?? '?'}` : '';
-          console.log(`saved: ${outPath} (${res.width ?? '?'}x${res.height ?? '?'}, ${buf.byteLength} bytes${originStr})`);
-        }
-      });
-    });
-}
-
-// setup (alias: install-helper):
-//   1. resolve dist .app
-//   2. copy to /Applications/Computer Helper.app
-//   3. codesign --verify the destination
-//   4. write LaunchAgent plist with absolute HOME paths
-//   5. launchctl bootout (ignore failure) -> bootstrap -> kickstart -k
-//   6. wait for socket to appear
-//   7. probe trust_status, print grant instructions if needed
-//
-// macOS TCC is keyed by signed-bundle identity + bundle id. Putting the
-// .app at a stable absolute path under /Applications/ means the AX grant
-// survives across npm updates. The CLI itself is unsigned but doesn't
-// need AX — it sends JSON-RPC to the daemon, which has AX.
-const HELPER_BUNDLE_ID = 'com.phnx-labs.computer-helper';
-const HELPER_APP_NAME = 'Computer Helper.app';
-const HELPER_APP_DEST = `/Applications/${HELPER_APP_NAME}`;
-/**
- * launchd Label for this process's helper — the production identifier for a real
- * invocation, namespaced under a redirected HOME (RUSH-2639). launchd routes
- * bootout/bootstrap/kickstart/print by identifier alone, never by the plist's
- * path, so without this a process running under a sandbox HOME tears down the
- * operator's live helper.
- */
-export function helperLabel(): string {
-  return namespacedServiceLabel(HELPER_BUNDLE_ID);
+export async function installComputerHelperMacLocal(): Promise<void> {
+  renderPolicyFiles({ quiet: true });
+  const { exitCode } = await forwardToComputer({ argv: ['setup'], record: false });
+  if (exitCode !== 0) throw new Error(`\`computer setup\` failed (exit ${exitCode})`);
 }
 
 /**
- * Install the macOS helper locally: resolve (or download + verify) the signed,
- * notarized .app, copy it to /Applications, verify the destination signature,
- * and write the LaunchAgent plist (inactive — activation is a separate opt-in
- * step via `start`). Throws on any failure. Shared by `agents computer setup`
- * and the unified `agents setup computer` wizard so there is one install path.
+ * Activate the local daemon through the engine and report whether Accessibility
+ * trust is granted, so the wizard knows whether to walk the user to System
+ * Settings.
  */
-export async function installComputerHelperMacLocal(): Promise<{ appDest: string; plistPath: string }> {
-  let srcApp = resolveHelperApp();
-  if (!srcApp || !fs.existsSync(srcApp)) {
-    // No local build / bundled copy (the normal case on an npm-installed CLI).
-    // Fetch the signed + notarized helper release asset for this CLI version;
-    // it is sha256- and signature-verified before we touch /Applications.
-    const { ensureMacHelperApp } = await import('../lib/computer/download.js');
-    srcApp = await ensureMacHelperApp();
-    console.log(`helper:  ${srcApp} (downloaded + verified)`);
-  }
-
-  const socketPath = resolveSocketPath();
-  const logPath = resolveLogPath();
-  const plistPath = path.join(os.homedir(), 'Library', 'LaunchAgents', `${helperLabel()}.plist`);
-
-  console.log(`source:  ${srcApp}`);
-  console.log(`dest:    ${HELPER_APP_DEST}`);
-
-  // 1. Copy to /Applications/ via ditto (preserves xattrs + codesign metadata).
-  if (fs.existsSync(HELPER_APP_DEST)) {
-    try {
-      fs.rmSync(HELPER_APP_DEST, { recursive: true, force: true });
-    } catch (err) {
-      throw new Error(
-        `failed to remove prior install at ${HELPER_APP_DEST}: ${(err as Error).message}. try: sudo rm -rf "${HELPER_APP_DEST}"`,
-      );
-    }
-  }
-  try {
-    execFileSync('/usr/bin/ditto', [srcApp, HELPER_APP_DEST], { stdio: 'inherit' });
-  } catch (err) {
-    throw new Error(`ditto copy failed: ${(err as Error).message}`);
-  }
-  console.log(`copied to ${HELPER_APP_DEST}`);
-
-  // 2. Verify codesign on the destination — TCC needs a valid signature.
-  try {
-    execFileSync('/usr/bin/codesign', ['--verify', '--deep', '--strict', HELPER_APP_DEST], { stdio: 'inherit' });
-    console.log('codesign verify: OK');
-  } catch {
-    throw new Error(
-      `codesign verify FAILED for ${HELPER_APP_DEST}. The destination .app is unsigned or its signature was stripped.`,
-    );
-  }
-
-  // 3. Ensure socket + log parent dirs exist.
-  fs.mkdirSync(path.dirname(socketPath), { recursive: true });
-  fs.mkdirSync(path.dirname(logPath), { recursive: true });
-
-  // 4. Write the LaunchAgent plist but DO NOT bootstrap it (opt-in via `start`).
-  const execInsideApp = path.join(HELPER_APP_DEST, 'Contents', 'MacOS', 'ComputerHelper');
-  const plistContent = renderLaunchAgentPlist({ label: helperLabel(), exec: execInsideApp, socketPath, logPath });
-  fs.mkdirSync(path.dirname(plistPath), { recursive: true });
-  fs.writeFileSync(plistPath, plistContent);
-  console.log(`wrote plist: ${plistPath} (NOT activated)`);
-
-  return { appDest: HELPER_APP_DEST, plistPath };
+export async function activateComputerHelperMacLocal(): Promise<{ trusted: boolean }> {
+  renderPolicyFiles();
+  const { exitCode } = await forwardToComputer({ argv: ['start'], record: false });
+  if (exitCode !== 0) throw new Error(`\`computer start\` failed (exit ${exitCode})`);
+  return { trusted: await probeComputerTrust() };
 }
 
 /**
- * Activate the local helper daemon via launchd (render policy + peers, bootout
- * → bootstrap → kickstart, wait for the socket, probe AX trust). Throws on any
- * failure. Returns the trust status so callers can guide the permission grant.
- * Shared by `agents computer start` and the `agents setup computer` wizard.
+ * Read `trusted` out of `computer status --json`.
+ *
+ * Tolerant by construction: the engine may print a banner line before its JSON,
+ * so scan for the first parseable object rather than assuming the whole stream
+ * is JSON. Pure, so the parsing contract is testable without a daemon.
  */
-export async function activateComputerHelperMacLocal(): Promise<{ trusted: boolean; socketPath: string; logPath: string }> {
-  const plistPath = path.join(os.homedir(), 'Library', 'LaunchAgents', `${helperLabel()}.plist`);
-  const socketPath = resolveSocketPath();
-  const logPath = resolveLogPath();
-
-  if (!fs.existsSync(plistPath)) throw new Error(`plist not found at ${plistPath}. run: agents computer setup`);
-  if (!fs.existsSync(HELPER_APP_DEST)) throw new Error(`helper app not found at ${HELPER_APP_DEST}. run: agents computer setup`);
-
-  const uid = process.getuid?.();
-  if (typeof uid !== 'number') throw new Error('cannot resolve uid');
-
-  const reg = serviceManagerRegistrationAllowed();
-  if (!reg.allowed) {
-    throw new Error(reg.reason);
-  }
-
-  const domain = `gui/${uid}`;
-
-  // Render the policy file BEFORE bootstrap so the daemon reads a fresh allow
-  // list at startup (fail-safe: missing/unparseable → everything denied).
-  const allowed = loadComputerAllowList();
-  writeComputerPolicy(allowed);
-  console.log(`policy: ${allowed.length} app${allowed.length === 1 ? '' : 's'} allowed (${resolvePolicyPath()})`);
-  if (allowed.length > 0) {
-    const preview = allowed.slice(0, 5).join(', ');
-    const more = allowed.length > 5 ? ` (+${allowed.length - 5} more)` : '';
-    console.log(`        ${preview}${more}`);
-  } else {
-    console.log(`        (no Computer(...) patterns found — everything will be denied)`);
-    console.log(`        add to ~/.agents/permissions/groups/<name>.yaml under allow:`);
-    console.log(`          - "Computer(com.apple.finder)"`);
-  }
-
-  // Peer-auth allow list — which caller executables may connect to the socket.
-  const callers = loadDefaultPeers();
-  writeComputerPeers(callers);
-  console.log(`peers:  ${callers.length} caller${callers.length === 1 ? '' : 's'} allowed (${resolvePeersPath()})`);
-  for (const p of callers) console.log(`        ${p}`);
-
-  // Bootout first to clear any prior registration (best-effort).
+export function parseTrustFromStatusJson(stdout: string): boolean {
+  const start = stdout.indexOf('{');
+  if (start < 0) return false;
   try {
-    execFileSync('/bin/launchctl', ['bootout', domain, plistPath], { stdio: 'pipe' });
-  } catch {
-    // expected when not previously loaded
-  }
-  try {
-    execFileSync('/bin/launchctl', ['bootstrap', domain, plistPath], { stdio: 'pipe' });
-  } catch (err) {
-    throw new Error(`launchctl bootstrap failed: ${(err as Error).message}`);
-  }
-  // Force restart so we pick up the latest binary.
-  try {
-    execFileSync('/bin/launchctl', ['kickstart', '-k', `${domain}/${helperLabel()}`], { stdio: 'pipe' });
-  } catch (err) {
-    throw new Error(`launchctl kickstart failed: ${(err as Error).message}`);
-  }
-
-  // Wait up to 5s for the socket.
-  const deadline = Date.now() + 5000;
-  while (Date.now() < deadline) {
-    if (fs.existsSync(socketPath)) break;
-    await sleep(100);
-  }
-  if (!fs.existsSync(socketPath)) {
-    throw new Error(`socket did not appear at ${socketPath} within 5s. check ${logPath} for helper startup errors`);
-  }
-
-  // Probe trust through the socket.
-  let trusted = false;
-  let trustStr = 'unknown';
-  try {
-    const client = openComputerClient();
-    try {
-      const r = await client.call('trust_status');
-      trusted = Boolean(r.result?.trusted);
-      trustStr = r.error ? `error (${r.error.code})` : (trusted ? 'granted' : 'denied');
-    } finally {
-      await client.close();
-    }
-  } catch (err) {
-    trustStr = `error (${(err as Error).message})`;
-  }
-
-  console.log(`daemon: running`);
-  console.log(`socket: ${socketPath}`);
-  console.log(`trust:  ${trustStr}`);
-  return { trusted, socketPath, logPath };
-}
-
-/** Probe the running daemon's Accessibility trust status without re-activating.
- * Returns false (never throws) if the socket is down or the RPC errors — used to
- * poll while the user grants permissions in System Settings. */
-export async function probeComputerTrust(): Promise<boolean> {
-  try {
-    const client = openComputerClient();
-    try {
-      const r = await client.call('trust_status');
-      return Boolean(r.result?.trusted);
-    } finally {
-      await client.close();
-    }
+    const parsed = JSON.parse(stdout.slice(start)) as { trusted?: unknown };
+    return parsed.trusted === true;
   } catch {
     return false;
   }
 }
 
-function registerSetupCommand(program: Command): void {
-  program
-    .command('setup')
-    .alias('install-helper')
-    .description('Install the helper — locally to /Applications/ (macOS), or to a remote Windows device with --device')
-    .option('--device <name>', 'Provision a remote Windows device (push the exe + register a LOGON task) instead of installing locally')
-    .action(async (opts: { device?: string }) => {
-      if (opts.device) {
-        try {
-          const { target, taskName } = await setupRemoteHelper(opts.device);
-          console.log(`pushed computer-helper-win.exe to ${target}`);
-          console.log(`registered LOGON scheduled task "${taskName}" (interactive session, started now)`);
-          console.log('');
-          console.log(`Next:  agents computer start --device ${opts.device}`);
-        } catch (err) {
-          console.error(`error: ${(err as Error).message}`);
-          process.exit(1);
-        }
-        return;
-      }
-
-      let plistPath: string;
-      try {
-        ({ plistPath } = await installComputerHelperMacLocal());
-      } catch (err) {
-        console.error(`error: ${(err as Error).message}`);
-        process.exit(1);
-      }
-
-      console.log('');
-      console.log('Helper installed (inactive).');
-      console.log('');
-      console.log(`  app:    ${HELPER_APP_DEST}`);
-      console.log(`  plist:  ${plistPath}`);
-      console.log('');
-      console.log('Next steps:');
-      console.log('  1. Grant TCC permissions (one-time):');
-      console.log('     System Settings > Privacy & Security > Accessibility       — add Agents Computer');
-      console.log('     System Settings > Privacy & Security > Screen Recording    — add Agents Computer');
-      console.log('  2. Whitelist the apps the daemon may drive. Add a YAML under ~/.agents/permissions/groups/:');
-      console.log('       name: computer');
-      console.log('       allow:');
-      console.log('         - "Computer(com.apple.mail)"');
-      console.log('         - "Computer(com.apple.notes)"');
-      console.log('     Default policy is deny-all.');
-      console.log('  3. When you want to use it:  agents computer start');
-      console.log('  4. When you are done:         agents computer stop');
-    });
-}
-
-function registerStartCommand(program: Command): void {
-  program
-    .command('start')
-    .description('Activate the helper daemon — local launchd (macOS) or a remote Windows tunnel with --device')
-    .option('--device <name>', 'Open a tunnel to the remote Windows daemon and record it for --device verbs')
-    .action(async (opts: { device?: string }) => {
-      if (opts.device) {
-        try {
-          const state = await startRemoteTunnel(opts.device);
-          console.log(`tunnel: 127.0.0.1:${state.localPort} -> ${state.target} (127.0.0.1:${state.remotePort})`);
-          console.log(`daemon: answering (ssh pid ${state.tunnelPid})`);
-          console.log('');
-          console.log(`Drive it:  agents computer apps --device ${opts.device}`);
-          console.log(`Stop:      agents computer stop --device ${opts.device}`);
-        } catch (err) {
-          console.error(`error: ${(err as Error).message}`);
-          process.exit(1);
-        }
-        return;
-      }
-
-      let trusted: boolean;
-      try {
-        ({ trusted } = await activateComputerHelperMacLocal());
-      } catch (err) {
-        console.error(`error: ${(err as Error).message}`);
-        process.exit(1);
-      }
-      if (!trusted) {
-        console.log('');
-        console.log('Grant Accessibility + Screen Recording to Agents Computer, then run `agents computer start` again.');
-      }
-    });
-}
-
-function registerReloadCommand(program: Command): void {
-  program
-    .command('reload')
-    .description('Reload the allow-list policy (SIGHUP the local daemon) — or restart a remote Windows daemon with --device')
-    .option('--device <name>', 'Restart the remote Windows daemon (its scheduled task) instead of SIGHUPing the local one')
-    .action(async (opts: { device?: string }) => {
-      if (opts.device) {
-        try {
-          await reloadRemoteHelper(opts.device);
-        } catch (err) {
-          console.error(`error: ${(err as Error).message}`);
-          process.exit(1);
-        }
-        return;
-      }
-      const socketPath = resolveSocketPath();
-      if (!fs.existsSync(socketPath)) {
-        console.error(`daemon not running (no socket at ${socketPath})`);
-        console.error('run: agents computer start');
-        process.exit(1);
-      }
-
-      const allowed = loadComputerAllowList();
-      writeComputerPolicy(allowed);
-      console.log(`policy: ${allowed.length} app${allowed.length === 1 ? '' : 's'} allowed (${resolvePolicyPath()})`);
-
-      // Rewrite peers list too — an upgrade of the npm-global CLI moves
-      // its node path; without this the reloaded daemon would reject the
-      // very binary that just signaled it.
-      const callers = loadDefaultPeers();
-      writeComputerPeers(callers);
-      console.log(`peers:  ${callers.length} caller${callers.length === 1 ? '' : 's'} allowed (${resolvePeersPath()})`);
-
-      // Resolve the daemon's pid via `launchctl list <label>`. The plist
-      // output includes a "PID" key when the service is running.
-      const uid = process.getuid?.();
-      if (typeof uid !== 'number') {
-        console.error('cannot resolve uid');
-        process.exit(1);
-      }
-      const domain = `gui/${uid}`;
-
-      let pid: number | null = null;
-      try {
-        const out = execFileSync('/bin/launchctl', ['print', `${domain}/${helperLabel()}`], { encoding: 'utf-8' });
-        const m = out.match(/\bpid\s*=\s*(\d+)/);
-        if (m) pid = parseInt(m[1], 10);
-      } catch (err) {
-        console.error(`launchctl print failed: ${(err as Error).message}`);
-        process.exit(1);
-      }
-
-      if (pid === null || !Number.isFinite(pid) || pid <= 0) {
-        console.error('could not resolve daemon pid from launchctl print output');
-        process.exit(1);
-      }
-
-      try {
-        process.kill(pid, 'SIGHUP');
-      } catch (err) {
-        console.error(`kill -HUP ${pid} failed: ${(err as Error).message}`);
-        process.exit(1);
-      }
-
-      // Brief socket-up check so the user knows the daemon survived the
-      // signal (it should — SIGHUP just triggers a re-read).
-      await sleep(150);
-      if (!fs.existsSync(socketPath)) {
-        console.error(`socket disappeared after SIGHUP — check ${resolveLogPath()}`);
-        process.exit(1);
-      }
-
-      console.log(`reloaded: daemon pid ${pid}`);
-      if (allowed.length > 0) {
-        const preview = allowed.slice(0, 5).join(', ');
-        const more = allowed.length > 5 ? ` (+${allowed.length - 5} more)` : '';
-        console.log(`        ${preview}${more}`);
-      }
-    });
-}
-
-function registerStopCommand(program: Command): void {
-  program
-    .command('stop')
-    .description('Deactivate the helper daemon — local launchd (macOS) or a remote Windows tunnel with --device')
-    .option('--device <name>', 'Tear down the remote tunnel and unregister the scheduled task')
-    .action(async (opts: { device?: string }) => {
-      if (opts.device) {
-        try {
-          const { tunnelKilled, taskRemoved } = await stopRemoteHelper(opts.device);
-          console.log(`tunnel: ${tunnelKilled ? 'closed' : 'not running'}`);
-          console.log(`task:   ${taskRemoved ? 'unregistered' : 'not removed (device offline?)'}`);
-        } catch (err) {
-          console.error(`error: ${(err as Error).message}`);
-          process.exit(1);
-        }
-        return;
-      }
-
-      const home = os.homedir();
-      const plistPath = path.join(home, 'Library', 'LaunchAgents', `${helperLabel()}.plist`);
-      const socketPath = resolveSocketPath();
-
-      const uid = process.getuid?.();
-      if (typeof uid !== 'number') {
-        console.error('cannot resolve uid');
-        process.exit(1);
-      }
-      const domain = `gui/${uid}`;
-
-      // Same invariant as the start path: a redirected-HOME process must never
-      // talk to the real launchd (RUSH-2968). Stop has a local fallback — the
-      // plist/socket cleanup below — so skip the bootout with the reason
-      // rather than throwing like start does.
-      const reg = serviceManagerRegistrationAllowed();
-      if (!reg.allowed) {
-        console.warn(`skipping launchctl bootout: ${reg.reason}`);
-      } else {
-        try {
-          execFileSync('/bin/launchctl', ['bootout', domain, plistPath], { stdio: 'pipe' });
-        } catch {
-          // already gone — fine
-        }
-      }
-
-      // launchd unlinks the socket when the daemon exits; helper also has an
-      // atexit unlink. Best-effort cleanup if either path didn't fire.
-      try { fs.unlinkSync(socketPath); } catch {}
-
-      console.log('daemon: stopped');
-      if (fs.existsSync(socketPath)) {
-        console.warn(`(socket still present at ${socketPath} — may belong to a different process)`);
-      }
-    });
-}
-
 /**
- * The helper's launchd plist.
+ * Probe Accessibility trust without re-activating. Returns false (never throws)
+ * when the engine is absent, the daemon is down, or the probe errors — the
+ * wizard polls this while the user grants permissions in System Settings, and a
+ * throw there would abort the very flow that fixes it.
  *
- * The `EnvironmentVariables` dict carries HOME (RUSH-2639, see
- * `lib/service-manifest.ts`): launchd applies this dict on top of the LOGIN
- * SESSION's environment, never the environment of whoever called `launchctl
- * bootstrap`, so a manifest that omits HOME hands the helper the account home no
- * matter which home the caller resolved. That is a silent escape from any
- * redirected HOME — the hermetic test harness's, and an agent's isolated version
- * home alike.
+ * This is the ONE place agents-cli reads engine stdout instead of passing it
+ * through, because it needs an answer rather than a display.
  */
-export function renderLaunchAgentPlist(opts: { label: string; exec: string; socketPath: string; logPath: string }): string {
-  const envXml = Object.entries(serviceManifestHomeEnv())
-    .map(([k, v]) => `        <key>${escapeXml(k)}</key>\n        <string>${escapeXml(v)}</string>`)
-    .join('\n');
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>${escapeXml(opts.label)}</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>${escapeXml(opts.exec)}</string>
-        <string>--socket</string>
-        <string>${escapeXml(opts.socketPath)}</string>
-    </array>
-    <key>EnvironmentVariables</key>
-    <dict>
-${envXml}
-    </dict>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>ProcessType</key>
-    <string>Background</string>
-    <key>StandardErrorPath</key>
-    <string>${escapeXml(opts.logPath)}</string>
-    <key>StandardOutPath</key>
-    <string>${escapeXml(opts.logPath)}</string>
-</dict>
-</plist>
-`;
+export async function probeComputerTrust(): Promise<boolean> {
+  try {
+    const { exitCode, stdout } = await forwardToComputer({
+      argv: ['status', '--json'],
+      record: false,
+      capture: true,
+    });
+    if (exitCode !== 0) return false;
+    return parseTrustFromStatusJson(stdout);
+  } catch {
+    return false;
+  }
 }
-
-function escapeXml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-// Backwards-compat: a few external callers may still import these.
-// Re-export from the shared lib so existing imports keep working.
-export { resolveHelperExec as resolveHelperPath };
-export { resolveSocketPath };

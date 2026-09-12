@@ -105,10 +105,10 @@ function buildFixture(root: string, opts: { failSuite?: boolean; suite?: 'greenW
     [
       '#!/usr/bin/env bash',
       'if [[ "$1" == "--version" ]]; then echo "1.2.3"; exit 0; fi',
-      // PHNX-2943: the producer reads the computer-mac floor via `bun -e "…helperFloor…"`.
-      // Real bun evaluates cli/src/lib/helper-versions.ts; the stub returns the same
-      // floor the fixture's helper-versions.ts declares (1.0.0), so the fetch targets
-      // computer-mac/v1.0.0 exactly as production does.
+      // The producer reads the menubar floor via `bun -e "…helperFloor…"`. Real bun
+      // evaluates cli/src/lib/helper-versions.ts; the stub returns the same floor the
+      // fixture's helper-versions.ts declares (1.0.0), so the fetch targets
+      // menubar/v1.0.0 exactly as production does.
       'if [[ "$1" == "-e" ]]; then echo "1.0.0"; exit 0; fi',
       'if [[ "$1" == "install" ]]; then exit 0; fi',
       'if [[ "$1" == "run" && "$2" == "test" ]]; then',
@@ -507,19 +507,18 @@ describe('release-attestation-produce.sh', () => {
 });
 
 // Extends the base fixture with a real (copied, not faked) release-manifest.sh
-// and stage-menubar-helper.sh plus the inputs each helper is keyed on:
-// computer-mac's minimal source tree at repo root, and the menubar floor table
-// (cli/src/lib/helper-versions.ts -- the menubar's source lives in
-// phnx-labs/agi-menu, so that pin IS its input, PHNX-4036). The menubar's
-// published release is modelled by a fixture directory served through a fake
-// `curl` on the fixture PATH (the same way `gh` is stubbed for computer-mac):
-// the real stage script still does the sha256 verification, the provenance
-// parse, and the JSON report against those real bytes.
+// and stage-menubar-helper.sh plus the one input the one remaining helper is
+// keyed on: the menubar floor table (cli/src/lib/helper-versions.ts -- the
+// menubar's source lives in phnx-labs/agi-menu, so that pin IS its input,
+// PHNX-4036). The menubar's published release is modelled by a fixture directory
+// served through a fake `curl` on the fixture PATH: the real stage script still
+// does the sha256 verification, the provenance parse, and the JSON report
+// against those real bytes.
 /**
  * A prior release's `release-manifest.json`, built with the shipped generator
  * so the seed fixture matches what a real GitHub release carries.
  */
-function priorReleaseManifest(root: string, computerMacDigest: string): string {
+function priorReleaseManifest(root: string, menubarDigest: string): string {
   const file = path.join(root, 'prior-release-manifest.json');
   const created = spawnSync(
     'bash',
@@ -531,7 +530,7 @@ function priorReleaseManifest(root: string, computerMacDigest: string): string {
   // `put` verifies the asset exists on disk, so give it a real one in a temp
   // dist/ and run from there — the same shape a signing box would have.
   fs.mkdirSync(path.join(root, 'dist'), { recursive: true });
-  const asset = path.join(root, 'dist/ComputerHelper.app.zip');
+  const asset = path.join(root, 'dist/MenubarHelper.app.zip');
   fs.writeFileSync(asset, 'prior release helper asset\n');
   // put refuses a declared digest that does not match the real bytes, so
   // compute it rather than asserting a placeholder.
@@ -541,11 +540,11 @@ function priorReleaseManifest(root: string, computerMacDigest: string): string {
     'bash',
     [
       MANIFEST_SCRIPT, 'put', '--file', file,
-      '--helper', 'computer-mac',
+      '--helper', 'menubar',
       '--helper-version', 'prev-1.0.0',
-      '--input-digest', computerMacDigest,
+      '--input-digest', menubarDigest,
       '--asset-digest', assetDigest,
-      '--asset-path', 'dist/ComputerHelper.app.zip',
+      '--asset-path', 'dist/MenubarHelper.app.zip',
       '--platform', 'darwin',
     ],
     { encoding: 'utf-8', cwd: root },
@@ -615,26 +614,22 @@ function buildManifestFixture(
   root: string,
   menubarRelease: { sidecar?: boolean; wrongSha?: boolean; empty?: boolean } = {},
 ): ReturnType<typeof buildFixture> & {
-  manifestDigests: Record<'computer-mac' | 'menubar', string>;
+  manifestDigests: Record<'menubar', string>;
   menubarZipSha: string;
 } {
   const fx = buildFixture(root);
   const { caller } = fx;
 
-  fs.mkdirSync(path.join(caller, 'native/computer-mac/Sources'), { recursive: true });
-  fs.mkdirSync(path.join(caller, 'native/computer-mac/scripts'), { recursive: true });
-  fs.writeFileSync(path.join(caller, 'native/computer-mac/Sources/dummy.swift'), '// dummy\n');
-  fs.writeFileSync(path.join(caller, 'native/computer-mac/scripts/build.sh'), '#!/usr/bin/env bash\n');
-  fs.writeFileSync(path.join(caller, 'native/computer-mac/Package.swift'), '// swift package\n');
-
-  // The producer reads the computer-mac floor from this module to know which
-  // published helper release to verify+record against (PHNX-2943). A minimal
-  // standalone copy is enough — helperFloor/helperTag are pure and import nothing.
+  // The producer reads the menubar floor from this module to know which
+  // published helper release to verify+record against. A minimal standalone copy
+  // is enough — helperFloor/helperTag are pure and import nothing. There is no
+  // computer-mac entry: that helper left with the standalone `computer` engine
+  // (PHNX-4075), and `release-manifest.sh` now refuses the name.
   fs.mkdirSync(path.join(caller, 'cli/src/lib'), { recursive: true });
   fs.writeFileSync(
     path.join(caller, 'cli/src/lib/helper-versions.ts'),
     [
-      "const FLOORS = { 'computer-mac': '1.0.0', menubar: '1.0.0', 'computer-win': '1.0.0' };",
+      "const FLOORS = { menubar: '1.0.0' };",
       'export function helperFloor(h) { return FLOORS[h]; }',
       "export function helperTag(h, v) { return `${h}/v${v}`; }",
       '',
@@ -668,7 +663,6 @@ function buildManifestFixture(
     ...fx,
     headCommit,
     manifestDigests: {
-      'computer-mac': digestFor('computer-mac'),
       menubar: digestFor('menubar'),
     },
     menubarZipSha: zipSha,
@@ -703,8 +697,8 @@ function seedManifest(store: string, helpers: Record<string, { inputDigest: stri
 describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => {
   // The manifest step is opt-in since --with-helpers (a CLI-only attestation must
   // not abort because a helper's SOURCE moved — a one-line comment fix in
-  // native/computer-mac/scripts/build.sh blocked a real 1.22.49 attestation that
-  // way). Every test in this block is ABOUT the manifest, so they all pass the
+  // the then-in-repo computer-mac build script blocked a real 1.22.49 attestation
+  // that way). Every test in this block is ABOUT the manifest, so they all pass the
   // flag; a separate test below pins that the DEFAULT skips it.
   const runProduceWithHelpers = (
     fx: ReturnType<typeof buildFixture>,
@@ -712,34 +706,46 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
     env: NodeJS.ProcessEnv = {},
   ) => runProduce(fx, ['--with-helpers', ...extra], env);
 
-  it('carries forward an unchanged helper and records fresh digests for changed ones', () => {
+  it('carries forward an unchanged helper rather than re-recording it', () => {
     const root = tmp('attest-produce-manifest-');
     const fx = buildManifestFixture(root);
-    // Pre-seed only computer-mac, matching its current digest -- it must be
-    // carried forward untouched (this producer never rebuilds it). menubar
-    // has no prior record, so it must be freshly recorded from its PUBLISHED
-    // release (PHNX-4036) -- nothing in this tree can build it.
-    seedManifest(fx.store, { 'computer-mac': { inputDigest: fx.manifestDigests['computer-mac'] } });
+    // Pre-seed menubar matching its current digest -- it must be carried forward
+    // untouched, since this producer never rebuilds a helper and the published
+    // release it would otherwise re-fetch has not moved.
+    seedManifest(fx.store, { menubar: { inputDigest: fx.manifestDigests.menubar } });
 
     const result = runProduceWithHelpers(fx);
     expect(result.status, result.stdout + result.stderr).toBe(0);
-    expect(result.stdout + result.stderr).toContain('helper computer-mac unchanged');
+    expect(result.stdout + result.stderr).toContain('helper menubar unchanged');
 
     const manifestFile = path.join(fx.store, 'release-manifest.json');
     expect(fs.existsSync(manifestFile)).toBe(true);
     const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf-8'));
 
-    // computer-mac: untouched, still the seeded placeholder record.
-    expect(manifest.helpers['computer-mac'].helperVersion).toBe('prev-1.0.0');
-    expect(manifest.helpers['computer-mac'].inputDigest).toBe(fx.manifestDigests['computer-mac']);
+    // Untouched, still the seeded placeholder record — and NOT re-fetched.
+    expect(manifest.helpers.menubar.helperVersion).toBe('prev-1.0.0');
+    expect(manifest.helpers.menubar.inputDigest).toBe(fx.manifestDigests.menubar);
+    expect(result.stdout + result.stderr).not.toContain('Recorded menubar from published');
+  });
 
-    // menubar: freshly recorded from the published release, keyed by the SAME
-    // input digest a second, independent checkout computes (proving the
-    // RUSH-2766 relative-path fix: the producer hashed inside a throwaway $WT,
-    // the test hashed the caller clone -- different absolute paths, same
-    // relative tree). The asset digest is the sha256 of the published zip's
-    // bytes, the version is the helper's FLOOR (never the CLI's version), and
-    // the provenance sidecar rides along as `source`.
+  it('records a changed helper from its PUBLISHED release, never a rebuild', () => {
+    const root = tmp('attest-produce-manifest-record-');
+    const fx = buildManifestFixture(root);
+    // A stale digest: menubar reads as changed, so the record-from-published
+    // path runs. Nothing in this tree can build it (PHNX-4036).
+    seedManifest(fx.store, { menubar: { inputDigest: 'sha256:' + '0'.repeat(64) } });
+
+    const result = runProduceWithHelpers(fx);
+    expect(result.status, result.stdout + result.stderr).toBe(0);
+    const manifestFile = path.join(fx.store, 'release-manifest.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf-8'));
+
+    // Keyed by the SAME input digest a second, independent checkout computes
+    // (proving the RUSH-2766 relative-path fix: the producer hashed inside a
+    // throwaway $WT, the test hashed the caller clone -- different absolute
+    // paths, same relative tree). The asset digest is the sha256 of the
+    // published zip's bytes, the version is the helper's FLOOR (never the CLI's
+    // version), and the provenance sidecar rides along as `source`.
     expect(result.stdout + result.stderr).toContain('Recorded menubar from published menubar/v1.0.0');
     const menubar = manifest.helpers.menubar;
     expect(menubar.inputDigest).toBe(fx.manifestDigests.menubar);
@@ -767,11 +773,11 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
   });
 
   /**
-   * RUSH-2970 trap 1. A fresh attestation store has no recorded computer-mac
-   * inputDigest, so the helper loop below reads "input changed" and dies
-   * telling the operator to run publish-computer-helper-mac.sh — which does
-   * not write a manifest, so re-running the producer hits the identical error.
-   * Every hand-cut release walked into that loop. The producer now seeds the
+   * RUSH-2970 trap 1. A fresh attestation store has no recorded inputDigest, so
+   * the helper loop below reads "input changed" and re-fetches (historically, for
+   * the in-repo computer-mac helper, it DIED telling the operator to run a publish
+   * script that wrote no manifest — so re-running hit the identical error, and
+   * every hand-cut release walked into that loop). The producer seeds the
    * manifest from the last published release first.
    *
    * `gh` is stubbed on the fixture's fake-bin PATH so this exercises the real
@@ -782,7 +788,7 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
     const fx = buildManifestFixture(root);
     // Built with the real generator, so the fixture is a manifest the shipped
     // tooling actually produces rather than a hand-rolled shape.
-    const priorManifest = priorReleaseManifest(root, fx.manifestDigests['computer-mac']);
+    const priorManifest = priorReleaseManifest(root, fx.manifestDigests.menubar);
     // A `gh` that answers exactly the two calls the seed makes.
     fs.writeFileSync(
       path.join(fx.fakebin, 'gh'),
@@ -803,12 +809,12 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
     expect(result.status, result.stdout + result.stderr).toBe(0);
     expect(result.stdout + result.stderr).toContain('Seeded the helper manifest from v9.9.8');
     // The dead-end this fix exists to remove must NOT have fired.
-    expect(result.stdout + result.stderr).not.toContain('helper computer-mac input changed');
+    expect(result.stdout + result.stderr).not.toContain('helper menubar input changed');
 
     const manifest = JSON.parse(fs.readFileSync(path.join(fx.store, 'release-manifest.json'), 'utf-8'));
-    // The seeded computer-mac record carried forward, so the unchanged helper
-    // needed no rebuild — the whole point.
-    expect(manifest.helpers['computer-mac'].inputDigest).toBe(fx.manifestDigests['computer-mac']);
+    // The seeded menubar record carried forward, so the unchanged helper
+    // needed no re-fetch — the whole point.
+    expect(manifest.helpers.menubar.inputDigest).toBe(fx.manifestDigests.menubar);
     // …and the seed did not disable the check: the other helper was still
     // recorded fresh against this tree.
     for (const helper of ['menubar'] as const) {
@@ -824,7 +830,11 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
   it('records menubar without provenance when the published release predates the sidecar', () => {
     const root = tmp('attest-produce-mb-nosidecar-');
     const fx = buildManifestFixture(root, { sidecar: false });
-    seedManifest(fx.store, { 'computer-mac': { inputDigest: fx.manifestDigests['computer-mac'] } });
+    // A stale menubar digest: the manifest FILE exists (so the seed branch is not
+    // what is under test) while menubar still reads as changed and reaches the
+    // record-from-published path. Before PHNX-4075 this seeded computer-mac,
+    // which is no longer a helper of this CLI.
+    seedManifest(fx.store, { menubar: { inputDigest: 'sha256:' + '0'.repeat(64) } });
     const result = runProduceWithHelpers(fx);
     const out = result.stdout + result.stderr;
     expect(result.status, out).toBe(0);
@@ -837,21 +847,31 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
   it('fails closed when the published menubar asset does not match its .sha256', () => {
     const root = tmp('attest-produce-mb-badsha-');
     const fx = buildManifestFixture(root, { wrongSha: true });
-    seedManifest(fx.store, { 'computer-mac': { inputDigest: fx.manifestDigests['computer-mac'] } });
+    // A stale menubar digest: the manifest FILE exists (so the seed branch is not
+    // what is under test) while menubar still reads as changed and reaches the
+    // record-from-published path. Before PHNX-4075 this seeded computer-mac,
+    // which is no longer a helper of this CLI.
+    seedManifest(fx.store, { menubar: { inputDigest: 'sha256:' + '0'.repeat(64) } });
     const result = runProduceWithHelpers(fx);
     const out = result.stdout + result.stderr;
     expect(result.status, out).not.toBe(0);
     expect(out).toContain('sha256 mismatch');
     expect(out).toContain('phnx-labs/agi-menu');
-    expect(fs.existsSync(path.join(fx.store, 'release-manifest.json')) &&
-      JSON.parse(fs.readFileSync(path.join(fx.store, 'release-manifest.json'), 'utf-8')).helpers.menubar,
-    ).toBeFalsy();
+    // Fail CLOSED: the stale seeded record must still be stale. Recording the
+    // corrupt download's digest would bind the release to unverified bytes.
+    const written = JSON.parse(fs.readFileSync(path.join(fx.store, 'release-manifest.json'), 'utf-8'));
+    expect(written.helpers.menubar.inputDigest).toBe('sha256:' + '0'.repeat(64));
+    expect(written.helpers.menubar.inputDigest).not.toBe(fx.manifestDigests.menubar);
   });
 
   it('fails closed when the floor names a menubar release that was never published', () => {
     const root = tmp('attest-produce-mb-missing-');
     const fx = buildManifestFixture(root, { empty: true });
-    seedManifest(fx.store, { 'computer-mac': { inputDigest: fx.manifestDigests['computer-mac'] } });
+    // A stale menubar digest: the manifest FILE exists (so the seed branch is not
+    // what is under test) while menubar still reads as changed and reaches the
+    // record-from-published path. Before PHNX-4075 this seeded computer-mac,
+    // which is no longer a helper of this CLI.
+    seedManifest(fx.store, { menubar: { inputDigest: 'sha256:' + '0'.repeat(64) } });
     const result = runProduceWithHelpers(fx);
     const out = result.stdout + result.stderr;
     expect(result.status, out).not.toBe(0);
@@ -861,8 +881,8 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
 
   /**
    * The seed is a convenience, never a way to smuggle a changed helper through:
-   * if the prior release's computer-mac digest does not match this tree, the
-   * producer must still fail closed.
+   * if the prior release's helper digest does not match this tree, the producer
+   * must still fail closed.
    */
   /**
    * The seed's diagnostic must name the REAL cause. A single `&&` chain made a
@@ -905,7 +925,7 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
     expect(output).toContain(expected);
     expect(output).not.toContain(notExpected);
     // Whatever the cause, it still falls back rather than dying here — the
-    // computer-mac gate below is what fails closed.
+    // per-helper gate below is what fails closed.
     expect(output).toContain('Starting a fresh helper manifest');
   });
 
@@ -914,11 +934,11 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
     // computer-helper workflow publishes helper-only releases into the same
     // `v<version>` tag namespace. Taking the newest release unconditionally let
     // one of those shadow the last real CLI release — the seed missed, EVERY
-    // helper read as "changed", and computer-mac (never rebuilt here) fail-closed
-    // on every run. Live instance: v1.22.48 shadowed v1.22.47.
+    // helper read as "changed", and every helper (never rebuilt here) re-fetch or
+    // fail-closed on every run. Live instance: v1.22.48 shadowed v1.22.47.
     const root = tmp('attest-produce-seed-shadowed-');
     const fx = buildManifestFixture(root);
-    const priorManifest = priorReleaseManifest(root, fx.manifestDigests['computer-mac']);
+    const priorManifest = priorReleaseManifest(root, fx.manifestDigests.menubar);
     fs.writeFileSync(
       path.join(fx.fakebin, 'gh'),
       '#!/usr/bin/env bash\n' +
@@ -948,110 +968,6 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
     expect(result.status, out).toBe(0);
   });
 
-  // PHNX-2943: when computer-mac drifts and has no prior record to carry forward,
-  // the producer records it from its PUBLISHED release — but only after the release's
-  // `computer-mac-input-digest.txt` sidecar proves the published binary was built from
-  // THIS source. These stubs model `gh release download computer-mac/v1.0.0`; the seed
-  // is failed (`release list` exit 1) so computer-mac genuinely reaches the drift path.
-  //
-  // `sidecar` is the source digest the published release claims it was built from;
-  // pass fx.manifestDigests['computer-mac'] to match this tree, anything else to force
-  // a mismatch. `omitSidecar` publishes the zip WITHOUT the sidecar (a pre-PHNX-2943
-  // release). `failDownload` makes the download itself fail (gh offline/unauth).
-  const stubComputerMacRelease = (
-    fx: ReturnType<typeof buildManifestFixture>,
-    opts: { sidecar?: string; omitSidecar?: boolean; failDownload?: boolean } = {},
-  ) => {
-    const lines = [
-      '#!/usr/bin/env bash',
-      // No seed: force computer-mac onto the drift path so the published-release
-      // record path is what runs.
-      'if [[ "$1" == release && "$2" == list ]]; then exit 1; fi',
-      'if [[ "$1" == release && "$2" == download ]]; then',
-    ];
-    if (opts.failDownload) {
-      lines.push('  echo "gh: offline" >&2; exit 1');
-    } else {
-      lines.push(
-        '  dir=""; for ((i=1;i<=$#;i++)); do [[ "${!i}" == --dir ]] && { j=$((i+1)); dir="${!j}"; }; done',
-        "  printf 'computer-helper-zip-bytes\\n' > \"$dir/ComputerHelper.app.zip\"",
-        '  ( cd "$dir" && { command -v sha256sum >/dev/null 2>&1 && sha256sum ComputerHelper.app.zip || shasum -a 256 ComputerHelper.app.zip; } ) > "$dir/ComputerHelper.app.zip.sha256"',
-      );
-      if (!opts.omitSidecar) {
-        lines.push(`  printf '%s\\n' ${JSON.stringify(opts.sidecar ?? '')} > "$dir/computer-mac-input-digest.txt"`);
-      }
-      lines.push('  exit 0');
-    }
-    lines.push('fi', 'exit 1', '');
-    fs.writeFileSync(path.join(fx.fakebin, 'gh'), lines.join('\n'));
-    fs.chmodSync(path.join(fx.fakebin, 'gh'), 0o755);
-  };
-
-  it('records computer-mac from its published release when the sidecar proves it was built from this source', () => {
-    const root = tmp('attest-produce-cm-record-');
-    const fx = buildManifestFixture(root);
-    stubComputerMacRelease(fx, { sidecar: fx.manifestDigests['computer-mac'] });
-
-    const result = runProduceWithHelpers(fx);
-    const out = result.stdout + result.stderr;
-    expect(result.status, out).toBe(0);
-    expect(out).toContain('Recorded computer-mac from published computer-mac/v1.0.0');
-
-    const manifestFile = path.join(fx.store, 'release-manifest.json');
-    const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf-8'));
-    // Recorded against the CURRENT source digest and the published binary's sha,
-    // keyed to the helper's own floor version (not the CLI's).
-    expect(manifest.helpers['computer-mac'].inputDigest).toBe(fx.manifestDigests['computer-mac']);
-    expect(manifest.helpers['computer-mac'].helperVersion).toBe('1.0.0');
-    expect(manifest.helpers['computer-mac'].assetDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
-
-    // The consumer accepts it: require checks the recorded input-digest still
-    // matches this tree's source.
-    const required = spawnSync(
-      'bash',
-      [MANIFEST_SCRIPT, 'require', '--file', manifestFile, '--helper', 'computer-mac', '--repo-root', fx.caller],
-      { encoding: 'utf-8' },
-    );
-    expect(required.status, required.stdout + required.stderr).toBe(0);
-  });
-
-  it('fails closed when the published release was built from a DIFFERENT source (stale binary)', () => {
-    const root = tmp('attest-produce-cm-mismatch-');
-    const fx = buildManifestFixture(root);
-    // The published sidecar claims a source that is not this tree — recording it
-    // would attest a stale binary against changed source.
-    stubComputerMacRelease(fx, { sidecar: 'sha256:' + 'b'.repeat(64) });
-
-    const result = runProduceWithHelpers(fx);
-    const out = result.stdout + result.stderr;
-    expect(result.status, out).not.toBe(0);
-    expect(out).toContain('built from a DIFFERENT source');
-    expect(out).toContain('publish-computer-helper-mac.sh');
-  });
-
-  it('fails closed when the published release predates the input-digest sidecar', () => {
-    const root = tmp('attest-produce-cm-nosidecar-');
-    const fx = buildManifestFixture(root);
-    stubComputerMacRelease(fx, { omitSidecar: true });
-
-    const result = runProduceWithHelpers(fx);
-    const out = result.stdout + result.stderr;
-    expect(result.status, out).not.toBe(0);
-    expect(out).toContain('carries no computer-mac-input-digest.txt');
-    expect(out).toContain('publish-computer-helper-mac.sh');
-  });
-
-  it('fails closed when the published release cannot be downloaded (gh offline)', () => {
-    const root = tmp('attest-produce-cm-dlfail-');
-    const fx = buildManifestFixture(root);
-    stubComputerMacRelease(fx, { failDownload: true });
-
-    const result = runProduceWithHelpers(fx);
-    const out = result.stdout + result.stderr;
-    expect(result.status, out).not.toBe(0);
-    expect(out).toContain('could not be downloaded');
-    expect(out).toContain('publish-computer-helper-mac.sh');
-  });
 
   /**
    * PHNX-3699 — an ordinary CLI-only run must sign NOTHING, even on a signing box.
@@ -1127,9 +1043,9 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
     expect(result.status, out).toBe(0);
   });
 
-  it('skips the helper manifest by default even when computer-mac would fail closed', () => {
+  it('skips the helper manifest by default even when a helper would fail closed', () => {
     // Pair of the fail-closed test above: same fixture (release-manifest.sh
-    // present, no seeded computer-mac digest) WITHOUT --with-helpers. This is
+    // present, no seeded helper digest) WITHOUT --with-helpers. This is
     // the 1.22.49 abort — a helper SOURCE digest move killed a CLI-only
     // attestation. buildFixture cannot reproduce it because it never copies
     // release-manifest.sh, so `-x scripts/release-manifest.sh` is already false
@@ -1141,7 +1057,7 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
     expect(result.status, out).toBe(0);
     expect(out).toContain('CLI-only attestation: skipping the helper manifest');
     expect(out).toMatch(/Wrote .*\.json/);
-    expect(out).not.toContain('helper computer-mac input changed');
+    expect(out).not.toContain('helper menubar input changed');
   });
 });
 

@@ -7,7 +7,6 @@
 # notarization live outside this path.
 #
 # What counts as a helper's input differs by where its source lives:
-#   computer-mac  the Swift source in this repo (native/computer-mac).
 #   menubar       NOT source -- AGI Menu lives in phnx-labs/agi-menu (PHNX-4036)
 #                 and this repo only pins which published build it uses. Its
 #                 input is src/lib/helper-versions.ts, the file that holds the
@@ -54,7 +53,11 @@ usage() {
   exit 2
 }
 
-KNOWN_HELPERS="computer-mac menubar"
+# The computer helpers (computer-mac / computer-win) left this repo with the
+# standalone `computer` engine (PHNX-4075): that engine resolves and verifies its
+# own helper releases, so they are no longer helpers of THIS CLI and must not be
+# recorded in its manifest.
+KNOWN_HELPERS="menubar"
 
 CMD="${1:-}"
 [[ -n "$CMD" ]] || usage
@@ -115,12 +118,6 @@ assert_helper() {
 helper_paths() {
   local root="$1" name="$2"
   case "$name" in
-    computer-mac)
-      printf '%s\n' \
-        "$root/native/computer-mac/Sources" \
-        "$root/native/computer-mac/scripts/build.sh" \
-        "$root/native/computer-mac/Package.swift"
-      ;;
     menubar)
       # No source here (phnx-labs/agi-menu). The input that selects the published
       # build is the floor table; a floor bump is the only thing that changes
@@ -287,9 +284,8 @@ require_helpers() {
   printf '%s\n' "$FILE"
 }
 
-# Copy verified helper bytes into DEST without rebuilding. Used to keep the
-# per-CLI-version ComputerHelper.app.zip on v<new> while the downloader still
-# resolves that URL (N/N+1).
+# Copy verified helper bytes into DEST without rebuilding. Used to stage a
+# helper asset onto v<new> for a --with-helpers release, without a rebuild.
 copy_asset() {
   [[ -n "$FILE" ]] || die "copy-asset needs --file"
   [[ -n "$HELPER" ]] || die "copy-asset needs --helper"
@@ -299,8 +295,7 @@ copy_asset() {
   digest="$(jq -r '.assetDigest' <<<"$rec")"
   src="$(jq -r '.assetPath // empty' <<<"$rec")"
   name="$(jq -r --arg n "$HELPER" '
-      if $n == "computer-mac" then "ComputerHelper.app.zip"
-      elif $n == "menubar" then "MenubarHelper.app.zip"
+      if $n == "menubar" then "MenubarHelper.app.zip"
       else $n end' <<<"$rec")"
   if [[ -z "$src" || ! -f "$src" ]]; then
     die "helper $HELPER asset is not on disk -- no fallback rebuild"

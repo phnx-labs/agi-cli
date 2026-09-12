@@ -2269,11 +2269,15 @@ export function listShimFileNames(): string[] {
 
 /**
  * Legacy command shims that are wrong even when their baked install is alive.
- * `secrets` (PHNX-3989) and `sessions` (PHNX-4012): the shim `exec`s
- * `agents <name>`, which is a passthrough to the STANDALONE binary — so the
- * shim re-enters itself (the 1.22.85 fork bomb). Pruned unconditionally.
+ * `secrets` (PHNX-3989), `sessions` (PHNX-4012) and `computer` (PHNX-4075): the
+ * shim `exec`s `agents <name>`, which is a passthrough to the STANDALONE binary —
+ * so the shim re-enters itself (the 1.22.85 fork bomb). Pruned unconditionally.
+ *
+ * `computer` is the sharpest of the three, because agents-cli USED to publish a
+ * `computer` bin of its own: a machine that installed an older CLI has a real
+ * shim on PATH under the name the standalone engine now owns.
  */
-const LEGACY_SHIMS_ALWAYS_PRUNED: ReadonlySet<string> = new Set(['secrets', 'sessions']);
+const LEGACY_SHIMS_ALWAYS_PRUNED: ReadonlySet<string> = new Set(['secrets', 'sessions', 'computer']);
 
 /**
  * Prune a stale, orphaned shim: one that is NOT a managed agent shim and NOT a user

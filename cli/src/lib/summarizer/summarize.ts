@@ -3,8 +3,8 @@
  *
  * A pure boundary: given the session's first user turn (the goal source) and its
  * live progress (todos / plan / phase off the state engine), it asks a local
- * Anthropic-wire endpoint (Ollama / vLLM / LiteLLM — the same configurable base
- * URL `computer/model.ts` speaks) for a strict JSON `{goal, checkpoints, checklist}`
+ * Anthropic-wire endpoint (Ollama / vLLM / LiteLLM) for a strict JSON
+ * `{goal, checkpoints, checklist}`
  * and validates the shape. On ANY failure — network, non-2xx, non-JSON, wrong
  * shape — it returns `undefined`, and the caller records `summaryState: 'skipped'`.
  *
@@ -13,7 +13,15 @@
  */
 
 import type { TodoProgress } from '../session/types.js';
-import { ANTHROPIC_VERSION } from '../computer/model.js';
+
+/**
+ * The `anthropic-version` header this request sends. Declared here because this
+ * is now its only caller: it used to be imported from the computer subsystem's
+ * model client, which left with the standalone `computer` engine (PHNX-4075).
+ * A shared constants module for one string used in one request would be more
+ * indirection than the string.
+ */
+const ANTHROPIC_VERSION = '2023-06-01';
 
 /** Live progress fed to the model alongside the goal-bearing prompt. */
 export interface SummarizeProgress {

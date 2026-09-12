@@ -27,7 +27,7 @@
 # Usage: scripts/release.sh <version> [--apply] [--with-helpers] [--device <name>]
 #
 # --with-helpers (default OFF) opts the release into helper work: staging the
-# computer-mac asset onto v<version> and verifying the helper input-digest
+# menubar asset onto v<version> and verifying the helper input-digest
 # manifest. An ordinary release publishes the CLI and NOTHING else -- helpers
 # live on their own tags (cli/src/lib/helper-versions.ts) and are downloaded on
 # demand, so a CLI release neither ships nor gates on them.
@@ -141,7 +141,7 @@ DEPLOY_WORKER="auto"
 readonly WORKER_CF_BUNDLE="cloudflare.com"
 # --home-base-phase is an INTERNAL entrypoint, not a user knob: the trigger box
 # ssh's release.sh onto the home base with this flag to run ONLY the privileged
-# publish phase (build + sign + notarize + npm publish + computer-helper) against
+# publish phase (build + sign + notarize + npm publish + release assets) against
 # an already-merged+tagged release. It is never something an operator passes.
 HOME_BASE_PHASE=false
 # --orchestration-phase is an INTERNAL marker added only by release-worktree.sh.
@@ -308,7 +308,7 @@ run_home_base_phase() {
   command -v node >/dev/null || die "node not found on $RELEASE_HOME_BASE"
   command -v git >/dev/null  || die "git not found on $RELEASE_HOME_BASE"
   command -v jq >/dev/null   || die "jq not found on $RELEASE_HOME_BASE (brew install jq)"
-  command -v gh >/dev/null   || die "gh not found on $RELEASE_HOME_BASE (needed for the computer-helper release asset)"
+  command -v gh >/dev/null   || die "gh not found on $RELEASE_HOME_BASE (needed to publish the GitHub release assets)"
 
   cd "$ROOT"
 
@@ -349,7 +349,7 @@ run_home_base_phase() {
   dl_patterns=(--pattern 'release-attestation.json'
                --pattern 'phnx-labs-agents-cli-*.tgz')
   if [[ "$WITH_HELPERS" == true ]]; then
-    dl_patterns+=(--pattern 'release-manifest.json' --pattern 'ComputerHelper.app.zip*')
+    dl_patterns+=(--pattern 'release-manifest.json')
   fi
   gh release download "v$TARGET" --dir "$attest_dir" "${dl_patterns[@]}" \
     || die "could not download attested artifacts from GitHub release v$TARGET -- the trigger must upload them before this phase"
@@ -397,12 +397,11 @@ run_home_base_phase() {
   # The ComputerHelper.app.zip gate that used to live here is GONE, deliberately.
   # It existed because the client downloaded `releases/download/v$CLI_VERSION/
   # ComputerHelper.app.zip`, so a release without that asset shipped a broken
-  # `agents computer setup`. Helpers now resolve from their OWN tags
-  # (`computer-mac/v<x.y.z>`, see cli/src/lib/helper-versions.ts), so v$TARGET
-  # carrying the asset is neither necessary nor sufficient -- and keeping the
-  # `die` would have hard-failed an otherwise-good release over an asset nothing
-  # reads. The real gate is that the helper's own tag exists, which is asserted
-  # where the helper is released, not here.
+  # `agents computer setup`. That helper then moved to its own tag, and with
+  # PHNX-4075 it left this repo entirely -- the standalone `computer` engine
+  # resolves and verifies its own helper releases. v$TARGET carrying the asset
+  # is neither necessary nor sufficient, and the `die` would have hard-failed an
+  # otherwise-good release over an asset nothing reads.
 }
 
 # Resolve the npm publish token from the local `npmjs.com` secrets bundle and
@@ -534,7 +533,7 @@ bun install --frozen-lockfile >/dev/null \
 
 # ----- Route the privileged phase to the home base -----
 # After the trigger box has merged + tagged the release (git + gh, which need the
-# invoking box's auth), the promote+publish+computer-helper phase runs
+# invoking box's auth), the promote+publish+release-assets phase runs
 # on the home base -- always from the TAGGED release.sh, checked out into a
 # throwaway worktree at v$TARGET, so the home base's own on-disk checkout (which,
 # on the first release after this PR merges, predates --home-base-phase) is never
@@ -825,7 +824,7 @@ if $MAIN_AT_TARGET && ! $PHNX_TARGET_PUBLISHED && [[ -n "$MERGED_RELEASE_SHA" ]]
   # single selector in phase 4 owns both version checks plus the exact-tree
   # attestation; it deliberately does not equate a rebased merge tree with the
   # artifact tree. No artifacts are built on the trigger box. The whole
-  # privileged phase (promote + publish + computer-helper) now runs on the home
+  # privileged phase (promote + publish + release assets) now runs on the home
   # base against the tagged tree, so no staged helper / historical worktree
   # build is needed on the invoking box.
   HISTORICAL_CATCHUP=true
@@ -1214,24 +1213,20 @@ upload_release_proof() {
   # Helper assets and the manifest ride the release ONLY with --with-helpers.
   #
   # By default a CLI release publishes the CLI and nothing else. Helpers resolve
-  # from their OWN tags (`menubar/v<x.y.z>`, `keychain/v<x.y.z>`,
-  # `computer-mac/v<x.y.z>`, `computer-win/v<x.y.z>` -- see
-  # cli/src/lib/helper-versions.ts), so an asset staged onto v$TARGET is one no
-  # client ever requests: dead weight on every release, and previously a filename
-  # proven to 404 (the keychain staging wrote `Agents CLI.app.zip`, which GitHub
-  # rewrites to a dot).
+  # from their OWN tags (`menubar/v<x.y.z>` -- see cli/src/lib/helper-versions.ts),
+  # so an asset staged onto v$TARGET is one no client ever requests: dead weight on
+  # every release, and previously a filename proven to 404 (the keychain staging
+  # wrote `Agents CLI.app.zip`, which GitHub rewrites to a dot).
   #
   # The comment that used to sit here claimed no helper assets were staged at all,
   # which was false three lines below its own text -- computer-mac was still being
   # copied. Flagged in the review of #3056; the flag is what makes the claim true.
+  # That helper has since left the repo with the standalone `computer` engine
+  # (PHNX-4075), so the manifest is now the only helper artifact this stages.
   if [[ "$WITH_HELPERS" == true ]]; then
     [[ -f "$store/release-manifest.json" ]] \
       || die "release manifest missing at $store/release-manifest.json -- no fallback rebuild"
     cp "$store/release-manifest.json" "$dest/release-manifest.json"
-    if ! scripts/release-manifest.sh copy-asset --file "$store/release-manifest.json" --helper computer-mac --asset-path "$dest"; then
-      gh release download "v$PHNX_LATEST" --dir "$dest" --pattern 'ComputerHelper.app.zip*' \
-        || die "could not reuse ComputerHelper.app.zip from v$PHNX_LATEST -- no fallback rebuild"
-    fi
   else
     gray "CLI-only release: no helper assets staged onto v$TARGET (pass --with-helpers to include them)"
   fi

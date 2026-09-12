@@ -1481,7 +1481,11 @@ src/
                        #   preferred.ts resolves WHICH terminal for a GUI caller (from live sessions' host app)
     cloud/             # Provider registry (Rush / Codex / Factory / Antigravity)
     teams/             # `agents teams` orchestration
-    computer/          # `agents computer` client (computer-rpc.ts openComputerClient() transport switch → native/computer-mac Unix socket / native/computer-win TCP over ssh -L / rfb-client.ts RFB-VNC desktop; des.ts is the pure-JS DES for VNC auth) plus dispatch/download/loop
+    computer/          # `agents computer` CONSUMER of the standalone `computer` engine (PHNX-4075):
+                       #   policy.ts (permissions → the allow-list file), remote.ts (--device fleet resolution
+                       #   + the ssh -L tunnel), context.ts (the fd-3 JSON handed to the engine),
+                       #   record.ts (fd-4 action events → feed + session history), sessions-list.ts (the ledger
+                       #   reader). The daemons, RPC, RFB/VNC and the model loop all live in the engine.
     menubar/           # AGI Menu installer/downloader/snapshot (the helper's SOURCE is phnx-labs/agi-menu, PHNX-4036)
     profiles.ts        # Host CLI + endpoint + model bundles
 ```
@@ -1610,14 +1614,17 @@ downloads, verifies, and manages its own signed helper release now, off
 |---|---|---|---|
 | Menu-bar helper (AGI Menu) | [phnx-labs/agi-menu](https://github.com/phnx-labs/agi-menu) (own repo, PHNX-4036) — never built here; `scripts/stage-menubar-helper.sh` stages the published build at `bin/MenubarHelper.app` | **No** (RUSH-3100) — signed + notarized `MenubarHelper.app.zip` GitHub **release asset** on the helper's own `menubar/v<x.y.z>` tag, downloaded on demand | `src/lib/menubar/install-menubar.ts`, `src/lib/menubar/download-menubar.ts` (shared machinery in `src/lib/helper-download.ts`) |
 | Standalone CLI binary | `src/` → `bun build --compile` → `bin/agents-macos` | **No** — dropped from the tarball (RUSH-3026); macOS installs fall back to the JS entrypoint until it returns as a per-release GitHub asset | `scripts/postinstall.js` |
-| computer-mac | [`../../native/computer-mac`](../../native/computer-mac) | No — signed + notarized GitHub **release asset** on its own `computer-mac/v<x.y.z>` tag, downloaded on demand | `src/lib/computer/computer-rpc.ts`, `src/lib/computer/download.ts` (shared machinery in `src/lib/helper-download.ts`) |
-| computer-win | [`../../native/computer-win`](../../native/computer-win) | No — `computer-helper-win.exe` GitHub **release asset** on its own `computer-win/v<x.y.z>` tag, downloaded on demand | `src/lib/computer/ssh-tunnel.ts` |
 
-Path math: compiled resolvers run from `cli/dist/lib/…`. Files still in `dist/lib/`
-reach repo-root `native/` in **4 hops** (`../../../../native/…`); files in
-`dist/lib/computer/` need **5 hops**; the menu-bar installer reaches the staged
-`cli/bin/MenubarHelper.app` in **3 hops** (`../../../bin/…`). Recompute depth if
-you move files — don't blind-replace.
+The computer helpers (computer-mac, computer-win) are **no longer helpers of this
+CLI**. They left with the standalone `computer` engine (PHNX-4075), which resolves,
+downloads and verifies its own helper releases. agents-cli neither downloads nor
+version-pins them, and `src/lib/helper-versions.ts` deliberately has no entry for
+them — see [`docs/computer.md`](docs/computer.md).
+
+Path math: compiled resolvers run from `cli/dist/lib/…`. The menu-bar installer
+reaches the staged `cli/bin/MenubarHelper.app` in **3 hops** (`../../../bin/…`).
+Recompute depth if you move files — don't blind-replace. (There is no longer a
+repo-root `native/` tree to reach: it left with the computer engine, PHNX-4075.)
 
 ## Build, test, dev
 
@@ -1638,11 +1645,12 @@ regressions are caught on the nightly lane instead; a risky release can still ru
 it on demand via `workflow_dispatch`. CI runs from `cli` via
 `defaults.run.working-directory`.
 
-**Live Windows `--device` e2e (opt-in):** `src/lib/computer/ssh-tunnel.e2e.test.ts` and
-`src/lib/browser/drivers/ssh.e2e.test.ts` drive a real Windows box end-to-end
-(exe push + LOGON task, tunnel + RPC, screenshot, type/get-text round-trip,
-remote browser launch/stop). Gated on `AGENTS_TEST_WIN_HOST=<registered device>`;
-both suites skip cleanly when the var is unset, so CI needs no Windows runner.
+**Live Windows `--device` e2e (opt-in):** `src/lib/browser/drivers/ssh.e2e.test.ts`
+drives a real Windows box end-to-end (tunnel + remote browser launch/stop). Gated
+on `AGENTS_TEST_WIN_HOST=<registered device>`; it skips cleanly when the var is
+unset, so CI needs no Windows runner. The computer half of this suite (exe push +
+LOGON task, RPC, screenshot, type/get-text round-trip) moved to the standalone
+`computer` engine's repo with the helper itself (PHNX-4075).
 
 **Local dev build:** `scripts/install.sh --skip-tests` builds the working tree,
 installs it at `$HOME/.local/agents-cli-dev/`, and exposes it as
@@ -1984,20 +1992,14 @@ after extraction); it never blocked the CLI tarball. A helper is re-recorded onl
 when its own input changes; the input digest in
 [`scripts/release-manifest.sh`](scripts/release-manifest.sh) is what decides that.
 
-**computer-mac records itself from its published release, not a local rebuild
-(PHNX-2943).** `computer-mac` is signed on the separate
-[`scripts/publish-computer-helper-mac.sh`](scripts/publish-computer-helper-mac.sh)
-path and is never rebuilt in `release-attestation-produce.sh`. When its source
-drifts, the producer records the **published** `computer-mac/v<floor>` binary — but
-only after proving that binary was built from the current source: the publish
-script uploads a `computer-mac-input-digest.txt` sidecar naming the source it built
-from, and the producer records the row only when that equals the current source
-digest, verifying the downloaded zip against its `.sha256` first. A mismatch, a
-missing sidecar (a pre-PHNX-2943 release), or an undownloadable release **fails
-closed** with the exact `publish-computer-helper-mac.sh` command — never binding a
-new source digest to an unproven binary. Before this, the producer just died on
-drift and the publish script recorded nothing, so the "republish then re-run"
-advice looped forever (hit live cutting 1.22.43).
+**The helper manifest covers `menubar` and nothing else.** `computer-mac` used to be
+recorded here from its published release (PHNX-2943), with a source-digest sidecar
+proving the published binary was built from this tree's Swift source. That whole arm
+is gone: the computer helpers left the repo with the standalone `computer` engine
+(PHNX-4075), so there is no source here to digest and no helper for this CLI's
+release to attest. `KNOWN_HELPERS` in
+[`scripts/release-manifest.sh`](scripts/release-manifest.sh) is the list — adding a
+helper back means adding its input-digest arm in the same change.
 
 **Menu-bar helper (AGI Menu) — consumed from its published release, never built
 here (PHNX-4036).** The helper's source moved to
