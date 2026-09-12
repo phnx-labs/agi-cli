@@ -486,8 +486,15 @@ syncs, so Anthropic re-prompts every run (the operator-visible re-login loop).
 **before spawn** with the real fix — pin a live account (`agents run claude#<name>`),
 set the default (`agents accounts default claude <name>`), or mint the token on a
 headed box (`agents accounts login claude#<name>`) — never "log in here." It is
-interactive-only; the headless 401 is already loud. Naming *which* account was
-selected at dispatch (the `accounts=balanced` banner) is tracked under PHNX-3940.
+interactive-only (the headless 401 is already loud) and fires ONLY on an **explicit
+`role: worker`** box: the owner rule guarantees a worker holds no native login, so
+no-token there is genuinely the login screen with nothing behind it. A headed box
+uses its own native login, and an UNMARKED box is left alone — it may be an
+unconfigured personal laptop whose first-run login is legitimate, and its native
+login must not be probed on the hot path (a macOS keychain auth sheet). `--device
+auto` only lands on explicit workers, so the dispatched trap is still caught.
+Naming *which* account was selected at dispatch (the `accounts=balanced` banner) is
+tracked under PHNX-3940.
 
 **Account → slot at spawn (PHNX-3940 T5).** The role rule still chooses *which
 kind* of credential is injected. The slot chooses *whose* credential. When a run
