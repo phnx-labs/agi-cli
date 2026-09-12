@@ -1,1 +1,0 @@
-- Computer setup installs standalone Computer CLI 0.1.2, whose application code is obfuscated before compilation to increase inspection effort. Agents continues to provide permissions and session tracking through its adapter.

@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.22.105
+
+- Computer setup installs standalone Computer CLI 0.1.2, whose application code is obfuscated before compilation to increase inspection effort. Agents continues to provide permissions and session tracking through its adapter.
+
+- Fleet test runs use separate temporary workspaces and clean up their own copies. Router account fixtures run only with isolated file-backed secret storage, preserving native keyrings.
+
+- **Device picker module for `agents run <agent>@` (PHNX-4083).** New
+  `run-device-picker` command module builds the fleet device menu entirely from
+  on-disk state — the device registry, the cached fleet stats, configured roles
+  and descriptions, and the fleet-synced account catalog — with zero SSH, zero
+  network, and no re-probing of stale rows. Source: `src/commands/run-device-picker.ts`.
+
 ## 1.22.104
 
 - **Interactive Claude runs on a worker fail loud instead of dropping to the login screen (PHNX-3502 sibling).** `agents run claude --interactive --device auto/<worker>` whose selected account had no synced setup-token used to fall through to Claude Code's "Select login method" screen — an interactive OAuth on a headless box that never persists, so Anthropic re-prompted on the next run (the repeated re-login loop). The run is now refused before spawn with the real fix (pin a live account with `agents run claude#<name>`, set the fleet default with `agents accounts default claude <name>`, or mint the account's token on a headed box with `agents accounts login claude#<name>`). Headless runs are unchanged (they already fail loud with a 401), and headed boxes still show their normal native-login prompt. Source: `cli/src/lib/harness/adapters/claude.ts`, `cli/src/lib/exec.ts`.
