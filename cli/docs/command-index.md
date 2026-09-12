@@ -162,30 +162,30 @@ agents commands view [name]    Read the full content of a command file with mark
 ## computer — Drive macOS apps via Accessibility, a Linux GUI desktop with --vnc, or a remote Windows device with --device — screenshot, click, type
 
 ```
-agents computer                        Drive macOS apps via Accessibility, a Linux GUI desktop with --vnc, or a remote Windows device with --device — screenshot, click, type
-agents computer apps [args...]         List running apps the policy allows, with pid and bundle id
-agents computer ax-action [args...]    Perform a raw accessibility action on an element
-agents computer click [args...]        Click an element by id, or a coordinate pair
-agents computer describe [args...]     Dump an app's accessibility tree — the element ids the interact verbs target
-agents computer drag [args...]         Drag from one point or element to another
-agents computer focus [args...]        Move keyboard focus to an element
-agents computer get-text [args...]     Read the text content of an element or a whole window
-agents computer key [args...]          Send a key or chord (e.g. cmd+s, escape)
-agents computer launch [args...]       Launch an allow-listed app by bundle id and wait for it to be ready
-agents computer raise [args...]        Bring an app to the front
-agents computer reload [args...]       Reload the allow-list policy (SIGHUP the local daemon) — or restart a remote Windows daemon with --device
-agents computer right-click [args...]  Right-click an element by id, or a coordinate pair
-agents computer run [args...]          Autonomously drive an app from a natural-language task (model loop over the computer verbs)
-agents computer screenshot [args...]   Capture a window (default: largest), enumerate windows (--list), or the whole display (--display)
-agents computer scroll [args...]       Scroll an element or the window under a coordinate
-agents computer sessions               Browse computer-driving history, grouped by run — one row per `agents computer` invocation
-agents computer setup [args...]        Install the helper — locally to /Applications/ (macOS), or to a remote Windows device with --device
-agents computer start [args...]        Activate the helper daemon — local launchd (macOS) or a remote Windows tunnel with --device
-agents computer status [args...]       Report install state, daemon state, and Accessibility trust — or a remote Windows daemon with --device
-agents computer stop [args...]         Deactivate the helper daemon — local launchd (macOS) or a remote Windows tunnel with --device
-agents computer type [args...]         Type into a focused element by id
-agents computer type-text [args...]    Type a literal string at the current focus
-agents computer wait [args...]         Wait for an element or condition to appear before continuing
+agents computer              Drive macOS apps via Accessibility, a Linux GUI desktop with --vnc, or a remote Windows device with --device — screenshot, click, type
+agents computer apps         List running apps the policy allows, with pid and bundle id
+agents computer ax-action    Perform a raw accessibility action on an element
+agents computer click        Click an element by id, or a coordinate pair
+agents computer describe     Dump an app's accessibility tree — the element ids the interact verbs target
+agents computer drag         Drag from one point or element to another
+agents computer focus        Move keyboard focus to an element
+agents computer get-text     Read the text content of an element or a whole window
+agents computer key          Send a key or chord (e.g. cmd+s, escape)
+agents computer launch       Launch an allow-listed app by bundle id and wait for it to be ready
+agents computer raise        Bring an app to the front
+agents computer reload       Reload the allow-list policy (SIGHUP the local daemon) — or restart a remote Windows daemon with --device
+agents computer right-click  Right-click an element by id, or a coordinate pair
+agents computer run          Autonomously drive an app from a natural-language task (model loop over the computer verbs)
+agents computer screenshot   Capture a window (default: largest), enumerate windows (--list), or the whole display (--display)
+agents computer scroll       Scroll an element or the window under a coordinate
+agents computer sessions     Browse computer-driving history, grouped by run — one row per `agents computer` invocation
+agents computer setup        Install the helper — locally to /Applications/ (macOS), or to a remote Windows device with --device
+agents computer start        Activate the helper daemon — local launchd (macOS) or a remote Windows tunnel with --device
+agents computer status       Report install state, daemon state, and Accessibility trust — or a remote Windows daemon with --device
+agents computer stop         Deactivate the helper daemon — local launchd (macOS) or a remote Windows tunnel with --device
+agents computer type         Type into a focused element by id
+agents computer type-text    Type a literal string at the current focus
+agents computer wait         Wait for an element or condition to appear before continuing
 ```
 
 ## config — Get, set, list, and unset run defaults, tier overrides, the projects root, device options, and spend caps.
