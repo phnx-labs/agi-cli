@@ -53,23 +53,23 @@ function provider(overrides: Partial<ProviderAccountCatalogRow> = {}): ProviderA
 }
 
 describe('renderAccountList', () => {
-  it('renders one account row with state, where, usage, and default marker', () => {
+  it('renders a healthy account as name + usage and nothing else', () => {
     const out = stripAnsi(renderAccountList([row()], [], { localDevice: 'other-box' }));
-    expect(out).toContain('ACCOUNT');
-    expect(out).toContain('IDENTITY');
-    expect(out).toContain('STATE');
-    expect(out).toContain('WHERE');
-    expect(out).toContain('USAGE');
-    expect(out).toContain('FIX');
-    expect(out).toContain('* work');
-    expect(out).toContain('LIVE');
-    expect(out).toContain('on 1 box');
-    expect(out).toContain('20%');
-    expect(out).toContain('STATE:');
+    const data = out.split('\n').find((line) => line.includes('work'))!;
+    expect(data).toContain('* work');
+    expect(data).toContain('20%');
+    // The columns the old table printed on every row are gone: a healthy
+    // account says only what it is and how used it is.
+    expect(data).not.toContain('w@example.com');
+    expect(data).not.toContain('LIVE');
+    expect(data).not.toContain('box');
+    expect(out).not.toContain('IDENTITY');
+    expect(out).not.toContain('WHERE');
     expect(out).toContain('* stale usage');
+    expect(out).toContain('agents accounts list --fleet');
   });
 
-  it('puts the usage bar + percent in USAGE and leaves FIX empty when there is no repair', () => {
+  it('puts the usage bar + percent in the usage cell and leaves the trailing note empty when there is no repair', () => {
     const out = stripAnsi(renderAccountList([row({
       usage: {
         status: 'available',
@@ -82,23 +82,22 @@ describe('renderAccountList', () => {
       },
       fix: null,
     })], [], { localDevice: 'zion' }));
-    const data = out.split('\n').find((line) => line.includes('work') && line.includes('LIVE'));
+    const data = out.split('\n').find((line) => line.includes('work'));
     expect(data).toBeDefined();
     expect(data).toContain('59%*');
     expect(data).not.toContain('fix:');
-    const header = out.split('\n').find((line) => line.includes('ACCOUNT') && line.includes('FIX'));
-    expect(header).toMatch(/WHERE\s+USAGE\s+FIX/);
   });
 
-  it('reads WHERE as this box when only the local device reports', () => {
-    const out = stripAnsi(renderAccountList([row()], [], { localDevice: 'zion' }));
-    expect(out).toContain('this box');
-    expect(out).not.toContain('on 1 box');
-    // The renderer must not consult machineId() — omitting localDevice stays
-    // hermetic even when this host's name matches the fixture device.
-    const omitted = stripAnsi(renderAccountList([row()]));
-    expect(omitted).not.toContain('this box');
-    expect(omitted).toContain('on 1 box');
+  it('calls out partial device coverage and stays silent on full coverage', () => {
+    const partial = stripAnsi(renderAccountList([row({
+      devices: [
+        { device: 'zion', authMode: 'native', verdict: 'live' },
+        { device: 'worker-1', authMode: 'durable', verdict: 'revoked' },
+      ],
+    })], [], { localDevice: 'zion' }));
+    expect(partial).toContain('usable on 1 of 2 boxes');
+    const full = stripAnsi(renderAccountList([row()], [], { localDevice: 'zion' }));
+    expect(full).not.toContain('boxes');
   });
 
   it('restricts a harness filter to that harness and never prints an empty group', () => {
@@ -114,8 +113,6 @@ describe('renderAccountList', () => {
     expect(out).not.toMatch(/^claude$/m);
     expect(out).not.toContain('\nclaude\n');
     expect(out).not.toContain('opencode');
-    const headers = out.split('\n').filter((line) => /ACCOUNT\s+IDENTITY/.test(line));
-    expect(headers).toHaveLength(1);
   });
 
   it('prints the exact repair command and attention count for an expired account', () => {
@@ -126,25 +123,50 @@ describe('renderAccountList', () => {
         devices: [{ device: 'zion', authMode: 'native', verdict: 'expired' }],
       }),
     ]));
-    expect(out).toContain('EXPIRED');
-    expect(out).toContain('fix: agents accounts login claude#work');
+    expect(out).toContain('expired · fix: agents accounts login claude#work');
     expect(out).toContain('1 accounts need you');
   });
 
   it.each([
-    ['live', 'LIVE'],
-    ['expired', 'EXPIRED'],
-    ['revoked', 'REVOKED'],
-    ['rate_limited', 'LIMITED'],
-    ['unverified', 'UNVERIFIED'],
-    ['missing', 'MISSING'],
-    ['per-device', 'PER-DEVICE'],
-  ] as const)('renders the %s verdict as %s', (verdict, label) => {
+    ['expired', 'expired'],
+    ['revoked', 'revoked'],
+    ['missing', 'missing'],
+    ['rate_limited', 'rate-limited'],
+  ] as const)('trails the %s verdict on the row as %s', (verdict, label) => {
     const out = stripAnsi(renderAccountList([row({
       verdict,
-      fix: verdict === 'live' || verdict === 'rate_limited' ? null : 'repair',
+      fix: verdict === 'rate_limited' ? null : 'repair',
     })]));
-    expect(out).toContain(label);
+    const data = out.split('\n').find((line) => line.includes('work'))!;
+    expect(data).toContain(label);
+  });
+
+  it.each(['live', 'unverified', 'per-device'] as const)(
+    'prints no state for the ordinary %s verdict — it is not an operator action',
+    (verdict) => {
+      const out = stripAnsi(renderAccountList([row({ verdict, fix: null })]));
+      const data = out.split('\n').find((line) => line.includes('work'))!;
+      expect(data.toLowerCase()).not.toContain(verdict);
+    },
+  );
+
+  it('never says rate-limited twice when the usage cell already names the throttle', () => {
+    const out = stripAnsi(renderAccountList([row({
+      verdict: 'rate_limited',
+      fix: null,
+      usage: {
+        status: 'out_of_credits',
+        verdict: 'unavailable',
+        usedPercent: null,
+        stale: false,
+        capturedAt: '2026-09-06T00:00:00.000Z',
+        resetsAt: null,
+        unavailableReason: null,
+      },
+    })]));
+    const data = out.split('\n').find((line) => line.includes('work'))!;
+    expect(data).toContain('no credits');
+    expect(data).not.toContain('rate-limited');
   });
 
   it('never exposes reserved credential stores in account output', () => {
@@ -176,10 +198,13 @@ describe('renderAccountList', () => {
     expect(out).toContain('claude');
     expect(out).toContain('* work');
     expect(out).toContain('openrouter-work');
-    expect(out).toContain('READY');
+    // A ready provider credential is the ordinary case: name only, no state,
+    // and never the provider label the old IDENTITY column repeated.
+    const providerLine = out.split('\n').find((line) => line.includes('openrouter-work'))!;
+    expect(providerLine.trim()).toBe('openrouter-work');
     expect(out).toContain('Other accounts');
     expect(out).toContain('orphan-proxy');
-    expect(out).toContain('MISSING');
+    expect(out).toContain('missing · fix: agents accounts set-key orphan-proxy');
     expect(out).toContain('fix: agents accounts set-key orphan-proxy');
     expect(out.toLowerCase()).not.toContain('bundle');
     expect(out).toContain('1 accounts need you');
@@ -231,7 +256,6 @@ describe('renderAccountList', () => {
         unavailableReason: 'usage unavailable (headless)',
       },
     })]));
-    expect(out).toContain('UNVERIFIED');
     expect(out).not.toMatch(/out of credits|no credits/i);
     expect(out).toContain('0 accounts need you');
   });

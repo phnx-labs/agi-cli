@@ -586,7 +586,7 @@ export function registerAccountsCommand(program: Command): void {
       await runAccountsAction(command, () => printAccounts(!!o.json, !!o.fleet));
     });
   const listCmd = accounts.command('list [harness]')
-    .description('List accounts with authentication verdict, device coverage, usage, and exact repair command')
+    .description('List accounts as name + usage, with the state and repair command only when one is needed')
     .option('--json', 'Machine-readable account metadata')
     .option('--fleet', 'Show accounts as rows and devices as columns')
     .action(async (harness: string | undefined, o: { json?: boolean; fleet?: boolean }, command: Command) => {
@@ -598,7 +598,7 @@ export function registerAccountsCommand(program: Command): void {
 agents accounts list claude
 agents accounts list --json
 agents accounts list --fleet`,
-    notes: 'One row per account per harness. STATE is the usage snapshot (`deriveUsageStatusFromSnapshot`/`applyUsageHonesty`, never a probe 429 — a throttled probe keeps the previous verdict within 20 min, otherwise `unverified` with `probe throttled (HTTP 429)`; `LIMITED` only when the local usage snapshot is `rate_limited`/`out_of_credits`, remote `rate_limited` only when no local snapshot). WHERE is `this box` when only this device reports; otherwise `on N boxes` when every provisioned device is usable (`live`/`rate_limited`/`unverified`), `on N of M boxes` when some are not, `—` when nothing is provisioned; per-device accounts list present devices. USAGE is the bar + percent (`*` stale). FIX is the exact repair command — empty when there is none. Reserved credential stores are not listed here; `agents secrets` is the place those show.',
+    notes: 'One row per account per harness: the account name, its usage bars (`*` stale), then nothing at all when the account is healthy. A state worth acting on trails the row — `rate-limited` (the usage snapshot via `deriveUsageStatusFromSnapshot`/`applyUsageHonesty`, never a probe 429), `expired`/`revoked`/`missing`, partial fleet coverage (`usable on 3 of 5 boxes`), then the exact repair command. `live`, `unverified`, `ready` and `per-device` are the ordinary cases and print nothing. For the identity behind an account use `agents accounts view <name>`; for per-device state use `--fleet`; for everything use `--json`. Reserved credential stores are not listed here; `agents secrets` is the place those show.',
   });
 
   registerMintCommand(accounts, undefined, { hidden: true });

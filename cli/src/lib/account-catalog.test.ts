@@ -15,7 +15,7 @@ import {
   resolveLocalAccountObservation,
   secretsUnavailableNote,
   toProviderRow,
-  whereText,
+  coverageNote,
   type NativeHomeRow,
 } from './account-catalog.js';
 import { USAGE_NOT_COLLECTED_MARKER, deriveUsageStatusFromSnapshot, usageErrorForDisplay, usageHeadlessScopeError } from './accounting/usage.js';
@@ -678,25 +678,23 @@ describe('aggregateAccountVerdict honours local usage snapshot (PHNX-3940/4051)'
   });
 });
 
-describe('WHERE English rendering (PHNX-4051)', () => {
-  const mkRow = (devices: Array<{ device: string; verdict: 'live' | 'revoked' | 'rate_limited' | 'unverified' | 'missing' | 'expired' }>, provisioning: 'portable' | 'per-device' = 'portable'): Parameters<typeof whereText>[0] =>
+describe('device coverage is a note, not a column (PHNX-4051)', () => {
+  const mkRow = (devices: Array<{ device: string; verdict: 'live' | 'revoked' | 'rate_limited' | 'unverified' | 'missing' | 'expired' }>, provisioning: 'portable' | 'per-device' = 'portable'): Parameters<typeof coverageNote>[0] =>
     ({ kind: 'native', agent: 'claude', identityKey: 'k', name: 'n', id: 'id', email: null, display: 'd', identityLabel: 'd', home: null, installations: [], isDefault: false, state: 'connected', provisioning, verdict: 'live', checkedAt: null, devices: devices as never, usage: null, fix: null } as never);
 
-  it('this box when only the local device reports', () => {
-    expect(whereText(mkRow([{ device: 'zion', verdict: 'live' }]), 'zion')).toBe('this box');
+  it('says nothing when only the local device reports — that is a gap in what we can see', () => {
+    expect(coverageNote(mkRow([{ device: 'zion', verdict: 'live' }]), 'zion')).toBeNull();
   });
-  it('on N boxes when every provisioned device is usable (live + rate_limited + unverified)', () => {
+  it('says nothing when every provisioned device is usable (live + rate_limited + unverified)', () => {
     const devices = [
       ...Array.from({ length: 2 }, (_, i) => ({ device: `live-${i}`, verdict: 'live' as const })),
       ...Array.from({ length: 2 }, (_, i) => ({ device: `limited-${i}`, verdict: 'rate_limited' as const })),
       ...Array.from({ length: 2 }, (_, i) => ({ device: `unverified-${i}`, verdict: 'unverified' as const })),
     ];
-    expect(whereText(mkRow(devices), 'zion')).toBe('on 6 boxes');
+    expect(coverageNote(mkRow(devices), 'zion')).toBeNull();
+    expect(coverageNote(mkRow([{ device: 'a', verdict: 'live' }, { device: 'b', verdict: 'missing' }]), 'zion')).toBeNull();
   });
-  it('on 1 box when single provisioned usable device but not this box alone', () => {
-    expect(whereText(mkRow([{ device: 'a', verdict: 'live' }, { device: 'b', verdict: 'missing' }]), 'zion')).toBe('on 1 box');
-  });
-  it('on N of M boxes when some provisioned are not usable (revoked/expired)', () => {
+  it('names the usable fraction when some provisioned device is not usable (revoked/expired)', () => {
     const devices = [
       { device: 'a', verdict: 'live' as const },
       { device: 'b', verdict: 'rate_limited' as const },
@@ -704,26 +702,27 @@ describe('WHERE English rendering (PHNX-4051)', () => {
       { device: 'd', verdict: 'revoked' as const },
       { device: 'e', verdict: 'expired' as const },
     ];
-    // 3 usable of 5 provisioned
-    expect(whereText(mkRow(devices), 'zion')).toBe('on 3 of 5 boxes');
+    expect(coverageNote(mkRow(devices), 'zion')).toBe('usable on 3 of 5 boxes');
   });
-  it('— when nothing is provisioned (all missing)', () => {
-    expect(whereText(mkRow([{ device: 'a', verdict: 'missing' }, { device: 'b', verdict: 'missing' }]), 'zion')).toBe('—');
-    expect(whereText(mkRow([]), 'zion')).toBe('—');
+  it('says nothing when NO box can use it — the row state already says that', () => {
+    expect(coverageNote(mkRow([{ device: 'a', verdict: 'missing' }, { device: 'b', verdict: 'missing' }]), 'zion')).toBeNull();
+    expect(coverageNote(mkRow([{ device: 'a', verdict: 'expired' }, { device: 'b', verdict: 'expired' }]), 'zion')).toBeNull();
+    expect(coverageNote(mkRow([]), 'zion')).toBeNull();
   });
-  it('per-device branch lists present devices', () => {
+  it('per-device branch names the boxes it is NOT on, and nothing when it is on all of them', () => {
     const devices = [
       { device: 'zion', verdict: 'live' as const },
       { device: 'worker-1', verdict: 'live' as const },
       { device: 'worker-2', verdict: 'missing' as const },
     ];
-    expect(whereText(mkRow(devices, 'per-device'), 'zion')).toBe('zion, worker-1');
+    expect(coverageNote(mkRow(devices, 'per-device'), 'zion')).toBe('not on worker-2');
+    expect(coverageNote(mkRow(devices.slice(0, 2), 'per-device'), 'zion')).toBeNull();
   });
   it('legend line is present in rendered output', async () => {
     const { renderAccountRows } = await import('./account-catalog.js');
     const row = mkRow([{ device: 'zion', verdict: 'live' }]) as never;
     const out = renderAccountRows([row] as never, { localDevice: 'zion' } as never);
-    expect(out).toContain('STATE:');
     expect(out).toContain('* stale usage');
+    expect(out).toContain('agents accounts list --fleet');
   });
 });
