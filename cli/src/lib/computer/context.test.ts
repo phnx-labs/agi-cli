@@ -1,13 +1,23 @@
 /**
- * Transport precedence is the rule a user's existing environment depends on:
- * before PHNX-4075 the in-process client picked the backend, and it now has to
- * be decided here and handed to the engine. These cases pin that the answer did
- * not change.
+ * The fd-3 context is the engine's input contract, so its SHAPE is the thing
+ * under test: the engine accepts `version`/`permissions`/`peers`/`target`/
+ * `session` and nothing else. A field the engine does not read is not a
+ * harmless extra — it is a second, drifting copy of an answer that already
+ * travels in the environment.
  */
 import { describe, expect, it, afterEach } from 'vitest';
-import { resolveTransport } from './context.js';
+import { buildComputerContext, computerTransportEnv } from './context.js';
 
-const ENV_KEYS = ['COMPUTER_HELPER_VNC', 'COMPUTER_HELPER_VNC_PASSWORD', 'COMPUTER_HELPER_TCP', 'COMPUTER_HELPER_TOKEN'] as const;
+const ENV_KEYS = [
+  'COMPUTER_HELPER_TCP',
+  'CODEX_THREAD_ID',
+  'CLAUDE_CODE_SESSION_ID',
+  'CLAUDE_SESSION_ID',
+  'AGENTS_SESSION_ID',
+  'AGENT_SESSION_ID',
+  'AGENTS_RUN_ID',
+  'AGENT_LAUNCH_ID',
+] as const;
 const saved = new Map<string, string | undefined>();
 
 function setEnv(key: string, value: string | undefined): void {
@@ -24,55 +34,54 @@ afterEach(() => {
   saved.clear();
 });
 
-describe('resolveTransport', () => {
-  it('defaults to the local macOS socket', () => {
-    for (const key of ENV_KEYS) setEnv(key, undefined);
-    const t = resolveTransport();
-    expect(t.kind).toBe('socket');
-    expect(t.socketPath).toMatch(/computer\.sock$/);
+describe('buildComputerContext', () => {
+  it('carries exactly the keys the engine accepts', async () => {
+    const context = await buildComputerContext();
+    expect(Object.keys(context).sort()).toEqual(['peers', 'permissions', 'session', 'version']);
+    expect(context.version).toBe(1);
   });
 
-  it('selects TCP from COMPUTER_HELPER_TCP, defaulting the host to loopback', () => {
-    for (const key of ENV_KEYS) setEnv(key, undefined);
-    setEnv('COMPUTER_HELPER_TCP', '9222');
-    expect(resolveTransport()).toEqual({ kind: 'tcp', tcp: { host: '127.0.0.1', port: 9222 } });
+  it('renders the permission and peer allow lists as string arrays', async () => {
+    const context = await buildComputerContext({ computerBin: '/usr/local/bin/computer' });
+    expect(Array.isArray(context.permissions.allow)).toBe(true);
+    expect(context.permissions.allow.every((id) => typeof id === 'string')).toBe(true);
+    // The standalone's own path is always a peer — it is the process that opens
+    // the daemon socket now.
+    expect(context.peers.allow).toContain('/usr/local/bin/computer');
   });
 
-  it('parses an explicit host:port', () => {
+  it('names the acting session, preferring the harness-native id', async () => {
     for (const key of ENV_KEYS) setEnv(key, undefined);
-    setEnv('COMPUTER_HELPER_TCP', '10.0.0.4:8765');
-    expect(resolveTransport()).toEqual({ kind: 'tcp', tcp: { host: '10.0.0.4', port: 8765 } });
+    setEnv('AGENTS_SESSION_ID', 'agents-own');
+    setEnv('CLAUDE_CODE_SESSION_ID', 'claude-native');
+    setEnv('AGENT_LAUNCH_ID', 'launch-7');
+    const context = await buildComputerContext();
+    expect(context.session.sessionId).toBe('claude-native');
+    expect(context.session.launchId).toBe('launch-7');
+    expect(typeof context.session.actor).toBe('string');
   });
 
-  it('lets VNC win over everything — --vnc names the desktop explicitly', () => {
+  it('omits the target for a local invocation', async () => {
+    expect((await buildComputerContext()).target).toBeUndefined();
+  });
+});
+
+describe('computerTransportEnv', () => {
+  it('overlays nothing for a local invocation, leaving the inherited env alone', () => {
     for (const key of ENV_KEYS) setEnv(key, undefined);
-    setEnv('COMPUTER_HELPER_TCP', '9222');
-    setEnv('COMPUTER_HELPER_VNC', '100.64.0.2:5901');
-    setEnv('COMPUTER_HELPER_VNC_PASSWORD', 'hunter2');
-    expect(resolveTransport()).toEqual({
-      kind: 'vnc',
-      vnc: { host: '100.64.0.2', port: 5901, password: 'hunter2' },
-    });
+    expect(computerTransportEnv()).toEqual({});
   });
 
-  it('defaults the VNC port to 5901', () => {
-    for (const key of ENV_KEYS) setEnv(key, undefined);
-    setEnv('COMPUTER_HELPER_VNC', 'desktop-box');
-    expect(resolveTransport().vnc).toEqual({ host: 'desktop-box', port: 5901, password: '' });
-  });
-
-  it('prefers a caller-supplied endpoint over the ambient COMPUTER_HELPER_TCP', () => {
+  it('publishes a freshly opened tunnel endpoint on the var the engine reads', () => {
     // `start --device` has just opened a tunnel and knows its port before any
-    // state file is re-read; that endpoint must win.
+    // state file is re-read; only the fleet layer can know it at all.
     for (const key of ENV_KEYS) setEnv(key, undefined);
-    setEnv('COMPUTER_HELPER_TCP', '9222');
-    expect(resolveTransport({ tcpOverride: { host: '127.0.0.1', port: 51234 } }))
-      .toEqual({ kind: 'tcp', tcp: { host: '127.0.0.1', port: 51234 } });
+    expect(computerTransportEnv({ tcpOverride: { host: '127.0.0.1', port: 51234 } }))
+      .toEqual({ COMPUTER_HELPER_TCP: '127.0.0.1:51234' });
   });
 
-  it('ignores a malformed COMPUTER_HELPER_TCP rather than inventing a port', () => {
+  it('does not overlay a device with no live tunnel — the engine keeps the ambient transport', () => {
     for (const key of ENV_KEYS) setEnv(key, undefined);
-    setEnv('COMPUTER_HELPER_TCP', 'not-a-port');
-    expect(resolveTransport().kind).toBe('socket');
+    expect(computerTransportEnv({ device: 'no-such-device-tunnel' })).toEqual({});
   });
 });

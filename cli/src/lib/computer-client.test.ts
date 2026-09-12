@@ -1,13 +1,15 @@
 /**
- * The fd-3 / fd-4 contract with the standalone `computer` engine, exercised
- * against a REAL child process (`testdata/fake-computer-engine.mjs`) over real
- * pipes — no mocking of spawn, of the fds, or of the framing. The fixture
- * implements the engine's half of the protocol; if the wiring here is wrong,
- * these tests fail the way production would.
+ * The pure half of the fd-3 / fd-4 contract: bin resolution, how a bin is
+ * invoked, and the NDJSON framing rules.
+ *
+ * The wiring half — real pipes, real fds, real exit codes — is
+ * `computer-client.e2e.test.ts`, which drives the REAL compiled `computer`
+ * engine. There is deliberately no stand-in engine fixture: a fake implements
+ * whatever protocol we assumed, so it proves the client agrees with itself
+ * rather than with the thing it has to talk to.
  */
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import * as path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
   COMPUTER_CONTEXT_FD,
   COMPUTER_EVENTS_FD,
@@ -16,17 +18,7 @@ import {
   invocation,
   parseEventLines,
   resolveComputerBin,
-  runComputer,
-  type ComputerActionEvent,
 } from './computer-client.js';
-
-const ENGINE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'testdata', 'fake-computer-engine.mjs');
-
-const SAMPLE_CONTEXT = { version: 1 as const, marker: 'from-agents-cli' };
-
-function withEngine(argv: string[], opts: Parameters<typeof runComputer>[0] extends infer T ? Partial<T> : never = {}) {
-  return runComputer({ argv, context: SAMPLE_CONTEXT, ...opts } as Parameters<typeof runComputer>[0]);
-}
 
 describe('resolveComputerBin', () => {
   const prev = process.env.COMPUTER_BIN;
@@ -38,15 +30,15 @@ describe('resolveComputerBin', () => {
   });
 
   it('prefers $COMPUTER_BIN so a dev build needs no PATH surgery', () => {
-    process.env.COMPUTER_BIN = ENGINE;
-    expect(resolveComputerBin()).toBe(ENGINE);
+    process.env.COMPUTER_BIN = '/opt/dev/computer';
+    expect(resolveComputerBin()).toBe('/opt/dev/computer');
   });
 
   it('fails LOUD with install guidance when the standalone is absent — there is no fallback engine', () => {
     process.env.COMPUTER_BIN = '';
     // An empty PATH is the honest "not installed" shape; findInPath finds nothing.
     const prevPath = process.env.PATH;
-    process.env.PATH = path.join(path.dirname(ENGINE), 'definitely-not-here');
+    process.env.PATH = path.join(path.sep, 'definitely-not-here');
     try {
       expect(() => resolveComputerBin()).toThrow(ComputerClientError);
       expect(() => resolveComputerBin()).toThrow(/npm i -g @phnx-labs\/computer-cli/);
@@ -63,85 +55,50 @@ describe('invocation', () => {
   });
 });
 
+describe('the fd numbers the engine is told to use', () => {
+  it('are 3 for the context and 4 for the events', () => {
+    // The engine reads these by number out of COMPUTER_CONTEXT_FD /
+    // COMPUTER_EVENTS_FD, so changing either is a wire-protocol break.
+    expect(COMPUTER_CONTEXT_FD).toBe(3);
+    expect(COMPUTER_EVENTS_FD).toBe(4);
+  });
+});
+
 describe('parseEventLines — NDJSON framing', () => {
   it('carries a trailing partial line forward instead of losing or corrupting it', () => {
-    const first = parseEventLines('{"verb":"click"}\n{"verb":"ty');
-    expect(first.events).toEqual([{ verb: 'click' }]);
-    expect(first.rest).toBe('{"verb":"ty');
+    const first = parseEventLines('{"command":"click"}\n{"command":"ty');
+    expect(first.events).toEqual([{ command: 'click' }]);
+    expect(first.rest).toBe('{"command":"ty');
 
     const second = parseEventLines(first.rest + 'pe"}\n');
-    expect(second.events).toEqual([{ verb: 'type' }]);
+    expect(second.events).toEqual([{ command: 'type' }]);
     expect(second.rest).toBe('');
   });
 
   it('drops an unreadable line rather than throwing — the action it describes already happened', () => {
-    const { events } = parseEventLines('garbage\n\n{"verb":"key"}\n');
-    expect(events).toEqual([{ verb: 'key' }]);
+    const { events } = parseEventLines('garbage\n\n{"command":"key"}\n');
+    expect(events).toEqual([{ command: 'key' }]);
   });
 
-  it('ignores a JSON object with no verb — it is not an action event', () => {
-    const { events } = parseEventLines('{"hello":"world"}\n{"verb":"focus"}\n');
-    expect(events).toEqual([{ verb: 'focus' }]);
-  });
-});
-
-describe('runComputer — the live passthrough', () => {
-  const prev = process.env.COMPUTER_BIN;
-  beforeEach(() => {
-    process.env.COMPUTER_BIN = ENGINE;
-    _resetComputerClientForTest();
-  });
-  afterEach(() => {
-    if (prev === undefined) delete process.env.COMPUTER_BIN;
-    else process.env.COMPUTER_BIN = prev;
-    _resetComputerClientForTest();
+  it('ignores a JSON object with no command — it is not an action event', () => {
+    const { events } = parseEventLines('{"hello":"world"}\n{"command":"focus"}\n');
+    expect(events).toEqual([{ command: 'focus' }]);
   });
 
-  it('delivers the context on fd 3, and names the fds in the environment', async () => {
-    const { exitCode, stdout } = await withEngine(['echo-context'], { capture: true });
-    expect(exitCode).toBe(0);
-    expect(JSON.parse(stdout)).toEqual(SAMPLE_CONTEXT);
-    // The fixture read fd 3 by number from the env, so a wrong number would have
-    // thrown there rather than produced this output.
-    expect(COMPUTER_CONTEXT_FD).toBe(3);
-    expect(COMPUTER_EVENTS_FD).toBe(4);
-  });
-
-  it('surfaces every action event the engine streams back on fd 4', async () => {
-    const seen: ComputerActionEvent[] = [];
-    const { exitCode } = await withEngine(['emit', '3'], { onEvent: (e) => seen.push(e) });
-    expect(exitCode).toBe(0);
-    expect(seen.map((e) => e.targetPid)).toEqual([100, 101, 102]);
-    expect(seen.every((e) => e.verb === 'click')).toBe(true);
-  });
-
-  it('keeps the good events when the engine writes an unparseable line', async () => {
-    const seen: ComputerActionEvent[] = [];
-    await withEngine(['emit-garbage'], { onEvent: (e) => seen.push(e) });
-    expect(seen).toEqual([{ verb: 'type' }]);
-  });
-
-  it('does not lose a final event that has no trailing newline', async () => {
-    const seen: ComputerActionEvent[] = [];
-    await withEngine(['emit-partial'], { onEvent: (e) => seen.push(e) });
-    expect(seen).toEqual([{ verb: 'key' }]);
-  });
-
-  it('propagates the engine exit code so a failed verb fails the command', async () => {
-    expect((await withEngine(['exit', '3'])).exitCode).toBe(3);
-    expect((await withEngine(['exit', '0'])).exitCode).toBe(0);
-  });
-
-  it('survives an engine that exits before reading the context (EPIPE on fd 3)', async () => {
-    // `--help` and a bad argv both do this in practice. The write must not
-    // crash the CLI with an unhandled EPIPE.
-    const { exitCode } = await withEngine(['ignore-context']);
-    expect(exitCode).toBe(7);
-  });
-
-  it('fails loud when the executable does not exist', async () => {
-    process.env.COMPUTER_BIN = '/nonexistent/computer-engine-binary';
-    _resetComputerClientForTest();
-    await expect(withEngine(['apps'])).rejects.toThrow(/Could not run/);
+  it('keeps the engine\'s full record, not a narrowed projection of it', () => {
+    const line = JSON.stringify({
+      event: 'computer.action',
+      command: 'click',
+      invocationId: 'run-1',
+      pid: 900,
+      targetPid: 4211,
+      bundle: 'com.apple.notes',
+      host: 'win-mini',
+      actor: 'muqsit',
+    });
+    const { events } = parseEventLines(line + '\n');
+    expect(events[0].invocationId).toBe('run-1');
+    expect(events[0].host).toBe('win-mini');
+    expect(events[0].actor).toBe('muqsit');
   });
 });
