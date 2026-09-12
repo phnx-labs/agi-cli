@@ -1,0 +1,39 @@
+=== agents run claude# </dev/null
+Selecting a Claude account requires an interactive terminal.
+Run one of these non-interactive forms instead:
+  agents run claude@<version>
+  agents view claude
+
+=== agents run claude@ </dev/null
+Selecting a device requires an interactive terminal.
+Run one of these non-interactive forms instead:
+  agents run claude --device <name>
+  agents devices
+
+=== agents run claude@ --device yosemite-m1 </dev/null
+Device selection with claude@ cannot be combined with --device yosemite-m1. Remove one — the picker already chooses the device.
+
+=== agents run claude# --account work </dev/null
+Account selection with claude# cannot be combined with --account 'work'. Remove one — the picker already chooses the account.
+
+=== agents run claude@2.1.218# </dev/null
+Invalid run picker target: claude@2.1.218#. an explicit pin in 'claude@2.1.218' already selects what the # account picker chooses. Use agents run <agent># to pick an account, <agent>@ to pick a device, <agent>#@ for both.
+
+=== agents run claude#@ --device yosemite-m1 </dev/null
+Device selection with claude#@ cannot be combined with --device yosemite-m1. Remove one — the picker already chooses the device.
+
+=== agents run claude#work# </dev/null
+Invalid run picker target: claude#work#. an explicit pin in 'claude#work' already selects what the # account picker chooses. Use agents run <agent># to pick an account, <agent>@ to pick a device, <agent>#@ for both.
+
+=== agents run claude## </dev/null
+Invalid run picker target: claude##. the # picker marker may appear at most once in 'claude##'. Use agents run <agent># to pick an account, <agent>@ to pick a device, <agent>#@ for both.
+
+=== agents run claude@@ </dev/null
+Invalid run picker target: claude@@. the @ picker marker may appear at most once in 'claude@@'. Use agents run <agent># to pick an account, <agent>@ to pick a device, <agent>#@ for both.
+
+=== agents run auto# </dev/null
+agents run auto picks the harness and account itself — the trailing-# account picker needs a concrete harness (agents run <harness>#).
+
+=== agents run auto@ </dev/null
+agents run auto picks the harness and its placement itself — the trailing-@ device picker needs a concrete harness (agents run <harness>@).
+
