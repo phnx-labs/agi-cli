@@ -470,6 +470,25 @@ on `ctx.interactive` alone hijacked the laptop's login onto the setup-token).
 
 Keying on device role — not run mode — is the single fix for both.
 
+**A MISSING worker credential fails loud, it does not fall to the login screen
+(PHNX-3502 sibling).** The routing above assumes the worker's setup-token exists.
+When the account a run *selected* has **no** setup-token on this box — an
+`unverified`/never-minted account, or one whose reserved key has not yet synced —
+`applyExecConfigEnv` strips the ambient token (never authenticate as the shared
+rotating one — RUSH-2360) and the harness launches with no credential. A
+**headless** run then fails loud with a 401. An **interactive** dispatched TUI,
+though, would drop to Claude Code's own "Select login method" screen — an
+interactive OAuth on a headless box that the worker path never reads and never
+syncs, so Anthropic re-prompts every run (the operator-visible re-login loop).
+`claudeWorkerLoginTrapPreflight`
+([`harness/adapters/claude.ts`](../src/lib/harness/adapters/claude.ts), called from
+`spawnAgentLeased` beside `codexSandboxPreflight`) refuses that interactive run
+**before spawn** with the real fix — pin a live account (`agents run claude#<name>`),
+set the default (`agents accounts default claude <name>`), or mint the token on a
+headed box (`agents accounts login claude#<name>`) — never "log in here." It is
+interactive-only; the headless 401 is already loud. Naming *which* account was
+selected at dispatch (the `accounts=balanced` banner) is tracked under PHNX-3940.
+
 **Account → slot at spawn (PHNX-3940 T5).** The role rule still chooses *which
 kind* of credential is injected. The slot chooses *whose* credential. When a run
 resolves a native account (`#name`, `--account`, a binding, or the per-harness

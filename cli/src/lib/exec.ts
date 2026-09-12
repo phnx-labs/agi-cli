@@ -42,6 +42,7 @@ import { applyAddDirs } from './add-dir.js';
 import { applyActiveRulesPresetAtRun } from './rules/run-sync.js';
 import { applySystemResourcesAtRun } from './system-run-sync.js';
 import { resolveHarnessAdapter, stripForeignConfigDir } from './harness/index.js';
+import { claudeWorkerLoginTrapPreflight } from './harness/adapters/claude.js';
 import { resolveConfigVersion } from './harness/exec-config-version.js';
 import { getAccountInfo } from './agents.js';
 import { getUsageLookupKey, noteClaudeSessionLimit, noteClaudeOutOfCredits, clearClaudeAccountRefusal, parseClaudeSessionLimitReset } from './accounting/usage.js';
@@ -2179,6 +2180,28 @@ async function spawnAgentLeased(options: ExecOptions): Promise<SpawnResult> {
         process.stderr.write(`\x1b[31m${message}\x1b[0m\n`);
         return { exitCode: 1, stdout: '', stderr: message };
       }
+    }
+  }
+
+  // Fail loud before an INTERACTIVE claude run on a worker with no synced
+  // credential falls through to Claude Code's "Select login method" screen — an
+  // interactive OAuth on a headless box that never persists, the 10-minute
+  // re-login loop (PHNX-3502 sibling). A worker authenticates from the
+  // setup-token; when none resolves for the selected account, refuse with the
+  // real fix instead of the useless login prompt. Headless already fails loud
+  // (401), so the gate is interactive-only (the preflight enforces that).
+  if (options.agent === 'claude') {
+    const { versionHome } = resolveExecConfigHome(options);
+    const loginTrap = claudeWorkerLoginTrapPreflight({
+      agent: options.agent,
+      interactive,
+      deviceRole: selfConfiguredDeviceRole(),
+      hasSetupToken: versionHome ? resolveClaudeSetupToken(versionHome) !== null : false,
+      machine: machineId(),
+    });
+    if (loginTrap) {
+      process.stderr.write(`\x1b[31m${loginTrap}\x1b[0m\n`);
+      return { exitCode: 1, stdout: '', stderr: loginTrap };
     }
   }
 

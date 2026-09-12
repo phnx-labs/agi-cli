@@ -1,7 +1,8 @@
 import * as path from 'path';
+import type { AgentId } from '../../types.js';
 import type { HarnessAdapter } from '../adapter.js';
 import { slotAwareConfigEnvBash, stripForeignConfigDir } from '../adapter.js';
-import { isHeadedDeviceRole } from '../../device-config.js';
+import { isHeadedDeviceRole, type ConfiguredDeviceRole } from '../../device-config.js';
 
 export const claudeAdapter: HarnessAdapter = {
   id: 'claude',
@@ -114,6 +115,12 @@ fi
 `;
   },
 
+  // NOTE: the worker branch above strips the token and returns; a MISSING worker
+  // credential is caught before spawn by claudeWorkerLoginTrapPreflight (below),
+  // which fails loud for an interactive run instead of letting Claude Code fall
+  // through to its "Select login method" screen. A headless run keeps the
+  // strip-and-401 behavior.
+
   routineModeArgs(cmd, ctx) {
     const mode = ctx.mode;
     if (mode === 'edit') {
@@ -129,3 +136,59 @@ fi
     }
   },
 };
+
+/**
+ * Fail-loud preflight for the worker login-screen trap — the sibling of the
+ * PHNX-3502 fix. On a worker (non-headed) device every Claude run authenticates
+ * from the synced `setup-token`, never an interactive login (owner rule /
+ * credential-management invariant 7). When NO setup-token resolves for the
+ * account this run selected, `applyExecConfigEnv` strips any ambient token and
+ * the harness launches with no credential. A HEADLESS run then fails loud with a
+ * 401 — but an INTERACTIVE dispatched TUI (`agents run claude --interactive
+ * --device <worker>`, the usual `--device auto` landing) instead drops to Claude
+ * Code's own "Select login method" screen. Answering it does an interactive OAuth
+ * on a headless box, minting a native login the worker path never reads and never
+ * syncs; Anthropic later expires it and the next run repeats the prompt — the
+ * 10-minute re-login loop the operator sees.
+ *
+ * This gate refuses that run BEFORE spawn with the real fix (pin or mint a
+ * durable account) instead of the useless login prompt. It is interactive-only
+ * because the headless 401 is already loud. Pure: the caller (spawnAgentLeased)
+ * resolves the inputs and renders the returned message, exactly like
+ * codexSandboxPreflight. Returns null when the run may proceed.
+ */
+export function claudeWorkerLoginTrapPreflight(args: {
+  agent: AgentId;
+  interactive: boolean;
+  deviceRole?: ConfiguredDeviceRole;
+  hasSetupToken: boolean;
+  machine?: string;
+}): string | null {
+  if (args.agent !== 'claude') return null;
+  // A headless run with no token fails loud with a 401 already; only an
+  // interactive run falls through to Claude Code's login screen.
+  if (!args.interactive) return null;
+  // A headed box (personal/desktop) authenticates from its own native login, so
+  // Claude Code's login prompt there is the correct, expected first-run flow.
+  if (isHeadedDeviceRole(args.deviceRole)) return null;
+  // A durable worker credential resolved for the selected account — proceed.
+  if (args.hasSetupToken) return null;
+
+  const where = args.machine ? `worker '${args.machine}'` : 'this worker';
+  return [
+    `No Claude worker credential is available on ${where} for the account this run selected.`,
+    `A worker authenticates from a synced setup-token, never an interactive login — so`,
+    `Claude Code's "Select login method" screen here would not persist (it is the source`,
+    `of the repeated re-login). Do one of these instead:`,
+    ``,
+    `  • Pin a live account for this run:   agents run claude#<name> …   (e.g. claude#work)`,
+    `  • Or set the fleet-wide default:     agents accounts default claude <name>`,
+    `  • If that account has no token yet, mint it on a HEADED box (e.g. your laptop):`,
+    `        agents accounts login claude#<name>`,
+    ``,
+    // NB: keep this text clear of RATE_LIMIT_PATTERNS (exec.ts) — this string is
+    // returned as spawn stderr, which runWithFallback scans; a stray "rate limit"
+    // / "quota" phrase here would spuriously trigger an account-rotation fallback.
+    `See which accounts are LIVE (signed in, with headroom) with:  agents accounts list`,
+  ].join('\n');
+}
