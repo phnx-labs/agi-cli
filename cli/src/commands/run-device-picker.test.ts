@@ -17,6 +17,15 @@ import * as os from 'os';
 import * as path from 'path';
 
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-run-device-picker-test-'));
+// Vitest reuses worker processes across test files, so every env override here
+// is restored in afterAll — a leaked HOME would point later files' spawned
+// children at a deleted temp dir.
+const ORIGINAL_ENV = {
+  HOME: process.env.HOME,
+  AGENTS_DEVICES_DIR: process.env.AGENTS_DEVICES_DIR,
+  AGENTS_SYNC_MACHINE_ID: process.env.AGENTS_SYNC_MACHINE_ID,
+  AGENTS_SKIP_MIGRATION: process.env.AGENTS_SKIP_MIGRATION,
+};
 process.env.HOME = TEST_HOME;
 process.env.AGENTS_DEVICES_DIR = path.join(TEST_HOME, 'devices');
 process.env.AGENTS_SYNC_MACHINE_ID = 'zion';
@@ -85,6 +94,10 @@ beforeEach(async () => {
 });
 
 afterAll(async () => {
+  for (const [key, value] of Object.entries(ORIGINAL_ENV)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
   await fsp.rm(TEST_HOME, { recursive: true, force: true });
 });
 
