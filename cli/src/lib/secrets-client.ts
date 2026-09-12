@@ -493,11 +493,19 @@ function serveOnceSync(op: string, args: unknown[], context?: SecretsContext): u
       throw new SecretsClientError(
         'TIMEOUT',
         `the standalone \`secrets\` CLI did not answer within ${Math.round(syncServeTimeoutMs / 1000)}s ` +
-          `(${command} __serve). The machine may be too loaded to boot it in time, or the install is broken: ` +
+          `(${[command, ...prefix, '__serve'].join(' ')}). The machine may be too loaded to boot it in time, or the install is broken: ` +
           'check with `secrets --version`.',
       );
     }
-    throw new SecretsClientError('SPAWN_FAILED', `secrets request failed: ${err.message}`);
+    // A standalone that exits before draining fd 3 leaves `spawnSync`'s stdin
+    // write with EPIPE, yet its exit status and everything it wrote to fd 4 are
+    // still returned. Like the async path (`input.on('error', () => {})`), the
+    // outcome is whatever reached fd 4 — an empty or non-JSON answer is the
+    // diagnostic, not the errno. Seen on the GitHub-hosted runner, where a
+    // planted `exit 0` standalone exits faster than the request is written.
+    if (err.code !== 'EPIPE') {
+      throw new SecretsClientError('SPAWN_FAILED', `secrets request failed: ${err.message}`);
+    }
   }
   const raw = (result.stdout as Buffer | undefined) ?? Buffer.alloc(0);
   if (raw.length > MAX_PROTOCOL_BYTES) {

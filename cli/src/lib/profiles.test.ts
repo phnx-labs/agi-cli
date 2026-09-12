@@ -8,6 +8,7 @@ import {
   profileFromHostModel,
   forkProfile,
   profileSummary,
+  profileAuthLabel,
   profileLabel,
   editProfile,
   renameProfile,
@@ -20,7 +21,12 @@ import {
   listProfiles,
   type Profile,
 } from './profiles.js';
-import { profileKeychainItem, setKeychainTokenSync } from './secrets-client.js';
+import {
+  _resetSecretsClientForTest,
+  _setSyncServeTimeoutForTest,
+  profileKeychainItem,
+  setKeychainTokenSync,
+} from './secrets-client.js';
 import { standaloneKeychainIsFileBacked, useFreshSecretsHome } from '../../tests/secrets-standalone.js';
 
 let TEST_ROOT: string;
@@ -714,5 +720,39 @@ describe('profileSummary — first-class harness fields', () => {
     expect(summary.label).toBe('Spark');
     expect(summary.hostVersion).toBeNull();
     expect(summary.forkedFrom).toBeNull();
+  });
+});
+
+describe('profileAuthLabel tolerates an unreachable standalone (status row)', () => {
+  const savedBin = process.env.SECRETS_BIN;
+  let dir: string;
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'profiles-auth-label-'));
+  });
+  afterEach(() => {
+    if (savedBin === undefined) delete process.env.SECRETS_BIN;
+    else process.env.SECRETS_BIN = savedBin;
+    _resetSecretsClientForTest();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it.skipIf(process.platform === 'win32')('renders "<provider> unavailable" instead of aborting the whole view', () => {
+    // A wedged standalone used to throw straight out of `agents view`'s harness
+    // rows while the provider-account rows degraded; the label now degrades too.
+    const bin = path.join(dir, 'mock-secrets');
+    fs.writeFileSync(bin, '#!/bin/sh\nsleep 30\n'); // never answers on fd 4
+    fs.chmodSync(bin, 0o755);
+    process.env.SECRETS_BIN = bin;
+    _resetSecretsClientForTest();
+    _setSyncServeTimeoutForTest(1_000);
+    const profile: Profile = {
+      name: 'wedged',
+      host: { agent: 'claude' },
+      env: {},
+      auth: { envVar: 'ANTHROPIC_AUTH_TOKEN', keychainItem: 'agents-cli.openrouter.token' },
+      provider: 'openrouter',
+    };
+    expect(profileAuthLabel(profile)).toBe('openrouter unavailable');
   });
 });
