@@ -53,6 +53,15 @@ export interface SessionActorRecord {
    * (PHNX-2935).
    */
   harness?: string;
+  /**
+   * Stable native-account registry id this session launched under
+   * (`ExecOptions.accountId` / `AGENTS_RUN_ACCOUNT_ID`, PHNX-3940 model-refusal
+   * tracking) — independent of {@link version}, which is the binary rather
+   * than the account identity for a slot launch. Joined onto the session
+   * index at scan time so a later model-refusal lookup or recovery pick can
+   * resolve the exact account a session ran under.
+   */
+  accountId?: string;
   /** Stable wrapper names that resolve to this native session id. */
   aliases?: string[];
   startedAtMs: number;
@@ -87,6 +96,7 @@ function hasRecordData(record: SessionActorRecord): boolean {
     || typeof record.mode === 'string'
     || typeof record.version === 'string'
     || typeof record.harness === 'string'
+    || typeof record.accountId === 'string'
     || (Array.isArray(record.aliases) && record.aliases.some(alias => typeof alias === 'string'));
 }
 
@@ -133,6 +143,7 @@ export function writeSessionAliasRecord(sessionId: string, alias: string): void 
       mode: previous?.mode,
       version: previous?.version,
       harness: previous?.harness,
+      accountId: previous?.accountId,
       aliases: normalizedAliases([...(previous?.aliases ?? []), alias]),
       startedAtMs: previous?.startedAtMs ?? Date.now(),
     });

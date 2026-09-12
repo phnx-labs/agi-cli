@@ -3,7 +3,7 @@ import * as os from 'node:os';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { shouldTapStdout, resolveInteractive, inferredInteractiveWithoutTty, buildExecCommand, nativeResume, resolveShimSpawn, buildExecEnv, ensureVendorHomeDir, stampedAgentName, customHarnessName, resolveTmuxWrap, buildTmuxAgentCommand, writeTmuxEnvFile, formatPaneTail, detectRateLimit, detectOutOfCredits, classifyClaudeRunRefusal, classifyCodexRunRefusal, parseCodexUsageLimitReset, detectAuthFailure, detectAuthFailureEvent, authFailureReason, isAuthFailureFromLog, resolveLaunchId, shouldRecapDeadPane, isPaneKnownAliveFromQueryResult, tmuxRunExitCode, UNKNOWN_OUTCOME_EXIT_CODE, type TmuxWrapContext } from './exec.js';
+import { shouldTapStdout, resolveInteractive, inferredInteractiveWithoutTty, buildExecCommand, nativeResume, resolveShimSpawn, buildExecEnv, ensureVendorHomeDir, stampedAgentName, customHarnessName, resolveTmuxWrap, buildTmuxAgentCommand, writeTmuxEnvFile, formatPaneTail, detectRateLimit, detectOutOfCredits, classifyClaudeRunRefusal, modelRefusalAccountKey, classifyCodexRunRefusal, parseCodexUsageLimitReset, detectAuthFailure, detectAuthFailureEvent, authFailureReason, isAuthFailureFromLog, resolveLaunchId, shouldRecapDeadPane, isPaneKnownAliveFromQueryResult, tmuxRunExitCode, UNKNOWN_OUTCOME_EXIT_CODE, type TmuxWrapContext } from './exec.js';
 import type { ExecOptions } from './exec.js';
 import { isTmuxInstalled } from './tmux/binary.js';
 import { mailboxDir } from './mailbox.js';
@@ -231,6 +231,24 @@ describe('buildExecEnv — AGENTS_EXEC_HOME (account-slot launch marker)', () =>
       expect(env.AGENTS_EXEC_HOME).toBeUndefined();
     } finally {
       if (prev === undefined) delete process.env.AGENTS_EXEC_HOME; else process.env.AGENTS_EXEC_HOME = prev;
+    }
+  });
+});
+
+describe('buildExecEnv — AGENTS_RUN_ACCOUNT_ID (PHNX-3940 model-refusal tracking)', () => {
+  it('stamps the run account id when the launch resolved one', () => {
+    const env = buildExecEnv(execOpts({ agent: 'claude', accountId: 'acct-123' }));
+    expect(env.AGENTS_RUN_ACCOUNT_ID).toBe('acct-123');
+  });
+
+  it('clears an inherited marker for a launch with no resolved account id', () => {
+    const prev = process.env.AGENTS_RUN_ACCOUNT_ID;
+    process.env.AGENTS_RUN_ACCOUNT_ID = 'parent-acct';
+    try {
+      const env = buildExecEnv(execOpts({ agent: 'claude' }));
+      expect(env.AGENTS_RUN_ACCOUNT_ID).toBeUndefined();
+    } finally {
+      if (prev === undefined) delete process.env.AGENTS_RUN_ACCOUNT_ID; else process.env.AGENTS_RUN_ACCOUNT_ID = prev;
     }
   });
 });
@@ -1323,6 +1341,62 @@ describe('classifyClaudeRunRefusal (RUSH-3018 — persist/clear decision on the 
 
   it('a non-zero exit with no recognized refusal leaves the marker untouched', () => {
     expect(classifyClaudeRunRefusal('some unrelated error', 1)).toEqual({ action: 'none' });
+  });
+
+  it('the exact real Fable refusal is a distinct model-limit action, not a global clear', () => {
+    const text = "You've reached your Fable limit. Run /usage-credits to continue or switch models with /model.";
+    // The real-world evidence: this refusal commonly ends the CLI turn with
+    // exit 0. Before this fix, classifyClaudeRunRefusal fell through to
+    // `exitCode === 0 -> clear`, wrongly wiping any stale session/credits
+    // marker on the account for a refusal that was itself unrecognized.
+    expect(classifyClaudeRunRefusal(text, 0, 'claude-fable-5-1')).toEqual({
+      action: 'note_model_limit',
+      model: 'claude-fable-5-1',
+      family: 'Fable',
+    });
+    // Also true at a non-zero exit.
+    expect(classifyClaudeRunRefusal(text, 1, 'claude-fable-5-1')).toEqual({
+      action: 'note_model_limit',
+      model: 'claude-fable-5-1',
+      family: 'Fable',
+    });
+  });
+
+  it('a model-limit refusal is never classified as note_out_of_credits', () => {
+    const text = "You've reached your Fable limit. Run /usage-credits to continue or switch models with /model.";
+    const r = classifyClaudeRunRefusal(text, 1, 'claude-fable-5-1');
+    expect(r.action).not.toBe('note_out_of_credits');
+    expect(r.action).not.toBe('clear');
+  });
+
+  it('falls back to the parsed family name as the model key when no model was supplied', () => {
+    const text = "You've reached your Fable limit. Run /usage-credits to continue or switch models with /model.";
+    expect(classifyClaudeRunRefusal(text, 0)).toEqual({
+      action: 'note_model_limit',
+      model: 'Fable',
+      family: 'Fable',
+    });
+  });
+});
+
+describe('modelRefusalAccountKey (PHNX-3940 — org-shared usageKey must not scope a per-model marker)', () => {
+  it('prefers the stable native account id over usageKey/accountKey/email', () => {
+    expect(modelRefusalAccountKey({
+      accountId: 'acct-123', usageKey: 'claude:org=shared', accountKey: 'claude:org=shared', email: 'a@x.com',
+    })).toBe('native:acct-123');
+  });
+
+  it('falls back to usageKey, then accountKey, then email, then a sentinel', () => {
+    expect(modelRefusalAccountKey({ accountId: null, usageKey: 'claude:org=shared', accountKey: null, email: null })).toBe('claude:org=shared');
+    expect(modelRefusalAccountKey({ accountId: null, usageKey: null, accountKey: 'claude:key', email: null })).toBe('claude:key');
+    expect(modelRefusalAccountKey({ accountId: null, usageKey: null, accountKey: null, email: 'a@x.com' })).toBe('a@x.com');
+    expect(modelRefusalAccountKey({ accountId: null, usageKey: null, accountKey: null, email: null })).toBe('unregistered');
+  });
+
+  it('two sibling accounts under the same org usageKey resolve to distinct keys once accountId is known', () => {
+    const siblingA = modelRefusalAccountKey({ accountId: 'acct-a', usageKey: 'claude:org=shared', accountKey: null, email: null });
+    const siblingB = modelRefusalAccountKey({ accountId: 'acct-b', usageKey: 'claude:org=shared', accountKey: null, email: null });
+    expect(siblingA).not.toBe(siblingB);
   });
 });
 

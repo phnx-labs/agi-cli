@@ -29,6 +29,7 @@ import {
   getUsageInfoByIdentity,
   getUsageLookupKey,
   deriveUsageStatusFromSnapshot,
+  getClaudeModelRefusal,
   type UsageSnapshot,
 } from './usage.js';
 import { readAccountHeadroom } from '../fleet-cache.js';
@@ -98,6 +99,8 @@ export interface RotateCandidate {
    * binary (managed install) and is no longer the account identity.
    */
   nativeAccount?: string;
+  /** Stable registry id for {@link nativeAccount}; never inferred from version. */
+  nativeAccountId?: string;
   /** Slot dir when this candidate is a slot — the spawn HOME. */
   slotDir?: string;
   /** True when this row came from `deviceAccounts.slots`, not a version home. */
@@ -198,9 +201,9 @@ function isLaunchableSlotVerdict(verdict: AuthVerdict | null): boolean {
   return verdict !== null && LAUNCHABLE_SLOT_VERDICTS.has(verdict);
 }
 
-function isRotationEligible(candidate: RotateCandidate): boolean {
+function isRotationEligible(candidate: RotateCandidate, nowMs: number = Date.now(), model?: string): boolean {
   if (candidate.fromSlot && !isLaunchableSlotVerdict(candidate.authVerdict)) return false;
-  return readinessFromCandidate(candidate).ready;
+  return readinessFromCandidate(candidate, nowMs, model).ready;
 }
 
 /**
@@ -374,7 +377,11 @@ function hasUsageAvailable(candidate: RotateCandidate): boolean {
  */
 export type AccountReadiness =
   | { ready: true }
-  | { ready: false; reason: 'rate_limited' | 'out_of_credits' | 'signed_out' | 'revoked'; email: string | null };
+  | {
+      ready: false;
+      reason: 'rate_limited' | 'out_of_credits' | 'signed_out' | 'revoked' | 'model_limited';
+      email: string | null;
+    };
 
 /**
  * Pure decision reusing the router's own eligibility gate (`hasUsageAvailable`
@@ -385,8 +392,23 @@ export type AccountReadiness =
  * snapshot never carries). When a live snapshot exists it wins over the cached
  * status — matching the gate — so a stale `out_of_credits` cache is not
  * reported while the account is actually serving requests.
+ *
+ * `model`, when supplied, additionally consults a per-(account, model)
+ * refusal Claude can surface on ONE model family ("You've reached your Fable
+ * limit…") while the account's other models and its global usage windows stay
+ * healthy — a global rate_limited/out_of_credits marker would wrongly exclude
+ * the whole account for an unrelated model. Keyed on the candidate's stable
+ * native account id (never the org-shared usageKey) via
+ * {@link candidateAccountKey}, so a model-only limit on one login can never
+ * poison a sibling account that merely shares the same org usage bucket.
+ * Omitting `model` (every existing caller) leaves generic account status
+ * completely unaffected — the model check runs only when a caller opts in.
  */
-export function readinessFromCandidate(candidate: RotateCandidate, now: number = Date.now()): AccountReadiness {
+export function readinessFromCandidate(
+  candidate: RotateCandidate,
+  now: number = Date.now(),
+  model?: string,
+): AccountReadiness {
   if (!candidate.signedIn) {
     return { ready: false, reason: 'signed_out', email: candidate.email };
   }
@@ -398,6 +420,9 @@ export function readinessFromCandidate(candidate: RotateCandidate, now: number =
     || now - candidate.authCheckedAt <= AUTH_PROBE_MAX_AGE_MS;
   if (authFresh && candidate.authVerdict !== null && isDeadVerdict(candidate.authVerdict)) {
     return { ready: false, reason: 'revoked', email: candidate.email };
+  }
+  if (model && getClaudeModelRefusal(candidateAccountKey(candidate), model, now)) {
+    return { ready: false, reason: 'model_limited', email: candidate.email };
   }
   if (hasUsageAvailable(candidate)) {
     return { ready: true };
@@ -483,14 +508,16 @@ function compareCandidates(a: RotateCandidate, b: RotateCandidate): number {
  * are genuinely separate buckets and must stay distinct. Prefer the org usage
  * key; fall back to email only when no usage identity is available.
  */
-function candidateIdentity(c: RotateCandidate): string {
-  return c.usageKey ?? c.accountKey ?? c.email ?? `${c.agent}@${c.version}`;
+export function candidateAccountKey(c: RotateCandidate): string {
+  if (c.nativeAccountId) return `native:${c.nativeAccountId}`;
+  if (c.providerAccount) return `provider:${c.providerAccount}`;
+  return c.usageKey ?? c.accountKey ?? c.email ?? `${c.agent}:unregistered:${c.accountLabel || c.version}`;
 }
 
 function dedupeAndSortCandidates(candidates: RotateCandidate[]): RotateCandidate[] {
   const byIdentity = new Map<string, RotateCandidate>();
   for (const c of candidates) {
-    const id = candidateIdentity(c);
+    const id = candidateAccountKey(c);
     const existing = byIdentity.get(id);
     if (!existing) {
       byIdentity.set(id, c);
@@ -526,15 +553,20 @@ function dedupeAndSortCandidates(candidates: RotateCandidate[]): RotateCandidate
  *
  * Returns null if no candidate is eligible — callers fall back to the pinned
  * version so behavior stays predictable.
+ *
+ * `model`, when supplied, additionally excludes an account carrying a live
+ * per-model refusal for that exact model (see {@link readinessFromCandidate}).
+ * Omitted (every pre-existing caller), eligibility is unchanged.
  */
 export function pickBalancedCandidate(
   candidates: RotateCandidate[],
   nowMs: number = Date.now(),
+  model?: string,
 ): RotateResult | null {
   const healthy: RotateCandidate[] = [];
   const excluded: RotateCandidate[] = [];
   for (const c of candidates) {
-    if (!isRotationEligible(c)) {
+    if (!isRotationEligible(c, nowMs, model)) {
       excluded.push(c);
       continue;
     }
@@ -751,7 +783,7 @@ export function classifyHarnessCandidates(
 ): HarnessSummary[] {
   const summaries: HarnessSummary[] = [];
   for (const [agent, candidates] of byHarness) {
-    const eligible = candidates.filter(isRotationEligible);
+    const eligible = candidates.filter((c) => isRotationEligible(c));
     if (eligible.length === 0) {
       const counts = new Map<string, number>();
       for (const c of candidates) {
@@ -948,6 +980,7 @@ export async function collectRunCandidates(agent: AgentId): Promise<RotateCandid
     authCheckedAt: number | null;
     lastActive: Date | null;
     nativeAccount?: string;
+    nativeAccountId?: string;
     slotDir?: string;
     fromSlot?: boolean;
   };
@@ -983,6 +1016,7 @@ export async function collectRunCandidates(agent: AgentId): Promise<RotateCandid
         })(),
         lastActive: info.lastActive,
         nativeAccount: account.name,
+        nativeAccountId: account.id,
         slotDir: home,
         fromSlot: true as const,
       };

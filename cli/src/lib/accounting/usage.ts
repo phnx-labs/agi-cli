@@ -531,6 +531,21 @@ interface CachedUsageWindow {
   windowMinutes: number | null;
 }
 
+/**
+ * A model-specific refusal ("You've reached your Fable limit…") observed from
+ * a real run. Independent of {@link CachedUsageSnapshot.unavailable}: Claude
+ * can block ONE model family while the account's other models and its global
+ * usage windows stay healthy, so this must never fold into the account-wide
+ * marker (that would wrongly exclude every model on the account for a limit
+ * that only ever named one). No invented reset — `resetsAt` is present only
+ * when the refusal text itself carried a clock; absent means the marker is
+ * sticky until a later successful run on this exact (account, model) clears it.
+ */
+interface CachedModelRefusal {
+  family?: string;
+  resetsAt?: string;
+}
+
 /** Serialized usage snapshot for the on-disk cache. */
 export interface CachedUsageSnapshot {
   capturedAt: string | null;
@@ -541,6 +556,15 @@ export interface CachedUsageSnapshot {
     reason: 'session_limit' | 'out_of_credits';
     resetsAt?: string;
   };
+  /**
+   * Per-model refusal markers, keyed by the exact model name a refusal was
+   * observed against. Keyed on the account row (itself keyed by a stable
+   * accountId-preferring key — see {@link noteClaudeModelRefusal}), not on
+   * the org-shared usage key alone, so a per-model limit on one login cannot
+   * be misread as blocking a sibling account that merely shares the same org
+   * usage bucket.
+   */
+  modelRefusals?: Record<string, CachedModelRefusal>;
 }
 
 /** Parsed rate-limit data extracted from a Codex session file. */
@@ -2352,10 +2376,17 @@ export function writeClaudeUsageCache(
       // refresh cannot drop another account's row (lost update).
       const cache = readClaudeUsageCacheFile(cachePath);
       const prior = cache[usageKey];
-      cache[usageKey] = serializeClaudeUsageSnapshot({
-        ...snapshot,
-        unavailable: carryForwardUnavailable(prior?.unavailable, snapshot.unavailable),
-      });
+      cache[usageKey] = {
+        ...serializeClaudeUsageSnapshot({
+          ...snapshot,
+          unavailable: carryForwardUnavailable(prior?.unavailable, snapshot.unavailable),
+        }),
+        // A per-model refusal has its own independent lifecycle (see
+        // noteClaudeModelRefusal / clearClaudeModelRefusal) — a global usage
+        // write must never drop it, the same reason `unavailable` is carried
+        // forward above rather than overwritten.
+        modelRefusals: prior?.modelRefusals,
+      };
       atomicWriteFileSync(cachePath, JSON.stringify(cache, null, 2), 'utf-8');
     });
   } catch {
@@ -2381,12 +2412,16 @@ export function mergeClaudeUsageCacheWindows(
         priorSnapshot?.windows.map((window) => [window.key, window]) ?? [],
       );
       for (const window of snapshot.windows) windows.set(window.key, window);
-      cache[usageKey] = serializeClaudeUsageSnapshot({
-        ...snapshot,
-        windows: [...windows.values()],
-        plan: snapshot.plan ?? priorSnapshot?.plan ?? null,
-        unavailable: carryForwardUnavailable(prior?.unavailable, snapshot.unavailable),
-      });
+      cache[usageKey] = {
+        ...serializeClaudeUsageSnapshot({
+          ...snapshot,
+          windows: [...windows.values()],
+          plan: snapshot.plan ?? priorSnapshot?.plan ?? null,
+          unavailable: carryForwardUnavailable(prior?.unavailable, snapshot.unavailable),
+        }),
+        // See writeClaudeUsageCache: a per-model refusal survives a windows-only merge too.
+        modelRefusals: prior?.modelRefusals,
+      };
       atomicWriteFileSync(cachePath, JSON.stringify(cache, null, 2), 'utf-8');
     });
   } catch {
@@ -2587,7 +2622,8 @@ function deserializeClaudeUsageSnapshot(
     staleWindows.length === 0 &&
     !unavailable &&
     !snapshot.plan &&
-    !snapshot.refreshHint
+    !snapshot.refreshHint &&
+    !hasLiveModelRefusal(snapshot.modelRefusals, now)
   ) {
     return null;
   }
@@ -2638,6 +2674,19 @@ function deserializeUnavailable(
   return reset && reset.getTime() > now.getTime()
     ? { reason: 'session_limit', resetsAt: reset }
     : undefined;
+}
+
+/** Whether any per-model refusal in the row is still live (not clock-expired). */
+function hasLiveModelRefusal(
+  modelRefusals: CachedUsageSnapshot['modelRefusals'],
+  now: Date,
+): boolean {
+  if (!modelRefusals) return false;
+  return Object.values(modelRefusals).some((entry) => {
+    if (!entry.resetsAt) return true; // no clock given — sticky until cleared
+    const reset = parseDateValue(entry.resetsAt);
+    return !reset || reset.getTime() > now.getTime();
+  });
 }
 
 /**
@@ -2710,6 +2759,111 @@ export function noteClaudeSessionLimit(
   } catch {
     /* best-effort cache write — lock busy or disk full */
   }
+}
+
+/**
+ * Persist a Claude MODEL-specific refusal — "You've reached your Fable limit.
+ * Run /usage-credits to continue or switch models with /model." — a distinct
+ * class from {@link noteClaudeOutOfCredits} / {@link noteClaudeSessionLimit}:
+ * those exclude the whole account, this excludes only ONE model on it (an
+ * organization quota group can meter models separately). `accountKey` MUST be
+ * the candidate's stable native-account key (see `candidateAccountKey` in
+ * rotate.ts), never the org-shared `usageKey` — using the org key here would
+ * poison every sibling account under that org for a limit that named one
+ * model on one login. No invented reset: `resetsAt` is written only when the
+ * refusal text carried one; otherwise the marker is sticky until a later
+ * successful run on this exact (account, model) clears it via
+ * {@link clearClaudeModelRefusal}.
+ */
+export function noteClaudeModelRefusal(
+  accountKey: string,
+  model: string,
+  refusal: { family?: string; resetsAt?: Date },
+  cachePath = getClaudeUsageCachePath(),
+): void {
+  try {
+    ensureLockTarget(cachePath, '{}');
+    withFileLock(cachePath, () => {
+      const cache = readClaudeUsageCacheFile(cachePath);
+      const existing = cache[accountKey] ?? { capturedAt: null, windows: [] };
+      const modelRefusals = { ...(existing.modelRefusals ?? {}) };
+      modelRefusals[model] = {
+        family: refusal.family,
+        resetsAt: refusal.resetsAt?.toISOString(),
+      };
+      cache[accountKey] = { ...existing, modelRefusals };
+      atomicWriteFileSync(cachePath, JSON.stringify(cache, null, 2), 'utf-8');
+    });
+  } catch {
+    /* best-effort cache write — lock busy or disk full */
+  }
+}
+
+/**
+ * Clear a persisted model-refusal marker for exactly ONE (account, model)
+ * pair after a run SUCCEEDS on that same account+model. Never clears a
+ * sibling model on the same account, and never fires for an interactive
+ * detach or an unknown outcome — the caller must have demonstrated an actual
+ * completed success on this exact model before calling this.
+ */
+export function clearClaudeModelRefusal(
+  accountKey: string,
+  model: string,
+  cachePath = getClaudeUsageCachePath(),
+): void {
+  try {
+    if (!fs.existsSync(cachePath)) return;
+    withFileLock(cachePath, () => {
+      const cache = readClaudeUsageCacheFile(cachePath);
+      const existing = cache[accountKey];
+      if (!existing?.modelRefusals?.[model]) return;
+      const modelRefusals = { ...existing.modelRefusals };
+      delete modelRefusals[model];
+      const rest: CachedUsageSnapshot = { ...existing, modelRefusals };
+      if (Object.keys(modelRefusals).length === 0) delete rest.modelRefusals;
+      cache[accountKey] = rest;
+      atomicWriteFileSync(cachePath, JSON.stringify(cache, null, 2), 'utf-8');
+    });
+  } catch {
+    /* best-effort cache write */
+  }
+}
+
+/**
+ * Read a live (non-expired) model-refusal marker for (accountKey, model), or
+ * null when none is recorded or the recorded one has passed its clock. A
+ * marker with no `resetsAt` never expires here — it is sticky until
+ * {@link clearClaudeModelRefusal} observes a real success.
+ */
+export function getClaudeModelRefusal(
+  accountKey: string,
+  model: string,
+  nowMs: number = Date.now(),
+  cachePath = getClaudeUsageCachePath(),
+): { family?: string; resetsAt: Date | null } | null {
+  const cache = readClaudeUsageCacheFile(cachePath);
+  const entry = cache[accountKey]?.modelRefusals?.[model];
+  if (!entry) return null;
+  if (entry.resetsAt) {
+    const reset = parseDateValue(entry.resetsAt);
+    if (reset && reset.getTime() <= nowMs) return null;
+    return { family: entry.family, resetsAt: reset };
+  }
+  return { family: entry.family, resetsAt: null };
+}
+
+/**
+ * Parse Claude's model-specific refusal — the CLI's own phrasing when ONE
+ * model's quota is exhausted while the account otherwise keeps serving:
+ * "You've reached your Fable limit. Run /usage-credits to continue or switch
+ * models with /model." Deliberately narrow (unlike the broad RATE_LIMIT_PATTERNS
+ * scan) so a session that merely discusses `/usage-credits` cannot false-positive.
+ * Tolerates both a straight and curly apostrophe.
+ */
+export function parseClaudeModelRefusal(text: string): { family: string } | null {
+  const match = /You[''’]ve reached your (.+?) limit\.\s*Run \/usage-credits to continue or switch models with \/model\./i.exec(text);
+  if (!match) return null;
+  return { family: match[1].trim() };
 }
 
 /** Parse Claude's `hit your session limit · resets …` refusal. */

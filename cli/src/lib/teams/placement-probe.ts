@@ -160,7 +160,7 @@ export async function probePoolSignals(
           if (!candidates) {
             return [d.name, { installed: true, signedIn: undefined, pickerEligible: undefined }];
           }
-          const readiness = candidates.map(readinessFromCandidate);
+          const readiness = candidates.map((c) => readinessFromCandidate(c));
           return [d.name, {
             installed: true,
             signedIn: readiness.some((candidate) => candidate.ready),

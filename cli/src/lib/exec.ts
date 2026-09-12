@@ -44,8 +44,17 @@ import { applySystemResourcesAtRun } from './system-run-sync.js';
 import { resolveHarnessAdapter, stripForeignConfigDir } from './harness/index.js';
 import { claudeWorkerLoginTrapPreflight } from './harness/adapters/claude.js';
 import { resolveConfigVersion } from './harness/exec-config-version.js';
-import { getAccountInfo } from './agents.js';
-import { getUsageLookupKey, noteClaudeSessionLimit, noteClaudeOutOfCredits, clearClaudeAccountRefusal, parseClaudeSessionLimitReset } from './accounting/usage.js';
+import { getAccountInfo, type AccountInfo } from './agents.js';
+import {
+  getUsageLookupKey,
+  noteClaudeSessionLimit,
+  noteClaudeOutOfCredits,
+  clearClaudeAccountRefusal,
+  parseClaudeSessionLimitReset,
+  noteClaudeModelRefusal,
+  clearClaudeModelRefusal,
+  parseClaudeModelRefusal,
+} from './accounting/usage.js';
 import { bootMark, flushBootProfile } from './boot-profile.js';
 
 /**
@@ -395,6 +404,17 @@ export interface ExecOptions {
   launchSignedIn?: boolean | null;
   /** Precomputed account email companion to {@link launchSignedIn}. */
   launchEmail?: string | null;
+  /**
+   * Stable native-account registry id this run authenticates as (the same
+   * identity `candidateAccountKey`/`modelRefusalAccountKey` key on) —
+   * independent of `version`, which is the binary rather than the account
+   * identity for a slot launch (PHNX-3940 T5). Exported to
+   * `AGENTS_RUN_ACCOUNT_ID` and stamped on the session-actor sidecar so a
+   * later model-refusal lookup or recovery pick can resolve the exact account
+   * a session ran under, not just the version home it launched from. Absent
+   * for a run whose account identity isn't resolved at launch time.
+   */
+  accountId?: string;
 }
 
 /**
@@ -629,6 +649,15 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
     result.AGENTS_EXEC_HOME = options.execHome;
   } else {
     delete result.AGENTS_EXEC_HOME;
+  }
+
+  // Durable account identity for this run (PHNX-3940 model-refusal tracking).
+  // Cleared when absent so a run spawned from inside an account-scoped session
+  // never inherits its parent's account id.
+  if (options.accountId) {
+    result.AGENTS_RUN_ACCOUNT_ID = options.accountId;
+  } else {
+    delete result.AGENTS_RUN_ACCOUNT_ID;
   }
 
   // Export the run's durable name (companion to AGENT_SESSION_ID) so a
@@ -1765,19 +1794,34 @@ async function runInTmux(options: ExecOptions, executable: string, args: string[
   const RED = '\x1b[31m', GRAY = '\x1b[90m', OFF = '\x1b[0m';
   const NO_TMUX_TIP = `${GRAY}  This run used the opt-in tmux wrap. Re-run with --no-tmux for a direct launch, or turn the wrap off: agents config set devices.${machineId()}.tmux off${OFF}\n\n`;
 
+  // Read a dead pane's scrollback. Must run BEFORE killSession — capture-pane
+  // needs the session still alive (remain-on-exit keeps the dead pane readable
+  // until we tear it down). Best-effort: a missing/gone pane just yields ''.
+  // Callers thread this into SpawnResult.stdout for a GENUINELY dead pane only
+  // (positive proof from paneExitStatus) — never for the "still alive, user
+  // detached" or "outcome unknown" paths below, so an interactive detach or an
+  // unresolved tmux race can never masquerade as refusal evidence.
+  const capturePaneTail = async (pane: string | undefined): Promise<string> => {
+    if (!pane) return '';
+    try {
+      const r = await runTmux({ socket, args: ['capture-pane', '-p', '-t', pane, '-S', '-200'], throwOnError: false });
+      return r.code === 0 ? formatPaneTail(r.stdout) : '';
+    } catch {
+      return '';
+    }
+  };
+
   // Recap a dead pane's tail into THIS shell's stderr. The pane-died hook
   // detaches the client the instant the agent exits, so a fast failure (a
   // gutted install that dies with ENOENT, a bad flag, a crash on startup) would
-  // otherwise leave only a bare `[detached]` with no clue why. Must run BEFORE
-  // killSession — capture-pane needs the session still alive (remain-on-exit
-  // keeps the dead pane readable until we tear it down). Best-effort throughout.
-  const surfacePaneFailure = async (pane: string | undefined, status: number | undefined, headline: string): Promise<void> => {
+  // otherwise leave only a bare `[detached]` with no clue why.
+  const surfacePaneFailure = async (
+    pane: string | undefined,
+    status: number | undefined,
+    headline: string,
+    tail: string,
+  ): Promise<void> => {
     if (!pane) return;
-    let tail = '';
-    try {
-      const r = await runTmux({ socket, args: ['capture-pane', '-p', '-t', pane, '-S', '-200'], throwOnError: false });
-      if (r.code === 0) tail = formatPaneTail(r.stdout);
-    } catch { /* best-effort — a missing pane just means no recap */ }
     process.stderr.write(`\n${RED}agents: ${headline} (exit ${status ?? UNKNOWN_OUTCOME_EXIT_CODE}).${OFF}\n`);
     if (tail) {
       process.stderr.write(`${GRAY}  ── last output from ${options.agent} ──${OFF}\n`);
@@ -1808,18 +1852,25 @@ async function runInTmux(options: ExecOptions, executable: string, args: string[
   const resolveAfterAttach = async (pane: string | undefined): Promise<{ exitCode: number; stderr: string; stdout: string }> => {
     const after = pane ? await paneExitStatus(pane, socket) : { found: false, dead: false, status: undefined };
     if (after.dead) {
+      // Positive proof of a genuinely completed pane (paneExitStatus confirmed
+      // dead) — capture its scrollback as refusal evidence for the caller
+      // (classifyClaudeRunRefusal etc.) BEFORE tearing the session down.
+      // Deliberately not done for the "alive" (detach) or "unknown" branches
+      // below: neither is a demonstrated completion, so neither may carry
+      // evidence a caller could mistake for a real refusal or success.
+      const tail = await capturePaneTail(pane);
       // Nonzero exit after attach → the agent crashed rather than the user
       // detaching cleanly (a clean detach leaves the pane ALIVE, handled below).
       // F2: for interactive runs, also recap a clean exit-0 — the harness exited
       // without error but without starting a REPL, which is still a failure.
       if (shouldRecapDeadPane(after.status, resolveInteractive(options))) {
-        await surfacePaneFailure(pane, after.status, `${options.agent} exited`);
+        await surfacePaneFailure(pane, after.status, `${options.agent} exited`, tail);
       }
       await killSession(name, socket).catch(() => {});
       // A dead pane whose status tmux never reported is UNKNOWN, not success —
       // and surfacePaneFailure already printed `exit 1` for it, so the old
       // `?? 0` made the message and the returned code disagree (EXEC-23b).
-      return { exitCode: tmuxRunExitCode(after, false), stderr: '', stdout: '' };
+      return { exitCode: tmuxRunExitCode(after, false), stderr: '', stdout: tail };
     }
     // after.dead===false, but that could be a stale/unreadable-pane result.
     // Require positive proof before keeping the session as "user detached".
@@ -1952,6 +2003,7 @@ async function runInTmux(options: ExecOptions, executable: string, args: string[
         initiatedBy: resolveActor().kind,
         phoenixId: resolveActor().phoenixId,
         harness: customHarnessName(options),
+        accountId: options.accountId,
         startedAtMs: Date.now(),
       });
     }
@@ -1961,18 +2013,22 @@ async function runInTmux(options: ExecOptions, executable: string, args: string[
   // already-dead pane — surface its output + status directly and tear down.
   const before = pane ? await paneExitStatus(pane, socket) : { found: false, dead: false, status: undefined };
   if (before.dead) {
+    // Positive proof of a genuinely completed pane — capture scrollback as
+    // refusal evidence before tearing the session down (see the matching
+    // comment in resolveAfterAttach).
+    const tail = await capturePaneTail(pane);
     // F2 (RUSH-2185 / EXEC-23a): for interactive runs, ALWAYS recap — a clean
     // exit-0 before attach means the harness has no interactive REPL and the
     // user would see only a bare `[detached]` with no clue why. For headless
     // runs the old quiet behaviour stands: exit-0 is a successful quick run.
     if (shouldRecapDeadPane(before.status, resolveInteractive(options))) {
-      await surfacePaneFailure(pane, before.status, `${options.agent} exited before it could start`);
+      await surfacePaneFailure(pane, before.status, `${options.agent} exited before it could start`, tail);
     }
     await killSession(name, socket).catch(() => {});
     // A dead pane whose status tmux never reported is an UNKNOWN outcome, not a
     // success — and the banner one line up already printed `exit 1` for it, so
     // the old `?? 0` also made the message and the returned code disagree.
-    return { exitCode: tmuxRunExitCode(before, false), stderr: '', stdout: '' };
+    return { exitCode: tmuxRunExitCode(before, false), stderr: '', stdout: tail };
   }
 
   await attachTmux({ socket, args: ['attach-session', '-t', name] });
@@ -2382,6 +2438,7 @@ async function spawnAgentLeased(options: ExecOptions): Promise<SpawnResult> {
         initiatedBy: resolveActor().kind,
         phoenixId: resolveActor().phoenixId,
         harness: customHarnessName(options),
+        accountId: options.accountId,
         startedAtMs: Date.now(),
       });
     }
@@ -2610,13 +2667,51 @@ export function detectOutOfCredits(text: string): boolean {
 export type ClaudeRefusalAction =
   | { action: 'note_session'; resetsAt: Date }
   | { action: 'note_out_of_credits' }
+  | { action: 'note_model_limit'; model: string; family: string }
   | { action: 'clear' }
   | { action: 'none' };
 
-export function classifyClaudeRunRefusal(output: string, exitCode: number): ClaudeRefusalAction {
+/**
+ * Stable per-account key for a MODEL-specific refusal marker (usage.ts's
+ * noteClaudeModelRefusal / getClaudeModelRefusal). Deliberately prefers the
+ * account's own registry id over `usageKey`/`accountKey`, which can name an
+ * ORG-wide quota group shared by several sibling accounts — keying a
+ * per-model marker on that shared key would poison every sibling account for
+ * a limit that Claude only ever named on one login. Mirrors
+ * `candidateAccountKey`'s native-id precedence in rotate.ts, without
+ * importing it here (exec.ts already sits below rotate.ts in the import
+ * graph — rotate.ts type-imports FallbackEntry from this module).
+ */
+export function modelRefusalAccountKey(
+  account: Pick<AccountInfo, 'accountId' | 'usageKey' | 'accountKey' | 'email'>,
+): string {
+  if (account.accountId) return `native:${account.accountId}`;
+  return account.usageKey ?? account.accountKey ?? account.email ?? 'unregistered';
+}
+
+/**
+ * Classify a Claude run's output + exit code, model-limit refusal included.
+ * Precedence: a session-limit reset first (it carries a clock), then a
+ * clock-less billing exhaustion, then a MODEL-specific refusal ("You've
+ * reached your Fable limit…") — checked BEFORE the exit-0 clear so a model
+ * refusal that ends the run with exit 0 is never misread as a clean success
+ * that clears every other stale marker on the account. A model refusal never
+ * maps to `note_out_of_credits`/`note_session`: those are account-wide, this
+ * names one model. Only a clean run with NO refusal text clears stale
+ * markers; anything else leaves them untouched.
+ */
+export function classifyClaudeRunRefusal(
+  output: string,
+  exitCode: number,
+  model?: string,
+): ClaudeRefusalAction {
   const sessionLimitReset = parseClaudeSessionLimitReset(output);
   if (sessionLimitReset) return { action: 'note_session', resetsAt: sessionLimitReset };
   if (detectOutOfCredits(output)) return { action: 'note_out_of_credits' };
+  const modelRefusal = parseClaudeModelRefusal(output);
+  if (modelRefusal) {
+    return { action: 'note_model_limit', model: model ?? modelRefusal.family, family: modelRefusal.family };
+  }
   if (exitCode === 0) return { action: 'clear' };
   return { action: 'none' };
 }
@@ -2970,28 +3065,54 @@ export async function runWithFallback(options: FallbackOptions): Promise<number>
     // classify{Claude,Codex}RunRefusal.
     const refusal =
       agent === 'claude'
-        ? classifyClaudeRunRefusal(output, result.exitCode ?? 1)
+        ? classifyClaudeRunRefusal(output, result.exitCode ?? 1, execOpts.model)
         : agent === 'codex'
           ? classifyCodexRunRefusal(output, result.exitCode ?? 1)
           : null;
     const sessionLimitReset =
       refusal?.action === 'note_session' ? refusal.resetsAt : null;
     if (refusal && version && refusal.action !== 'none') {
-      const account = await getAccountInfo(agent, getVersionHomePath(agent, version));
+      // Resolve the account from the HOME this attempt actually authenticated
+      // from — execHome (a slot dir, PHNX-3940 T5) or configVersion wins over
+      // the bare managed-binary version home. Reading `getVersionHomePath(agent,
+      // version)` unconditionally attributed a refusal to the wrong account for
+      // every account-slot / configVersion launch, since `version` there is the
+      // BINARY, not the credential's home.
+      const { versionHome: refusalHome } = resolveExecConfigHome(execOpts);
+      const account = await getAccountInfo(agent, refusalHome ?? getVersionHomePath(agent, version));
       const usageKey = getUsageLookupKey(account);
-      if (usageKey) {
+      if (refusal.action === 'note_model_limit') {
+        // A model-specific refusal is scoped to ONE model on the account's own
+        // registry key (never the org-shared usageKey) — see
+        // modelRefusalAccountKey — so it can never poison a sibling account or
+        // a sibling model on the same account.
+        noteClaudeModelRefusal(modelRefusalAccountKey(account), refusal.model, {
+          family: refusal.family,
+        });
+      } else if (usageKey) {
         if (refusal.action === 'note_session') noteClaudeSessionLimit(usageKey, refusal.resetsAt);
         else if (refusal.action === 'note_out_of_credits') noteClaudeOutOfCredits(usageKey);
         else if (refusal.action === 'clear') clearClaudeAccountRefusal(usageKey);
       }
+      // A demonstrated clean success clears the SAME account+model's refusal
+      // too — but only that model, never a sibling one — independent of
+      // whether a global marker existed to clear above.
+      if (refusal.action === 'clear' && execOpts.model) {
+        clearClaudeModelRefusal(modelRefusalAccountKey(account), execOpts.model);
+      }
     }
 
-    if (result.exitCode === 0 && !sessionLimitReset) return 0;
+    // A model-limit refusal commonly ends the CLI turn with exit 0 (Claude
+    // just refuses to keep going on that model rather than crashing) — so,
+    // like a session-limit reset, it must not be read as a clean success that
+    // short-circuits the cascade before the fallback chain ever runs.
+    const modelLimited = refusal?.action === 'note_model_limit';
+    if (result.exitCode === 0 && !sessionLimitReset && !modelLimited) return 0;
 
     const isLast = i === chain.length - 1;
     if (isLast) return result.exitCode || 1;
 
-    if (!sessionLimitReset && !detectRateLimit(result.stderr) && !detectRateLimit(result.stdout)) {
+    if (!sessionLimitReset && !modelLimited && !detectRateLimit(result.stderr) && !detectRateLimit(result.stdout)) {
       return result.exitCode;
     }
 

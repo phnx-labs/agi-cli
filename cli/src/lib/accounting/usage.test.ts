@@ -17,6 +17,11 @@ import {
   noteClaudeOutOfCredits,
   clearClaudeAccountRefusal,
   parseClaudeSessionLimitReset,
+  noteClaudeModelRefusal,
+  clearClaudeModelRefusal,
+  getClaudeModelRefusal,
+  parseClaudeModelRefusal,
+  mergeClaudeUsageCacheWindows,
   deriveUsageStatusFromSnapshot,
   setClaudeUsageCachePathForTest,
   deriveUsageHeadroom,
@@ -663,6 +668,113 @@ describe('observed Claude session limits', () => {
       reason: 'session_limit',
       resetsAt: reset,
     });
+  });
+});
+
+describe('per-model Claude refusal tracking (PHNX-3940)', () => {
+  let cacheDir: string;
+  let prevPath: string | null;
+  const accountA = 'native:acct-a';
+  const accountB = 'native:acct-b';
+
+  beforeEach(() => {
+    cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-model-refusal-'));
+    prevPath = setClaudeUsageCachePathForTest(path.join(cacheDir, 'claude-usage.json'));
+  });
+
+  afterEach(() => {
+    setClaudeUsageCachePathForTest(prevPath);
+    fs.rmSync(cacheDir, { recursive: true, force: true });
+  });
+
+  it('parses the exact real Fable refusal text', () => {
+    const refusal = parseClaudeModelRefusal(
+      "You've reached your Fable limit. Run /usage-credits to continue or switch models with /model.",
+    );
+    expect(refusal).toEqual({ family: 'Fable' });
+  });
+
+  it('does not match unrelated text mentioning /usage-credits', () => {
+    expect(parseClaudeModelRefusal('See /usage-credits for details on your plan.')).toBeNull();
+  });
+
+  it('A/Fable is blocked while A/Sonnet and B/Fable (same org) stay eligible', () => {
+    noteClaudeModelRefusal(accountA, 'fable', { family: 'Fable' });
+
+    expect(getClaudeModelRefusal(accountA, 'fable')).toEqual({ family: 'Fable', resetsAt: null });
+    // A different model on the SAME account is unaffected.
+    expect(getClaudeModelRefusal(accountA, 'sonnet')).toBeNull();
+    // A different account — even one that would share an org-scoped usageKey —
+    // is unaffected: the marker is keyed on the caller-supplied account key,
+    // never a shared org bucket.
+    expect(getClaudeModelRefusal(accountB, 'fable')).toBeNull();
+  });
+
+  it('a clock-bearing refusal expires; a clock-less one stays sticky', () => {
+    const resetsAt = new Date(Date.now() + 60_000);
+    noteClaudeModelRefusal(accountA, 'fable', { family: 'Fable', resetsAt });
+    expect(getClaudeModelRefusal(accountA, 'fable', Date.now())).not.toBeNull();
+    expect(getClaudeModelRefusal(accountA, 'fable', resetsAt.getTime() + 1)).toBeNull();
+
+    noteClaudeModelRefusal(accountA, 'opus', { family: 'Opus' });
+    // No resetsAt was given — never invent one, and it must not auto-expire.
+    expect(getClaudeModelRefusal(accountA, 'opus', Date.now() + 365 * 24 * 60 * 60 * 1000)).toEqual({
+      family: 'Opus',
+      resetsAt: null,
+    });
+  });
+
+  it('clearing one (account, model) leaves a sibling model on the same account untouched', () => {
+    noteClaudeModelRefusal(accountA, 'fable', { family: 'Fable' });
+    noteClaudeModelRefusal(accountA, 'opus', { family: 'Opus' });
+
+    clearClaudeModelRefusal(accountA, 'fable');
+
+    expect(getClaudeModelRefusal(accountA, 'fable')).toBeNull();
+    expect(getClaudeModelRefusal(accountA, 'opus')).toEqual({ family: 'Opus', resetsAt: null });
+  });
+
+  it('clearing an account with no refusal is a no-op', () => {
+    expect(() => clearClaudeModelRefusal(accountA, 'fable')).not.toThrow();
+    expect(getClaudeModelRefusal(accountA, 'fable')).toBeNull();
+  });
+
+  it('a model-refusal-only row survives readClaudeUsageCache retention (no windows, no plan)', () => {
+    noteClaudeModelRefusal(accountA, 'fable', { family: 'Fable' });
+    // The row carries nothing but the model refusal — must not be treated as
+    // an empty/prunable row the way a truly-empty cache entry is.
+    expect(readClaudeUsageCache(accountA)).not.toBeNull();
+    expect(getClaudeModelRefusal(accountA, 'fable')).toEqual({ family: 'Fable', resetsAt: null });
+  });
+
+  it('survives a full writeClaudeUsageCache overwrite of the same account row', () => {
+    noteClaudeModelRefusal(accountA, 'fable', { family: 'Fable' });
+
+    writeClaudeUsageCache(accountA, {
+      source: 'live',
+      sourceLabel: 'live',
+      capturedAt: new Date(),
+      windows: [
+        { key: 'week', label: 'Current week', shortLabel: 'W', usedPercent: 10, resetsAt: new Date(Date.now() + 60_000), windowMinutes: 10080 },
+      ],
+    });
+
+    expect(getClaudeModelRefusal(accountA, 'fable')).toEqual({ family: 'Fable', resetsAt: null });
+  });
+
+  it('survives a partial mergeClaudeUsageCacheWindows update of the same account row', () => {
+    noteClaudeModelRefusal(accountA, 'fable', { family: 'Fable' });
+
+    mergeClaudeUsageCacheWindows(accountA, {
+      source: 'live',
+      sourceLabel: 'live',
+      capturedAt: new Date(),
+      windows: [
+        { key: 'session', label: 'Session', shortLabel: 'S', usedPercent: 5, resetsAt: new Date(Date.now() + 60_000), windowMinutes: 300 },
+      ],
+    });
+
+    expect(getClaudeModelRefusal(accountA, 'fable')).toEqual({ family: 'Fable', resetsAt: null });
   });
 });
 
