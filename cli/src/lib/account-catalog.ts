@@ -685,7 +685,9 @@ function usageCellNamesThrottle(row: NativeAccountCatalogRow): boolean {
 
 function nativeLine(row: NativeAccountCatalogRow, localDevice: string, maxWindows?: number): ListingLine {
   return {
-    name: row.name ?? 'unnamed',
+    // A discovered login nobody has named is still identified by what it is:
+    // the row no longer carries an IDENTITY column, so the identity IS the name.
+    name: row.name ?? row.identityLabel,
     notes: [
       usageCellNamesThrottle(row) && row.verdict === 'rate_limited' ? null : verdictNote(row.verdict),
       coverageNote(row, localDevice),
