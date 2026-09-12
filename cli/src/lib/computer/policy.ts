@@ -7,33 +7,21 @@
  * (`~/.agents/permissions/groups/`), which is an agents-cli concept the
  * standalone `computer` CLI has no business reimplementing — it would have to
  * re-learn resource layering, user-over-system precedence, and the rule grammar
- * to do it. So agents-cli renders the policy to a file and hands the engine the
- * path in its context (`context.ts`); the engine reads and enforces it.
+ * to do it. So agents-cli resolves the allow lists and hands them to the engine
+ * in its fd-3 context (`context.ts`), and ALSO renders them to the files the
+ * long-lived daemon re-reads at startup and on SIGHUP. Both readers, one source.
  *
  * Moved out of the deleted `computer-rpc.ts` during the PHNX-4075 extraction
  * with its behavior intact: same file locations, same 0600 modes, same strict
- * line-wise rule grammar. Only the RPC transport left.
+ * line-wise rule grammar. Only the RPC transport left. The engine's own paths —
+ * its socket, its daemon log, its per-session admission cache — went with it and
+ * are deliberately NOT named here: a second copy of a path agents-cli no longer
+ * reads is a drift waiting to happen.
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { getHelpersDir, getLogsDir, getUserPermissionsDir, getPermissionsDir } from '../state.js';
-
-// Socket the macOS daemon listens on. Internal scratch — lives under
-// getHelpersDir() (~/.agents/.cache/helpers/), matching browser.sock. agents-cli
-// no longer speaks this socket; it names it so the engine and the agents-side
-// `status` report agree on one path.
-export function resolveSocketPath(): string {
-  const envPath = process.env.COMPUTER_HELPER_SOCKET;
-  if (envPath && envPath.length > 0) return envPath;
-  return path.join(getHelpersDir(), 'computer.sock');
-}
-
-// Default log path for the daemon. Lives in the cache/logs/ bucket (matches the
-// scheduler daemon's logs.jsonl convention).
-export function resolveLogPath(): string {
-  return path.join(getLogsDir(), 'computer-helper.log');
-}
+import { getHelpersDir, getUserPermissionsDir, getPermissionsDir } from '../state.js';
 
 // Policy file the helper reads at startup and on SIGHUP. Sibling of
 // computer.sock under ~/.agents/.cache/helpers/. Allow-list of bare bundle
@@ -41,17 +29,6 @@ export function resolveLogPath(): string {
 // ~/.agents/permissions/groups/.
 export function resolvePolicyPath(): string {
   return path.join(getHelpersDir(), 'computer-policy.json');
-}
-
-/**
- * Where the engine caches per-session target admissions. The LOCATION is policy
- * (it sits beside the policy file, under the same user-owned cache dir), so
- * agents-cli names it; the admission mechanism itself needs a live `list_apps`
- * and therefore lives in the engine.
- */
-export function resolveAdmissionCachePath(env: NodeJS.ProcessEnv = process.env): string {
-  if (env.AGENTS_COMPUTER_ADMISSION_CACHE) return env.AGENTS_COMPUTER_ADMISSION_CACHE;
-  return path.join(path.dirname(resolvePolicyPath()), 'computer-target-admissions.json');
 }
 
 // Walk all permission group YAMLs (user dir wins on name collision) and

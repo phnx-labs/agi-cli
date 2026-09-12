@@ -4,17 +4,20 @@
  *
  * WHAT THIS FILE IS NOW. Every verb below forwards its arguments verbatim to the
  * standalone engine and propagates its exit code. agents-cli contributes four
- * things the engine cannot know, all of them delivered as one JSON context on
- * fd 3 (`lib/computer/context.ts`):
+ * things the engine cannot know:
  *
  *   1. the permissions allow list, rendered from `Computer(<bundle-id>)` rules
  *      in the agents resource layer (`lib/computer/policy.ts`);
- *   2. `--device <name>` resolved against the fleet, and the `ssh -L` tunnel
- *      that puts a remote daemon on loopback (`lib/computer/remote.ts`);
- *   3. the acting actor and agent session;
+ *   2. the peer allow list, and `--device <name>` resolved against the fleet —
+ *      both carried in the fd-3 context (`lib/computer/context.ts`);
+ *   3. the acting actor and agent session, likewise on fd 3;
  *   4. a recorder for the action events the engine streams back on fd 4, so
  *      `agents computer sessions` and `agents sessions --computer` keep their
  *      history (`lib/computer/record.ts`).
+ *
+ * The `ssh -L` tunnel a `--device` invocation needs is opened here too
+ * (`lib/computer/remote.ts`); its loopback endpoint reaches the engine on the
+ * transport env var the engine already reads, not as a second context field.
  *
  * WHY VERB FLAGS ARE NOT REDECLARED HERE. Each passthrough verb declares only
  * `--device` — the one flag the consumer must intercept — and takes everything
@@ -48,7 +51,7 @@ import {
   startRemoteTunnel,
   stopRemoteTunnel,
 } from '../lib/computer/remote.js';
-import { buildComputerContext } from '../lib/computer/context.js';
+import { buildComputerContext, computerTransportEnv } from '../lib/computer/context.js';
 import { recordComputerAction } from '../lib/computer/record.js';
 import {
   isComputerClientError,
@@ -176,15 +179,15 @@ export async function forwardToComputer(opts: {
     throw err;
   }
 
-  const context = await buildComputerContext({
-    device: opts.device,
-    tcpOverride: opts.tcpOverride,
-    computerBin: bin,
-  });
+  const context = await buildComputerContext({ device: opts.device, computerBin: bin });
 
   return runComputer({
     argv: opts.argv,
     context,
+    // The engine reads its transport from the environment it inherits. The one
+    // value it cannot inherit is the loopback port a `--device` tunnel just
+    // landed on, so that is overlaid here.
+    env: computerTransportEnv({ device: opts.device, tcpOverride: opts.tcpOverride }),
     capture: opts.capture,
     onEvent: opts.record === false
       ? undefined

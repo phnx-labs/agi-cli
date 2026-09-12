@@ -4,11 +4,10 @@
  *
  * The bug this pins: the daemon's plist was fixed in isolation, and the two
  * other manifests — the menu-bar helper and the `agents computer` helper — kept
- * omitting HOME. The computer helper's plist is now rendered by the standalone
- * `computer` engine (PHNX-4075), so what this file pins for it is the CONTEXT
- * agents-cli hands that engine: the namespaced label, the registration verdict,
- * and the home env its manifest must bake. The engine cannot derive any of
- * those — only the CLI that redirected HOME knows it did.
+ * omitting HOME. The computer helper is no longer this CLI's to render: the
+ * standalone `computer` engine writes and registers its own manifest
+ * (PHNX-4075) and inherits `HOME`/`AGENTS_REAL_HOME` from the process that
+ * spawns it, so it sees the redirected home directly and owns that safety.
  * launchd applies a manifest's `EnvironmentVariables` on top of
  * the LOGIN SESSION's environment, never the caller's, so those two handed their
  * child the account home. Under the hermetic harness (tests/setup.ts redirects
@@ -27,7 +26,6 @@ import * as path from 'path';
 import { isolatedHomeSuffix, namespacedServiceLabel, serviceManifestHomeEnv } from './service-manifest.js';
 import { generateLaunchdPlist, generateSystemdUnit, daemonServiceLabel } from './daemon/daemon.js';
 import { generateServicePlist } from './menubar/install-menubar.js';
-import { buildServiceContext, COMPUTER_HELPER_SERVICE_LABEL } from './computer/context.js';
 
 const savedHome = process.env.HOME;
 const savedRealHome = process.env.AGENTS_REAL_HOME;
@@ -112,38 +110,4 @@ describe('every generated service manifest carries the caller HOME (RUSH-2639)',
     });
   });
 
-  // The computer helper's plist is the engine's to render, so what must not
-  // regress here is the HOME the engine is TOLD to bake. Handing it nothing
-  // reproduces the original leak one layer out: the engine would fall back to
-  // the login session's home and bootstrap `~/.agents` in the real one.
-  it('the computer-helper context carries the caller HOME for the engine to bake', () => {
-    withRedirectedHome((home) => {
-      const service = buildServiceContext();
-      expect(service.homeEnv.HOME).toBe(home);
-      expect(service.homeEnv.AGENTS_REAL_HOME).toBe(home);
-    });
-  });
-
-  it('the computer-helper Label is namespaced under a redirected HOME, and only then', () => {
-    withRedirectedHome(() => {
-      expect(buildServiceContext().label)
-        .toBe(`${COMPUTER_HELPER_SERVICE_LABEL}.sandbox-${isolatedHomeSuffix()}`);
-    });
-    process.env.HOME = os.userInfo().homedir;
-    expect(buildServiceContext().label).toBe(COMPUTER_HELPER_SERVICE_LABEL);
-  });
-
-  // The label alone does not protect launchd: it is per-user-session and
-  // HOME-independent, so a sandboxed process registering a namespaced job still
-  // registers in the REAL launchd (RUSH-2968). The engine cannot see that it is
-  // sandboxed, so the refusal has to travel with the context.
-  it('refuses service-manager registration under a redirected HOME, and allows it otherwise', () => {
-    withRedirectedHome(() => {
-      const service = buildServiceContext();
-      expect(service.registrationAllowed).toBe(false);
-      expect(service.reason).toMatch(/redirected HOME/);
-    });
-    process.env.HOME = os.userInfo().homedir;
-    expect(buildServiceContext().registrationAllowed).toBe(true);
-  });
 });
