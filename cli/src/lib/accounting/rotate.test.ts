@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import {
   rotationFailoverChain,
+  candidateAccountKey,
   shouldArmRotationFailover,
   DEFAULT_ROTATION_FAILOVER_LIMIT,
   pickBalancedCandidate,
@@ -272,10 +273,17 @@ describe('rotationFailoverChain (#348 — synthesize a same-agent failover chain
     const c = candidate({ version: '3.0.0' });
     // A is the account picked pre-flight; B and C are the healthy alternatives.
     const chain = rotationFailoverChain(rotation([a, b, c], 0), a.version);
-    expect(chain).toEqual([
+    // Each entry now carries the account it re-resolves on the spawn device
+    // (PHNX-3940) alongside agent+version.
+    expect(chain.map((e) => ({ agent: e.agent, version: e.version }))).toEqual([
       { agent: 'claude', version: '2.0.0' },
       { agent: 'claude', version: '3.0.0' },
     ]);
+    expect(chain.map((e) => e.accountKey)).toEqual([
+      candidateAccountKey(b),
+      candidateAccountKey(c),
+    ]);
+    expect(chain.every((e) => e.accountCandidate)).toBe(true);
   });
 
   it('preserves rotation.healthy order (freshest account first) and never re-lists the primary', () => {

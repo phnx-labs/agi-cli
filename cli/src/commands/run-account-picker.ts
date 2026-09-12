@@ -283,9 +283,11 @@ export function noVerifiedUsageDecision(
 }
 
 /**
- * Choose which installed version to launch so the user can authenticate, when a
- * strategy found zero healthy accounts but at least one is merely signed out
- * (RUSH-2334). Returns the version to launch, or null if the user cancelled.
+ * Choose which account to launch so the user can authenticate, when a strategy
+ * found zero healthy accounts but at least one is merely signed out (RUSH-2334).
+ * Returns the selected CANDIDATE — not a bare version — so the caller resolves
+ * and launches that account's own home/slot and the login lands in the right
+ * place (PHNX-3940). Null when the user cancelled.
  *
  * A single candidate does NOT prompt — a one-item picker is pure noise, and the
  * only thing to decide has one answer. Several candidates fall through to the
@@ -295,16 +297,15 @@ export function noVerifiedUsageDecision(
  * Callers MUST have already confirmed an interactive terminal: off a TTY there
  * is nobody to complete the login, and the run should fail loud instead.
  */
-export async function pickSignInLaunchVersion(
+export async function pickSignInLaunchCandidate(
   agent: AgentId,
   recoverable: RotateCandidate[],
   quiet = false,
-): Promise<string | null> {
+): Promise<RotateCandidate | null> {
   if (recoverable.length === 0) return null;
 
   if (recoverable.length > 1) {
-    const selected = await pickRunAccountCandidate(agent);
-    return selected?.version ?? null;
+    return await pickRunAccountCandidate(agent);
   }
 
   const [only] = recoverable;
@@ -318,7 +319,7 @@ export async function pickSignInLaunchVersion(
     ));
     process.stderr.write(chalk.gray(`Sign in with: ${loginHint(agent)}\n`));
   }
-  return only.version;
+  return only;
 }
 
 /** Prompt for one safe installed account/version. A cancelled picker launches nothing. */

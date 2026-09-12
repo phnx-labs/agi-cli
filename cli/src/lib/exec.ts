@@ -46,6 +46,8 @@ import { resolveConfigVersion } from './harness/exec-config-version.js';
 import { getAccountInfo } from './agents.js';
 import { getUsageLookupKey, noteClaudeSessionLimit, noteClaudeOutOfCredits, clearClaudeAccountRefusal, parseClaudeSessionLimitReset } from './accounting/usage.js';
 import { bootMark, flushBootProfile } from './boot-profile.js';
+import type { ResolvedLaunchAccount } from './accounting/account-launch.js';
+import type { RotateCandidate } from './accounting/rotate.js';
 
 /**
  * Agent execution modes. Canonical name `skip` (dangerously skip permissions);
@@ -281,6 +283,14 @@ export interface ExecOptions {
    */
   harnessName?: string;
   version?: string;
+  /** Safe account identity for this exact attempt; never inferred from version. */
+  account?: ResolvedLaunchAccount;
+  /** Candidate selected for this attempt. Local-only; may carry a slot path. */
+  accountCandidate?: RotateCandidate;
+  /** Harness/profile env retained only for a same-account model retry. */
+  harnessEnv?: Record<string, string>;
+  /** Credential env materialized for this exact local account attempt. */
+  accountEnv?: Record<string, string>;
   /** Version home whose native auth/config is overlaid onto this run's binary. */
   configVersion?: string;
   /**
@@ -638,6 +648,8 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
 
   return {
     ...result,
+    ...options.harnessEnv,
+    ...options.accountEnv,
     ...options.env,
   };
 }
@@ -2769,6 +2781,18 @@ export interface FallbackEntry {
    * a same-agent retry without touching auth or base URL.
    */
   envOverride?: Record<string, string>;
+  /**
+   * Account this entry launches under, re-resolved on the spawn device rather
+   * than inherited from the primary (PHNX-3940). `accountCandidate` carries the
+   * selected candidate (local-only — may hold a slot path); `accountSelector` is
+   * the name another device could resolve against its own registry;
+   * `accountKey` is the stable anti-collision key. A cross-harness `--fallback`
+   * entry carries none of these and launches the target harness's own default
+   * home — it MUST NOT inherit the primary account's home/credential/config.
+   */
+  accountSelector?: string;
+  accountKey?: string;
+  accountCandidate?: RotateCandidate;
 }
 
 /** ExecOptions extended with a fallback chain for rate-limit cascading. */
@@ -2823,6 +2847,70 @@ export function buildFallbackPrompt(
     `Continue from where the prior agent left off.`,
   );
   return lines.join('\n');
+}
+
+/** The account-launch fields a fallback attempt spawns with, isolated per entry. */
+type ChainEntryAccount = Pick<
+  ExecOptions,
+  'account' | 'accountCandidate' | 'execHome' | 'accountEnv' | 'configVersion'
+>;
+
+/**
+ * Resolve the account a fallback chain entry launches under (PHNX-3940).
+ *
+ * The primary (i === 0) and a same-account model-swap retry keep the account
+ * the caller already resolved into `options` — the account did not change. Every
+ * OTHER entry owns its account and is resolved FRESH on this device, so a 429
+ * handoff never inherits the primary account's home, credential env, or config
+ * label: a slot/credential is materialized at this spawn boundary or not at all.
+ * A cross-harness `--fallback` entry carries no account and launches the target
+ * harness's own default home (cleared, never inherited).
+ */
+async function resolveChainEntryAccount(
+  entry: FallbackEntry,
+  index: number,
+  sameHostRetry: boolean,
+  options: FallbackOptions,
+): Promise<ChainEntryAccount> {
+  if (index === 0 || sameHostRetry) {
+    return {
+      account: options.account,
+      accountCandidate: options.accountCandidate,
+      execHome: options.execHome,
+      accountEnv: options.accountEnv,
+      configVersion: options.configVersion,
+    };
+  }
+  const cleared: ChainEntryAccount = {
+    account: undefined,
+    accountCandidate: undefined,
+    execHome: undefined,
+    accountEnv: undefined,
+    configVersion: undefined,
+  };
+  if (!entry.accountCandidate && !entry.accountSelector) return cleared;
+  try {
+    const { resolveLocalAccountLaunch } = await import('./accounting/account-launch.js');
+    const launch = await resolveLocalAccountLaunch({
+      agent: entry.agent,
+      executableVersion: entry.version ?? resolveVersion(entry.agent) ?? '',
+      candidate: entry.accountCandidate,
+      selector: entry.accountSelector,
+    });
+    return {
+      account: launch.account ?? undefined,
+      accountCandidate: entry.accountCandidate,
+      execHome: launch.execHome,
+      accountEnv: Object.keys(launch.env).length > 0 ? launch.env : undefined,
+      configVersion: launch.configVersion,
+    };
+  } catch (err) {
+    process.stderr.write(
+      `[agents] failover account ${entry.accountSelector ?? entry.accountKey ?? entry.agent} `
+      + `could not be resolved on this device: ${(err as Error).message}\n`,
+    );
+    return cleared;
+  }
 }
 
 /**
@@ -2889,10 +2977,15 @@ export async function runWithFallback(options: FallbackOptions): Promise<number>
       ? buildFallbackPrompt(prevAgent, prevSessionId, agent, options.prompt)
       : options.prompt;
 
+    // Each attempt resolves its OWN account on this device. A distinct-account
+    // failover must not inherit the primary's home/credential/config (PHNX-3940).
+    const entryAccount = await resolveChainEntryAccount(chain[i], i, sameHostRetry, options);
+
     const execOpts: ExecOptions = {
       ...options,
       agent,
       version,
+      ...entryAccount,
       mode: options.modeWasImplicit ? implicitModeFor(agent) : options.mode,
       prompt,
       env: envOverride ? { ...(options.env ?? {}), ...envOverride } : options.env,
@@ -2941,7 +3034,12 @@ export async function runWithFallback(options: FallbackOptions): Promise<number>
     const sessionLimitReset =
       refusal?.action === 'note_session' ? refusal.resetsAt : null;
     if (refusal && version && refusal.action !== 'none') {
-      const account = await getAccountInfo(agent, getVersionHomePath(agent, version));
+      // Attribute the refusal to the account that ACTUALLY spawned — the slot
+      // home when this attempt launched one, not the binary's version home
+      // (PHNX-3940). Keying the usage marker by version home would mark the
+      // wrong account's quota on a slot or distinct-account failover.
+      const refusedHome = execOpts.execHome ?? getVersionHomePath(agent, version);
+      const account = await getAccountInfo(agent, refusedHome);
       const usageKey = getUsageLookupKey(account);
       if (usageKey) {
         if (refusal.action === 'note_session') noteClaudeSessionLimit(usageKey, refusal.resetsAt);
