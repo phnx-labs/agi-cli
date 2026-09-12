@@ -180,12 +180,15 @@ export function claudeWorkerLoginTrapPreflight(args: {
   // UNMARKED one. The owner rule guarantees a real worker holds no native login
   // (it authenticates from the synced setup-token), so no token there genuinely
   // means the login screen with nothing behind it. A headed box authenticates
-  // from its own native login (its login prompt is the correct first-run flow),
-  // and an UNMARKED box is ambiguous — an unconfigured personal laptop whose
-  // first-run login IS legitimate, or one with a native login we must not probe
-  // for on the hot path (a macOS keychain probe raises an auth sheet per version,
-  // the exact cost applyExecConfigEnv avoids). `--device auto` only ever lands on
-  // an explicit worker (filterAutoPool), so the dispatched trap is still caught.
+  // from its own native login (its login prompt is the correct first-run flow).
+  // An UNMARKED box is deliberately spared: it never receives a synced setup-token
+  // (auth-sync pushes only to `role=worker` peers), so it is typically an ordinary
+  // machine authenticating from a native login the operator just never marked —
+  // gating it would false-refuse every such laptop, a far larger surface than the
+  // marked-worker case this closes. `--device auto` lands on an explicit worker
+  // once any worker is marked in the fleet (filterAutoPool), which is the primary
+  // trap; a directly-named `--device <unmarked-box>` is left as it was on main
+  // (unprotected — a bootstrap-window residual, not a regression).
   if (args.deviceRole !== 'worker') return null;
   // A credential will reach the child (worker setup-token, or an explicit
   // --env CLAUDE_CODE_OAUTH_TOKEN override) — proceed.

@@ -490,10 +490,14 @@ merges last in `buildExecEnv`, so the gate treats it as a present credential and
 does not refuse it). It is interactive-only (the headless 401 is already loud) and
 fires ONLY on an **explicit `role: worker`** box: the owner rule guarantees a worker holds no native login, so
 no-token there is genuinely the login screen with nothing behind it. A headed box
-uses its own native login, and an UNMARKED box is left alone — it may be an
-unconfigured personal laptop whose first-run login is legitimate, and its native
-login must not be probed on the hot path (a macOS keychain auth sheet). `--device
-auto` only lands on explicit workers, so the dispatched trap is still caught.
+uses its own native login, and an **UNMARKED** box is deliberately spared — it never
+receives a synced setup-token (`auth-sync` pushes only to `role=worker` peers, above),
+so it is typically an ordinary machine authenticating from a native login the operator
+never marked; gating it would false-refuse every such laptop. `--device auto` restricts
+to explicit workers only **once any worker is marked in the fleet** (`filterAutoPool`),
+which is the primary dispatched trap; a directly-named `--device <unmarked-box>` is
+**not** covered by this gate — unprotected exactly as on `main` today, a
+bootstrap-window residual of the original PHNX-3502 surface, not a regression.
 Naming *which* account was selected at dispatch (the `accounts=balanced` banner) is
 tracked under PHNX-3940.
 
