@@ -545,7 +545,7 @@ bun install --frozen-lockfile >/dev/null \
 # or remotely via ssh): fetch origin + the tag, verify the tag's version, create a
 # detached worktree at v$TARGET, and run THAT worktree's
 # cli/scripts/release.sh $TARGET --home-base-phase. The worktree is removed on
-# exit whether the phase succeeds or fails (BLOCKER 3), via a scoped EXIT trap.
+# exit only when it is clean, via a scoped EXIT trap.
 home_base_wt_snippet() {
   # $1 = version. Emits a self-contained bash program (no outer-shell expansion of
   # runtime values beyond the version, which is validated MAJOR.MINOR.PATCH).
@@ -566,7 +566,7 @@ TAG_VER="\$(git -C "\$REPO_ROOT" show "v$1:\$CLI_DIR/package.json" | jq -r .vers
 [ "\$TAG_VER" = "$1" ] \\
   || { echo "tag v$1 tree is at \$TAG_VER, not $1 -- refusing home-base phase" >&2; exit 1; }
 WT="\$REPO_ROOT/.agents/worktrees/homebase-publish-v$1-\$\$"
-trap 'git -C "\$REPO_ROOT" worktree remove --force "\$WT" >/dev/null 2>&1 || true' EXIT
+trap 'git -C "\$REPO_ROOT" worktree remove "\$WT" >/dev/null 2>&1 || echo "Retained publish worktree for inspection: \$WT" >&2' EXIT
 git -C "\$REPO_ROOT" worktree add --quiet --detach "\$WT" "v$1" \\
   || { echo "could not create home-base publish worktree at \$WT" >&2; exit 1; }
 [ -z "\$(git -C "\$WT" status --short | grep '^ D')" ] \\
@@ -798,11 +798,11 @@ HISTORICAL_CATCHUP=false
 HISTORICAL_WT=""
 INVOKING_ROOT="$ROOT"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-PKG_BUMPED=false
 remove_historical_worktree() {
   if [[ -n "${HISTORICAL_WT:-}" ]]; then
     cd "$INVOKING_ROOT"
-    git -C "$REPO_ROOT" worktree remove --force "$HISTORICAL_WT" >/dev/null 2>&1 || true
+    git -C "$REPO_ROOT" worktree remove "$HISTORICAL_WT" >/dev/null 2>&1 \
+      || yellow "Retained historical worktree for inspection: $HISTORICAL_WT"
     HISTORICAL_WT=""
   fi
 }
@@ -833,24 +833,12 @@ fi
 
 # ----- Sync package.json with target -----
 ORIGINAL_PKG_VERSION="$(jq -r .version package.json)"
-restore_package_json() {
-  if $PKG_BUMPED; then
-    tmp="$(mktemp)"
-    jq --arg v "$ORIGINAL_PKG_VERSION" '.version = $v' package.json > "$tmp"
-    mv "$tmp" package.json
-    yellow "Reverted package.json to $ORIGINAL_PKG_VERSION"
-  fi
-  cleanup_early
-}
-# Initial trap; replaced later by cleanup_all once SHIM_TMP and NPMRC_TMP exist.
-trap restore_package_json EXIT
 
 if [[ "$ORIGINAL_PKG_VERSION" != "$TARGET" ]]; then
   yellow "Updating package.json: $ORIGINAL_PKG_VERSION -> $TARGET"
   tmp="$(mktemp)"
   jq --arg v "$TARGET" '.version = $v' package.json > "$tmp"
   mv "$tmp" package.json
-  PKG_BUMPED=true
 fi
 
 # ----- Strict TypeScript check -----
@@ -900,27 +888,23 @@ SHIM_SRC="$ROOT/scripts/companion-shim"
 SHIM_TMP="$(mktemp -d "${TMPDIR:-/tmp}/agents-cli-shim.XXXXXX")"
 # Cleanup of SHIM_TMP layered onto the existing EXIT trap (which restores
 # package.json on abort). bash only keeps the most recent EXIT trap, so we
-# Reset the changelog working-tree edits (bump + folded queue + regenerated
-# aggregate) back to HEAD so an abort or dry-run always leaves a clean,
-# re-runnable checkout. release-changelog.ts creates .changelog/$TARGET.md (new),
-# drains .changelog/next/* (deletes), and rewrites CHANGELOG.md — `git checkout`
-# alone won't drop the newly-added version file, so remove it explicitly first.
+# Only restore generated files after the pushed PR head preserves their exact
+# working-tree and index contents. Partial or subsequently edited output stays.
 restore_release_tree() {
-  if [[ -n "${TARGET:-}" ]]; then
-    rm -f ".changelog/$TARGET.md"
-    git reset -q -- ".changelog/$TARGET.md" >/dev/null 2>&1 || true
+  local paths=(package.json CHANGELOG.md .changelog docs/command-index.md docs/command-index.json docs/command-reference.html)
+  if git diff --quiet HEAD -- "${paths[@]}" && git diff --cached --quiet HEAD -- "${paths[@]}"; then
+    return
   fi
-  git checkout -q HEAD -- package.json CHANGELOG.md .changelog 2>/dev/null || restore_package_json
+  if [[ -z "${RELEASE_CI_HEAD:-}" ]] \
+    || ! git diff --quiet "$RELEASE_CI_HEAD" -- "${paths[@]}" \
+    || ! git diff --cached --quiet "$RELEASE_CI_HEAD" -- "${paths[@]}"; then
+    yellow "Retained release edits for inspection: $ROOT"
+    return
+  fi
+  git restore --source=HEAD --staged --worktree -- "${paths[@]}"
 }
 
-# define a combined cleanup function.
 cleanup_all() {
-  # Revert any working-tree edits to package.json / CHANGELOG.md back to HEAD so
-  # that an abort (or a dry-run exit) always leaves a clean, re-runnable
-  # checkout. HEAD never moves during a release (the release commit is pushed via
-  # commit-tree, and the merge lands on origin only), so HEAD is the pre-release
-  # state. The success path already restores these before exiting, making this a
-  # no-op there. Falls back to the jq revert if git checkout is unavailable.
   restore_release_tree
   rm -rf "${SHIM_TMP:-}"
   rm -f "${NPMRC_TMP:-}"
@@ -1048,11 +1032,6 @@ require_lease() { # $1 = what we are about to do
   scripts/release-lease.sh verify \
     || phase_fail "lost the release lease before $1 -- refusing to continue; another releaser owns this pipeline now"
 }
-
-# Auto-revert of the package.json bump is no longer wanted here — the bump is
-# carried into the release branch commit (and the cleanup trap reverts the
-# working tree to HEAD on any abort, keeping re-runs clean).
-PKG_BUMPED=false
 
 phase "Preflight + version validation complete" "$THIS_HOST"
 phase_ok "isolated origin/$DEFAULT_BRANCH, bump $BUMP ($PHNX_LATEST -> $TARGET), type check + tarball preview done"

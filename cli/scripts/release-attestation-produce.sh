@@ -206,13 +206,14 @@ mkdir -p "$STORE"
 # the attestation in the wrong directory.
 STORE="$(cd "$STORE" && pwd)"
 
-WT="$(mktemp -d "${TMPDIR:-/tmp}/agents-cli-attest-produce.XXXXXX")"
+mkdir -p "$REPO_ROOT/.agents/worktrees"
+WT="$(mktemp -d "$REPO_ROOT/.agents/worktrees/attest-produce.XXXXXX")"
 cleanup() {
   if $KEEP; then
     gray "kept worktree for inspection: $WT"
   else
-    git -C "$REPO_ROOT" worktree remove --force "$WT" >/dev/null 2>&1 || true
-    rm -rf "$WT"
+    git -C "$REPO_ROOT" worktree remove "$WT" >/dev/null 2>&1 \
+      || gray "Retained attestation worktree for inspection: $WT"
   fi
 }
 trap cleanup EXIT

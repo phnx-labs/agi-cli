@@ -7,6 +7,73 @@ import { afterEach, describe, expect, it } from 'vitest';
 const SCRIPT = path.resolve(__dirname, 'release-worktree.sh');
 const roots: string[] = [];
 
+describe('release cleanup preserves work', () => {
+  it('retains a dirty linked worktree and removes it only after it is clean', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'release-cleanup-'));
+    roots.push(root);
+    git(root, 'init');
+    git(root, '-c', 'user.name=Release Test', '-c', 'user.email=release@example.com', 'commit', '--allow-empty', '-m', 'base');
+    const worktree = path.join(root, '.agents/worktrees/release');
+    git(root, 'worktree', 'add', '--detach', worktree, 'HEAD');
+    const pending = path.join(worktree, 'pending.txt');
+    fs.writeFileSync(pending, 'keep this work\n');
+    const cleanup = fs.readFileSync(SCRIPT, 'utf8').match(/cleanup\(\) \{[\s\S]*?\n\}/)![0];
+    const run = () => spawnSync('bash', ['-c', `${cleanup}\ncleanup`], {
+      cwd: root, encoding: 'utf8', env: { ...process.env, REPO_ROOT: root, WORKTREE: worktree },
+    });
+    const retained = run();
+    expect(retained.status, retained.stderr).toBe(0);
+    expect(retained.stderr).toContain(worktree);
+    expect(fs.readFileSync(pending, 'utf8')).toBe('keep this work\n');
+    fs.unlinkSync(pending);
+    expect(run().status).toBe(0);
+    expect(fs.existsSync(worktree)).toBe(false);
+  });
+
+  it.each(['saved', 'unpublished', 'edited', 'restaged'])('restores only saved, unchanged release output: %s', (state) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'release-restore-'));
+    roots.push(root);
+    git(root, 'init');
+    git(root, 'config', 'user.name', 'Release Test');
+    git(root, 'config', 'user.email', 'release@example.com');
+    const files = ['package.json', 'CHANGELOG.md', '.changelog/next/note.md', 'docs/command-index.md', 'docs/command-index.json', 'docs/command-reference.html'];
+    for (const file of files) {
+      fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+      fs.writeFileSync(path.join(root, file), 'original\n');
+    }
+    git(root, 'add', '.');
+    git(root, 'commit', '-m', 'base');
+    fs.writeFileSync(path.join(root, 'package.json'), 'release\n');
+    fs.writeFileSync(path.join(root, '.changelog/9.8.7.md'), 'release note\n');
+    fs.unlinkSync(path.join(root, '.changelog/next/note.md'));
+    git(root, 'add', '.');
+    const saved = git(root, 'commit-tree', git(root, 'write-tree'), '-p', 'HEAD', '-m', 'release');
+    if (state === 'edited' || state === 'restaged') {
+      fs.writeFileSync(path.join(root, 'package.json'), 'subsequent edit\n');
+      if (state === 'restaged') {
+        git(root, 'add', 'package.json');
+        fs.writeFileSync(path.join(root, 'package.json'), 'release\n');
+      }
+    }
+    const before = git(root, 'status', '--porcelain');
+    const beforeIndex = git(root, 'write-tree');
+    const body = fs.readFileSync(path.resolve(__dirname, 'release.sh'), 'utf8')
+      .match(/restore_release_tree\(\) \{[\s\S]*?\n\}/)![0];
+    const result = spawnSync('bash', ['-c', `set -e\nyellow() { printf '%s\\n' "$*"; }\n${body}\nrestore_release_tree`], {
+      cwd: root, encoding: 'utf8', env: { ...process.env, ROOT: root, RELEASE_CI_HEAD: state === 'unpublished' ? '' : saved },
+    });
+    expect(result.status, result.stderr).toBe(0);
+    if (state === 'saved') {
+      expect(git(root, 'status', '--porcelain')).toBe('');
+      expect(fs.readFileSync(path.join(root, '.changelog/next/note.md'), 'utf8')).toBe('original\n');
+    } else {
+      expect(git(root, 'status', '--porcelain')).toBe(before);
+      expect(git(root, 'write-tree')).toBe(beforeIndex);
+      expect(fs.readFileSync(path.join(root, '.changelog/9.8.7.md'), 'utf8')).toBe('release note\n');
+    }
+  });
+});
+
 function git(cwd: string, ...args: string[]) {
   const result = spawnSync('git', args, { cwd, encoding: 'utf-8' });
   if (result.status !== 0) throw new Error(result.stderr || result.stdout);
