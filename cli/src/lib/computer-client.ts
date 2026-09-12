@@ -45,7 +45,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { realpathSync } from 'node:fs';
+import { realpathSync, existsSync } from 'node:fs';
 import * as path from 'node:path';
 import { findInPath } from './agent-spec/agents.js';
 
@@ -71,10 +71,16 @@ export function isComputerClientError(err: unknown): err is ComputerClientError 
 
 let cachedBin: string | undefined;
 
+function computerEntrypoint(bin: string): string {
+  if (!/\.(cmd|ps1)$/i.test(bin)) return bin;
+  const launcher = path.join(path.dirname(bin), 'node_modules', '@phnx-labs', 'computer-cli', 'bin', 'computer.cjs');
+  return existsSync(launcher) ? launcher : bin;
+}
+
 export function isStandaloneComputer(bin: string): boolean {
-  let real = bin;
-  try { real = realpathSync(bin); } catch { /* spawn reports missing explicit paths */ }
-  return !real.endsWith(path.join('dist', 'computer.js'));
+  let real = computerEntrypoint(bin);
+  try { real = realpathSync(real); } catch { /* spawn reports missing explicit paths */ }
+  return !/\.(cmd|ps1)$/i.test(real) && !real.endsWith(path.join('dist', 'computer.js'));
 }
 
 /**
@@ -98,8 +104,8 @@ export function resolveComputerBin(): string {
         'or point $COMPUTER_BIN at its executable.',
     );
   }
-  cachedBin = resolved;
-  return resolved;
+  cachedBin = computerEntrypoint(resolved);
+  return cachedBin;
 }
 
 /** A `.js` bin is run through this runtime; a real executable is exec'd directly. */
