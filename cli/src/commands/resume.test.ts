@@ -83,3 +83,10 @@ describe('resumeLocalFallbackSource (prefer-device, fall back to local — PHNX-
     ]);
   });
 });
+
+it('preserves the harness constraint on the owner hop without adding a run flag', () => {
+  expect(buildResumeRemoteArgs(session().id, undefined, { agent: 'codex', local: true })).toEqual([
+    'sessions', 'resume', session().id, '--agent', 'codex',
+  ]);
+  expect(buildResumeRunArgs(session(), undefined, { agent: 'codex' })).toEqual(['run', 'codex', '--resume', session().id]);
+});

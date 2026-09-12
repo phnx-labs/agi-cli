@@ -154,6 +154,7 @@ export async function sessionsResumeAction(
     throw new Error('--attach-only cannot be combined with a follow-up prompt or options that change the running session.');
   }
   const strictOpts: StrictResumeOptions = {
+    agent: parseAgentFilter(options.agent).agent,
     account: options.account,
     model: options.model,
     mode: options.mode,
@@ -181,10 +182,10 @@ export async function sessionsResumeAction(
     // `--attach-only`: a prompt/mode/headless/cwd override still means the
     // caller wants strict resume semantics (a scripted continue), so that
     // case is excluded via wantsStrictResume.
-    if (!options.account && !options.model && !wantsStrictResume(prompt, strictOpts) && await attachLocalLiveSelector(query.trim(), hosts)) {
+    if (!options.agent && !options.account && !options.model && !wantsStrictResume(prompt, strictOpts) && await attachLocalLiveSelector(query.trim(), hosts)) {
       return;
     }
-    if (!options.account && !options.model && resumeUsesLifecycleDispatch(query, prompt, options)) {
+    if (!options.agent && !options.account && !options.model && resumeUsesLifecycleDispatch(query, prompt, options)) {
       await dispatchSessionLifecycleInPlace(query.trim(), hosts, !!options.attachOnly, !!options.local);
       return;
     }
