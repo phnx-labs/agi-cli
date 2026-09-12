@@ -2,128 +2,67 @@
  * context.ts — everything agents-cli knows that the standalone `computer`
  * engine cannot work out for itself, serialized as one JSON object onto fd 3.
  *
- * This is the whole contract of the consumer half. Read the fields as the
- * answer to "what does the fleet CLI uniquely own?":
+ * This is the whole contract of the consumer half, and it is deliberately four
+ * fields wide. The engine accepts exactly this shape:
  *
- *   transport  which daemon to talk to — including the loopback port a
- *              `--device` tunnel landed on, which only the fleet layer can know.
- *   device     the resolved ssh target, so the engine can PROVISION a remote
- *              helper without re-implementing the devices registry.
- *   policy     which apps are allowed, derived from the agents permissions
- *              resource layer, plus the paths the engine reads and the verb
- *              classes that are gated.
- *   identity   who is acting — the actor id and the agent session, so an action
- *              lands in the right session history.
+ *   version      `1`. The engine matches on it; a field added later must be
+ *                optional so an older engine keeps working.
+ *   permissions  which apps are allowed, derived from `Computer(<bundle-id>)`
+ *                rules in the agents permissions resource layer. The engine
+ *                would have to re-learn resource layering to compute this.
+ *   peers        which executables the daemon accepts a connection from.
+ *   target       the `--device <name>` target, resolved against the fleet:
+ *                devices registry, ssh identity, platform. Absent for a local
+ *                invocation.
+ *   session      who is acting — actor id and agent session — so an action
+ *                lands in the right session history.
+ *
+ * WHAT IS DELIBERATELY NOT HERE. The transport (`COMPUTER_HELPER_TCP`,
+ * `COMPUTER_HELPER_VNC`, `COMPUTER_HELPER_SOCKET`) and the policy-file paths
+ * travel in the environment the engine already inherits from this process —
+ * putting them in the context too would be a second, drifting copy of the same
+ * answer. Service-manager safety (launchd/systemd registration under a
+ * redirected HOME) is the standalone's own: it inherits `HOME` and
+ * `AGENTS_REAL_HOME` and renders its own manifest, so agents-cli neither
+ * computes a label nor issues a verdict for it.
  *
  * The context is PUSHED (written and closed) rather than exposed as a callback,
  * so the engine never re-enters agents-cli and there is exactly one direction of
- * dependency. Version it: `version: 1` is what the engine matches on, and a
- * field added later must be optional so an older engine keeps working.
+ * dependency.
  */
 
 import { resolveActor } from '../actor.js';
-import { namespacedServiceLabel, serviceManagerRegistrationAllowed, serviceManifestHomeEnv } from '../service-manifest.js';
-import { COMPUTER_APP_GATED_VERBS, COMPUTER_INPUT_GATED_VERBS, formatComputerPermissionGrantHint } from '../permissions.js';
-import {
-  loadComputerAllowList,
-  loadDefaultPeers,
-  resolveAdmissionCachePath,
-  resolveLogPath,
-  resolvePeersPath,
-  resolvePolicyPath,
-  resolveSocketPath,
-  resolveTcpEndpoint,
-  resolveVncEndpoint,
-} from './policy.js';
+import { loadComputerAllowList, loadDefaultPeers } from './policy.js';
 import { resolveDeviceEndpoint } from './remote.js';
 import { resolveRemoteDevice } from '../ssh-tunnel.js';
-import { COMPUTER_INVOCATION_ID } from './record.js';
-
-/** The transport the engine should use, already decided by the consumer. */
-export interface ComputerTransportContext {
-  kind: 'socket' | 'tcp' | 'vnc';
-  /** Unix socket the local macOS daemon listens on (`kind: 'socket'`). */
-  socketPath?: string;
-  /** Loopback endpoint for a remote daemon, tunnelled or configured (`kind: 'tcp'`). */
-  tcp?: { host: string; port: number };
-  /** RFB/VNC desktop (`kind: 'vnc'`). */
-  vnc?: { host: string; port: number; password: string };
-}
 
 /** A `--device <name>` target, resolved against the fleet. */
-export interface ComputerDeviceContext {
-  name: string;
-  platform: string;
+export interface ComputerTargetContext {
+  /** The device name as the user typed it. */
+  alias: string;
   /** `user@host`, already validated against ssh option injection. */
-  sshTarget: string;
-  user: string;
   host: string;
+  user: string;
+  /** Bare host — the ssh-config Host name or address, without the user. */
+  hostname: string;
+  platform: string;
   /** Per-device ssh identity flags, in argv order. Possibly empty. */
   sshArgs: string[];
 }
 
-export interface ComputerPolicyContext {
-  policyPath: string;
-  peersPath: string;
-  allowedBundleIds: string[];
-  allowedPeerExecPaths: string[];
-  /** Verbs gated on `Computer(<bundle-id>)`. */
-  appGatedVerbs: readonly string[];
-  /** Verbs that additionally admit a target for the rest of the agent session. */
-  inputGatedVerbs: readonly string[];
-  admissionCachePath: string;
-  /** The exact sentence to print when a target is refused, so both sides say the same thing. */
-  grantHint: string;
-}
-
-/**
- * Whether and under what label the engine may register its daemon with the
- * user's real service manager.
- *
- * This rides the context because the hazard is an agents-cli concept the engine
- * cannot see: `launchctl` and `systemd --user` are per-user-session and
- * HOME-independent, so a process running under one of agents-cli's redirected
- * homes (a version home, a hermetic test fork) would register its job in the
- * REAL service manager and outlive the sandbox that created it (RUSH-2968). Only
- * the CLI that redirected HOME knows it did.
- *
- * So agents-cli computes the verdict and the namespaced label and the engine
- * obeys them. `allowed: false` means refuse to register and print `reason`.
- */
-export interface ComputerServiceContext {
-  /** launchd/systemd job label, already namespaced when HOME is redirected. */
-  label: string;
-  /** False when this process must not touch the real service manager. */
-  registrationAllowed: boolean;
-  /** Why, in the words the user should see if registration is refused. */
-  reason: string;
-  /**
-   * The home-resolution env every generated service manifest must bake, so a
-   * service-manager-started daemon resolves the SAME home the caller did.
-   */
-  homeEnv: { HOME: string; AGENTS_REAL_HOME: string };
-}
-
-/** The base launchd label for the computer helper, before HOME namespacing. */
-export const COMPUTER_HELPER_SERVICE_LABEL = 'com.phnx-labs.computer-helper';
-
-export interface ComputerIdentityContext {
-  actor: string;
+/** Who is acting, so the engine can stamp the action it reports back. */
+export interface ComputerSessionContext {
   sessionId?: string;
   launchId?: string;
-  /** Groups every action of this invocation into one session row. */
-  invocationId: string;
+  actor: string;
 }
 
 export interface ComputerContext {
   version: 1;
-  transport: ComputerTransportContext;
-  device?: ComputerDeviceContext;
-  policy: ComputerPolicyContext;
-  identity: ComputerIdentityContext;
-  service: ComputerServiceContext;
-  /** Where the engine should write its daemon log, so `agents computer status` can find it. */
-  logPath: string;
+  permissions: { allow: string[] };
+  peers: { allow: string[] };
+  target?: ComputerTargetContext;
+  session: ComputerSessionContext;
 }
 
 /**
@@ -143,38 +82,41 @@ function agentSessionId(env: NodeJS.ProcessEnv = process.env): string | undefine
 export interface BuildContextOptions {
   /** `--device <name>`, if given. */
   device?: string;
-  /** An endpoint the caller just created (`start --device`), before state is re-read. */
-  tcpOverride?: { host: string; port: number };
   /** Resolved path of the standalone executable, for the peer allow list. */
   computerBin?: string;
 }
 
 /**
- * Pick the transport. Precedence matches the pre-extraction client so a user's
- * existing environment keeps selecting the same backend:
- *   1. COMPUTER_HELPER_VNC — an RFB/VNC desktop (Linux GUI over the wire).
- *   2. an explicit endpoint from the caller, or a live `--device` tunnel.
- *   3. COMPUTER_HELPER_TCP — a remote daemon over an externally managed tunnel.
- *   4. the local macOS socket.
- *
- * Pure with respect to everything but env and the tunnel state file, so the
- * precedence is testable without spawning anything.
+ * Inputs to the transport overlay, deliberately a DIFFERENT type from
+ * {@link BuildContextOptions}: a transport hint must not be passable to the
+ * context builder, which would silently ignore it.
  */
-export function resolveTransport(opts: BuildContextOptions = {}): ComputerTransportContext {
-  const vnc = resolveVncEndpoint();
-  if (vnc) return { kind: 'vnc', vnc };
+export interface TransportEnvOptions {
+  /** `--device <name>`, if given. */
+  device?: string;
+  /** An endpoint the caller just created (`start --device`), before state is re-read. */
+  tcpOverride?: { host: string; port: number };
+}
 
-  if (opts.tcpOverride) return { kind: 'tcp', tcp: opts.tcpOverride };
-
-  if (opts.device) {
-    const endpoint = resolveDeviceEndpoint(opts.device);
-    if (endpoint) return { kind: 'tcp', tcp: endpoint };
-  }
-
-  const tcp = resolveTcpEndpoint();
-  if (tcp) return { kind: 'tcp', tcp: { host: tcp.host, port: tcp.port } };
-
-  return { kind: 'socket', socketPath: resolveSocketPath() };
+/**
+ * The transport overlay for the engine's environment.
+ *
+ * Transport selection is env-driven and the engine reads it directly — a user
+ * who exported `COMPUTER_HELPER_TCP` or `COMPUTER_HELPER_VNC` needs nothing from
+ * us, since the child inherits this process's environment. The ONE endpoint
+ * agents-cli computes is the loopback port a `--device` tunnel landed on: only
+ * the fleet layer opened that tunnel, so only it knows the port. It is published
+ * on the same env var the engine already reads, rather than as a second
+ * transport channel in the context.
+ *
+ * Returns an empty overlay for a local invocation, so the inherited environment
+ * is left exactly as the user set it.
+ */
+export function computerTransportEnv(opts: TransportEnvOptions = {}): NodeJS.ProcessEnv {
+  const endpoint = opts.tcpOverride
+    ?? (opts.device ? resolveDeviceEndpoint(opts.device) : null);
+  if (!endpoint) return {};
+  return { COMPUTER_HELPER_TCP: `${endpoint.host}:${endpoint.port}` };
 }
 
 /**
@@ -186,60 +128,33 @@ export function resolveTransport(opts: BuildContextOptions = {}): ComputerTransp
  * layer that can actually see the device's platform.
  */
 export async function buildComputerContext(opts: BuildContextOptions = {}): Promise<ComputerContext> {
-  let device: ComputerDeviceContext | undefined;
+  let target: ComputerTargetContext | undefined;
   if (opts.device) {
     const resolved = await resolveRemoteDevice(opts.device, {
       expectPlatform: 'windows',
       forWhat: '`agents computer --device` drives the Windows computer-helper daemon, so it',
     });
-    device = {
-      name: opts.device,
-      platform: resolved.device.platform,
-      sshTarget: resolved.target,
+    target = {
+      alias: opts.device,
+      host: resolved.target,
       user: resolved.user,
-      host: resolved.host,
+      hostname: resolved.host,
+      platform: resolved.device.platform,
       sshArgs: resolved.identityArgs,
     };
   }
 
-  const allowedBundleIds = loadComputerAllowList();
-
   return {
     version: 1,
-    transport: resolveTransport(opts),
-    device,
-    policy: {
-      policyPath: resolvePolicyPath(),
-      peersPath: resolvePeersPath(),
-      allowedBundleIds,
-      allowedPeerExecPaths: loadDefaultPeers({ computerBin: opts.computerBin }),
-      appGatedVerbs: COMPUTER_APP_GATED_VERBS,
-      inputGatedVerbs: COMPUTER_INPUT_GATED_VERBS,
-      admissionCachePath: resolveAdmissionCachePath(),
-      grantHint: formatComputerPermissionGrantHint(),
-    },
-    identity: {
-      actor: resolveActor().id,
+    permissions: { allow: loadComputerAllowList() },
+    peers: { allow: loadDefaultPeers({ computerBin: opts.computerBin }) },
+    // Spread rather than assigned: a local invocation must not ship a `target`
+    // key at all, so the engine never has to distinguish absent from null.
+    ...(target ? { target } : {}),
+    session: {
       sessionId: agentSessionId(),
       launchId: process.env.AGENT_LAUNCH_ID,
-      invocationId: COMPUTER_INVOCATION_ID,
+      actor: resolveActor().id,
     },
-    service: buildServiceContext(),
-    logPath: resolveLogPath(),
-  };
-}
-
-/**
- * The service-registration verdict and label the engine must obey. Exported so
- * the redirected-HOME invariant is testable directly, which is how it was pinned
- * before the engine moved out of this repo.
- */
-export function buildServiceContext(): ComputerServiceContext {
-  const verdict = serviceManagerRegistrationAllowed();
-  return {
-    label: namespacedServiceLabel(COMPUTER_HELPER_SERVICE_LABEL),
-    registrationAllowed: verdict.allowed,
-    reason: verdict.reason,
-    homeEnv: serviceManifestHomeEnv(),
   };
 }

@@ -93,17 +93,36 @@ export function invocation(bin: string): { command: string; prefix: string[] } {
   return { command: bin, prefix: [] };
 }
 
-/** One action the engine performed, as it appears on the NDJSON events fd. */
+/**
+ * One action the engine performed, as it appears on the NDJSON events fd.
+ *
+ * This is the engine's wire shape, not a translation of it: the engine emits
+ * `{event: "computer.action", command, invocationId, pid, targetPid, bundle,
+ * host, task, sessionId, launchId, actor}`. `command` — not `verb` — is the
+ * field that names the action, and it is what marks a line as an action event.
+ */
 export interface ComputerActionEvent {
+  /** Always `computer.action` on this stream. */
+  event?: string;
   /** The verb the engine ran (`click`, `type`, `screenshot`, …). */
-  verb: string;
+  command: string;
+  /** The engine's own id for this run — the grouping key for a session row. */
+  invocationId?: string;
+  /** The engine process's pid. */
+  pid?: number;
   /** pid of the app the action targeted, when the engine resolved one. */
   targetPid?: number;
   /** Bundle id / app identifier the action targeted. */
   bundle?: string;
-  /** Device name for a `--device` invocation. */
-  device?: string;
-  /** Free-form detail the engine attaches (task preview, coordinates, …). */
+  /** The driven device for a `--device` invocation; absent when local. */
+  host?: string;
+  /** `run --task` description, only on the task marker. */
+  task?: string;
+  /** Identity, echoed back from the context this CLI handed the engine. */
+  sessionId?: string;
+  launchId?: string;
+  actor?: string;
+  /** Free-form detail the engine attaches (coordinates, text length, …). */
   [key: string]: unknown;
 }
 
@@ -128,7 +147,7 @@ export function parseEventLines(
     if (!trimmed) continue;
     try {
       const parsed = JSON.parse(trimmed) as unknown;
-      if (parsed && typeof parsed === 'object' && typeof (parsed as ComputerActionEvent).verb === 'string') {
+      if (parsed && typeof parsed === 'object' && typeof (parsed as ComputerActionEvent).command === 'string') {
         events.push(parsed as ComputerActionEvent);
       }
     } catch {
@@ -145,7 +164,15 @@ export interface RunComputerOptions {
   context: unknown;
   /** Called once per action event the engine reports on fd 4. */
   onEvent?: (event: ComputerActionEvent) => void;
-  /** Extra environment overlay (never used to smuggle context — fd 3 is the channel). */
+  /**
+   * Environment overlay on top of the inherited environment.
+   *
+   * The engine reads its transport and its home from env, which it inherits
+   * unchanged; this overlay is for the one value it cannot inherit — the
+   * loopback endpoint of a `--device` tunnel agents-cli just opened
+   * (`computerTransportEnv` in `lib/computer/context.ts`). It is never a second
+   * channel for the context: that is fd 3.
+   */
   env?: NodeJS.ProcessEnv;
   /**
    * Capture the engine's stdout instead of inheriting the terminal.

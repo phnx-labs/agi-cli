@@ -39,11 +39,11 @@ agent process
      │  agents computer <verb> [--device <name>] [--vnc <host:port>]
      ▼
   agents-cli  (commands/computer.ts)
-     │         · permissions  → the allow-list + peer files       (lib/computer/policy.ts)
+     │         · permissions  → the allow + peer lists            (lib/computer/policy.ts)
      │         · --device     → fleet resolution + ssh -L tunnel  (lib/computer/remote.ts)
      │         · actor/session identity                           (lib/computer/context.ts)
      │
-     │  spawn, stdio 0/1/2 INHERITED (the engine owns the terminal)
+     │  spawn, env INHERITED (transport + HOME travel there), stdio 0/1/2 INHERITED
      │    fd 3  COMPUTER_CONTEXT_FD  →  one JSON context object, then EOF
      │    fd 4  COMPUTER_EVENTS_FD   ←  NDJSON action events, one per line
      ▼
@@ -69,6 +69,7 @@ feed and the session ledger — that is what `agents computer sessions` and
 | App allow list (`Computer(<bundle-id>)` rules) | agents-cli | Derived from the agents permissions resource layer |
 | `--device` resolution and the ssh tunnel | agents-cli | It owns the devices registry, ssh identity, and the fleet |
 | Action history, feed events, actor identity | agents-cli | It owns `sessions.db` and the feed |
+| Daemon service registration (launchd/systemd) | the engine | It writes its own manifest and inherits the redirected `HOME` |
 | Per-verb flags and their `--help` | the engine | One surface, not a drifting copy |
 
 ### The context (fd 3)
@@ -79,25 +80,34 @@ optional so an older engine keeps working.
 
 | Field | Meaning |
 |---|---|
-| `transport` | `socket` / `tcp` / `vnc`, already decided — including the loopback port a `--device` tunnel landed on |
-| `device` | The resolved ssh target (`sshTarget`, `user`, `host`, `sshArgs`) so the engine can provision a remote helper without the devices registry |
-| `policy` | `policyPath`, `peersPath`, the allowed bundle ids and peer exec paths, the gated verb classes, the admission cache path, and the exact grant hint |
-| `identity` | `actor`, `sessionId`, `launchId`, and the `invocationId` that groups one run's actions |
-| `service` | Whether the engine may register its daemon with the real service manager, under which `label`, and the `homeEnv` its manifest must bake |
-| `logPath` | Where the daemon log belongs, so `status` and the engine agree |
+| `permissions` | `{ allow: string[] }` — the bundle ids `Computer(<bundle-id>)` rules grant |
+| `peers` | `{ allow: string[] }` — the executable paths the daemon accepts a connection from |
+| `target` | The resolved `--device` target: `alias`, `host` (`user@host`), `user`, `hostname`, `platform`, `sshArgs`. Absent for a local invocation |
+| `session` | `actor`, `sessionId`, `launchId` — who is acting |
 
-`service` is the one field the engine must *obey* rather than merely use.
-`launchctl` and `systemd --user` are per-user-session and HOME-independent, so a
-process running under one of agents-cli's redirected homes would register its job
-in the **real** service manager and outlive the sandbox that created it
-(RUSH-2968). Only the CLI that redirected HOME knows it did, so it sends the
-verdict: `registrationAllowed: false` means refuse to register and print `reason`.
+**That is the whole object.** Everything else the engine needs it already has:
+the transport (`COMPUTER_HELPER_TCP`, `COMPUTER_HELPER_VNC`,
+`COMPUTER_HELPER_SOCKET`), the policy-file paths, and `HOME` / `AGENTS_REAL_HOME`
+all travel in the environment the child inherits. Restating any of them in the
+context would be a second copy of the same answer, free to drift from the first.
+The one endpoint agents-cli must publish is the loopback port a `--device` tunnel
+just landed on — only the fleet layer opened it — and that goes out on
+`COMPUTER_HELPER_TCP`, the var the engine already reads, not as a context field.
+
+Service-manager safety is the standalone's own. It renders and registers its own
+launchd/systemd manifest, and it inherits the redirected `HOME` directly, so it
+can see the sandbox it is running in without agents-cli sending a verdict.
 
 ### The action events (fd 4)
 
 One JSON object per line, each an action the engine actually performed. A line
-needs at least a `verb`; `targetPid`, `bundle`, `device`, and free-form detail
-(a `task` preview, coordinates) are optional. An unreadable line is dropped
+carries `event: "computer.action"` and needs at least a string `command` — the
+verb that ran. `invocationId` (the engine's id for the run, which groups one
+row in the history), `pid`, `targetPid`, `bundle`, `host` (the driven device),
+`task`, `sessionId`, `launchId`, `actor`, and free-form detail are optional.
+agents-cli records the engine's own `invocationId` and `host` rather than
+re-deriving them — for a `--device` run the engine's answer and this process's
+are genuinely different machines' work. An unreadable line is dropped
 rather than failing the command — the action it describes already happened and
 already reported its own success or failure. agents-cli bounds the `task`
 preview itself, so an engine cannot write an unbounded string into the ledger.
