@@ -44,12 +44,8 @@ import { registerCommandGroups, setHelpSections } from '../lib/help.js';
 import {
   loadComputerAllowList,
   loadDefaultPeers,
-  resolvePeersPath,
-  resolvePolicyPath,
   resolveTcpEndpoint,
   resolveVncEndpoint,
-  writeComputerPeers,
-  writeComputerPolicy,
 } from '../lib/computer/policy.js';
 import { buildComputerContext } from '../lib/computer/context.js';
 import { recordComputerAction } from '../lib/computer/record.js';
@@ -119,34 +115,6 @@ export function shouldBlockOffPlatform(opts: {
 }
 
 /**
- * Render the policy and peer allow lists the engine's daemon reads.
- *
- * Called before any lifecycle verb that (re)starts or re-reads the daemon, so a
- * permission group edited five seconds ago is in force. The daemon fails safe:
- * a missing or unparseable policy denies everything, which is why this runs
- * BEFORE the engine rather than alongside it.
- */
-function renderPolicyFiles(opts: { computerBin?: string; quiet?: boolean } = {}): void {
-  const allowed = loadComputerAllowList();
-  writeComputerPolicy(allowed);
-  const callers = loadDefaultPeers({ computerBin: opts.computerBin });
-  writeComputerPeers(callers);
-  if (opts.quiet) return;
-
-  console.log(`policy: ${allowed.length} app${allowed.length === 1 ? '' : 's'} allowed (${resolvePolicyPath()})`);
-  if (allowed.length > 0) {
-    const preview = allowed.slice(0, 5).join(', ');
-    const more = allowed.length > 5 ? ` (+${allowed.length - 5} more)` : '';
-    console.log(`        ${preview}${more}`);
-  } else {
-    console.log('        (no Computer(...) patterns found — everything will be denied)');
-    console.log('        add to ~/.agents/permissions/groups/<name>.yaml under allow:');
-    console.log('          - "Computer(com.apple.finder)"');
-  }
-  console.log(`peers:  ${callers.length} caller${callers.length === 1 ? '' : 's'} allowed (${resolvePeersPath()})`);
-}
-
-/**
  * Put `--device <name>` back on the argv handed to the engine.
  *
  * commander CONSUMES the `--device` it declares, so a verb that only read
@@ -190,7 +158,9 @@ export async function forwardToComputer(opts: {
     throw err;
   }
 
-  const context = await buildComputerContext({ device: opts.device, computerBin: bin });
+  const hostFlag = opts.argv.findIndex(arg => arg === '--host' || arg.startsWith('--host='));
+  const host = hostFlag < 0 ? undefined : (opts.argv[hostFlag].includes('=') ? opts.argv[hostFlag].slice(7) : opts.argv[hostFlag + 1]);
+  const context = await buildComputerContext({ device: opts.device, host, computerBin: bin });
 
   return runComputer({
     argv: withDeviceFlag(opts.argv, opts.device),
@@ -232,7 +202,7 @@ export function registerComputerCommand(program: Command): void {
         platform: process.platform,
         tcpConfigured: resolveTcpEndpoint() != null,
         vncConfigured: resolveVncEndpoint() != null,
-        device,
+        device: device || (actionCommand.args.some(arg => arg === '--host' || arg.startsWith('--host=')) ? 'direct-host' : undefined),
       })) {
         console.error('agents computer: macOS only for local driving — it uses the macOS Accessibility API.');
         console.error('For a Linux GUI desktop over VNC: `agents computer --vnc <host:port> screenshot`.');
@@ -323,11 +293,6 @@ function registerSetupCommand(program: Command): void {
     .allowExcessArguments(true)
     .helpOption(false)
     .action(async (opts: { device?: string }, cmd: Command) => {
-      // Render the allow list first: a fresh LOCAL install should come up with
-      // the user's current permissions already in force, not an empty deny-all
-      // that needs a second `reload` to fix. A Windows daemon enforces no allow
-      // list, so a remote provision has nothing to render.
-      if (!opts.device) renderPolicyFiles({ quiet: true });
       await forwardAndExit({ argv: ['setup', ...cmd.args], device: opts.device, record: false });
     });
 }
@@ -341,10 +306,6 @@ function registerStartCommand(program: Command): void {
     .allowExcessArguments(true)
     .helpOption(false)
     .action(async (opts: { device?: string }, cmd: Command) => {
-      // Policy must be on disk before the local daemon boots and reads it. A
-      // remote daemon enforces no allow list, so there is nothing to render for
-      // it — and the engine opens and reports the tunnel itself.
-      if (!opts.device) renderPolicyFiles();
       await forwardAndExit({ argv: ['start', ...cmd.args], device: opts.device, record: false });
     });
 }
@@ -377,7 +338,6 @@ function registerReloadCommand(program: Command): void {
       // the whole command. A `--device` reload bounces the remote daemon, which
       // enforces no allow list — rendering (and printing) this machine's would
       // claim a policy that device never reads.
-      if (!opts.device) renderPolicyFiles();
       await forwardAndExit({ argv: ['reload', ...cmd.args], device: opts.device, record: false });
     });
 }
@@ -430,7 +390,6 @@ function registerSessionsCommand(program: Command): void {
  * conversation with the user, not a daemon operation.
  */
 export async function installComputerHelperMacLocal(): Promise<void> {
-  renderPolicyFiles({ quiet: true });
   const { exitCode } = await forwardToComputer({ argv: ['setup'], record: false });
   if (exitCode !== 0) throw new Error(`\`computer setup\` failed (exit ${exitCode})`);
 }
@@ -441,7 +400,6 @@ export async function installComputerHelperMacLocal(): Promise<void> {
  * Settings.
  */
 export async function activateComputerHelperMacLocal(): Promise<{ trusted: boolean }> {
-  renderPolicyFiles();
   const { exitCode } = await forwardToComputer({ argv: ['start'], record: false });
   if (exitCode !== 0) throw new Error(`\`computer start\` failed (exit ${exitCode})`);
   return { trusted: await probeComputerTrust() };

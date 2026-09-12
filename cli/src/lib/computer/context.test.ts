@@ -43,11 +43,20 @@ describe('buildComputerContext', () => {
 
   it('renders the permission and peer allow lists as string arrays', async () => {
     const context = await buildComputerContext({ computerBin: '/usr/local/bin/computer' });
-    expect(Array.isArray(context.permissions.allow)).toBe(true);
-    expect(context.permissions.allow.every((id) => typeof id === 'string')).toBe(true);
+    expect(Array.isArray(context.permissions!.allow)).toBe(true);
+    expect(context.permissions!.allow.every((id) => typeof id === 'string')).toBe(true);
     // The standalone's own path is always a peer — it is the process that opens
     // the daemon socket now.
     expect(context.peers.allow).toContain('/usr/local/bin/computer');
+  });
+
+  it('keeps Mac bundle permissions out of remote and VNC contexts', async () => {
+    expect((await buildComputerContext({ host: 'windows-host' })).permissions).toBeUndefined();
+    setEnv('COMPUTER_HELPER_VNC', 'localhost:5901');
+    expect((await buildComputerContext()).permissions).toBeUndefined();
+    setEnv('COMPUTER_HELPER_VNC', undefined);
+    setEnv('COMPUTER_HELPER_TCP', 'localhost:8765');
+    expect((await buildComputerContext()).permissions).toBeUndefined();
   });
 
   it('names the acting session, preferring the harness-native id', async () => {

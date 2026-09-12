@@ -62,7 +62,7 @@ export interface ComputerSessionContext {
 
 export interface ComputerContext {
   version: 1;
-  permissions: { allow: string[] };
+  permissions?: { allow: string[] };
   peers: { allow: string[] };
   target?: ComputerTargetContext;
   session: ComputerSessionContext;
@@ -85,6 +85,8 @@ function agentSessionId(env: NodeJS.ProcessEnv = process.env): string | undefine
 export interface BuildContextOptions {
   /** `--device <name>`, if given. */
   device?: string;
+  /** Direct host targeting, which bypasses fleet resolution. */
+  host?: string;
   /** Resolved path of the standalone executable, for the peer allow list. */
   computerBin?: string;
 }
@@ -116,7 +118,8 @@ export async function buildComputerContext(opts: BuildContextOptions = {}): Prom
 
   return {
     version: 1,
-    permissions: { allow: loadComputerAllowList() },
+    ...(!opts.device && !opts.host && !process.env.COMPUTER_HELPER_TCP && !process.env.COMPUTER_HELPER_VNC
+      ? { permissions: { allow: loadComputerAllowList() } } : {}),
     peers: { allow: loadDefaultPeers({ computerBin: opts.computerBin }) },
     // Spread rather than assigned: a local invocation must not ship a `target`
     // key at all, so the engine never has to distinguish absent from null.
