@@ -163,29 +163,29 @@ agents commands view [name]    Read the full content of a command file with mark
 
 ```
 agents computer              Drive macOS apps via Accessibility, a Linux GUI desktop with --vnc, or a remote Windows device with --device — screenshot, click, type
-agents computer apps         List apps the daemon may drive (allow-listed + running)
-agents computer ax-action    Perform an arbitrary AX action (AXConfirm, AXCancel, AXRaise, ...) on an element
-agents computer click        Click an element (--id) or screen coordinate (--x --y)
-agents computer describe     Dump the accessibility tree (element ids feed click/type --id)
-agents computer drag         Drag from one coordinate to another
-agents computer focus        Set keyboard focus to an element (so type-text/key land there)
-agents computer get-text     Extract visible text from the app (or a subtree via --id)
-agents computer key          Send a key chord, e.g. "cmd+shift+s", "enter", "esc"
-agents computer launch       Launch an app by bundle id, path, or name
-agents computer raise        Bring an app (or a specific window) to the front — switches Spaces for fullscreen windows
+agents computer apps         List running apps the policy allows, with pid and bundle id
+agents computer ax-action    Perform a raw accessibility action on an element
+agents computer click        Click an element by id, or a coordinate pair
+agents computer describe     Dump an app's accessibility tree — the element ids the interact verbs target
+agents computer drag         Drag from one point or element to another
+agents computer focus        Move keyboard focus to an element
+agents computer get-text     Read the text content of an element or a whole window
+agents computer key          Send a key or chord (e.g. cmd+s, escape)
+agents computer launch       Launch an allow-listed app by bundle id and wait for it to be ready
+agents computer raise        Bring an app to the front
 agents computer reload       Reload the allow-list policy (SIGHUP the local daemon) — or restart a remote Windows daemon with --device
-agents computer right-click  Right-click (context menu) an element or coordinate
-agents computer run          Autonomously drive an app from a natural-language task (embedded model loop over the computer verbs)
+agents computer right-click  Right-click an element by id, or a coordinate pair
+agents computer run          Autonomously drive an app from a natural-language task (model loop over the computer verbs)
 agents computer screenshot   Capture a window (default: largest), enumerate windows (--list), or the whole display (--display)
-agents computer scroll       Scroll by a pixel delta at an element or coordinate
+agents computer scroll       Scroll an element or the window under a coordinate
 agents computer sessions     Browse computer-driving history, grouped by run — one row per `agents computer` invocation
 agents computer setup        Install the helper — locally to /Applications/ (macOS), or to a remote Windows device with --device
 agents computer start        Activate the helper daemon — local launchd (macOS) or a remote Windows tunnel with --device
 agents computer status       Report install state, daemon state, and Accessibility trust — or a remote Windows daemon with --device
 agents computer stop         Deactivate the helper daemon — local launchd (macOS) or a remote Windows tunnel with --device
-agents computer type         Set a field value (--id) or paste at a coordinate (--x --y)
-agents computer type-text    Type an arbitrary unicode string into the focused field (focus first via click/focus)
-agents computer wait         Wait for a duration (--duration) or for an element (--id / --role/--label) to satisfy --until
+agents computer type         Type into a focused element by id
+agents computer type-text    Type a literal string at the current focus
+agents computer wait         Wait for an element or condition to appear before continuing
 ```
 
 ## config — Get, set, list, and unset run defaults, tier overrides, the projects root, device options, and spend caps.

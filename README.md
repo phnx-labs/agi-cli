@@ -1836,7 +1836,7 @@ Agents are defined in [src/lib/agents.ts](cli/src/lib/agents.ts) -- each is a co
 |---|---|
 | [`cli`](cli) | **The CLI** (this README) — version management, config sync, sessions, teams, cloud, browser, computer, secrets. |
 | [phnx-labs/agi-ext](https://github.com/phnx-labs/agi-ext) | **AGI EXT** — the VS Code extension (agent terminals as tabs + the Fleet dashboard). Moved to its own repo (RUSH-3189); separate product, own publish identity. |
-| [`native/computer-mac`](native/computer-mac) · [`native/computer-win`](native/computer-win) | Native backends behind `agents computer` — Swift (macOS Accessibility + screen capture) and C#/.NET (Windows UI Automation). A third, install-free backend drives a **Linux GUI desktop over VNC/RFB**: `agents computer --vnc <host:port> screenshot` (coordinate-based — screenshot/click/type/key/scroll against any x11vnc/Xvnc server). |
+| `@phnx-labs/computer-cli` | The engine behind `agents computer`, published separately (`npm i -g @phnx-labs/computer-cli`): the Swift macOS Accessibility daemon, the C#/.NET Windows UI Automation daemon, and an install-free **VNC/RFB** backend for a Linux GUI desktop (`agents computer --vnc <host:port> screenshot` — coordinate-based screenshot/click/type/key/scroll against any x11vnc/Xvnc server). agents-cli supplies the app allow list, `--device` fleet resolution, and the action history. |
 | [`packages/session-tracker`](packages/session-tracker) | The `SessionStart` hook that writes live-session state **AGI EXT** reads back (agi-ext `src/core/liveSession.ts`) — not the CLI, which reads transcripts. |
 
 ## Contributing

@@ -2,7 +2,8 @@
  * sha256 helpers for verifying downloaded release assets.
  *
  * These live in their own LEAF module — importing only `node:crypto` and
- * `node:fs` — on purpose. They used to sit in `computer/ssh-tunnel.ts`, whose
+ * `node:fs` — on purpose. They used to sit in the computer subsystem's ssh-tunnel
+ * module (since extracted, PHNX-4075), whose
  * own import graph reached `browser/drivers/ssh.ts` -> `browser/chrome.ts` ->
  * the in-repo secrets engine's own keychain-helper downloader, which imported
  * back into `helper-download.ts` while it was still evaluating — before

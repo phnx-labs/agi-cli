@@ -2,10 +2,11 @@
  * Helper release-manifest reuse, exercised against REAL helper inputs (no mocks).
  * A missing helper or an input-digest change must fail — there is no rebuild.
  *
- * Two helpers, two kinds of input. computer-mac's input is its Swift source in
- * this repo. menubar's source lives in phnx-labs/agi-menu (PHNX-4036), so its
- * input is the floor pin in cli/src/lib/helper-versions.ts — the one file that
- * decides which published MenubarHelper.app.zip the CLI installs.
+ * One helper, and it has no source here: menubar lives in phnx-labs/agi-menu
+ * (PHNX-4036), so its input is the floor pin in cli/src/lib/helper-versions.ts —
+ * the one file that decides which published MenubarHelper.app.zip the CLI
+ * installs. The computer helpers left with the standalone `computer` engine
+ * (PHNX-4075) and must now be REFUSED as unknown, which is pinned below.
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
@@ -36,8 +37,8 @@ function sh(args: string[]): { status: number; out: string } {
 const describeUnix = process.platform === 'win32' ? describe.skip : describe;
 
 describeUnix('release-manifest.sh', () => {
-  it('input-digest is stable for unchanged computer-mac / menubar inputs', () => {
-    for (const helper of ['computer-mac', 'menubar'] as const) {
+  it('input-digest is stable for unchanged menubar inputs', () => {
+    for (const helper of ['menubar'] as const) {
       const a = sh(['input-digest', '--repo-root', REPO, '--helper', helper]);
       const b = sh(['input-digest', '--repo-root', REPO, '--helper', helper]);
       expect(a.status, a.out).toBe(0);
@@ -53,8 +54,8 @@ describeUnix('release-manifest.sh', () => {
     expect(created.status, created.out).toBe(0);
     fs.writeFileSync(file, created.out);
 
-    const digest = sh(['input-digest', '--repo-root', REPO, '--helper', 'computer-mac']).out.trim();
-    const asset = path.join(dir, 'computer-mac.bin');
+    const digest = sh(['input-digest', '--repo-root', REPO, '--helper', 'menubar']).out.trim();
+    const asset = path.join(dir, 'menubar.bin');
     fs.writeFileSync(asset, 'signed-bytes');
     const sha = spawnSync('sha256sum', [asset], { encoding: 'utf-8' });
     const assetDigest =
@@ -67,7 +68,7 @@ describeUnix('release-manifest.sh', () => {
       '--file',
       file,
       '--helper',
-      'computer-mac',
+      'menubar',
       '--helper-version',
       '3.0.0',
       '--input-digest',
@@ -81,11 +82,18 @@ describeUnix('release-manifest.sh', () => {
     ]);
     expect(put.status, put.out).toBe(0);
 
-    const reuse = sh(['reuse', '--file', file, '--helper', 'computer-mac', '--input-digest', digest]);
+    const reuse = sh(['reuse', '--file', file, '--helper', 'menubar', '--input-digest', digest]);
     expect(reuse.status, reuse.out).toBe(0);
     expect(JSON.parse(reuse.out).assetDigest).toBe(assetDigest);
 
-    const missing = sh(['resolve', '--file', file, '--helper', 'menubar']);
+    // The missing-helper refusal is proved on a manifest that has no record at
+    // all. With one known helper left (PHNX-4075), recording menubar and then
+    // resolving menubar would be resolving the row we just wrote.
+    const emptyFile = path.join(dir, 'manifest-empty.json');
+    const empty = sh(['new', '--cli-version', '1.22.40', '--cli-tree', 'abc']);
+    expect(empty.status, empty.out).toBe(0);
+    fs.writeFileSync(emptyFile, empty.out);
+    const missing = sh(['resolve', '--file', emptyFile, '--helper', 'menubar']);
     expect(missing.status).not.toBe(0);
     expect(missing.out).toContain('missing helper menubar');
     expect(missing.out).toContain('no fallback rebuild');
@@ -95,7 +103,7 @@ describeUnix('release-manifest.sh', () => {
       '--file',
       file,
       '--helper',
-      'computer-mac',
+      'menubar',
       '--input-digest',
       'sha256:0000000000000000000000000000000000000000000000000000000000000000',
     ]);
@@ -229,8 +237,8 @@ describeUnix('release-manifest.sh', () => {
     const dir = tmp('rel-manifest-copy-');
     const file = path.join(dir, 'manifest.json');
     fs.writeFileSync(file, sh(['new', '--cli-version', '1.22.40', '--cli-tree', 'abc']).out);
-    const digest = sh(['input-digest', '--repo-root', REPO, '--helper', 'computer-mac']).out.trim();
-    const asset = path.join(dir, 'computer-mac-src.bin');
+    const digest = sh(['input-digest', '--repo-root', REPO, '--helper', 'menubar']).out.trim();
+    const asset = path.join(dir, 'menubar-src.bin');
     fs.writeFileSync(asset, 'signed-helper-bytes');
     const sum = spawnSync(process.platform === 'linux' ? 'sha256sum' : 'shasum',
       process.platform === 'linux' ? [asset] : ['-a', '256', asset], { encoding: 'utf-8' });
@@ -241,7 +249,7 @@ describeUnix('release-manifest.sh', () => {
         '--file',
         file,
         '--helper',
-        'computer-mac',
+        'menubar',
         '--helper-version',
         '3.0.0',
         '--input-digest',
@@ -253,8 +261,20 @@ describeUnix('release-manifest.sh', () => {
       ]).status,
     ).toBe(0);
     const dest = path.join(dir, 'out');
-    const copied = sh(['copy-asset', '--file', file, '--helper', 'computer-mac', '--asset-path', dest]);
+    const copied = sh(['copy-asset', '--file', file, '--helper', 'menubar', '--asset-path', dest]);
     expect(copied.status, copied.out).toBe(0);
     expect(fs.readFileSync(copied.out.trim())).toEqual(fs.readFileSync(asset));
+  });
+
+  // PHNX-4075: the computer helpers left this repo with the standalone engine,
+  // which resolves and verifies its own releases. Recording one here would put
+  // an extracted helper back on THIS CLI's release path, so the script must
+  // refuse the name outright rather than silently digesting a missing tree.
+  it('refuses an extracted helper rather than recording it on this CLI\'s release', () => {
+    for (const helper of ['computer-mac', 'computer-win']) {
+      const r = sh(['input-digest', '--repo-root', REPO, '--helper', helper]);
+      expect(r.status, r.out).not.toBe(0);
+      expect(r.out).toMatch(/unknown helper/);
+    }
   });
 });

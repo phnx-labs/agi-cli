@@ -17,8 +17,7 @@
   "bin": {
     "agents": "dist/index.js",
     "ag": "dist/index.js",
-    "browser": "dist/browser.js",
-    "computer": "dist/computer.js"
+    "browser": "dist/browser.js"
   },
   "files": [
     "dist/**/*.js",

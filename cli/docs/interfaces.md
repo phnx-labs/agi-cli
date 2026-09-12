@@ -25,9 +25,16 @@ reconciliation likewise never owns shared-daemon stop/start; an explicit
 
 ## Computer
 
-The CLI talks to a signed native helper. The helper enforces platform permissions, an
-application allowlist, and executable peer authentication. It is not an always-on broad
-desktop daemon. Focus/frontmost checks are part of correctness, not a presentation detail.
+A signed native helper does the driving and enforces platform permissions, an application
+allowlist, and executable peer authentication. It is not an always-on broad desktop
+daemon. Focus/frontmost checks are part of correctness, not a presentation detail.
+
+The CLI does not talk to that helper directly. The helper, its transport, and the
+autonomous loop belong to the standalone `computer` engine (PHNX-4075); agents-cli is a
+consumer that supplies what only the fleet layer knows — the allowlist rendered from the
+permissions resource layer, `--device` resolution and its tunnel, and the acting identity —
+and records the actions the engine reports. The seam is documented in
+[computer.md](computer.md).
 
 ## Terminal
 

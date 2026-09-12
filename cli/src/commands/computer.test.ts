@@ -1,59 +1,9 @@
-import { describe, expect, it, afterEach } from 'vitest';
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
+import { describe, expect, it } from 'vitest';
 import {
-  buildRestartTaskScript,
-  detectImageFormat,
-  reconcileScreenshotExt,
+  COMPUTER_PASSTHROUGH_VERBS,
+  parseTrustFromStatusJson,
   shouldBlockOffPlatform,
-  emitComputerRunTaskMarker,
 } from './computer.js';
-import { query, _resetForTest } from '../lib/feed/events.js';
-import { TASK_PREVIEW_MAX_CHARS } from '../lib/computer/sessions-list.js';
-
-// Real leading magic bytes, matching what each helper actually encodes.
-const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); // Windows helper (ImageFormat.Png)
-const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]); // macOS helper (.jpeg representation)
-
-describe('detectImageFormat', () => {
-  it('recognizes PNG from its 8-byte signature', () => {
-    expect(detectImageFormat(PNG)).toBe('.png');
-  });
-  it('recognizes JPEG from FF D8 FF', () => {
-    expect(detectImageFormat(JPEG)).toBe('.jpg');
-  });
-  it('returns null for unknown/empty bytes', () => {
-    expect(detectImageFormat(Buffer.from([0x00, 0x01, 0x02, 0x03]))).toBeNull();
-    expect(detectImageFormat(Buffer.alloc(0))).toBeNull();
-  });
-});
-
-describe('reconcileScreenshotExt', () => {
-  it('corrects the .jpg default when the Windows helper returns PNG (issue #521)', () => {
-    // The exact bug: default out is ./computer-screenshot.jpg, bytes are PNG.
-    expect(reconcileScreenshotExt('/tmp/computer-screenshot.jpg', PNG)).toEqual({
-      path: '/tmp/computer-screenshot.png',
-      corrected: true,
-    });
-  });
-  it('leaves a matching .jpg alone for JPEG bytes (macOS default path)', () => {
-    expect(reconcileScreenshotExt('/tmp/shot.jpg', JPEG)).toEqual({ path: '/tmp/shot.jpg', corrected: false });
-  });
-  it('treats .jpeg as already-matching for JPEG bytes', () => {
-    expect(reconcileScreenshotExt('/tmp/shot.jpeg', JPEG)).toEqual({ path: '/tmp/shot.jpeg', corrected: false });
-  });
-  it('appends the real extension when the path has none', () => {
-    expect(reconcileScreenshotExt('/tmp/shot-test', PNG)).toEqual({ path: '/tmp/shot-test.png', corrected: true });
-  });
-  it('swaps a wrong .png to .jpg for JPEG bytes', () => {
-    expect(reconcileScreenshotExt('/tmp/shot.png', JPEG)).toEqual({ path: '/tmp/shot.jpg', corrected: true });
-  });
-  it('passes unknown bytes through untouched', () => {
-    const junk = Buffer.from([0x00, 0x01]);
-    expect(reconcileScreenshotExt('/tmp/shot.jpg', junk)).toEqual({ path: '/tmp/shot.jpg', corrected: false });
-  });
-});
 
 // The `computer` preAction hook calls process.exit(1) exactly when
 // shouldBlockOffPlatform() is true. These cases pin the rule that off-macOS
@@ -70,13 +20,12 @@ describe('shouldBlockOffPlatform', () => {
   });
 
   it('does NOT block off macOS when COMPUTER_HELPER_TCP is configured', () => {
-    // This is the regression the transport fix targets: a Linux host with a
-    // tunnel to a Windows daemon must be allowed to drive it.
+    // A Linux host with a tunnel to a Windows daemon must be allowed to drive it.
     expect(shouldBlockOffPlatform({ platform: 'linux', tcpConfigured: true })).toBe(false);
   });
 
   it('does NOT block off macOS when a --device remote device is given', () => {
-    // The remote path resolves its own endpoint before the client opens.
+    // The remote path resolves its own endpoint before the engine is spawned.
     expect(shouldBlockOffPlatform({ platform: 'linux', tcpConfigured: false, device: 'win-mini' })).toBe(false);
   });
 
@@ -86,66 +35,63 @@ describe('shouldBlockOffPlatform', () => {
   });
 });
 
-describe('buildRestartTaskScript', () => {
-  const script = buildRestartTaskScript('AgentsComputerHelper', 'computer-helper-win.exe');
+// The verb catalog is agents-cli's half of the contract with the standalone
+// engine: it is what `agents computer --help` lists and what the help groups
+// index. A verb dropped here silently disappears from the surface even though
+// the engine still implements it, so the catalog is pinned.
+describe('COMPUTER_PASSTHROUGH_VERBS', () => {
+  const names = COMPUTER_PASSTHROUGH_VERBS.map((v) => v.name);
 
-  it('kills by PROCESS name (no .exe suffix — Stop-Process -Name takes the bare name)', () => {
-    expect(script).toContain(`Stop-Process -Name 'computer-helper-win' -Force`);
-    expect(script).not.toContain(`'computer-helper-win.exe'`);
+  it('carries every interaction and observation verb the surface documents', () => {
+    expect(names).toEqual([
+      'run', 'apps', 'describe', 'screenshot', 'get-text', 'launch', 'raise',
+      'click', 'right-click', 'type', 'type-text', 'key', 'drag', 'scroll',
+      'ax-action', 'focus', 'wait',
+    ]);
   });
 
-  it('tolerates the daemon not running, but fails loud on anything else', () => {
-    expect(script).toContain('-ErrorAction SilentlyContinue');
-    expect(script).toContain(`$ErrorActionPreference = 'Stop'`);
+  it('does NOT include the lifecycle verbs — those wrap the engine with policy/tunnel work', () => {
+    for (const lifecycle of ['setup', 'start', 'stop', 'reload', 'status']) {
+      expect(names).not.toContain(lifecycle);
+    }
   });
 
-  it('starts the LOGON scheduled task that owns the daemon lifecycle', () => {
-    expect(script).toContain(`Start-ScheduledTask -TaskName 'AgentsComputerHelper'`);
+  it('does NOT include `sessions` — it reads agents-cli\'s own ledger and never reaches the engine', () => {
+    expect(names).not.toContain('sessions');
+  });
+
+  it('gives every verb a description, since that is the only help agents-cli owns', () => {
+    for (const verb of COMPUTER_PASSTHROUGH_VERBS) {
+      expect(verb.description.length).toBeGreaterThan(10);
+    }
   });
 });
 
-describe('emitComputerRunTaskMarker — computer.action run marker (RUSH-2432)', () => {
-  const tempDirs: string[] = [];
-
-  afterEach(() => {
-    _resetForTest();
-    for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+// The trust probe is the one place agents-cli reads engine stdout instead of
+// passing it through, so its parsing has to survive real-world output shapes.
+describe('parseTrustFromStatusJson', () => {
+  it('reads trusted:true out of a clean JSON status', () => {
+    expect(parseTrustFromStatusJson('{"trusted":true,"pid":4211}')).toBe(true);
   });
 
-  function eventsPath(): string {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-computer-run-marker-'));
-    tempDirs.push(dir);
-    return path.join(dir, 'events.jsonl');
-  }
-
-  it('records the run verb, bundle, and host against the real event log', () => {
-    _resetForTest(eventsPath());
-    emitComputerRunTaskMarker({ task: 'open Notes and write a haiku', bundle: 'com.apple.notes', device: 'win-mini' });
-
-    const recs = query({ eventTypes: ['computer.action'] });
-    expect(recs).toHaveLength(1);
-    expect(recs[0].command).toBe('run');
-    expect(recs[0].bundle).toBe('com.apple.notes');
-    expect(recs[0].device).toBe('win-mini');
-    expect(recs[0].task).toBe('open Notes and write a haiku');
-    expect(recs[0].invocationId).toEqual(expect.any(String));
-    expect((recs[0].invocationId as string).length).toBeGreaterThan(0);
+  it('reads trusted:false', () => {
+    expect(parseTrustFromStatusJson('{"trusted":false}')).toBe(false);
   });
 
-  it('bounds the task text to TASK_PREVIEW_MAX_CHARS — never the raw unbounded --task string', () => {
-    _resetForTest(eventsPath());
-    const longTask = 'describe every window in exhaustive detail '.repeat(20);
-    expect(longTask.length).toBeGreaterThan(TASK_PREVIEW_MAX_CHARS);
-    emitComputerRunTaskMarker({ task: longTask });
-
-    const rec = query({ eventTypes: ['computer.action'] })[0];
-    expect((rec.task as string).length).toBeLessThanOrEqual(TASK_PREVIEW_MAX_CHARS);
-    expect(JSON.stringify(rec)).not.toContain(longTask);
+  it('tolerates a banner line printed before the JSON', () => {
+    expect(parseTrustFromStatusJson('checking helper...\n{"trusted":true}\n')).toBe(true);
   });
 
-  it('carries no target pid — the marker fires before any window is resolved', () => {
-    _resetForTest(eventsPath());
-    emitComputerRunTaskMarker({ task: 'x' });
-    expect(query({ eventTypes: ['computer.action'] })[0].targetPid).toBeUndefined();
+  it('returns false — never throws — on empty or unparseable output', () => {
+    // The wizard polls this while the user is in System Settings; a throw would
+    // abort the very flow that fixes the untrusted state.
+    expect(parseTrustFromStatusJson('')).toBe(false);
+    expect(parseTrustFromStatusJson('daemon not running')).toBe(false);
+    expect(parseTrustFromStatusJson('{oops')).toBe(false);
+  });
+
+  it('treats a missing or non-boolean `trusted` as untrusted', () => {
+    expect(parseTrustFromStatusJson('{"pid":1}')).toBe(false);
+    expect(parseTrustFromStatusJson('{"trusted":"yes"}')).toBe(false);
   });
 });

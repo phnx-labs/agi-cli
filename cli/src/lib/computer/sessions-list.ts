@@ -2,9 +2,9 @@
  * Read-only task/run history over the `computer.action` event ledger
  * (`~/.agents/.history/events/YYYY-MM-DD/events.jsonl`, see `../events.ts`) —
  * the durable, already-existing audit log every `agents computer <verb>`
- * invocation (the explicit CLI verbs in `commands/computer-actions.ts`, and
- * the embedded `computer run` loop in `computer/dispatch.ts`) writes through
- * `emitComputerAction()`. Backs both `agents computer sessions` and the
+ * invocation writes through `computer/record.ts`'s `recordComputerAction()`,
+ * fed by the action events the standalone engine streams back (PHNX-4075).
+ * Backs both `agents computer sessions` and the
  * `agents sessions --computer` alias.
  *
  * There is no separate capture directory the way browser tasks have
@@ -24,7 +24,7 @@
  * the ledger's 7 days, and one row per CLI process would otherwise grow without
  * limit. It is metadata only. Nothing sensitive is persisted: `type` /
  * `type-text` events already carry only `textLength`, never the typed text
- * (see `commands/computer-actions.ts` `emitComputerAction` call sites) — the
+ * (see `computer/record.ts` `recordComputerAction`) — the
  * mission this module fulfils changes NONE of that. A `run --task`
  * description is the agent's OWN instruction, not typed-into-a-target-app
  * content (the same class of thing `agents sessions` already stores
@@ -35,10 +35,10 @@
  * deliberate exception to (not a bypass of) the automatic prompt-redaction
  * path in `events.ts` `sanitizePayload`.
  *
- * Grouping key: `emitComputerAction()` stamps one random `invocationId` for
+ * Grouping key: `recordComputerAction()` stamps one random `invocationId` for
  * the lifetime of the emitting CLI process. The event's own `pid` field is the emitting
  * CLI PROCESS's pid, never the target app's (that's `targetPid` — see
- * `computer-actions.ts` `emitComputerAction`, and its `#11` test guarding
+ * `computer/record.ts` `recordComputerAction`, and its `#11` test guarding
  * this). One `agents computer <verb>` invocation is one process, and
  * `computer run`'s whole embedded observe/act/verify loop is ALSO one
  * process. Grouping by `invocationId` gives exactly one row per CLI invocation without

@@ -502,7 +502,7 @@ CREATE INDEX IF NOT EXISTS idx_browser_sessions_started ON browser_sessions(star
 -- silently vanished on day 8. This row carries the same identity into the durable
 -- store; the ledger is untouched and remains the audit log, with no second pruner.
 --
--- Keyed on invocation_id, the id emitComputerAction stamps once per emitting CLI
+-- Keyed on invocation_id, the id recordComputerAction stamps once per emitting CLI
 -- process: one explicit verb is one row, and a whole "computer run" observe/act
 -- loop is also one row. task_preview is already bounded by events.ts truncate()
 -- before it is ever written, and typed-text content is never captured at all.
