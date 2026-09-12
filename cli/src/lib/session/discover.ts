@@ -16,7 +16,6 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import Database from '../sqlite.js';
 import { getAgentsDir, getUserAgentsDir, getHistoryDir, getRunsDir } from '../state.js';
-import { shortCodexHome } from '../codex-home.js';
 import { parseTimeFilter } from './relative-time.js';
 
 const execFileAsync = promisify(execFile);
@@ -663,8 +662,16 @@ export function isManagedSessionFile(filePath: string): boolean {
     path.join(getHistoryDir(), 'backups'),
     // Codex's managed home is not always under versions/. On macOS the versioned path
     // overflows SUN_LEN for codex's control socket, so the shim relocates it to
-    // `<agentsUserDir>/.codex-homes/<version>/` (lib/codex-home.ts).
+    // `<agentsUserDir>/.codex-homes/<key>/` (lib/codex-home.ts) — keyed by version OR
+    // by account short key (`a-<accountId prefix>`, lib/codex-home.ts `codexShortKey`).
     path.join(getUserAgentsDir(), '.codex-homes'),
+    // Account slots (PHNX-3940): a named account's HOME-shaped dir under
+    // `<historyDir>/accounts/<agent>/<accountId>/` (lib/accounts/slots.ts
+    // `slotDir`), sharing the one managed install rather than owning a version
+    // home of its own. Without this root, every account-slot transcript read as
+    // unmanaged the moment any version was managed, hiding a fully registered,
+    // runnable account's entire history from the default listing.
+    path.join(getHistoryDir(), 'accounts'),
     // Routine archives are agents-cli's OWN run output — managed by definition.
     getRunsDir(),
   ];
@@ -1134,20 +1141,46 @@ export function getAgentSessionDirs(agent: string, subdir: string): string[] {
     try {
       for (const version of fs.readdirSync(versionsBase)) {
         addDir(path.join(versionsBase, version, 'home', configDirName, subdir));
-        // Codex's managed home is not always where the version layout says. On macOS
-        // the versioned path overflows SUN_LEN (104 bytes) for codex's control
-        // socket, so the shim relocates the home to
-        // `<agentsUserDir>/.codex-homes/<version>/.codex` (lib/codex-home.ts). Every
-        // transcript an isolated codex writes lands there, and nothing scanned it —
-        // `agents sessions --roots` listed only the user's own ~/.codex, so a managed
-        // copy's own history was invisible. addDir skips what does not exist, so this
-        // is inert on Linux and for versions that never needed relocating.
-        if (agent === 'codex') {
-          addDir(path.join(shortCodexHome(getUserAgentsDir(), version), subdir));
-        }
       }
     } catch { /* dir unreadable */ }
   }
+
+  // Codex's managed home is not always where the version layout says. On macOS
+  // the versioned path overflows SUN_LEN (104 bytes) for codex's control socket,
+  // so the shim relocates the home to `<agentsUserDir>/.codex-homes/<key>/.codex`
+  // (lib/codex-home.ts) — `<key>` is the version for a version home, or
+  // `a-<accountId prefix>` (`codexShortKey`) for an account slot under
+  // `<historyDir>/accounts/codex/`. Walking `.codex-homes/` directly — rather
+  // than deriving keys from the installed-version list — is what catches BOTH:
+  // an account short key is not a vendor version and never appears in
+  // `versions/codex/`, so iterating only installed versions silently dropped
+  // every transcript a codex account slot wrote. addDir skips what does not
+  // exist, so this is inert on Linux and for homes that never needed relocating.
+  if (agent === 'codex') {
+    const codexHomesBase = path.join(getUserAgentsDir(), '.codex-homes');
+    try {
+      for (const key of fs.readdirSync(codexHomesBase)) {
+        addDir(path.join(codexHomesBase, key, '.codex', subdir));
+      }
+    } catch { /* dir absent or unreadable */ }
+  }
+
+  // Account slots (PHNX-3940): a named account gets its own HOME-shaped dir
+  // under `<historyDir>/accounts/<agent>/<accountId>/`, sharing the one managed
+  // binary install rather than owning a version home of its own
+  // (lib/accounts/slots.ts `slotDir`). A slot-launched transcript lives ONLY
+  // there — never under `versions/` — so without this root it is fully
+  // discoverable by the account machinery (the account is registered and
+  // runnable) yet invisible to `agents sessions`, reading as if the history had
+  // vanished. `addDir` follows the realpath, so a codex slot whose `.codex` is a
+  // symlink onto its `.codex-homes/<key>` short home (SUN_LEN relocation, above)
+  // is deduplicated against that same target rather than double-counted.
+  const accountsBase = path.join(getHistoryDir(), 'accounts', agent);
+  try {
+    for (const accountId of fs.readdirSync(accountsBase)) {
+      addDir(path.join(accountsBase, accountId, configDirName, subdir));
+    }
+  } catch { /* dir absent or unreadable */ }
 
   const backupsBase = path.join(getHistoryDir(), 'backups', agent);
   if (fs.existsSync(backupsBase)) {

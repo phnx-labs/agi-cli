@@ -3,9 +3,13 @@
  *
  * A Claude `.jsonl` records `sessionId`, `cwd`, `version`, `gitBranch` and per-message
  * `usage`, but carries **no account identity** — no `accountUuid`, no
- * `organizationUuid`, no email. What agents-cli does have is the version layout: every
+ * `organizationUuid`, no email. What agents-cli does have is per-account homes: every
  * installed version gets its own home with its own `.claude.json` (`CLAUDE_CONFIG_DIR`
- * is swapped per version, see lib/exec.ts), so a home identifies an account.
+ * is swapped per version, see lib/exec.ts), and — since PHNX-3940 — a named account
+ * additionally gets its own single-tenant slot home under
+ * `<historyDir>/accounts/claude/<accountId>/` (lib/accounts/slots.ts), sharing the one
+ * managed install rather than owning a version of its own. Either way, a home
+ * identifies an account.
  *
  * This matters because the default run strategy is `balanced` (lib/rotate.ts), which
  * sprays sessions across every signed-in account. Before this module the scanner
@@ -15,27 +19,45 @@
  *
  * Grouping is keyed on the **org** (`usageKey`), never the email: two orgs under one
  * email (a Team seat and a personal Max plan) are separate quota buckets and must stay
- * distinct — the same invariant `candidateIdentity` enforces in lib/rotate.ts.
+ * distinct — the same invariant `candidateIdentity` enforces in lib/rotate.ts. This key
+ * is a QUOTA GROUP, not a login: two distinct account slots can share one org (an
+ * enterprise plan with several seats) and therefore one `key`, so `accountKey` must
+ * never be read as "the" account a session ran under — only `entries`/`byAccountId`
+ * (below) name a specific home/slot, and several of them may legitimately map to the
+ * same grouping key.
  *
  * ## Evidence tiers
  *
- * Attribution is a pure function of (path, recorded version). It performs no per-file
- * I/O and does not need the transcript to still exist, which is what lets the v33
- * migration backfill already-indexed rows without re-parsing anything.
+ * Attribution is a pure function of (path, recorded version, launch-recorded account
+ * id). It performs no per-file I/O and does not need the transcript to still exist,
+ * which is what lets the v33 migration backfill already-indexed rows without
+ * re-parsing anything.
  *
  * 1. **The path names a home we can identify.** Strongest: the file physically lives in
- *    that home, including a retired `trash/` snapshot, which keeps its `.claude.json`.
+ *    that home — a version home, an account-slot home, or a retired `trash/` snapshot,
+ *    every one of which keeps its own `.claude.json`.
  * 1b. **The path names a home that exists but is signed out.** Dark, named after that
  *    home. The location proves which config dir Claude used, so this deliberately beats
  *    a recorded version — attributing it to some other version's account would be a
  *    guess dressed as evidence.
+ * 1c. **A launch-recorded account id resolves to a known slot.** The account a launch
+ *    actually picked (`resolveActor`'s choice, carried in the actor sidecar once it
+ *    records one), for a transcript sitting outside every identifiable home. Beats
+ *    tier 2 for the same reason 1b beats it: a fact captured when the session started
+ *    outranks inferring identity from whichever login a *shared* legacy home names
+ *    TODAY. A single-tenant account-slot home never needs this tier — it is already
+ *    tier 1 — this exists for the pre-PHNX-3940 shared-version-home world, where a
+ *    login can rotate through one home over time and "who's signed in now" says
+ *    nothing about who was signed in when an older row in that home was written.
  * 2. **The path is outside every known home, and the row records a version.** Resolve
  *    that version's own home. Covers the mutable `~/.claude` symlink and the routine
  *    archives under `<historyDir>/runs` that `readRoutineArchiveMeta` feeds in. The
  *    symlink's target moves with `agents use`, so "whatever it points at now" is weak
  *    evidence for old rows: on the machine this was developed against only 684 of 1,334
  *    such rows came from the version the symlink currently names, and 322 came from
- *    versions belonging to a *different* org.
+ *    versions belonging to a *different* org. A CURRENT login in that home proves who
+ *    can sign in there today, never who actually produced an older transcript sitting
+ *    in it — tier 1c above is the truthful escape hatch where a launch record exists.
  * 3. **Under the symlink with no recorded version at all.** Its current target is the
  *    only evidence there is, and the bucket says so via `evidence`. A version that IS
  *    recorded but resolves to no home stops at tier 2 and stays dark — it never
@@ -96,7 +118,7 @@ interface HomeEntry {
 
 /** Resolver over the Claude homes present on this machine. */
 export interface ClaudeAccountIndex {
-  /** Version- and trash-home prefixes, longest first. Excludes the `~/.claude` symlink. */
+  /** Version-, account-slot-, and trash-home prefixes, longest first. Excludes the `~/.claude` symlink. */
   entries: HomeEntry[];
   /**
    * Config-dir prefixes of homes that exist but carry no `oauthAccount`. Kept
@@ -111,6 +133,15 @@ export interface ClaudeAccountIndex {
    * as dark rather than guessed.
    */
   byVersion: Map<string, ClaudeAccountBucket | 'ambiguous'>;
+  /**
+   * Account-slot id (`<historyDir>/accounts/claude/<accountId>/`, PHNX-3940) →
+   * the identity read from that slot's own `.claude.json`. A slot's identity is
+   * proven the same way a version home's is — tier 1 evidence, see
+   * {@link resolveClaudeAccount} — so this map exists only to let a launch-
+   * recorded accountId (once the actor sidecar carries one) resolve straight to
+   * a bucket without re-deriving it from a path.
+   */
+  byAccountId: Map<string, ClaudeAccountBucket>;
   /** Whatever `~/.claude` points at right now; tier-3 evidence only. */
   symlinkBucket: ClaudeAccountBucket | null;
   /** Literal prefix of the live symlinked config dir. */
@@ -180,6 +211,7 @@ export function buildClaudeAccountIndex(): ClaudeAccountIndex {
   const darkHomes: Array<{ prefix: string; version: string | null }> = [];
   const liveByVersion = new Map<string, ClaudeAccountBucket>();
   const trashByVersion = new Map<string, ClaudeAccountBucket[]>();
+  const byAccountId = new Map<string, ClaudeAccountBucket>();
 
   const addHome = (home: string, version: string | null, retired: boolean): void => {
     const bucket = bucketForHome(home, 'version-home');
@@ -217,6 +249,26 @@ export function buildClaudeAccountIndex(): ClaudeAccountIndex {
     }
   }
 
+  // Account slots (PHNX-3940): a named account gets its own HOME-shaped dir at
+  // <historyDir>/accounts/claude/<accountId>/, sharing the one managed install
+  // rather than owning a version home of its own (lib/accounts/slots.ts
+  // `slotDir`). Each slot's `.claude.json` proves ITS identity exactly as
+  // directly as a version home's — tier 1 evidence in `resolveClaudeAccount` —
+  // so without this, every transcript a slot-launched session wrote was
+  // discoverable (the account is registered and runnable) yet permanently
+  // unattributed here, and `isManagedSessionFile`/`getAgentSessionDirs` would
+  // never even have scanned it in the first place. An unconfigured slot (never
+  // signed in) yields no bucket and is simply skipped, not recorded dark — a
+  // slot with nothing written to it yet owns no transcript to misattribute.
+  const accountsBase = path.join(getHistoryDir(), 'accounts', 'claude');
+  for (const accountId of listDirs(accountsBase)) {
+    const home = path.join(accountsBase, accountId);
+    const bucket = bucketForHome(home, 'version-home');
+    if (!bucket) continue;
+    entries.push({ prefix: path.join(home, '.claude'), bucket });
+    byAccountId.set(accountId, bucket);
+  }
+
   // A live home is authoritative for its version. Otherwise the retired snapshots
   // decide, but only when they agree — disagreement is reported, not resolved.
   const byVersion = new Map<string, ClaudeAccountBucket | 'ambiguous'>();
@@ -240,6 +292,7 @@ export function buildClaudeAccountIndex(): ClaudeAccountIndex {
     entries,
     darkHomes,
     byVersion,
+    byAccountId,
     symlinkBucket: bucketForHome(HOME, 'symlink-target'),
     symlinkPrefix: path.join(HOME, '.claude'),
   };
@@ -254,7 +307,9 @@ function versionFromPath(filePath: string): string | null {
 /**
  * The account bucket a transcript belongs to. `recordedVersion` is the Claude CLI
  * version stored on the session row (`sessions.version`), which is what disambiguates
- * rows sitting under the mutable `~/.claude` symlink.
+ * rows sitting under the mutable `~/.claude` symlink. `launchAccountId` is the
+ * account-slot id captured at launch time (the actor sidecar's `accountId`, once
+ * populated — see the module docblock's evidence tiers), when the caller has it.
  *
  * Never returns null: a transcript that matches no known home resolves to an
  * explicitly dark bucket rather than being dropped or folded into a real account.
@@ -266,6 +321,7 @@ export function resolveClaudeAccount(
   index: ClaudeAccountIndex,
   filePath: string,
   recordedVersion?: string | null,
+  launchAccountId?: string | null,
 ): ClaudeAccountBucket {
   // Tier 1 — the file physically lives in a home we can identify.
   for (const entry of index.entries) {
@@ -279,6 +335,21 @@ export function resolveClaudeAccount(
     if (filePath.startsWith(dark.prefix + path.sep)) {
       return unattributed(dark.version ? `signed-out home ${dark.version}` : 'signed-out home');
     }
+  }
+
+  // Tier 1c — a launch-recorded account id that resolves to a known slot's
+  // identity. This is a fact captured AT THE MOMENT the session started (which
+  // account the launcher actually picked), so for a transcript that sits
+  // outside any identifiable home — the shared legacy version-home path, or the
+  // mutable ~/.claude symlink — it beats tier 2's inference below. Tier 2 asks
+  // "who does this version's home say it belongs to *today*", and a login can
+  // rotate through a shared legacy home over time (account-slot homes above are
+  // each single-tenant and never need this); the current answer proves nothing
+  // about an older row in that same home. A launch id with no matching slot
+  // (an unresolved sidecar, or a slot since removed) falls through unchanged.
+  if (launchAccountId) {
+    const bucket = index.byAccountId.get(launchAccountId);
+    if (bucket) return bucket;
   }
 
   // Tier 2 — outside every known home. The recorded version names the home that ran,
