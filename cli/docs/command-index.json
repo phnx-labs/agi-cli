@@ -5735,7 +5735,7 @@
           "options": [
             {
               "flags": "--device <name>",
-              "description": "Drive a remote device (requires `agents computer start --device <name>` first)",
+              "description": "Drive a remote Windows device registered with `agents devices` (the engine connects or provisions it on demand)",
               "long": "--device",
               "required": true,
               "optional": false,
@@ -5754,7 +5754,7 @@
           "options": [
             {
               "flags": "--device <name>",
-              "description": "Drive a remote device (requires `agents computer start --device <name>` first)",
+              "description": "Drive a remote Windows device registered with `agents devices` (the engine connects or provisions it on demand)",
               "long": "--device",
               "required": true,
               "optional": false,
@@ -5773,7 +5773,7 @@
           "options": [
             {
               "flags": "--device <name>",
-              "description": "Drive a remote device (requires `agents computer start --device <name>` first)",
+              "description": "Drive a remote Windows device registered with `agents devices` (the engine connects or provisions it on demand)",
               "long": "--device",
               "required": true,
               "optional": false,
@@ -5792,7 +5792,7 @@
           "options": [
             {
               "flags": "--device <name>",
-              "description": "Drive a remote device (requires `agents computer start --device <name>` first)",
+              "description": "Drive a remote Windows device registered with `agents devices` (the engine connects or provisions it on demand)",
               "long": "--device",
               "required": true,
               "optional": false,
@@ -5811,7 +5811,7 @@
           "options": [
             {
               "flags": "--device <name>",
-              "description": "Drive a remote device (requires `agents computer start --device <name>` first)",
+              "description": "Drive a remote Windows device registered with `agents devices` (the engine connects or provisions it on demand)",
               "long": "--device",
               "required": true,
               "optional": false,
@@ -5830,7 +5830,7 @@
           "options": [
             {
               "flags": "--device <name>",
-              "description": "Drive a remote device (requires `agents computer start --device <name>` first)",
+              "description": "Drive a remote Windows device registered with `agents devices` (the engine connects or provisions it on demand)",
               "long": "--device",
               "required": true,
               "optional": false,
@@ -5849,7 +5849,7 @@
           "options": [
             {
               "flags": "--device <name>",
-              "description": "Drive a remote device (requires `agents computer start --device <name>` first)",
+              "description": "Drive a remote Windows device registered with `agents devices` (the engine connects or provisions it on demand)",
               "long": "--device",
               "required": true,
               "optional": false,
@@ -5868,7 +5868,7 @@
           "options": [
             {
               "flags": "--device <name>",
-              "description": "Drive a remote device (requires `agents computer start --device <name>` first)",
+              "description": "Drive a remote Windows device registered with `agents devices` (the engine connects or provisions it on demand)",
               "long": "--device",
               "required": true,
               "optional": false,
@@ -5887,7 +5887,7 @@
           "options": [
             {
               "flags": "--device <name>",
-              "description": "Drive a remote device (requires `agents computer start --device <name>` first)",
+              "description": "Drive a remote Windows device registered with `agents devices` (the engine connects or provisions it on demand)",
               "long": "--device",
               "required": true,
               "optional": false,
@@ -5906,7 +5906,7 @@
           "options": [
             {
               "flags": "--device <name>",
-              "description": "Drive a remote device (requires `agents computer start --device <name>` first)",
+              "description": "Drive a remote Windows device registered with `agents devices` (the engine connects or provisions it on demand)",
               "long": "--device",
               "required": true,
               "optional": false,
@@ -5944,7 +5944,7 @@
           "options": [
             {
               "flags": "--device <name>",
-              "description": "Drive a remote device (requires `agents computer start --device <name>` first)",
+              "description": "Drive a remote Windows device registered with `agents devices` (the engine connects or provisions it on demand)",
               "long": "--device",
               "required": true,
               "optional": false,
@@ -5963,7 +5963,7 @@
           "options": [
             {
               "flags": "--device <name>",
-              "description": "Drive a remote device (requires `agents computer start --device <name>` first)",
+              "description": "Drive a remote Windows device registered with `agents devices` (the engine connects or provisions it on demand)",
               "long": "--device",
               "required": true,
               "optional": false,
@@ -5982,7 +5982,7 @@
           "options": [
             {
               "flags": "--device <name>",
-              "description": "Drive a remote device (requires `agents computer start --device <name>` first)",
+              "description": "Drive a remote Windows device registered with `agents devices` (the engine connects or provisions it on demand)",
               "long": "--device",
               "required": true,
               "optional": false,
@@ -6001,7 +6001,7 @@
           "options": [
             {
               "flags": "--device <name>",
-              "description": "Drive a remote device (requires `agents computer start --device <name>` first)",
+              "description": "Drive a remote Windows device registered with `agents devices` (the engine connects or provisions it on demand)",
               "long": "--device",
               "required": true,
               "optional": false,
@@ -6097,7 +6097,7 @@
           "options": [
             {
               "flags": "--device <name>",
-              "description": "Open a tunnel to the remote Windows daemon and record it for --device verbs",
+              "description": "Start the remote Windows daemon and its tunnel instead of the local launchd service",
               "long": "--device",
               "required": true,
               "optional": false,
@@ -6154,7 +6154,7 @@
           "options": [
             {
               "flags": "--device <name>",
-              "description": "Drive a remote device (requires `agents computer start --device <name>` first)",
+              "description": "Drive a remote Windows device registered with `agents devices` (the engine connects or provisions it on demand)",
               "long": "--device",
               "required": true,
               "optional": false,
@@ -6173,7 +6173,7 @@
           "options": [
             {
               "flags": "--device <name>",
-              "description": "Drive a remote device (requires `agents computer start --device <name>` first)",
+              "description": "Drive a remote Windows device registered with `agents devices` (the engine connects or provisions it on demand)",
               "long": "--device",
               "required": true,
               "optional": false,
@@ -6192,7 +6192,7 @@
           "options": [
             {
               "flags": "--device <name>",
-              "description": "Drive a remote device (requires `agents computer start --device <name>` first)",
+              "description": "Drive a remote Windows device registered with `agents devices` (the engine connects or provisions it on demand)",
               "long": "--device",
               "required": true,
               "optional": false,
