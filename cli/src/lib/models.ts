@@ -15,7 +15,8 @@ import type { AgentId } from './types.js';
 import chalk from 'chalk';
 import { getVersionDir, getVersionHomePath, getBinaryPath } from './installations/versions.js';
 import { getModelsCachePath } from './state.js';
-import { agentConfigDirName } from './agents.js';
+import { agentConfigDirName, resolveOpenCodeXdgPath } from './agents.js';
+import { stripJsonComments } from './permissions-registry.js';
 import { resolveRunDefaults } from './run-defaults.js';
 import { getModelPricing, type ModelPricing } from './pricing/index.js';
 
@@ -1120,6 +1121,12 @@ export function resolveConfiguredModel(agent: AgentId, version: string): Configu
   const nativeModel = readNativeConfigModel(agent, version);
   if (nativeModel) return { model: nativeModel, source: 'config' };
 
+  // The agent's own persisted selection, for a runtime that stores one instead
+  // of flagging a catalog default. Ranks below `config` (an explicit setting
+  // wins) and above the catalog, whose `isDefault` OpenCode never sets.
+  const selected = readNativeSelectedModel(agent, version);
+  if (selected) return { model: selected, source: 'cli-default' };
+
   const catalog = getModelCatalog(agent, version);
   if (catalog) {
     const flagged = catalog.models.find((m) => m.isDefault);
@@ -1129,20 +1136,87 @@ export function resolveConfiguredModel(agent: AgentId, version: string): Configu
   return null;
 }
 
+/** An agent's own config document, for agents whose `model` is not in settings.json. */
+interface NativeModelConfig {
+  /** Accepted spellings under a version home, in precedence order. */
+  paths: (home: string) => string[];
+  /** Whether the harness's own loader tolerates comments in these files. */
+  jsonc: boolean;
+}
+
 /**
- * Best-effort read of the agent's own `model` from its native settings.json
+ * Where each agent keeps its OWN `model` setting, when that is not the
+ * `<configDir>/settings.json` every Claude-shaped harness uses.
+ *
+ * OpenCode reads `~/.config/opencode/opencode.{jsonc,json}` and puts `model` at
+ * its top level as `"<provider>/<model-id>"`. Its `~/.opencode/settings.json`
+ * DOES exist, but that is agents-cli's own plugin-enablement file, which
+ * OpenCode never reads a model from — so the default path found nothing and
+ * every OpenCode row rendered the placeholder `default`. Comments are stripped
+ * for BOTH spellings because OpenCode's loader accepts them in both, which is
+ * also how the MCP writer treats the same file (`format: 'opencode-jsonc'`).
+ */
+const NATIVE_MODEL_CONFIGS: Partial<Record<AgentId, NativeModelConfig>> = {
+  opencode: {
+    paths: (home) => [
+      path.join(home, '.config', 'opencode', 'opencode.jsonc'),
+      path.join(home, '.config', 'opencode', 'opencode.json'),
+    ],
+    jsonc: true,
+  },
+};
+
+/**
+ * Best-effort read of the agent's own `model` from its native config
  * (e.g. `~/.agents/.history/versions/claude/<ver>/home/.claude/settings.json`).
  * A missing/malformed file is a fall-through, not an error.
  */
 function readNativeConfigModel(agent: AgentId, version: string): string | null {
+  const home = getVersionHomePath(agent, version);
+  const native = NATIVE_MODEL_CONFIGS[agent];
+  const candidates = native?.paths(home)
+    ?? [path.join(home, agentConfigDirName(agent), 'settings.json')];
+  for (const configPath of candidates) {
+    try {
+      const raw = fs.readFileSync(configPath, 'utf8');
+      const parsed = JSON.parse(native?.jsonc ? stripJsonComments(raw) : raw) as { model?: unknown };
+      if (typeof parsed.model === 'string' && parsed.model.trim() !== '') return parsed.model;
+    } catch {
+      /* absent or malformed — try the next spelling */
+    }
+  }
+  return null;
+}
+
+/**
+ * The model the agent's OWN runtime will start with, for a harness that persists
+ * its selection rather than flagging a catalog default.
+ *
+ * OpenCode is the case that needs it: it ships no default model, so its catalog
+ * has no `isDefault` and `agents view` fell through to the literal `default` —
+ * a placeholder, not something the user could act on. OpenCode instead records
+ * the model picked in its TUI to `$XDG_STATE_HOME/opencode/model.json` as
+ * `{ recent: [{ providerID, modelID }, …] }`, newest first, and reuses
+ * `recent[0]` for the next session. That entry is the real answer to "what model
+ * is this install on", rendered the same `<provider>/<model-id>` way OpenCode's
+ * own config spells it.
+ *
+ * Returns null for every other agent, and for OpenCode when nothing has been
+ * selected yet — the catalog fallback still applies.
+ */
+function readNativeSelectedModel(agent: AgentId, version: string): string | null {
+  if (agent !== 'opencode') return null;
+  const statePath = resolveOpenCodeXdgPath(getVersionHomePath(agent, version), 'state', 'model.json');
+  if (!statePath) return null;
   try {
-    const settingsPath = path.join(
-      getVersionHomePath(agent, version),
-      agentConfigDirName(agent),
-      'settings.json',
-    );
-    const parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf8')) as { model?: unknown };
-    return typeof parsed.model === 'string' && parsed.model.trim() !== '' ? parsed.model : null;
+    const parsed = JSON.parse(fs.readFileSync(statePath, 'utf8')) as {
+      recent?: Array<{ providerID?: unknown; modelID?: unknown }>;
+    };
+    const current = parsed.recent?.[0];
+    const provider = typeof current?.providerID === 'string' ? current.providerID : '';
+    const model = typeof current?.modelID === 'string' ? current.modelID : '';
+    if (!model) return null;
+    return provider ? `${provider}/${model}` : model;
   } catch {
     return null;
   }

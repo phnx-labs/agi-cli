@@ -1871,37 +1871,53 @@ async function antigravityKeychainSignedIn(): Promise<boolean> {
   return cachedAgyKeychainSignedIn;
 }
 
+/** The XDG base dirs OpenCode reads, and the env var that overrides each. */
+const OPENCODE_XDG_DIRS = {
+  data: { env: 'XDG_DATA_HOME', fallback: ['.local', 'share'] },
+  state: { env: 'XDG_STATE_HOME', fallback: ['.local', 'state'] },
+} as const;
+
 /**
- * OpenCode (sst/opencode) stores provider credentials in a single JSON file at
- * `$XDG_DATA_HOME/opencode/auth.json`, defaulting to
- * `~/.local/share/opencode/auth.json` on EVERY platform — its `xdg-basedir`
- * dependency does not special-case macOS, so there is no
- * `~/Library/Application Support` variant. The path is account-global (not
- * per-version), matching how `session/discover.ts` already resolves
- * `~/.local/share/opencode/opencode.db`.
+ * Resolve one of OpenCode's (sst/opencode) XDG-rooted files.
+ *
+ * OpenCode keeps provider credentials under `$XDG_DATA_HOME/opencode/` and TUI
+ * state under `$XDG_STATE_HOME/opencode/`, defaulting to `~/.local/share` and
+ * `~/.local/state` on EVERY platform — its `xdg-basedir` dependency does not
+ * special-case macOS, so there is no `~/Library/Application Support` variant.
+ * Both roots are account-global (not per-version), matching how
+ * `session/discover.ts` already resolves `~/.local/share/opencode/opencode.db`.
  *
  * Resolution order, first existing wins:
- *   1. `<base>/.local/share/opencode/auth.json` — the passed per-version home.
- *      This is primarily a test hook (suites write a hermetic auth file under a
- *      temp home) but also covers any relocated install.
- *   2. `$XDG_DATA_HOME/opencode/auth.json` — an explicit XDG override, exactly
+ *   1. `<base>/<fallback>/opencode/<file>` — the passed per-version home. This is
+ *      primarily a test hook (suites write a hermetic file under a temp home)
+ *      but also covers any relocated install.
+ *   2. `$XDG_<KIND>_HOME/opencode/<file>` — an explicit XDG override, exactly
  *      what OpenCode itself honours.
- *   3. `<realHome>/.local/share/opencode/auth.json` — the active default, under
+ *   3. `<realHome>/<fallback>/opencode/<file>` — the active default, under
  *      `AGENTS_REAL_HOME` or `os.homedir()`, so every installed version reflects
- *      the one account-global login (same fallback shape as
+ *      the one account-global state (same fallback shape as
  *      resolveAccountCredentialPath).
  * Returns the first existing path, or null. Never throws.
  */
-function resolveOpenCodeAuthPath(base: string): string | null {
-  const candidates = [path.join(base, '.local', 'share', 'opencode', 'auth.json')];
-  const xdgData = process.env.XDG_DATA_HOME;
-  if (xdgData) candidates.push(path.join(xdgData, 'opencode', 'auth.json'));
+export function resolveOpenCodeXdgPath(
+  base: string,
+  kind: keyof typeof OPENCODE_XDG_DIRS,
+  file: string,
+): string | null {
+  const { env, fallback } = OPENCODE_XDG_DIRS[kind];
+  const candidates = [path.join(base, ...fallback, 'opencode', file)];
+  const override = process.env[env];
+  if (override) candidates.push(path.join(override, 'opencode', file));
   const realHome = process.env.AGENTS_REAL_HOME || os.homedir();
-  candidates.push(path.join(realHome, '.local', 'share', 'opencode', 'auth.json'));
+  candidates.push(path.join(realHome, ...fallback, 'opencode', file));
   for (const candidate of candidates) {
     try { if (fs.existsSync(candidate)) return candidate; } catch { /* unreadable */ }
   }
   return null;
+}
+
+function resolveOpenCodeAuthPath(base: string): string | null {
+  return resolveOpenCodeXdgPath(base, 'data', 'auth.json');
 }
 
 /**
@@ -1926,38 +1942,99 @@ function isValidOpenCodeCredential(value: unknown): boolean {
 }
 
 /**
- * OpenCode's account identity: the sorted, "+"-joined list of provider ids
- * that hold a valid credential in `auth.json` (e.g. `"anthropic+muse-spark"`).
- * `auth.json` carries no email/identity claim (see `isValidOpenCodeCredential`),
- * so this join is the closest thing to "which account is this" available — the
- * same value `agents view`/`agents doctor` show for OpenCode's signed-in state.
+ * The human identity an OpenCode `type: 'oauth'` credential carries in its
+ * access token, when that token is a JWT. Provider-agnostic by shape: the
+ * OpenAI-issued token OpenCode stores under its `openai` provider carries the
+ * same namespaced claims Codex's own `auth.json` does (`…/profile.email`,
+ * `…/auth.chatgpt_plan_type`), so the extraction is shared with `case 'codex'`
+ * rather than reinvented. A plain `email` claim is accepted too, for providers
+ * that issue an ordinary OIDC token.
+ *
+ * Only claims are read — the token itself is never returned or logged. A
+ * non-JWT credential (Anthropic's `sk-ant-oat…` opaque token, any `type: 'api'`
+ * key) simply yields nothing.
+ */
+function openCodeOauthIdentity(cred: unknown): { email: string | null; plan: string | null } {
+  const access = (cred as { type?: unknown; access?: unknown } | null)?.access;
+  if (typeof access !== 'string' || access.length === 0) return { email: null, plan: null };
+  const claims = decodeJwtPayload(access);
+  if (!claims) return { email: null, plan: null };
+
+  const profile = claims['https://api.openai.com/profile'] || {};
+  const auth = claims['https://api.openai.com/auth'] || {};
+  const rawEmail = profile.email ?? claims.email;
+  const email = typeof rawEmail === 'string' && rawEmail.includes('@') ? rawEmail : null;
+  const rawPlan = auth.chatgpt_plan_type;
+  const plan = typeof rawPlan === 'string' && rawPlan
+    ? rawPlan.charAt(0).toUpperCase() + rawPlan.slice(1)
+    : null;
+  return { email, plan };
+}
+
+/** OpenCode's signed-in identity, as far as `auth.json` can describe it. */
+export interface OpenCodeIdentity {
+  /** Sorted, "+"-joined provider ids holding a valid credential. */
+  providers: string;
+  /** Account email, when some OAuth credential's token carries the claim. */
+  email: string | null;
+  /** Plan tier from the same token (e.g. `Pro`), when present. */
+  plan: string | null;
+}
+
+/**
+ * OpenCode's account identity, read from `auth.json`.
+ *
+ * The provider join (`"meta+openai+opencode-go"`) is the stable key: OpenCode is
+ * a multi-provider harness, so "which providers are configured" is what actually
+ * identifies an install, and `session/discover.ts` indexes sessions by it.
+ * Providers that sign in over OAuth additionally hand OpenCode a token with real
+ * identity claims, so the email and plan are surfaced alongside it instead of
+ * leaving `agents view` showing a bare `id:` key for a login that knows exactly
+ * whose it is. Providers are walked in sorted order so a multi-OAuth install
+ * resolves to the same email on every machine.
  *
  * This is the ONLY correct source for an OpenCode "account". OpenCode's SQLite
  * `opencode.db` also carries `account`/`account_state`/`control_account` tables,
  * but on a real, actively-used install (yosemite-s1, 1.16.0, 35 applied
  * migrations) all three are permanently empty — no migration ever populates
  * them, and no session has ever written a row. Reading from them instead of
- * `auth.json` always yields `undefined`, credential or not; `session/discover.ts`
- * uses this function rather than duplicating a sqlite lookup against those
- * dead tables.
+ * `auth.json` always yields `undefined`, credential or not.
  *
  * Sync (`fs.readFileSync`), no network. Returns undefined when `auth.json` is
  * missing, unreadable, or carries no valid credential.
  */
-export function resolveOpenCodeAccountId(base: string): string | undefined {
+export function resolveOpenCodeIdentity(base: string): OpenCodeIdentity | undefined {
   const authPath = resolveOpenCodeAuthPath(base);
   if (!authPath) return undefined;
   try {
     const data = JSON.parse(fs.readFileSync(authPath, 'utf-8'));
     if (!data || typeof data !== 'object') return undefined;
-    const providers = Object.entries(data as Record<string, unknown>)
+    const valid = Object.entries(data as Record<string, unknown>)
       .filter(([, cred]) => isValidOpenCodeCredential(cred))
-      .map(([id]) => id)
-      .sort();
-    return providers.length ? providers.join('+') : undefined;
+      .sort(([a], [b]) => a.localeCompare(b));
+    if (valid.length === 0) return undefined;
+
+    let email: string | null = null;
+    let plan: string | null = null;
+    for (const [, cred] of valid) {
+      const claimed = openCodeOauthIdentity(cred);
+      email ??= claimed.email;
+      plan ??= claimed.plan;
+      if (email && plan) break;
+    }
+    return { providers: valid.map(([id]) => id).join('+'), email, plan };
   } catch {
     return undefined;
   }
+}
+
+/**
+ * The provider join alone — the value `session/discover.ts` indexes sessions by,
+ * kept as its own entry point so callers that only need the key do not have to
+ * know about the OAuth claim walk.
+ */
+export function resolveOpenCodeAccountId(base: string): string | undefined {
+  return resolveOpenCodeIdentity(base)?.providers;
 }
 
 /**
@@ -2182,6 +2259,11 @@ export async function getAccountInfo(
     claude: path.join(base, '.claude.json'),
     codex: path.join(base, '.codex', 'auth.json'),
     gemini: path.join(base, '.gemini', 'google_accounts.json'),
+    // OpenCode keeps every session in ONE sqlite file rather than a directory of
+    // per-session transcripts, so the session-file walk resolveLastActive runs
+    // for other agents finds nothing. Its mtime fallback is the right read here:
+    // opencode.db is written on every turn, so it tracks real activity.
+    opencode: resolveOpenCodeXdgPath(base, 'data', 'opencode.db') ?? undefined,
   };
   const lastActive = resolveLastActive(agentId, base, configFiles[agentId]);
 
@@ -2443,19 +2525,26 @@ export async function getAccountInfo(
       }
       case 'opencode': {
         // OpenCode's auth.json is a record keyed by provider id ->
-        // { type: 'oauth'|'api'|'wellknown', ...secret fields }. There is no
-        // email/identity claim to surface, so — like antigravity/kimi — we
-        // report signed-in state plus the NON-SECRET provider metadata (which
-        // provider ids hold a valid credential) and never read the tokens/keys
-        // themselves. The user's complaint was the row read "not signed in"
-        // despite a live login; a valid provider entry now shows e.g.
-        // "id:muse-spark" so they can see exactly which provider is configured.
-        // resolveOpenCodeAccountId is the single source of truth for this join —
-        // session/discover.ts reuses it for the indexed `account` field.
-        const accountId = resolveOpenCodeAccountId(base);
-        if (!accountId) return { ...empty, lastActive };
-        const accountKey = buildIdentityKey(agentId, [['providers', accountId]]);
-        return { ...empty, signedIn: true, accountId, accountKey, lastActive };
+        // { type: 'oauth'|'api'|'wellknown', ...secret fields }. The provider
+        // join is the identity key (see resolveOpenCodeIdentity), and an OAuth
+        // provider's token additionally carries the real account email and plan
+        // — so the row shows who is signed in rather than only a bare `id:` key.
+        // Secrets are never read out; only JWT claims are.
+        const identity = resolveOpenCodeIdentity(base);
+        if (!identity) return { ...empty, lastActive };
+        // Keyed on providers, not email: OpenCode bills through whichever
+        // provider credentials are configured, so two installs sharing one
+        // email but different provider sets are genuinely different accounts.
+        const accountKey = buildIdentityKey(agentId, [['providers', identity.providers]]);
+        return {
+          ...empty,
+          signedIn: true,
+          accountId: identity.providers,
+          accountKey,
+          email: identity.email,
+          plan: identity.plan,
+          lastActive,
+        };
       }
       case 'muse': {
         // Muse Code authenticates with META_API_KEY (env, highest priority) or
