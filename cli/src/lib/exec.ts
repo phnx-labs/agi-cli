@@ -579,6 +579,13 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
     result.AGENTS_PARENT_SESSION_ID = spawnerSessionId;
   }
   result.AGENTS_RUNTIME = resolveInteractive(options) ? 'terminal' : 'headless';
+  // The agent's own `secrets …` calls must hit the same store agents-cli reads
+  // for it: the process client points the standalone at the user agents dir
+  // (buildServeEnv, MIG-1), while a bare `secrets` defaults to ~/.secrets. Left
+  // unset, an agent's `secrets exec` ran against a second broker and a second
+  // event log, and an unlock in one was invisible in the other. An explicit
+  // SECRETS_HOME in the launching environment wins, matching buildServeEnv.
+  result.SECRETS_HOME = result.SECRETS_HOME ?? getUserAgentsDir();
   // Durable SessionStart metadata. The hook joins these launch facts to the
   // harness-provided real session id and writes them under the shared history
   // directory, so a later resume can restore the permission boundary without

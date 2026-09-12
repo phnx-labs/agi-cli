@@ -17,7 +17,7 @@ import { getHistoryDir } from '../lib/state.js';
 import { resolveSecretsBin, invocation, SecretsClientError, _resetSecretsClientForTest } from '../lib/secrets-client.js';
 import { installCli, resolveCliManifest } from '../lib/cli-resources.js';
 
-export const SECRETS_CLI_PACKAGE = '@phnx-labs/secrets-cli@0.1.2';
+export const SECRETS_CLI_PACKAGE = '@phnx-labs/secrets-cli@0.1.4';
 export const INSTALL_HINT = `agents clis install secrets   # or: npm i -g ${SECRETS_CLI_PACKAGE}`;
 
 export function setupSecretsPrefsPath(): string {
