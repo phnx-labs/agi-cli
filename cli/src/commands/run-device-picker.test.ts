@@ -260,10 +260,15 @@ describe('buildRunDeviceChoices', () => {
     writeSharedAccountRows('worker-1', [
       { accountId: 'acct-work', harness: 'claude', authMode: 'durable', verdict: 'live' },
     ]);
+    // worker-2 publishes verdicts, none for this account: the catalog answers "no".
+    writeSharedAccountRows('worker-2', [
+      { accountId: 'acct-other', harness: 'claude', authMode: 'durable', verdict: 'live' },
+    ]);
 
     const { rows } = picker.readRunDeviceRows({ agent: 'claude', accountLabel: 'work' });
     const withLabel = new Map(picker.buildRunDeviceChoices(rows, 'work').map((c) => [c.value, c]));
     expect(withLabel.get('worker-1')!.name).toContain('✓ work');
+    expect(withLabel.get('worker-2')!.name).toContain('– work');
     expect(withLabel.get('zion')!.name).not.toContain('✓');
     expect(withLabel.get('zion')!.name).not.toContain('–');
 
@@ -273,6 +278,12 @@ describe('buildRunDeviceChoices', () => {
 });
 
 describe('pickRunDevice', () => {
+  it('throws before any prompt when the registry holds no devices, naming agents devices add', async () => {
+    // beforeEach cleared the registry; nothing is seeded on purpose.
+    await expect(picker.pickRunDevice({ agent: 'claude' }))
+      .rejects.toThrow('No devices are registered. Add one with: agents devices add <name>');
+  });
+
   it('off a TTY fails loud, naming the non-interactive forms', async () => {
     await seedFleet();
     const exit = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {

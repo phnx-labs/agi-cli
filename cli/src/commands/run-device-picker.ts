@@ -226,16 +226,18 @@ function formatSnapshotAge(ageMs: number): string {
  * `agents devices add`).
  */
 export async function pickRunDevice(opts: { agent: AgentId; accountLabel?: string }): Promise<string | null> {
+  // An empty registry is wrong on every terminal, so it is judged before the
+  // TTY gate: "register a device" is the useful answer, not "need a TTY".
+  const { rows, snapshotAgeMs } = readRunDeviceRows(opts);
+  if (rows.length === 0) {
+    throw new Error('No devices are registered. Add one with: agents devices add <name>');
+  }
+
   if (!isInteractiveTerminal()) {
     requireInteractiveSelection('Selecting a device', [
       `agents run ${opts.agent} --device <name>`,
       'agents devices',
     ]);
-  }
-
-  const { rows, snapshotAgeMs } = readRunDeviceRows(opts);
-  if (rows.length === 0) {
-    throw new Error('No devices are registered. Add one with: agents devices add <name>');
   }
 
   const choices = buildRunDeviceChoices(rows, opts.accountLabel);
