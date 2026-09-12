@@ -25,9 +25,10 @@
  *     is load-bearing: the standalone wraps fd 3 in a `net.Socket`, and a Socket
  *     over a NAMED FIFO reads the request but never fires EOF on macOS, so the
  *     older FIFO wiring hung the read loop for the full timeout. Bounded to
- *     `SYNC_SERVE_TIMEOUT_MS` so a broken standalone fails fast, never for the
- *     server's 60s deadline. POSIX only; Windows fails loud pointing at the
- *     async path.
+ *     `SYNC_SERVE_TIMEOUT_MS` (30s — sized for a cold Node boot of the
+ *     standalone on a loaded box, see the constant) so a broken standalone
+ *     fails before the server's 60s deadline. POSIX only; Windows fails loud
+ *     pointing at the async path.
  *
  * State root (MIG-1): the standalone selects its state root from `SECRETS_HOME`.
  * agents-cli points it at the user agents dir (`~/.agents`) by default so the
@@ -79,20 +80,25 @@ const MAX_PROTOCOL_BYTES = 8 * 1024 * 1024;
 /** Just over the server's own 60s deadline, so the server times out first. */
 const SERVE_TIMEOUT_MS = 65_000;
 /**
- * The synchronous path only serves read-only STATUS surfaces — `agents view`,
- * the account-catalog rows, and run-config / account-rotation resolution on the
- * `agents run` hot path. Those must never hang the whole render or launch on a
- * missing or unreachable standalone, so the sync serve carries a short, hard
- * bound instead of the async path's 65s: a broken `secrets` fails loud in a few
- * seconds and the caller renders the rest of its output (or launches on the
- * native login) with one clear line, rather than sitting for the standalone's
- * own 60s deadline (the exact 60s hang PHNX-3989 hit when the child ran under
- * Bun). A real sync op (a handshake, a bundle list, one item read) completes in
- * tens of milliseconds, so this is ~100x headroom. It is NOT a fallback to the
- * embedded engine (DIST-1); the standalone stays the only implementation, it
- * just fails fast.
+ * The synchronous path serves the surfaces that resolve secrets before they can
+ * continue — `agents view`, the account-catalog rows, and the account listing and
+ * setup-token read on the `agents run` launch path. Those must never hang for the
+ * standalone's own 60s deadline (the exact hang PHNX-3989 hit when the child ran
+ * under Bun), so the sync serve carries a hard bound below it instead of the
+ * async path's 65s. The bound covers a COLD PROCESS, not just the operation: every
+ * request spawns `secrets __serve` afresh, so it pays a Node boot plus the
+ * standalone's module load before the tens-of-milliseconds op runs: ~0.3s on a
+ * quiet box, 0.4–2.6s and occasionally more on a desktop at load average ~100
+ * (measured 2026-09-12), where the previous 3s bound turned load into a failed
+ * launch (`secrets request failed: spawnSync sh ETIMEDOUT` from `agents run`).
+ * 30s absorbs that boot under load and still fails a broken or wedged standalone
+ * well before its 60s self-deadline. It is NOT a fallback to the embedded engine
+ * (DIST-1); the standalone stays the only implementation. Exported so the
+ * real-standalone test can assert a round-trip beats the bound.
  */
-const SYNC_SERVE_TIMEOUT_MS = 3_000;
+export const SYNC_SERVE_TIMEOUT_MS = 30_000;
+/** Test seam: a hang test plants a never-answering standalone and must not wait 30s. */
+let syncServeTimeoutMs = SYNC_SERVE_TIMEOUT_MS;
 
 export interface SecretsContext {
   /** Bundle allowlist; absent ⇒ full trust (the local agents client today). */
@@ -478,13 +484,20 @@ function serveOnceSync(op: string, args: unknown[], context?: SecretsContext): u
     input: request,
     stdio: ['pipe', 'pipe', 'inherit'],
     env: buildServeEnv(),
-    timeout: SYNC_SERVE_TIMEOUT_MS,
+    timeout: syncServeTimeoutMs,
     maxBuffer: MAX_PROTOCOL_BYTES + 4096,
   });
   if (result.error) {
     const err = result.error as NodeJS.ErrnoException;
-    const code = err.code === 'ETIMEDOUT' ? 'TIMEOUT' : 'SPAWN_FAILED';
-    throw new SecretsClientError(code, `secrets request failed: ${err.message}`);
+    if (err.code === 'ETIMEDOUT') {
+      throw new SecretsClientError(
+        'TIMEOUT',
+        `the standalone \`secrets\` CLI did not answer within ${Math.round(syncServeTimeoutMs / 1000)}s ` +
+          `(${command} __serve). The machine may be too loaded to boot it in time, or the install is broken: ` +
+          'check with `secrets --version`.',
+      );
+    }
+    throw new SecretsClientError('SPAWN_FAILED', `secrets request failed: ${err.message}`);
   }
   const raw = (result.stdout as Buffer | undefined) ?? Buffer.alloc(0);
   if (raw.length > MAX_PROTOCOL_BYTES) {
@@ -566,6 +579,12 @@ export function _resetSecretsClientForTest(): void {
   handshakeReady = false;
   handshakePromise = null;
   requestCounter = 0;
+  syncServeTimeoutMs = SYNC_SERVE_TIMEOUT_MS;
+}
+
+/** Shorten the sync bound for a test that plants a hanging standalone; reset restores it. */
+export function _setSyncServeTimeoutForTest(ms: number): void {
+  syncServeTimeoutMs = ms;
 }
 
 // --- typed wrappers -------------------------------------------------------

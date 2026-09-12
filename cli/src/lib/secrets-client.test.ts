@@ -53,6 +53,8 @@ import {
   isSecretsClientError,
   _resetSecretsClientForTest,
   PROTOCOL_VERSION,
+  _setSyncServeTimeoutForTest,
+  SYNC_SERVE_TIMEOUT_MS,
 } from './secrets-client.js';
 import { getShimsDir, getUserAgentsDir } from './state.js';
 import type { SecretsBundle } from './secrets-types.js';
@@ -224,8 +226,10 @@ describe('SecretsClientError serializes to a plain {code, message}', () => {
 // The synchronous read-only STATUS path, exercised WITHOUT the real standalone
 // so it runs on every runtime. It reproduces the PHNX-3989 CI failure shapes — a
 // standalone that hangs (the 60s deadlock when it ran under Bun) and one that
-// answers with non-JSON — and pins the ≤3s bound + fd-4 diagnostic that keep a
-// read-only surface from blocking or failing blind.
+// answers with non-JSON — and pins the hard bound + fd-4 diagnostic that keep a
+// read-only surface from blocking or failing blind. The hang test shortens the
+// bound through the test seam: the shipped 30s absorbs a cold standalone boot on
+// a loaded box, but a planted never-answering mock needs no such headroom.
 describe.skipIf(process.platform === 'win32')('synchronous status path is bounded and diagnosable', () => {
   let dir: string;
   const savedBin = process.env.SECRETS_BIN;
@@ -250,8 +254,9 @@ describe.skipIf(process.platform === 'win32')('synchronous status path is bounde
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  it('a hanging standalone fails loud within the ~3s bound, never the server 60s deadline', () => {
+  it('a hanging standalone fails loud at the bound, never the server 60s deadline', () => {
     plantServe('sleep 30'); // never answers on fd 4
+    _setSyncServeTimeoutForTest(3_000);
     const t0 = Date.now();
     try {
       secretsRequestSync('handshake', []);
@@ -259,8 +264,27 @@ describe.skipIf(process.platform === 'win32')('synchronous status path is bounde
     } catch (error) {
       expect(error).toBeInstanceOf(SecretsClientError);
       expect((error as SecretsClientError).code).toBe('TIMEOUT');
+      expect((error as SecretsClientError).message).toContain('did not answer within 3s');
+      expect((error as SecretsClientError).message).toContain('secrets --version');
       expect(Date.now() - t0).toBeLessThan(6_000); // 3s bound + spawn slack, far under 60s
     }
+  });
+
+  it('the shipped bound absorbs a cold standalone boot on a loaded box', () => {
+    // 2026-09-12: `agents run claude` died with `spawnSync sh ETIMEDOUT` on a
+    // desktop at load average ~100, where each cold `secrets __serve` spawn took
+    // 0.4–2.6s against the old 3s bound. A standalone that answers after a slow
+    // boot must still be accepted.
+    // The handshake answers at once; only the operation spawn boots slowly, so
+    // the test pays one slow spawn rather than two.
+    const marker = path.join(dir, 'handshake-done');
+    plantServe(
+      `if [ -e '${marker}' ]; then sleep 4; else : > '${marker}'; fi; ` +
+        `printf '%s' '{"v":1,"id":"x","ok":true,"result":{"protocol":1,"operations":{}}}' >&4`,
+    );
+    expect(SYNC_SERVE_TIMEOUT_MS).toBeGreaterThanOrEqual(30_000);
+    const result = secretsRequestSync<{ protocol: number }>('handshake', []);
+    expect(result.protocol).toBe(PROTOCOL_VERSION);
   });
 
   it('a standalone that writes nothing to fd 4 is surfaced as an empty response', () => {
@@ -353,17 +377,18 @@ describe.skipIf(!REAL_BIN)('secrets protocol client against the real standalone'
     expect(bundleExistsSync('absent-bundle')).toBe(false); // sync fd-3-over-stdin transport
   });
 
-  it('the synchronous handshake round-trips well under the ~3s bound (no fd-3 EOF hang)', () => {
+  it('the synchronous handshake round-trips under the bound (no fd-3 EOF hang)', () => {
     // Regression for the macOS sync-path hang: the standalone wraps fd 3 in a
     // `net.Socket`, and a Socket over a NAMED FIFO reads the request but never
     // fires EOF on macOS — so the old FIFO wiring left `for await (chunk of
-    // input)` blocked until the 3s SYNC_SERVE_TIMEOUT_MS fired (`ETIMEDOUT`).
-    // Feeding fd 3 the stdin pipe/socketpair (the async path's fd type) EOFs, so a
-    // real handshake now completes in tens of ms against the real standalone.
+    // input)` blocked until SYNC_SERVE_TIMEOUT_MS fired (`ETIMEDOUT`). Feeding
+    // fd 3 the stdin pipe/socketpair (the async path's fd type) EOFs, so a real
+    // handshake completes as soon as the standalone has booted. A hang would
+    // consume the whole bound, so beating it is the assertion.
     const t0 = Date.now();
     const result = secretsRequestSync<{ protocol: number }>('handshake', []);
     expect(result.protocol).toBe(PROTOCOL_VERSION);
-    expect(Date.now() - t0).toBeLessThan(2_000); // real op is tens of ms; never the 3s timeout
+    expect(Date.now() - t0).toBeLessThan(SYNC_SERVE_TIMEOUT_MS);
   });
 
   it('round-trips writeBundleWithItems -> readAndResolveBundleEnv on a file bundle', async () => {
