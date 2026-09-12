@@ -13,6 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 const TEST_SCRIPT = path.resolve(__dirname, 'test.sh');
+const BUILD_SCRIPT = path.resolve(__dirname, 'build.sh');
 const PRODUCE_SCRIPT = path.resolve(__dirname, 'release-attestation-produce.sh');
 const ATTEST_SCRIPT = path.resolve(__dirname, 'release-attestation.sh');
 const MANIFEST_SCRIPT = path.resolve(__dirname, 'release-manifest.sh');
@@ -85,6 +86,12 @@ function buildFixture(root: string, opts: { failSuite?: boolean; suite?: 'greenW
   // script and not a stub: that is what pins the producer -> test.sh contract.
   fs.copyFileSync(TEST_SCRIPT, path.join(caller, 'cli/scripts/test.sh'));
   fs.chmodSync(path.join(caller, 'cli/scripts/test.sh'), 0o755);
+  fs.copyFileSync(BUILD_SCRIPT, path.join(caller, 'cli/scripts/build.sh'));
+  fs.chmodSync(path.join(caller, 'cli/scripts/build.sh'), 0o755);
+  const tracker = path.join(caller, 'packages/session-tracker');
+  fs.mkdirSync(path.join(tracker, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(tracker, 'package.json'), '{"name":"@agents/session-tracker","scripts":{"build":"tsc"}}\n');
+  fs.copyFileSync(path.resolve(__dirname, '../../packages/session-tracker/src/hook.sh'), path.join(tracker, 'src/hook.sh'));
   fs.copyFileSync(PRODUCE_SCRIPT, path.join(caller, 'cli/scripts/release-attestation-produce.sh'));
   fs.copyFileSync(ATTEST_SCRIPT, path.join(caller, 'cli/scripts/release-attestation.sh'));
   fs.chmodSync(path.join(caller, 'cli/scripts/release-attestation-produce.sh'), 0o755);
@@ -119,7 +126,11 @@ function buildFixture(root: string, opts: { failSuite?: boolean; suite?: 'greenW
       '  echo "RUSH-3007-ENV: producer=${AGENTS_ATTEST_PRODUCER:-<unset>} ci=${CI:-<unset>}"',
       fakeSuiteBody(opts),
       'fi',
-      'if [[ "$1" == "run" && "$2" == "build" ]]; then mkdir -p dist; exit 0; fi',
+      'if [[ "$1" == "run" && "$2" == "build" ]]; then',
+      '  mkdir -p dist',
+      '  if [[ "$PWD" == */packages/session-tracker ]]; then echo "export {};" > dist/install-hook.js; fi',
+      '  exit 0',
+      'fi',
       'echo "fake bun: unhandled args: $*" >&2; exit 1',
       '',
     ].join('\n'),
@@ -130,6 +141,8 @@ function buildFixture(root: string, opts: { failSuite?: boolean; suite?: 'greenW
     [
       '#!/usr/bin/env bash',
       'if [[ "$1" == "pack" ]]; then',
+      '  [[ -f dist/session-tracker/dist/install-hook.js && -f dist/session-tracker/dist/hook.sh ]] || { echo "missing session tracker" >&2; exit 1; }',
+      '  cmp ../packages/session-tracker/src/hook.sh dist/session-tracker/dist/hook.sh || exit 1',
       '  name="phnx-labs-agents-cli-9.9.9.tgz"',
       '  echo "fake-tarball-bytes-$$" > "$name"',
       '  echo "$name"',
