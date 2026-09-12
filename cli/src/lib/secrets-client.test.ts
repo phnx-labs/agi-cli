@@ -290,6 +290,9 @@ describe.skipIf(process.platform === 'win32')('synchronous status path is bounde
   });
 
   it('a standalone that writes nothing to fd 4 is surfaced as an empty response', () => {
+    // The mock never reads fd 3 either, so on a fast box the request write hits
+    // EPIPE; the client must still report what reached fd 4 (nothing), not the
+    // errno — the same outcome on either side of that race.
     plantServe('exit 0'); // answers nothing
     try {
       secretsRequestSync('handshake', []);

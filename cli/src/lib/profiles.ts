@@ -13,7 +13,14 @@ import * as yaml from 'yaml';
 import type { AgentId } from './types.js';
 import { ALL_AGENT_IDS } from './agents.js';
 import { getUserAgentsDir } from './state.js';
-import { deleteKeychainTokenSync, getKeychainTokenSync, hasKeychainTokenSync, isSecretsClientError, profileKeychainItem } from './secrets-client.js';
+import {
+  deleteKeychainTokenSync,
+  getKeychainTokenSync,
+  hasKeychainTokenSync,
+  isSecretsClientError,
+  isSecretsTransportError,
+  profileKeychainItem,
+} from './secrets-client.js';
 import { getPreset, type Preset } from './profiles-presets.js';
 import { MODEL_TIERS, isTierToken, type ModelTier } from './model-tiers.js';
 import { addAccount, findAccount, resolveCredentialAccount } from './account-registry.js';
@@ -341,7 +348,16 @@ export function profileAuthLabel(profile: Profile): string {
     return `${provider} ${maskToken(token)}`;
   }
   if (profile.auth) {
-    return `${provider} ${hasKeychainTokenSync(profile.auth.keychainItem) ? 'stored' : 'missing'}`;
+    // A status row, like the provider-account rows: a wedged or missing
+    // standalone degrades this one label instead of aborting the whole render.
+    let stored: boolean;
+    try {
+      stored = hasKeychainTokenSync(profile.auth.keychainItem);
+    } catch (err) {
+      if (isSecretsTransportError(err)) return `${provider} unavailable`;
+      throw err;
+    }
+    return `${provider} ${stored ? 'stored' : 'missing'}`;
   }
   return provider;
 }
