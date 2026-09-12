@@ -379,7 +379,7 @@ export function assertRecoverableTranscript(
     ? `its transcript is gone from ${device} (${session.filePath})`
     : `no transcript for it was ever written on ${device}`;
   throw new SessionRecoveryError(
-    `Session ${session.shortId} has no transcript to resume — ${why}. `
+    `Session ${session.shortId} has nothing to resume — ${why}. `
     + `A recovered agent would open an empty conversation. `
     + `Start a new session instead: agents run ${session.agent}`
     + (session.cwd ? ` --cwd ${session.cwd}` : ''),
