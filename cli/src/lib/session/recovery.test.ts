@@ -8,13 +8,15 @@ import {
   SessionRecoveryError,
   inspectNativeResumeSession,
   resolveSessionRecoveryFromCandidates,
+  sessionMatchesAccount,
   sessionOriginDevice,
   sessionRecoveryDestinationMatches,
   sessionRecoveryPeer,
   sessionRecoveryRunArgs,
+  type SessionWithAccountId,
 } from './recovery.js';
 
-function session(over: Partial<SessionMeta> = {}): SessionMeta {
+function session(over: Partial<SessionWithAccountId> = {}): SessionWithAccountId {
   return {
     id: '14567b8a-db63-4e27-9867-4846813157cc',
     shortId: '14567b8a',
@@ -295,6 +297,255 @@ describe('resolveSessionRecoveryFromCandidates', () => {
       [candidate('2.1.187', { usageStatus: 'rate_limited' })],
       () => true,
     )).toThrow(/yosemite-s0.*claude@2\.1\.187.*rate_limited/);
+  });
+});
+
+describe('resolveSessionRecoveryFromCandidates — account disambiguation (PHNX-3940)', () => {
+  function nativeHomeFixture(root: string, id: string) {
+    const home = path.join(root, 'home');
+    const cwd = path.join(root, 'original-project');
+    const filePath = path.join(home, '.claude', 'projects', '-original-project', `${id}.jsonl`);
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.mkdirSync(cwd);
+    fs.writeFileSync(filePath, JSON.stringify({ type: 'attachment', cwd }) + '\n');
+    return { home, cwd, filePath };
+  }
+
+  it('disambiguates two accounts sharing one managed binary via the persisted sidecar accountId', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-recovery-two-accounts-id-'));
+    try {
+      const a = nativeHomeFixture(path.join(root, 'a'), session().id);
+      const b = nativeHomeFixture(path.join(root, 'b'), session().id);
+      // Both accounts run claude@2.1.187 (one managed binary) but only 'b' has
+      // the transcript. The sidecar accountId names 'b' directly — matching
+      // must not fall back to whichever same-version candidate appears first.
+      const source = session({ filePath: b.filePath, cwd: b.cwd, accountId: 'acct-b' });
+      const slotA = path.join(root, 'slots', 'acct-a');
+      const slotB = path.join(root, 'slots', 'acct-b');
+      fs.mkdirSync(path.dirname(slotA), { recursive: true });
+      fs.symlinkSync(a.home, slotA);
+      fs.symlinkSync(b.home, slotB);
+      const candidates = [
+        candidate('2.1.187', { accountKey: 'claude:a', fromSlot: true, slotDir: slotA }),
+        candidate('2.1.187', { accountKey: 'claude:b', fromSlot: true, slotDir: slotB }),
+      ];
+
+      const result = resolveSessionRecoveryFromCandidates(source, candidates, () => true);
+      expect(result).toMatchObject({ mode: 'native', agent: 'claude', version: '2.1.187', cwd: b.cwd });
+      expect(result.candidate.accountKey).toBe('claude:b');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('disambiguates two accounts sharing one managed binary via transcript ownership when there is no sidecar id', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-recovery-two-accounts-path-'));
+    try {
+      const a = nativeHomeFixture(path.join(root, 'a'), session().id);
+      const b = nativeHomeFixture(path.join(root, 'b'), session().id);
+      const source = session({ filePath: b.filePath, cwd: b.cwd });
+      const slotA = path.join(root, 'slots', 'acct-a');
+      const slotB = path.join(root, 'slots', 'acct-b');
+      fs.mkdirSync(path.dirname(slotA), { recursive: true });
+      fs.symlinkSync(a.home, slotA);
+      fs.symlinkSync(b.home, slotB);
+      const candidates = [
+        candidate('2.1.187', { accountKey: 'claude:a', fromSlot: true, slotDir: slotA }),
+        candidate('2.1.187', { accountKey: 'claude:b', fromSlot: true, slotDir: slotB }),
+      ];
+
+      const result = resolveSessionRecoveryFromCandidates(source, candidates, () => true);
+      expect(result).toMatchObject({ mode: 'native', agent: 'claude', version: '2.1.187', cwd: b.cwd });
+      expect(result.candidate.accountKey).toBe('claude:b');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('stays honest — unknown attribution — when two accounts share a version and neither can be proven', () => {
+    const result = resolveSessionRecoveryFromCandidates(
+      session(),
+      [candidate('2.1.187', { accountKey: 'claude:a' }), candidate('2.1.187', { accountKey: 'claude:b' })],
+      () => true,
+    );
+    expect(result.mode).toBe('continue');
+    expect(result.reason).toContain('attribution is unknown');
+  });
+
+  it('matches the sidecar accountId across a version relabel (vendor auto-update)', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-recovery-relabel-'));
+    try {
+      const home = nativeHomeFixture(root, session().id);
+      // The transcript was recorded under 2.1.187, but the vendor relabeled the
+      // installed binary to 2.1.220 — only the persisted accountId proves origin.
+      const source = session({ filePath: home.filePath, cwd: home.cwd, version: '2.1.187', accountId: 'acct-relabel' });
+      const slot = path.join(root, 'slots', 'acct-relabel');
+      fs.mkdirSync(path.dirname(slot), { recursive: true });
+      fs.symlinkSync(home.home, slot);
+      const candidates = [candidate('2.1.220', { accountKey: 'claude:relabel', fromSlot: true, slotDir: slot })];
+
+      const result = resolveSessionRecoveryFromCandidates(source, candidates, () => true);
+      expect(result).toMatchObject({ mode: 'native', agent: 'claude', version: '2.1.220', cwd: home.cwd });
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('never native-resumes on a symlinked account home — ownership still resolves through the real path', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-recovery-symlink-'));
+    try {
+      const real = nativeHomeFixture(path.join(root, 'real'), session().id);
+      const slot = path.join(root, 'slots', 'acct-sym');
+      fs.mkdirSync(path.dirname(slot), { recursive: true });
+      fs.symlinkSync(real.home, slot);
+      const source = session({ filePath: real.filePath, cwd: real.cwd });
+      const candidates = [candidate('2.1.187', { fromSlot: true, slotDir: slot })];
+
+      const result = resolveSessionRecoveryFromCandidates(source, candidates, () => true);
+      expect(result).toMatchObject({ mode: 'native', agent: 'claude', version: '2.1.187', cwd: real.cwd });
+      expect(result.mode === 'native' ? result.execHome : undefined).toBe(slot);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('explicit account: resumes natively when the requested account is the proven origin', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-recovery-explicit-match-'));
+    try {
+      const home = nativeHomeFixture(root, session().id);
+      const source = session({ filePath: home.filePath, cwd: home.cwd });
+      const slot = path.join(root, 'slots', 'acct-mine');
+      fs.mkdirSync(path.dirname(slot), { recursive: true });
+      fs.symlinkSync(home.home, slot);
+      const candidates = [
+        candidate('2.1.187', { accountKey: 'claude:mine', accountLabel: 'mine', email: 'mine@example.test', nativeAccount: 'mine', fromSlot: true, slotDir: slot }),
+      ];
+
+      const result = resolveSessionRecoveryFromCandidates(source, candidates, () => true, undefined, { account: 'mine' });
+      expect(result).toMatchObject({ mode: 'native', agent: 'claude', version: '2.1.187', cwd: home.cwd });
+      expect(result.reason).toContain('is the session origin');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('explicit account mismatch: never silently native-resumes under a different identity', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-recovery-explicit-mismatch-'));
+    try {
+      const owner = nativeHomeFixture(path.join(root, 'owner'), session().id);
+      const other = nativeHomeFixture(path.join(root, 'other'), session().id);
+      const source = session({ filePath: owner.filePath, cwd: owner.cwd });
+      const ownerSlot = path.join(root, 'slots', 'owner');
+      const otherSlot = path.join(root, 'slots', 'other');
+      fs.mkdirSync(path.dirname(ownerSlot), { recursive: true });
+      fs.symlinkSync(owner.home, ownerSlot);
+      fs.symlinkSync(other.home, otherSlot);
+      const candidates = [
+        candidate('2.1.187', { accountKey: 'claude:owner', accountLabel: 'owner', nativeAccount: 'owner', fromSlot: true, slotDir: ownerSlot }),
+        candidate('2.1.187', { accountKey: 'claude:other', accountLabel: 'other', nativeAccount: 'other', fromSlot: true, slotDir: otherSlot }),
+      ];
+
+      const result = resolveSessionRecoveryFromCandidates(source, candidates, () => true, undefined, { account: 'other' });
+      expect(result.mode).toBe('continue');
+      expect(result.candidate.accountKey).toBe('claude:other');
+      expect(result.reason).toContain('differs from the session');
+      expect(result.reason).toContain('interactive confirmation');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('explicit account: fails loud when the requested account is not a signed-in candidate', () => {
+    expect(() => resolveSessionRecoveryFromCandidates(
+      session(),
+      [candidate('2.1.187')],
+      () => true,
+      undefined,
+      { account: 'nobody' },
+    )).toThrowError(SessionRecoveryError);
+  });
+
+  it('a provider (injected-credential) account never claims transcript ownership, even riding the same version home', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-recovery-provider-truthful-'));
+    try {
+      const home = nativeHomeFixture(root, session().id);
+      const source = session({ filePath: home.filePath, cwd: home.cwd });
+      const candidates = [
+        candidate('2.1.187', { usageStatus: 'rate_limited' }),
+        candidate('2.1.187', {
+          accountKey: 'provider:tech',
+          accountLabel: 'tech',
+          nativeAccount: 'tech',
+          usageKey: null,
+          providerAccount: 'tech',
+        }),
+      ];
+      const result = resolveSessionRecoveryFromCandidates(
+        source,
+        candidates,
+        () => true,
+        inspectNativeResumeSession(source, home.home),
+        { account: 'tech' },
+      );
+      // The provider account is healthy and requested, but it is never the
+      // proven origin — it authenticates the existing origin context via
+      // rotation, never masquerades as having produced the transcript itself.
+      expect(result.mode).toBe('continue');
+      expect(result.candidate.providerAccount).toBe('tech');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('a legacy version-home candidate (no slot) is still truthfully matched by transcript ownership', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-recovery-legacy-'));
+    try {
+      const home = nativeHomeFixture(root, session().id);
+      const source = session({ filePath: home.filePath, cwd: home.cwd });
+      // No fromSlot/slotDir — a pre-migration install, identified only by version.
+      const result = resolveSessionRecoveryFromCandidates(
+        source,
+        [candidate('2.1.187')],
+        () => true,
+        inspectNativeResumeSession(source, home.home),
+      );
+      expect(result).toMatchObject({ mode: 'native', agent: 'claude', version: '2.1.187', cwd: home.cwd });
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('sessionMatchesAccount', () => {
+  it('matches on the persisted sidecar accountId regardless of path', () => {
+    const s = { agent: 'claude' as const, filePath: '/anywhere/session.jsonl', accountId: 'acct-1' };
+    expect(sessionMatchesAccount(s, { id: 'acct-1', agent: 'claude' })).toBe(true);
+    expect(sessionMatchesAccount(s, { id: 'acct-2', agent: 'claude' })).toBe(false);
+  });
+
+  it('never matches across a different agent, even with the same accountId', () => {
+    const s = { agent: 'claude' as const, filePath: '/anywhere/session.jsonl', accountId: 'acct-1' };
+    expect(sessionMatchesAccount(s, { id: 'acct-1', agent: 'codex' })).toBe(false);
+  });
+
+  it('falls back to canonical transcript ownership when there is no sidecar accountId', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-recovery-matches-account-'));
+    try {
+      const home = path.join(root, 'home');
+      fs.mkdirSync(home, { recursive: true });
+      const filePath = path.join(home, 'transcript.jsonl');
+      fs.writeFileSync(filePath, '{}\n');
+      const s = { agent: 'claude' as const, filePath };
+      expect(sessionMatchesAccount(s, { id: 'acct-1', agent: 'claude' }, home)).toBe(true);
+      expect(sessionMatchesAccount(s, { id: 'acct-1', agent: 'claude' }, path.join(root, 'other-home'))).toBe(false);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('stays unknown (false) with no accountId and no home to prove ownership', () => {
+    const s = { agent: 'claude' as const, filePath: '/anywhere/session.jsonl' };
+    expect(sessionMatchesAccount(s, { id: 'acct-1', agent: 'claude' })).toBe(false);
   });
 });
 
