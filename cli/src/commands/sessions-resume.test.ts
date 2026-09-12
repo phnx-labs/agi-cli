@@ -202,6 +202,7 @@ describe('selected resume argv', () => {
 
   it('rejects attach-only options that would launch a copy before lookup', async () => {
     await expect(sessionsResumeAction('abc12345', undefined, { attachOnly: true, mode: 'edit' })).rejects.toThrow('--attach-only cannot');
+    await expect(sessionsResumeAction('abc12345', undefined, { attachOnly: true, agent: 'codex' })).rejects.toThrow('--attach-only cannot');
   });
 
   it('retains run flags and native passthrough while filling the selected identity', () => {
