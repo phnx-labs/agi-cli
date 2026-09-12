@@ -13,8 +13,10 @@ import { isTierToken } from '../lib/model-tiers.js';
 import type { AgentId } from '../lib/types.js';
 import { RUN_AUTO_KEYWORD } from '../lib/types.js';
 import type { ResolvedRunDefaults } from '../lib/run-defaults.js';
+import type { DeviceAutoApplyResult } from '../lib/smart-launch.js';
 import { setHelpSections } from '../lib/help.js';
 import { isInteractiveTerminal, isPromptCancelled, requireInteractiveSelection } from './utils.js';
+import { isHumanFacingRun } from './run-account-picker.js';
 import { getUserAgentsDir, readMeta } from '../lib/state.js';
 import type { CrabboxBox } from '../lib/crabbox/cli.js';
 import { parseLoopInterval } from '../lib/loop.js';
@@ -266,18 +268,66 @@ export { RUN_AUTO_KEYWORD };
 /**
  * Whether `run auto` should default its host layer to the affinity pick (the
  * same machinery as `--device auto`). False when the caller pinned any host
- * flag, and false when this process was itself dispatched by a host run — the
- * dispatcher exports AGENTS_RUN_AUTO_HOST_RESOLVED=1 into the remote SHELL
+ * flag, and false when this process was itself dispatched by a host run —
+ * the dispatcher exports AGENTS_RUN_AUTO_HOST_RESOLVED=1 into the remote SHELL
  * (hosts/dispatch.ts remoteRunShellPrelude) because it already resolved the
  * host layer, and re-picking here would chain-hop the run across the fleet.
- * Pure so the pinning matrix is unit-testable.
+ * An INTERACTIVE dispatch of a named harness also reaches the remote as a bare
+ * `agents run <harness>` (its argv forwards without the routing flag), so the
+ * interactive prelude's AGENTS_REMOTE_INTERACTIVE=1 counts as "already placed"
+ * too — without it the remote would re-place the run and ping-pong across the
+ * fleet. Pure so the pinning matrix is unit-testable.
  */
 export function runAutoDefaultsToAffinity(
   options: { host?: string; device?: string; on?: string; computer?: string },
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   if (hostTargetGiven(options).length > 0) return false;
-  return env.AGENTS_RUN_AUTO_HOST_RESOLVED !== '1';
+  if (env.AGENTS_RUN_AUTO_HOST_RESOLVED === '1') return false;
+  return env.AGENTS_REMOTE_INTERACTIVE !== '1';
+}
+
+/**
+ * Whether a bare human-facing `agents run <harness>` — no prompt, so an
+ * interactive TUI run — defaults its placement to `--device auto` (PHNX-4083).
+ * A marker left off is decided for you: no `#` means balanced rotation, and no
+ * `@` (and no other placement flag) now means automatic device placement — the
+ * same engine as `--device auto`, whose pool never contains a box marked
+ * `personal`. ALL of these must hold:
+ *
+ * - no prompt (headless runs — teams, routines, hooks, `run <agent> "…"` —
+ *   keep running in place, unchanged);
+ * - a human-facing surface: a real TTY and no `--json`. This is the same
+ *   two-condition gate `signInLaunchDecision` uses in run-account-picker.ts —
+ *   reused here through isHumanFacingRun, not re-derived;
+ * - no device-picker marker (`agent@` already chose the device; picking this
+ *   machine there is a plain local run);
+ * - no `--resume` / `--lease` / `--box` / `--cloud` (those own placement);
+ * - the host layer is unpinned and this process is not itself a dispatched
+ *   hop — delegated to runAutoDefaultsToAffinity, which encodes both.
+ *
+ * Pure so the default-placement matrix is unit-testable.
+ */
+export function bareInteractiveRunDefaultsToDeviceAuto(
+  options: {
+    host?: string;
+    device?: string;
+    on?: string;
+    computer?: string;
+    resume?: string | boolean;
+    lease?: string | boolean;
+    box?: string;
+    cloud?: boolean;
+  },
+  run: { prompt?: string; devicePickerRequested?: boolean },
+  surface: { tty: boolean; json?: boolean },
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (run.prompt !== undefined) return false;
+  if (!isHumanFacingRun({ tty: surface.tty, json: surface.json === true })) return false;
+  if (run.devicePickerRequested) return false;
+  if (options.resume !== undefined || options.lease || options.box || options.cloud) return false;
+  return runAutoDefaultsToAffinity(options, env);
 }
 
 /**
@@ -920,8 +970,10 @@ export function registerRunCommand(program: Command): void {
       # Headless, can edit: have the agent make changes
       agents run claude "fix lint errors in src/" --mode edit
 
-      # Interactive (TUI) with the pinned default version
+      # Interactive (TUI): a bare run places itself like --device auto (a fleet
+      # worker, TUI forwarded over SSH); pin the device to stay on this machine
       agents run claude
+      agents run claude --device zion      # stay local (or pick this machine in claude@)
 
       # Pick a signed-in account/version for only this run (# = account picker)
       agents run claude#
@@ -1025,6 +1077,14 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         #@ asks both, account first, then device. The pickers cannot combine
         with an explicit pin of the same thing (--account, --device/--on/
         --computer/--host) or with --strategy/--balanced/--resume/--lease/--box.
+
+      Interactive placement: a bare 'agents run <harness>' (no prompt, real TTY)
+        places itself like --device auto — a fleet worker runs it, with the TUI
+        forwarded over SSH. Headless runs (any prompt, --json, no TTY) are
+        unchanged: they run in place. To stay on this machine, pass
+        --device <this machine>, or pick this machine (listed first) in the
+        '<harness>@' device picker. When placement finds no healthy device the
+        run fails loud and names the local spellings.
 
       Fallback: --fallback codex,antigravity retries on rate-limit failure via /continue handoff. Each entry accepts @version.
 
@@ -1489,19 +1549,44 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         if (!isSelfHost(pickedDevice)) options.device = pickedDevice;
       }
 
+      // Default placement (PHNX-4083): a bare human-facing `agents run
+      // <harness>` (no prompt, real TTY, no placement flags, not a dispatched
+      // hop) places itself like `--device auto` — a marker left off is decided
+      // for you. Headless runs (a prompt, --json, teams/routines/hooks) keep
+      // running in place, unchanged.
+      const defaultPlacement = bareInteractiveRunDefaultsToDeviceAuto(
+        options,
+        { prompt, devicePickerRequested },
+        { tty: isInteractiveTerminal(), json: options.json },
+      );
+      if (defaultPlacement) options.device = 'auto';
+
       // --device auto (and deprecated --smart): live fleet pick.
       // Harness is always the agent the user typed — never auto-picked.
       // Placement failure propagates; an automatic request never becomes local.
       {
         const { applyDeviceAutoToOptions } = await import('../lib/smart-launch.js');
-        const result = await applyDeviceAutoToOptions(options, {
-          accountPickerRequested,
-          // `run auto` selects its harness after placement, so do not filter
-          // candidates against an arbitrary proxy harness at this stage.
-          agent: normalizedAgentSpec.split('#')[0].split('@')[0] === RUN_AUTO_KEYWORD
-            ? undefined
-            : (resolveAgentName(normalizedAgentSpec.split('#')[0].split('@')[0]) ?? undefined),
-        });
+        let result: DeviceAutoApplyResult;
+        try {
+          result = await applyDeviceAutoToOptions(options, {
+            accountPickerRequested,
+            // `run auto` selects its harness after placement, so do not filter
+            // candidates against an arbitrary proxy harness at this stage.
+            agent: normalizedAgentSpec.split('#')[0].split('@')[0] === RUN_AUTO_KEYWORD
+              ? undefined
+              : (resolveAgentName(normalizedAgentSpec.split('#')[0].split('@')[0]) ?? undefined),
+          });
+        } catch (err) {
+          // Placement the DEFAULT chose must fail loud AND name the local
+          // escape hatch — never silently fall back to a local launch.
+          if (!defaultPlacement) throw err;
+          console.error(chalk.red((err as Error).message));
+          const { machineId } = await import('../lib/machine-id.js');
+          console.error(chalk.gray(
+            `Run here instead: agents run ${runBaseAgentName} --device ${machineId()}`,
+          ));
+          process.exit(1);
+        }
         if (!options.quiet && result.deprecationSmart) {
           process.stderr.write(
             chalk.yellow('[agents] --smart is deprecated; use --device auto\n'),

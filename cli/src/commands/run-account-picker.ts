@@ -248,6 +248,17 @@ export async function pickSwitchAccount(agent: AgentId, rows: SwitchAccountRow[]
 }
 
 /**
+ * The two-condition "human-facing" gate behind signInLaunchDecision and
+ * noVerifiedUsageDecision: a real TTY and no `--json`. Off a TTY nobody can
+ * answer a prompt, and `--json` marks a MACHINE consumer, which must never be
+ * handed a picker or dropped into a login TUI. Mirrors the canonical
+ * `Surface.interactive = tty && !json` in `commands/utils.ts`.
+ */
+export function isHumanFacingRun(input: { tty: boolean; json: boolean }): boolean {
+  return input.tty && !input.json;
+}
+
+/**
  * Whether a zero-healthy run may recover by launching for a login, or must keep
  * failing loud. Three inputs, all of which have to hold:
  *
@@ -262,7 +273,7 @@ export async function pickSwitchAccount(agent: AgentId, rows: SwitchAccountRow[]
 export function signInLaunchDecision(
   input: { recoverable: number; tty: boolean; json: boolean },
 ): 'launch' | 'fail-loud' {
-  const humanPresent = input.tty && !input.json;
+  const humanPresent = isHumanFacingRun(input);
   return input.recoverable > 0 && humanPresent ? 'launch' : 'fail-loud';
 }
 
