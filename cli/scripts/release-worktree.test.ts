@@ -30,7 +30,7 @@ describe('release cleanup preserves work', () => {
     expect(fs.existsSync(worktree)).toBe(false);
   });
 
-  it.each(['saved', 'unpublished', 'edited', 'restaged'])('restores only saved, unchanged release output: %s', (state) => {
+  it.each(['saved', 'unpublished', 'edited', 'restaged', 'recreated', 'ignored-recreated'])('restores only saved, unchanged release output: %s', (state) => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'release-restore-'));
     roots.push(root);
     git(root, 'init');
@@ -48,6 +48,12 @@ describe('release cleanup preserves work', () => {
     fs.unlinkSync(path.join(root, '.changelog/next/note.md'));
     git(root, 'add', '.');
     const saved = git(root, 'commit-tree', git(root, 'write-tree'), '-p', 'HEAD', '-m', 'release');
+    if (state === 'recreated' || state === 'ignored-recreated') {
+      fs.writeFileSync(path.join(root, '.changelog/next/note.md'), 'subsequent note\n');
+      if (state === 'ignored-recreated') {
+        fs.appendFileSync(path.join(root, '.git/info/exclude'), '\n.changelog/next/note.md\n');
+      }
+    }
     if (state === 'edited' || state === 'restaged') {
       fs.writeFileSync(path.join(root, 'package.json'), 'subsequent edit\n');
       if (state === 'restaged') {
@@ -70,6 +76,9 @@ describe('release cleanup preserves work', () => {
       expect(git(root, 'status', '--porcelain')).toBe(before);
       expect(git(root, 'write-tree')).toBe(beforeIndex);
       expect(fs.readFileSync(path.join(root, '.changelog/9.8.7.md'), 'utf8')).toBe('release note\n');
+      if (state === 'recreated' || state === 'ignored-recreated') {
+        expect(fs.readFileSync(path.join(root, '.changelog/next/note.md'), 'utf8')).toBe('subsequent note\n');
+      }
     }
   });
 });
