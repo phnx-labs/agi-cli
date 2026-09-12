@@ -11,13 +11,14 @@
 
 import type { Command } from 'commander';
 import os from 'node:os';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import chalk from 'chalk';
 import {
   installComputerHelperMacLocal,
   activateComputerHelperMacLocal,
   probeComputerTrust,
 } from './computer.js';
+import { resolveComputerBin, ComputerClientError } from '../lib/computer-client.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 
 const ACCESSIBILITY_PANE = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility';
@@ -48,6 +49,17 @@ export async function runComputerWizard(): Promise<boolean> {
       ),
     );
     return false;
+  }
+
+  try {
+    resolveComputerBin();
+  } catch (error) {
+    if (!(error instanceof ComputerClientError) || error.code !== 'COMPUTER_BIN_MISSING') throw error;
+    console.log('Installing @phnx-labs/computer-cli@0.1.0…');
+    const installed = spawnSync('npm', ['install', '-g', '@phnx-labs/computer-cli@0.1.0'], { stdio: 'inherit' });
+    if (installed.status !== 0) return false;
+    try { resolveComputerBin(); }
+    catch { console.error('Computer CLI installation did not produce an executable on PATH.'); return false; }
   }
 
   // 1. Download + verify + install the signed, notarized helper.

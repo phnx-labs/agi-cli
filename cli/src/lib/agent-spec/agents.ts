@@ -94,6 +94,7 @@ function saveCliVersionCache(): void {
  * section, even though the user had nothing to import.
  */
 interface NativeBinaryResolutionOptions {
+  accept?: (candidate: string) => boolean;
   shimsDir?: string;
   historyDir?: string;
 }
@@ -166,7 +167,7 @@ export function findInPath(command: string, options: NativeBinaryResolutionOptio
         // meaningless (PATHEXT decides), so the check is POSIX-only.
         if (process.platform !== 'win32') fs.accessSync(full, fs.constants.X_OK);
         const native = resolveNativeBinaryPath(command, full, options);
-        if (native) return native;
+        if (native && (!options.accept || options.accept(native))) return native;
       } catch {
         /* not in this dir */
       }
