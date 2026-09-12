@@ -1825,8 +1825,16 @@ process client (`cli/src/lib/secrets-client.ts`, documented in
   (`pruneOrphanedCommandShim`, `shims.drift.test.ts`).
 - **RPC-1 (MUST).** The client MUST speak the standalone's private
   request/response protocol over inherited pipes (fd 3 in, fd 4 out),
-  separate from the child's stdout, and MUST verify the protocol version via a
-  handshake before the first real request (`secrets-client.ts`).
+  separate from the child's stdout, and MUST verify the protocol version on
+  EVERY response, rejecting a version it does not speak with
+  `PROTOCOL_UNSUPPORTED` (`parseResponse`, `secrets-client.ts`). It MUST NOT
+  spend a separate `handshake` round trip to learn the version: every reply
+  carries `v`, and each request is a cold `secrets __serve` process, so a
+  negotiation spawn is a whole Node boot charged to the first secrets read of
+  every command (measured 1 of 7 spawns on an `agents run claude` launch,
+  PHNX-4082). Checking the version per response is also strictly stronger than
+  the handshake it replaces: a standalone that answered the handshake as v1 and
+  a later op as v2 previously surfaced as a malformed envelope.
 - **MIG-1 (MUST).** `SECRETS_HOME` MUST default to the user agents dir
   (`getUserAgentsDir()`, `~/.agents`) so the standalone adopts a user's
   pre-extraction store **in place** — no copy, no re-encryption. An explicit

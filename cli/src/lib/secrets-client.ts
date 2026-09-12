@@ -353,7 +353,21 @@ function parseResponse(raw: Buffer): unknown {
   } catch {
     throw new SecretsClientError('INVALID_RESPONSE', `secrets returned a non-JSON response${describeNonJson(text)}`);
   }
-  if (!parsed || parsed.v !== PROTOCOL_VERSION || typeof parsed.id !== 'string') {
+  if (!parsed || typeof parsed !== 'object') {
+    throw new SecretsClientError('INVALID_RESPONSE', 'secrets returned a malformed response envelope');
+  }
+  // Every reply carries the protocol it was written against, so version
+  // negotiation rides the answer itself — there is no separate handshake spawn
+  // to pay a cold Node boot for (PHNX-4082). A mismatch is the standalone being
+  // too old or too new, which is actionable; anything else is a broken envelope.
+  if (typeof parsed.v === 'number' && parsed.v !== PROTOCOL_VERSION) {
+    throw new SecretsClientError(
+      'PROTOCOL_UNSUPPORTED',
+      `secrets speaks protocol ${String(parsed.v)}; this agents-cli needs ${PROTOCOL_VERSION}. ` +
+        'Update the standalone CLI (npm i -g @phnx-labs/secrets-cli).',
+    );
+  }
+  if (parsed.v !== PROTOCOL_VERSION || typeof parsed.id !== 'string') {
     throw new SecretsClientError('INVALID_RESPONSE', 'secrets returned a malformed response envelope');
   }
   if (parsed.ok) return decodeWire(parsed.result);
@@ -514,48 +528,12 @@ function serveOnceSync(op: string, args: unknown[], context?: SecretsContext): u
   return parseResponse(raw);
 }
 
-// --- handshake (once per process) ------------------------------------------
-
-let handshakeReady = false;
-let handshakePromise: Promise<void> | null = null;
-
-function checkHandshake(result: unknown): void {
-  const protocol = (result as { protocol?: unknown } | null)?.protocol;
-  if (protocol !== PROTOCOL_VERSION) {
-    throw new SecretsClientError(
-      'PROTOCOL_UNSUPPORTED',
-      `secrets speaks protocol ${String(protocol)}; this agents-cli needs ${PROTOCOL_VERSION}. ` +
-        'Update the standalone CLI (npm i -g @phnx-labs/secrets-cli).',
-    );
-  }
-}
-
-async function ensureHandshake(): Promise<void> {
-  if (handshakeReady) return;
-  if (!handshakePromise) {
-    handshakePromise = (async () => {
-      checkHandshake(await serveOnce('handshake', []));
-      handshakeReady = true;
-    })().catch((error) => {
-      handshakePromise = null;
-      throw error;
-    });
-  }
-  await handshakePromise;
-}
-
-function ensureHandshakeSync(): void {
-  if (handshakeReady) return;
-  checkHandshake(serveOnceSync('handshake', []));
-  handshakeReady = true;
-}
-
 // --- primitives ------------------------------------------------------------
 
 /**
  * Send one operation to the standalone secrets CLI and await its typed result.
- * Verifies the executable speaks protocol v1 once per process (cached), then
- * spawns `secrets __serve` for the operation. Throws a {@link SecretsClientError}
+ * Spawns `secrets __serve` once for the operation; `parseResponse` checks the
+ * protocol on the reply it already carries. Throws a {@link SecretsClientError}
  * carrying the server's `{code, message}` on failure.
  */
 export async function secretsRequest<T = unknown>(
@@ -563,7 +541,6 @@ export async function secretsRequest<T = unknown>(
   args: unknown[] = [],
   context?: SecretsContext,
 ): Promise<T> {
-  await ensureHandshake();
   return (await serveOnce(op, args, context)) as T;
 }
 
@@ -577,15 +554,12 @@ export function secretsRequestSync<T = unknown>(
   args: unknown[] = [],
   context?: SecretsContext,
 ): T {
-  ensureHandshakeSync();
   return serveOnceSync(op, args, context) as T;
 }
 
-/** Test hook: forget the cached binary + handshake so a new env is re-resolved. */
+/** Test hook: forget the cached binary so a new env is re-resolved. */
 export function _resetSecretsClientForTest(): void {
   cachedBin = undefined;
-  handshakeReady = false;
-  handshakePromise = null;
   requestCounter = 0;
   syncServeTimeoutMs = SYNC_SERVE_TIMEOUT_MS;
 }

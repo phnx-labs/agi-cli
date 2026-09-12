@@ -37,9 +37,14 @@ parent                              child: `secrets __serve`
   `Map` arguments and results are carried through `encodeWire`/`decodeWire`
   (`{ $map: [[k, v], …] }`). This is the one thing the client re-declares rather
   than imports — a shared schema both sides must agree on byte-for-byte.
-- **Handshake**, once per process (cached): the first request sends
-  `op: "handshake"` and asserts the server speaks `PROTOCOL_VERSION` (1), else
-  throws `PROTOCOL_UNSUPPORTED`.
+- **Version negotiation rides the response**, not a separate round trip: every
+  reply carries `v`, and `parseResponse` rejects one that is not
+  `PROTOCOL_VERSION` (1) with `PROTOCOL_UNSUPPORTED`. There is deliberately no
+  `handshake` request before the first real op — each request is a cold
+  `secrets __serve` process, so that negotiation cost a full Node boot on the
+  first secrets read of every command (PHNX-4082). `op: "handshake"` remains a
+  callable op the standalone answers with `{protocol, operations}`; the client
+  just no longer spends a spawn on it.
 - **Errors** are `SecretsClientError` carrying the server's `{ code, message }`
   (e.g. `ACCESS_DENIED`, `NOT_FOUND`), or a client-side transport code
   (`SECRETS_BIN_MISSING`, `TIMEOUT`, `PROTOCOL_UNSUPPORTED`, `SPAWN_FAILED`).
