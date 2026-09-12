@@ -10,6 +10,7 @@ import { pathToFileURL } from 'url';
 import { createRequire } from 'module';
 import {
   addAlwaysFreshRepo,
+  bareInteractiveRunDefaultsToDeviceAuto,
   computeNetMode,
   gitToplevel,
   hostTargetGiven,
@@ -376,6 +377,18 @@ describe('agents run auto — the reserved harness keyword (RUSH-2132)', () => {
     expect(runAutoDefaultsToAffinity({}, { AGENTS_RUN_AUTO_HOST_RESOLVED: '1' })).toBe(false);
   });
 
+  it('runAutoDefaultsToAffinity: an interactive dispatch of a NAMED harness is already placed too (PHNX-4083)', () => {
+    // A bare `agents run claude --device <box>` reaches the remote as a bare
+    // `agents run claude` (routing flags are not forwarded), so its
+    // AGENTS_REMOTE_INTERACTIVE=1 prelude marker is the only hop evidence —
+    // without this the remote would re-place the run and chain-hop.
+    expect(runAutoDefaultsToAffinity({}, { AGENTS_REMOTE_INTERACTIVE: '1' })).toBe(false);
+    expect(runAutoDefaultsToAffinity({}, {
+      AGENTS_RUN_AUTO_HOST_RESOLVED: '1',
+      AGENTS_REMOTE_INTERACTIVE: '1',
+    })).toBe(false);
+  });
+
   it('the keyword does not collide with a real harness id today', () => {
     expect(RUN_AUTO_KEYWORD).toBe('auto');
     // If this ever fails, a harness registered the id `auto` and the run-auto
@@ -411,6 +424,63 @@ describe('agents run auto — the reserved harness keyword (RUSH-2132)', () => {
     }
   });
 });
+
+describe('bare interactive run defaults to --device auto (PHNX-4083)', () => {
+  const bare = {}; // no placement-owning options
+  const human = { prompt: undefined, devicePickerRequested: false };
+  const tty = { tty: true, json: false };
+
+  it('a bare human-facing run with nothing pinned places automatically', () => {
+    expect(bareInteractiveRunDefaultsToDeviceAuto(bare, human, tty)).toBe(true);
+  });
+
+  it('a prompt makes the run headless — it runs in place, unchanged', () => {
+    expect(bareInteractiveRunDefaultsToDeviceAuto(bare, { ...human, prompt: 'fix the bug' }, tty)).toBe(false);
+  });
+
+  it('the human-facing gate is two conditions: a real TTY and no --json', () => {
+    expect(bareInteractiveRunDefaultsToDeviceAuto(bare, human, { tty: true, json: true })).toBe(false);
+    expect(bareInteractiveRunDefaultsToDeviceAuto(bare, human, { tty: false, json: false })).toBe(false);
+    expect(bareInteractiveRunDefaultsToDeviceAuto(bare, human, { tty: false, json: true })).toBe(false);
+  });
+
+  it('the @ device-picker marker is an explicit device choice — never overridden', () => {
+    expect(bareInteractiveRunDefaultsToDeviceAuto(bare, { ...human, devicePickerRequested: true }, tty)).toBe(false);
+  });
+
+  it.each([
+    ['--resume', { resume: 'abc123' }],
+    ['--lease', { lease: true }],
+    ['--box', { box: 'warm-one' }],
+    ['--cloud', { cloud: true }],
+  ])('%s owns placement outright', (_flag, options) => {
+    expect(bareInteractiveRunDefaultsToDeviceAuto({ ...bare, ...options }, human, tty)).toBe(false);
+  });
+
+  it.each([
+    ['--host', { host: 'yosemite-s0' }],
+    ['--device', { device: 'yosemite-s0' }],
+    ['--on', { on: 'yosemite-s0' }],
+    ['--computer', { computer: 'yosemite-s0' }],
+  ])('an explicit %s keeps the run where it was pointed', (_flag, options) => {
+    expect(bareInteractiveRunDefaultsToDeviceAuto({ ...bare, ...options }, human, tty)).toBe(false);
+  });
+
+  it('a dispatched hop never re-places — neither run-auto nor interactive-dispatch markers', () => {
+    expect(bareInteractiveRunDefaultsToDeviceAuto(bare, human, tty, { AGENTS_RUN_AUTO_HOST_RESOLVED: '1' })).toBe(false);
+    expect(bareInteractiveRunDefaultsToDeviceAuto(bare, human, tty, { AGENTS_REMOTE_INTERACTIVE: '1' })).toBe(false);
+  });
+
+  it('stays a plain local run when several exclusions hold at once', () => {
+    expect(bareInteractiveRunDefaultsToDeviceAuto(
+      { resume: 'abc123', host: 'yosemite-s0' },
+      { prompt: 'x', devicePickerRequested: true },
+      { tty: false, json: true },
+      { AGENTS_REMOTE_INTERACTIVE: '1' },
+    )).toBe(false);
+  });
+});
+
 
 describe('interactive host dispatch — run auto session correlation (RUSH-2132 review #5)', () => {
   it('run auto ALWAYS mints a correlation launch id, even with an explicit --session-id', () => {

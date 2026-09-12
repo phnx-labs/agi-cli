@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { RotateCandidate } from '../lib/accounting/rotate.js';
 import type { UsageSnapshot, UsageWindowKey } from '../lib/accounting/usage.js';
-import { buildRunAccountChoices, buildSwitchAccountChoices, formatAccountLimits, noVerifiedUsageDecision, pickSignInLaunchVersion, signInLaunchDecision } from './run-account-picker.js';
+import { buildRunAccountChoices, buildSwitchAccountChoices, formatAccountLimits, isHumanFacingRun, noVerifiedUsageDecision, pickSignInLaunchVersion, signInLaunchDecision } from './run-account-picker.js';
 
 function snapshot(windows: Array<[UsageWindowKey, number]>, plan: string | null = null): UsageSnapshot {
   return {
@@ -270,6 +270,15 @@ describe('signInLaunchDecision (RUSH-2334)', () => {
 
   it('an all-throttled exhausted set fails loud even for a present human (RUSH-2132)', () => {
     expect(signInLaunchDecision({ ...base, recoverable: 0 })).toBe('fail-loud');
+  });
+});
+
+describe('isHumanFacingRun — the shared two-condition gate', () => {
+  it('is true only on a real TTY without --json (the gate signInLaunchDecision uses)', () => {
+    expect(isHumanFacingRun({ tty: true, json: false })).toBe(true);
+    expect(isHumanFacingRun({ tty: true, json: true })).toBe(false);
+    expect(isHumanFacingRun({ tty: false, json: false })).toBe(false);
+    expect(isHumanFacingRun({ tty: false, json: true })).toBe(false);
   });
 });
 
