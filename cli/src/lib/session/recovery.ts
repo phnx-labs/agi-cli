@@ -329,17 +329,21 @@ export function resolveSessionRecoveryFromCandidates(
  *   here (`/Users/…` vs `/home/…`). `_remote` marks exactly that case.
  * - **A peer's fleet-synced mirror stub.** `upsertMirrorSession`
  *   (`db.ts:4142`) writes `file_path = ''` by design — the row carries the
- *   peer's metadata and preview digest, not its transcript. `mirrorSyncedAt` is
- *   set for precisely these rows and "absent for a genuine local or
- *   host-dispatch row" (PHNX-3792), and it survives the PHNX-3626 fallback,
- *   which rewrites only `machine`. Judging such a row's empty path locally
- *   would refuse the owner-unreachable `/continue` replay this device is
- *   supposed to fall back to.
- * - **No path, no peer behind it.** What is left is a live-registry row:
- *   `activeSessionToSessionMeta` synthesizes `filePath: ''` for a session the
- *   registry calls running (RUSH-2682, deliberately, so `preview` can render a
- *   just-started one) and sets no mirror fields. That is the only shape this
- *   device can honestly call "no transcript" — see
+ *   peer's metadata and preview digest, not its transcript. The exemption is
+ *   NOT "this row has content to replay" (it does not, locally). It is that the
+ *   row is positive evidence a transcript EXISTS, on a named publishing device
+ *   (`mirrorSource`) that is merely unreachable right now — and PHNX-3626
+ *   already decided, deliberately and with a printed warning, that this case
+ *   degrades to a labelled `/continue` replay rather than dead-ending. Refusing
+ *   it here would silently reverse that decision. `mirrorSyncedAt` is set for
+ *   precisely these rows, "absent for a genuine local or host-dispatch row"
+ *   (PHNX-3792), and survives the fallback's `machine` rewrite.
+ * - **No path and no provenance.** A live-registry row
+ *   (`activeSessionToSessionMeta`, `filePath: ''` per RUSH-2682 so `preview` can
+ *   render a just-started session), a host-dispatch shim no peer answered for,
+ *   or a cloud task row. None carries evidence that a transcript exists
+ *   anywhere, which is what separates them from the mirror stub above — not
+ *   local readability, which none of them has either. See
  *   {@link assertRecoverableTranscript}.
  */
 export function sessionTranscriptReadable(
