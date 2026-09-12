@@ -398,7 +398,7 @@ DEST_JSON="$(scripts/release-attestation.sh write --dir "$STORE" --file "$ATTEST
   || die "failed to write attestation record"
 rm -f "$ATTEST_TMP"
 DEST_DIR="$(dirname "$DEST_JSON")"
-cp "$TGZ_NAME" "$DEST_DIR/$TGZ_NAME"
+mv "$TGZ_NAME" "$DEST_DIR/$TGZ_NAME"
 
 green "Wrote $DEST_JSON"
 green "Tarball at $DEST_DIR/$TGZ_NAME"

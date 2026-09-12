@@ -73,6 +73,7 @@ function buildFixture(root: string, opts: { failSuite?: boolean; suite?: 'greenW
   git(root, 'clone', '-q', remote, caller);
   git(caller, 'config', 'user.email', 'attest-test@example.com');
   git(caller, 'config', 'user.name', 'attest-test');
+  fs.copyFileSync(path.resolve(__dirname, '../../.gitignore'), path.join(caller, '.gitignore'));
 
   fs.mkdirSync(path.join(caller, 'cli/scripts'), { recursive: true });
   fs.mkdirSync(path.join(caller, 'cli/ci'), { recursive: true });

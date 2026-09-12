@@ -895,7 +895,12 @@ restore_release_tree() {
   if git diff --quiet HEAD -- "${paths[@]}" && git diff --cached --quiet HEAD -- "${paths[@]}"; then
     return
   fi
-  if [[ -z "${RELEASE_CI_HEAD:-}" ]] \
+  local untracked
+  if ! untracked="$(git ls-files --others -- "${paths[@]}")"; then
+    yellow "Retained release edits for inspection: $ROOT"
+    return
+  fi
+  if [[ -n "$untracked" || -z "${RELEASE_CI_HEAD:-}" ]] \
     || ! git diff --quiet "$RELEASE_CI_HEAD" -- "${paths[@]}" \
     || ! git diff --cached --quiet "$RELEASE_CI_HEAD" -- "${paths[@]}"; then
     yellow "Retained release edits for inspection: $ROOT"
