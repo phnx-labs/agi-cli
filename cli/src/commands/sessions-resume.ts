@@ -150,8 +150,8 @@ export async function sessionsResumeAction(
   prompt: string | undefined,
   options: ResumeOptions,
 ): Promise<void> {
-  if (options.attachOnly && (prompt !== undefined || options.account || options.model || options.mode || options.interactive || options.headless || options.cwd || options.here)) {
-    throw new Error('--attach-only cannot be combined with a follow-up prompt or options that change the running session.');
+  if (options.attachOnly && (prompt !== undefined || options.agent || options.account || options.model || options.mode || options.interactive || options.headless || options.cwd || options.here)) {
+    throw new Error('--attach-only cannot be combined with --agent, a follow-up prompt, or options that change the running session. Pass the session ID without filters.');
   }
   const strictOpts: StrictResumeOptions = {
     agent: parseAgentFilter(options.agent).agent,
