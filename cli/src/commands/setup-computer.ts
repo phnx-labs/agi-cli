@@ -55,8 +55,8 @@ export async function runComputerWizard(): Promise<boolean> {
     resolveComputerBin();
   } catch (error) {
     if (!(error instanceof ComputerClientError) || error.code !== 'COMPUTER_BIN_MISSING') throw error;
-    console.log('Installing @phnx-labs/computer-cli@0.1.0…');
-    const installed = spawnSync('npm', ['install', '-g', '@phnx-labs/computer-cli@0.1.0'], { stdio: 'inherit' });
+    console.log('Installing @phnx-labs/computer-cli@0.1.1…');
+    const installed = spawnSync('npm', ['install', '-g', '@phnx-labs/computer-cli@0.1.1'], { stdio: 'inherit' });
     if (installed.status !== 0) return false;
     try { resolveComputerBin(); }
     catch { console.error('Computer CLI installation did not produce an executable on PATH.'); return false; }
