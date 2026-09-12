@@ -512,7 +512,7 @@ describe('expired cached windows are unknown, not 0%', () => {
     // on `staleWindows` with `windows` empty. Serializing only `windows` dropped
     // the number, so the daemon-refreshed cache the next plain `agents view grok`
     // reads rendered the plan alone (no bar), even though `--refresh` had just
-    // shown "W: 42% · stale". The serializer must persist stale readings too.
+    // shown "W: 42%* (stale)". The serializer must persist stale readings too.
     const capturedAt = new Date(Date.now() - 60 * 60 * 1000);
     writeClaudeUsageCache(usageKey, {
       source: 'last_seen',
