@@ -83,7 +83,15 @@ optional so an older engine keeps working.
 | `device` | The resolved ssh target (`sshTarget`, `user`, `host`, `sshArgs`) so the engine can provision a remote helper without the devices registry |
 | `policy` | `policyPath`, `peersPath`, the allowed bundle ids and peer exec paths, the gated verb classes, the admission cache path, and the exact grant hint |
 | `identity` | `actor`, `sessionId`, `launchId`, and the `invocationId` that groups one run's actions |
+| `service` | Whether the engine may register its daemon with the real service manager, under which `label`, and the `homeEnv` its manifest must bake |
 | `logPath` | Where the daemon log belongs, so `status` and the engine agree |
+
+`service` is the one field the engine must *obey* rather than merely use.
+`launchctl` and `systemd --user` are per-user-session and HOME-independent, so a
+process running under one of agents-cli's redirected homes would register its job
+in the **real** service manager and outlive the sandbox that created it
+(RUSH-2968). Only the CLI that redirected HOME knows it did, so it sends the
+verdict: `registrationAllowed: false` means refuse to register and print `reason`.
 
 ### The action events (fd 4)
 
