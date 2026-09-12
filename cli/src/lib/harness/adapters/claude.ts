@@ -161,7 +161,15 @@ export function claudeWorkerLoginTrapPreflight(args: {
   agent: AgentId;
   interactive: boolean;
   deviceRole?: ConfiguredDeviceRole;
-  hasSetupToken: boolean;
+  /**
+   * Will a Claude credential actually reach the child at spawn? The caller ORs
+   * the resolved worker setup-token with an explicit `--env
+   * CLAUDE_CODE_OAUTH_TOKEN=…` override — `buildExecEnv` merges `options.env`
+   * LAST and unconditionally, so that override wins even the worker branch's
+   * strip and authenticates the run. Gating on the setup-token alone would
+   * falsely refuse that sanctioned escape hatch (forwarded across `--device`).
+   */
+  hasWorkerCredential: boolean;
   machine?: string;
 }): string | null {
   if (args.agent !== 'claude') return null;
@@ -179,8 +187,9 @@ export function claudeWorkerLoginTrapPreflight(args: {
   // the exact cost applyExecConfigEnv avoids). `--device auto` only ever lands on
   // an explicit worker (filterAutoPool), so the dispatched trap is still caught.
   if (args.deviceRole !== 'worker') return null;
-  // A durable worker credential resolved for the selected account — proceed.
-  if (args.hasSetupToken) return null;
+  // A credential will reach the child (worker setup-token, or an explicit
+  // --env CLAUDE_CODE_OAUTH_TOKEN override) — proceed.
+  if (args.hasWorkerCredential) return null;
 
   const where = args.machine ? `worker '${args.machine}'` : 'this worker';
   return [

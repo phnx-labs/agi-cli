@@ -485,9 +485,10 @@ syncs, so Anthropic re-prompts every run (the operator-visible re-login loop).
 `spawnAgentLeased` beside `codexSandboxPreflight`) refuses that interactive run
 **before spawn** with the real fix — pin a live account (`agents run claude#<name>`),
 set the default (`agents accounts default claude <name>`), or mint the token on a
-headed box (`agents accounts login claude#<name>`) — never "log in here." It is
-interactive-only (the headless 401 is already loud) and fires ONLY on an **explicit
-`role: worker`** box: the owner rule guarantees a worker holds no native login, so
+headed box (`agents accounts login claude#<name>`) — never "log in here." An explicit `--env CLAUDE_CODE_OAUTH_TOKEN=…` still authenticates the run (it
+merges last in `buildExecEnv`, so the gate treats it as a present credential and
+does not refuse it). It is interactive-only (the headless 401 is already loud) and
+fires ONLY on an **explicit `role: worker`** box: the owner rule guarantees a worker holds no native login, so
 no-token there is genuinely the login screen with nothing behind it. A headed box
 uses its own native login, and an UNMARKED box is left alone — it may be an
 unconfigured personal laptop whose first-run login is legitimate, and its native

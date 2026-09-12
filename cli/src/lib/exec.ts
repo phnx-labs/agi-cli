@@ -2199,11 +2199,17 @@ async function spawnAgentLeased(options: ExecOptions): Promise<SpawnResult> {
   // (401), so the gate is interactive-only (the preflight enforces that).
   if (options.agent === 'claude') {
     const { versionHome } = resolveExecConfigHome(options);
+    // A credential reaches the child if the worker setup-token resolves for the
+    // selected account OR the caller passed an explicit --env override
+    // (buildExecEnv merges options.env last, so it wins even the worker strip).
+    const hasWorkerCredential =
+      Boolean(options.env?.CLAUDE_CODE_OAUTH_TOKEN) ||
+      (versionHome ? resolveClaudeSetupToken(versionHome) !== null : false);
     const loginTrap = claudeWorkerLoginTrapPreflight({
       agent: options.agent,
       interactive,
       deviceRole: selfConfiguredDeviceRole(),
-      hasSetupToken: versionHome ? resolveClaudeSetupToken(versionHome) !== null : false,
+      hasWorkerCredential,
       machine: machineId(),
     });
     if (loginTrap) {
