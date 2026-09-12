@@ -16,13 +16,17 @@ import {
   isAlwaysFreshRepo,
   isInsideGitWorkTree,
   parseRunAccountPickerRequest,
+  resolveRecoveredAccountEnv,
   runAccountPickerConflicts,
   runAutoDefaultsToAffinity,
   hostInteractiveNeedsCorrelationId,
   parseExplicitSessionId,
+  useAccountDefaultForRun,
   RUN_AUTO_KEYWORD,
 } from './exec.js';
 import { ALL_AGENT_IDS } from '../lib/agents.js';
+import { addNativeAccount, removeAccount } from '../lib/account-registry.js';
+import { recordSlot, slotDir } from '../lib/accounts/slots.js';
 
 describe.skipIf(process.platform === 'win32')('native account launch selects a stable home', () => {
   it('uses the account installation unless an explicit binary installation was requested', () => {
@@ -691,5 +695,62 @@ describe.skipIf(process.platform === 'win32')('--copy-creds refusal (RUSH-2527)'
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe('useAccountDefaultForRun — suppress implicit defaults during resume', () => {
+  it('consults the harness default on an ordinary run', () => {
+    expect(useAccountDefaultForRun(false, false)).toBe(true);
+  });
+
+  it('suppresses the default when resuming, so session recovery\'s own account pick is never silently overridden', () => {
+    expect(useAccountDefaultForRun(false, true)).toBe(false);
+  });
+
+  it('a profile run never consults the harness default either way', () => {
+    expect(useAccountDefaultForRun(true, false)).toBe(false);
+    expect(useAccountDefaultForRun(true, true)).toBe(false);
+  });
+});
+
+describe('resolveRecoveredAccountEnv — session-recovery account wiring', () => {
+  it('resolves a recovered NATIVE selector to its own slot HOME, not the launched version home', async () => {
+    // Before the fix, only `rotatedAccount.providerAccount` reached
+    // resolveSpawnAccount, so a native origin/rotated-sibling selector (no
+    // providerAccount) resolved nothing and execHome silently stayed whatever
+    // the ordinary account path had already picked — never the account that
+    // actually produced the session.
+    const suffix = `recovered-native-${Date.now()}`;
+    const account = addNativeAccount(`acct-${suffix}`, 'claude', `claude:user=${suffix}`, undefined, 'version');
+    const dir = slotDir('claude', account.id);
+    fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
+    recordSlot(account.id, { accountId: account.id, slotDir: dir, authMode: 'native', verdict: 'live' });
+    try {
+      const result = await resolveRecoveredAccountEnv('claude', '2.1.269', {
+        selector: account.name,
+        nativeAccount: account.name,
+        label: account.name,
+        email: null,
+      });
+      expect(result.execHome).toBe(dir);
+    } finally {
+      removeAccount(account.name);
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('a provider selector injects env and touches no execHome', async () => {
+    const result = await resolveRecoveredAccountEnv('cursor', '1.0.0', {
+      selector: 'no-such-provider-account',
+      providerAccount: 'no-such-provider-account',
+      label: 'no-such-provider-account',
+      email: null,
+    }).catch((err: Error) => err);
+    // No such account is registered in this sandboxed HOME — resolveSpawnAccount
+    // fails loud (an explicit selector never silently falls through), the same
+    // behavior an explicit --account gets. Proves the provider branch still
+    // routes through the real resolveSpawnAccount call, not a bespoke lookup.
+    expect(result).toBeInstanceOf(Error);
+    expect((result as Error).message).toContain('no-such-provider-account');
   });
 });

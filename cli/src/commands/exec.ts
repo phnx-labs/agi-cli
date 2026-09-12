@@ -245,6 +245,60 @@ export function hostInteractiveNeedsCorrelationId(
   return !hostSessionId && isSessionTrackedAgent(runAgent);
 }
 
+/**
+ * Whether account resolution should fall back to the harness's implicit
+ * per-device default (`meta.accounts.defaults[agent]`). An explicit
+ * `--account` or a deliberate `agent@version`/device binding is unaffected —
+ * this only gates the last, weakest source in `resolveAccountSelection`'s
+ * binding order.
+ *
+ * A `--resume` never consults it: `resolveSpawnAccount` for a resume used to
+ * run BEFORE session recovery looked at the transcript, so it always resolved
+ * SOME account off the default, `configuredAccount` came out truthy, and the
+ * later `!configuredAccount` guard silently discarded whatever account
+ * recovery decided the session actually belongs to — an unrelated default
+ * account, or none at all, permanently pinned any resumed session to it
+ * instead of following the account it was created under.
+ */
+export function useAccountDefaultForRun(fromProfile: boolean, resumeRequested: boolean): boolean {
+  return !fromProfile && !resumeRequested;
+}
+
+/**
+ * Resolve the account a recovered resume should authenticate as, given the
+ * `RecoveryAccount` `resolveSessionRecoveryFromCandidates` picked (the healthy
+ * origin's own native slot, a rotated healthy sibling, or a durable provider
+ * account). Routes through the same `resolveSpawnAccount` →
+ * `resolveNativeSpawnHome` / `durableSlotEnv` path an explicit `--account`
+ * uses — never a bespoke lookup — so a NATIVE pick resolves its own slot HOME
+ * instead of silently falling through to the launched version home's own
+ * (possibly different) native login. `rotatedAccount.providerAccount` alone
+ * (the pre-account-first field) could only ever select a provider; a native
+ * origin or a rotated native sibling had no selector that reached this call
+ * at all.
+ */
+export async function resolveRecoveredAccountEnv(
+  agent: AgentId,
+  version: string,
+  rotatedAccount: import('../lib/session/recovery.js').RecoveryAccount,
+): Promise<{ accountEnv?: Record<string, string>; execHome?: string }> {
+  const { resolveSpawnAccount } = await import('../lib/account-registry.js');
+  const picked = resolveSpawnAccount(rotatedAccount.selector, agent, version, readMeta(), { useDefault: false });
+  if (picked?.kind === 'provider') return { accountEnv: picked.env };
+  if (picked?.kind === 'native') {
+    // Every RESUMABLE_SESSION_AGENTS harness (claude/codex/muse/opencode) is
+    // CONFIG_ENV_ISOLATED, never symlink-adopted, so the adopted-config
+    // repoint/mismatch checks the explicit `--account` path applies do not
+    // arise for a recovered resume.
+    const { durableSlotEnv, resolveNativeSpawnHome } = await import('../lib/exec-account-home.js');
+    const meta = readMeta();
+    const resolved = await resolveNativeSpawnHome(agent, picked, meta);
+    const durable = durableSlotEnv(agent, picked, resolved, meta);
+    return { execHome: resolved.execHome, ...(Object.keys(durable).length > 0 ? { accountEnv: durable } : {}) };
+  }
+  return {};
+}
+
 /** Build a one-line banner describing which version the strategy picked. */
 function formatRotationBanner(result: RotateResult, verb: string = 'balanced'): string {
   const { picked, healthy, excluded } = result;
@@ -2580,7 +2634,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
       const bindingTarget = fromProfile ? rawAgent : (version ? `${agent}@${version}` : `${agent}@${getGlobalDefault(agent) ?? ''}`);
       let spawnAccount: import('../lib/account-registry.js').SpawnAccount | null = null;
       try {
-        spawnAccount = resolveSpawnAccount(options.account, agent, version, readMeta(), { useDefault: !fromProfile, provider: profileProvider, target: bindingTarget });
+        spawnAccount = resolveSpawnAccount(options.account, agent, version, readMeta(), { useDefault: useAccountDefaultForRun(fromProfile, options.resume !== undefined), provider: profileProvider, target: bindingTarget });
       } catch (err) { console.error(chalk.red((err as Error).message)); process.exit(1); }
       // Downstream rotation gating asks only "was an account selected?".
       const configuredAccount = spawnAccount?.name;
@@ -2770,25 +2824,31 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           process.exit(1);
         }
         version = resolvedRecoveryTarget.version;
-        // Account rotation (PHNX-3626 / PHNX-3674): recovery picked a healthy
-        // provider of the SAME harness. Inject that credential through the
-        // `--account` path so spawn does not authenticate as the version home's
+        // Account selection (PHNX-3626 / PHNX-3674 / account-first slots):
+        // recovery identified the exact account that produced this session —
+        // its own healthy native login, a rotated healthy provider, or (with
+        // several accounts sharing one installed binary) which slot to launch
+        // — and names it via `selector`. Feed it through the same
+        // resolveSpawnAccount → resolveNativeSpawnHome/durableSlotEnv path an
+        // explicit --account uses, never a bespoke lookup, so recovery cannot
+        // authenticate as the wrong sibling account or the version home's
         // native login (the exhausted origin when the continue pick is a
-        // provider). An explicit --account (configuredAccount) always wins.
+        // provider). An explicit --account or a deliberate binding
+        // (configuredAccount) always wins.
         const rotatedAccount = resolvedRecoveryTarget.account;
         if (rotatedAccount && !configuredAccount) {
           try {
-            const picked = resolveSpawnAccount(rotatedAccount.providerAccount, agent, version, readMeta(), { useDefault: false });
-            if (picked?.kind === 'provider') accountEnv = picked.env;
+            const resolvedAccount = await resolveRecoveredAccountEnv(agent, version, rotatedAccount);
+            if (resolvedAccount.execHome) execHome = resolvedAccount.execHome;
+            if (resolvedAccount.accountEnv) accountEnv = { ...accountEnv, ...resolvedAccount.accountEnv };
           } catch {
             // Account-registry errors can carry provider credential material;
             // never relay them onto the terminal from this automatic path.
-            console.error(chalk.red('Could not prepare the rotated provider account for session recovery.'));
+            console.error(chalk.red('Could not prepare the recovered account for session recovery.'));
             process.exit(1);
           }
         }
         if (resolvedRecoveryTarget.mode === 'native') {
-          version = session.version;
           resumeNative = true;
           resumeSessionId = session.id;
           // The centralized recovery decision proves the transcript belongs to

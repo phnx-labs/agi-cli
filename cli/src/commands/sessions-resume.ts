@@ -24,6 +24,7 @@ import {
   buildSessionRecoveryCommand,
   resumeSessionInPlace,
   parseAgentFilter,
+  resolveSessionMetadataValue,
 } from './sessions.js';
 import { sessionMatchesQuery } from './sessions-browser.js';
 import {
@@ -175,6 +176,24 @@ export async function sessionsResumeAction(
       await dispatchSessionLifecycleInPlace(query.trim(), hosts, !!options.attachOnly, !!options.local);
       return;
     }
+    // An explicit terminal-backend flag (--iterm/--ghostty/--tmux/--vscodium/
+    // --terminal-app) must open through the same terminal engine the
+    // multi-select picker uses (openSurfaces/resolveBackend). runStrictResume
+    // only ever execs `agents run --resume` in the current process — it has no
+    // concept of a terminal backend — so a direct id/alias resume silently
+    // accepted and ignored the flag. Scoped to the no-prompt case: a prompt
+    // implies a scripted /continue-style resume, which the batch engine (one
+    // fixed `run auto --resume <id> --interactive` command, no prompt slot)
+    // cannot carry — that combination keeps going through runStrictResume.
+    if (!prompt && isDirectResumeSelector(query) && explicitBackendRequested(options)) {
+      const outcome = await resolveSessionMetadataValue(query.trim(), hosts.length ? { hosts } : {});
+      if (outcome.kind === 'resolved') {
+        await openResumeBatch([outcome.session], options);
+        return;
+      }
+      // Not a clean single resolution (not-found/ambiguous/partial) — fall
+      // through to runStrictResume's existing, richer error handling for those.
+    }
     await runStrictResume(query.trim(), prompt, strictOpts);
     return;
   }
@@ -231,6 +250,19 @@ export async function sessionsResumeAction(
   }
   if (!chosen || chosen.length === 0) return;
 
+  await openResumeBatch(chosen, options);
+}
+
+/**
+ * Route one or more resolved sessions through the terminal engine: the owning
+ * device's recovery resolver, then `resolveBackend`/`openSurfaces`. Shared by
+ * the multi-select picker AND a direct id/alias resume that named an explicit
+ * terminal backend (`--iterm`/`--ghostty`/`--tmux`/`--vscodium`/
+ * `--terminal-app`) — that flag must open through this SAME engine, not a
+ * separate one-off spawn, so a single-session direct resume gets the same
+ * backend handling a batch resume already has.
+ */
+async function openResumeBatch(chosen: SessionMeta[], options: ResumeOptions): Promise<void> {
   if (options.device) {
     const requestedHost = options.device;
     const mismatches = chosen
@@ -311,6 +343,13 @@ export async function sessionsResumeAction(
     }
   });
   console.log(chalk.gray(`\nOpened ${opened}/${items.length} in ${where}.`));
+}
+
+/** True when the caller named a specific terminal engine to open into. */
+export function explicitBackendRequested(
+  options: Pick<ResumeOptions, 'iterm' | 'ghostty' | 'tmux' | 'vscodium' | 'terminalApp'>,
+): boolean {
+  return !!(options.iterm || options.ghostty || options.tmux || options.vscodium || options.terminalApp);
 }
 
 /** IDs and tmux aliases are actions, not picker search text. Human phrases keep

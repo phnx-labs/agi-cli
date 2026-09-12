@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { randomBytes } from 'node:crypto';
 import {
   buildSessionLifecycleArgs,
+  explicitBackendRequested,
   isDirectResumeSelector,
   resolveResumePacking,
   resumeHostMismatch,
@@ -74,6 +75,20 @@ describe('buildSessionLifecycleArgs', () => {
     expect(buildSessionLifecycleArgs('019fd114', ['zion'], true)).toEqual([
       'sessions', 'focus', '019fd114', '--device', 'zion', '--attach-only',
     ]);
+  });
+});
+
+describe('explicitBackendRequested', () => {
+  it('is false for a bare resume with no backend flag', () => {
+    expect(explicitBackendRequested({})).toBe(false);
+  });
+
+  it('is true for any one of the five explicit backend flags', () => {
+    expect(explicitBackendRequested({ iterm: true })).toBe(true);
+    expect(explicitBackendRequested({ ghostty: true })).toBe(true);
+    expect(explicitBackendRequested({ tmux: true })).toBe(true);
+    expect(explicitBackendRequested({ vscodium: true })).toBe(true);
+    expect(explicitBackendRequested({ terminalApp: true })).toBe(true);
   });
 });
 

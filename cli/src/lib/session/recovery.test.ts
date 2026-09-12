@@ -298,6 +298,158 @@ describe('resolveSessionRecoveryFromCandidates', () => {
   });
 });
 
+describe('resolveSessionRecoveryFromCandidates — account-first origin identification', () => {
+  it('resumes the exact slot account that produced the session when several accounts share one installed binary', () => {
+    // Account-first: every native slot for one harness reports the SAME
+    // installed binary version (PHNX-3940 T5), so version alone cannot tell
+    // two accounts apart — only identity (accountKey) or transcript ownership
+    // (slotDir) can.
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-recovery-slots-'));
+    try {
+      const homeA = path.join(root, 'slot-a');
+      const homeB = path.join(root, 'slot-b');
+      const cwd = path.join(root, 'project');
+      fs.mkdirSync(cwd);
+      const filePath = path.join(homeA, '.claude', 'projects', '-project', `${session().id}.jsonl`);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.mkdirSync(homeB, { recursive: true });
+      fs.writeFileSync(filePath, JSON.stringify({ type: 'attachment', cwd }) + '\n');
+
+      const source = session({ filePath, accountKey: 'claude:acct-a' });
+      // The WRONG account (B) is listed first — a naive version-only match
+      // would pick it, since both share the single installed binary version.
+      const candidates: RotateCandidate[] = [
+        candidate('2.1.269', {
+          accountKey: 'claude:acct-b', accountLabel: 'acct-b',
+          nativeAccount: 'acct-b', slotDir: homeB, fromSlot: true, authVerdict: 'live',
+        }),
+        candidate('2.1.269', {
+          accountKey: 'claude:acct-a', accountLabel: 'acct-a',
+          nativeAccount: 'acct-a', slotDir: homeA, fromSlot: true, authVerdict: 'live',
+        }),
+      ];
+      const result = resolveSessionRecoveryFromCandidates(source, candidates, () => true);
+      expect(result).toMatchObject({
+        mode: 'native',
+        agent: 'claude',
+        version: '2.1.269',
+        cwd,
+        account: { nativeAccount: 'acct-a', selector: 'acct-a' },
+      });
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('proves ownership by transcript location when the session carries no accountKey', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-recovery-slots-nokey-'));
+    try {
+      const homeA = path.join(root, 'slot-a');
+      const homeB = path.join(root, 'slot-b');
+      const cwd = path.join(root, 'project');
+      fs.mkdirSync(cwd);
+      const filePath = path.join(homeB, '.claude', 'projects', '-project', `${session().id}.jsonl`);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.mkdirSync(homeA, { recursive: true });
+      fs.writeFileSync(filePath, JSON.stringify({ type: 'attachment', cwd }) + '\n');
+
+      // No accountKey recorded (a legacy transcript predating attribution) —
+      // recovery must still find the right slot by proving which home's
+      // transcript this actually is, not by an ambiguous version match.
+      const source = session({ filePath });
+      const candidates: RotateCandidate[] = [
+        candidate('2.1.269', {
+          accountKey: 'claude:acct-a', accountLabel: 'acct-a',
+          nativeAccount: 'acct-a', slotDir: homeA, fromSlot: true, authVerdict: 'live',
+        }),
+        candidate('2.1.269', {
+          accountKey: 'claude:acct-b', accountLabel: 'acct-b',
+          nativeAccount: 'acct-b', slotDir: homeB, fromSlot: true, authVerdict: 'live',
+        }),
+      ];
+      const result = resolveSessionRecoveryFromCandidates(source, candidates, () => true);
+      expect(result).toMatchObject({
+        mode: 'native',
+        version: '2.1.269',
+        cwd,
+        account: { nativeAccount: 'acct-b' },
+      });
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('native-resumes the origin account even when its installed alias reports a different version label than the session recorded', () => {
+    // The recorded label can drift from the live binary's reported version (a
+    // self-updating install, or an alias whose binary prints a newer label
+    // than the one it was launched under). Recovery must follow the ACCOUNT,
+    // not stall on the stale label and fall through to a brand-new /continue.
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-recovery-alias-'));
+    try {
+      const home = path.join(root, 'home');
+      const cwd = path.join(root, 'project');
+      fs.mkdirSync(cwd);
+      const filePath = path.join(home, '.claude', 'projects', '-project', `${session().id}.jsonl`);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, JSON.stringify({ type: 'attachment', cwd }) + '\n');
+
+      // Recorded at launch time as 2.1.269 (missing/uninstalled today); the
+      // account that actually produced it now resolves under alias 2.1.225.
+      const source = session({ filePath, version: '2.1.269', accountKey: 'claude:acct-a' });
+      const candidates: RotateCandidate[] = [
+        candidate('2.1.225', {
+          accountKey: 'claude:acct-a', accountLabel: 'acct-a',
+          nativeAccount: 'acct-a', slotDir: home, fromSlot: true, authVerdict: 'live',
+        }),
+      ];
+      const result = resolveSessionRecoveryFromCandidates(source, candidates, () => true);
+      expect(result).toMatchObject({ mode: 'native', version: '2.1.225', cwd });
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('does not native-resume a healthy sibling slot account for a rotated pick — /continue instead', () => {
+    // The balanced pick when the origin is unhealthy may land on a DIFFERENT
+    // native slot account of the same harness. That sibling's home never
+    // produced this transcript, so it must stay on /continue even though it
+    // is itself perfectly healthy (only a provider account can be forwarded
+    // into the origin's own home — see the PHNX-3626 rotation branch).
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-recovery-sibling-'));
+    try {
+      const homeA = path.join(root, 'slot-a');
+      const homeB = path.join(root, 'slot-b');
+      const cwd = path.join(root, 'project');
+      fs.mkdirSync(cwd);
+      const filePath = path.join(homeA, '.claude', 'projects', '-project', `${session().id}.jsonl`);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.mkdirSync(homeB, { recursive: true });
+      fs.writeFileSync(filePath, JSON.stringify({ type: 'attachment', cwd }) + '\n');
+
+      const source = session({ filePath, accountKey: 'claude:acct-a' });
+      const candidates: RotateCandidate[] = [
+        candidate('2.1.269', {
+          accountKey: 'claude:acct-a', accountLabel: 'acct-a', nativeAccount: 'acct-a',
+          slotDir: homeA, fromSlot: true, authVerdict: 'live', usageStatus: 'rate_limited',
+        }),
+        candidate('2.1.269', {
+          accountKey: 'claude:acct-b', accountLabel: 'acct-b', nativeAccount: 'acct-b',
+          slotDir: homeB, fromSlot: true, authVerdict: 'live',
+        }),
+      ];
+      const result = resolveSessionRecoveryFromCandidates(source, candidates, () => true);
+      expect(result).toMatchObject({
+        mode: 'continue',
+        version: '2.1.269',
+        account: { nativeAccount: 'acct-b' },
+      });
+      expect(result.reason).toContain('rate_limited');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('sessionRecoveryRunArgs', () => {
   it('routes focus, resume, and attach through run auto --resume', () => {
     expect(sessionRecoveryRunArgs(session())).toEqual([
