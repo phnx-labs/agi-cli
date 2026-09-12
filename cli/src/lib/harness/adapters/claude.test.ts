@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { claudeAdapter } from './claude.js';
+import { claudeAdapter, claudeWorkerLoginTrapPreflight } from './claude.js';
 import type { ExecConfigEnvCtx } from '../adapter.js';
 import type { ConfiguredDeviceRole } from '../../device-config.js';
 
@@ -152,5 +152,94 @@ describe('claudeAdapter.applyExecConfigEnv — role-aware CLAUDE_CODE_OAUTH_TOKE
       expect(resolvedToken({ interactive: true, deviceRole: 'desktop', setupToken: OWN_TOKEN }))
         .toBeUndefined();
     });
+  });
+});
+
+/**
+ * The worker login-screen trap: an interactive Claude run dispatched to a worker
+ * (`agents run claude --interactive --device auto/<worker>`) whose selected
+ * account has no synced setup-token used to fall through to Claude Code's own
+ * "Select login method" screen — an interactive OAuth on a headless box that
+ * never persists (the 10-minute re-login loop). `claudeWorkerLoginTrapPreflight`
+ * refuses that run before spawn with the real fix. This pins the exact matrix.
+ */
+describe('claudeWorkerLoginTrapPreflight — refuse the worker login-screen trap', () => {
+  it('refuses an interactive worker run with NO setup-token (the bug)', () => {
+    const msg = claudeWorkerLoginTrapPreflight({
+      agent: 'claude',
+      interactive: true,
+      deviceRole: 'worker',
+      hasSetupToken: false,
+      machine: 'yosemite-m5',
+    });
+    expect(msg).toBeTruthy();
+    // Names the box, and hands the operator the real fix — never "log in here".
+    expect(msg).toContain("yosemite-m5");
+    expect(msg).toContain('agents accounts default claude');
+    expect(msg).toContain('agents run claude#');
+    expect(msg).not.toMatch(/log ?in here/i);
+    // The message is returned as spawn stderr, which runWithFallback scans with
+    // RATE_LIMIT_PATTERNS — a stray rate-limit/quota phrase would spuriously
+    // trigger an account-rotation fallback. Keep it clear of every such token.
+    expect(msg).not.toMatch(
+      /rate[\s-]?limit|usage[\s-]?limit|quota\s*(exceeded|reached|limit)|\b429\b|5[\s-]?hour[\s-]?limit|too many requests|overloaded|spend[\s-]?limit|out of (?:usage )?credits/i,
+    );
+  });
+
+  it('treats an UNMARKED device (undefined role) as a worker — still refuses', () => {
+    expect(
+      claudeWorkerLoginTrapPreflight({
+        agent: 'claude',
+        interactive: true,
+        deviceRole: undefined,
+        hasSetupToken: false,
+      }),
+    ).toBeTruthy();
+  });
+
+  it('allows the run when a durable setup-token DID resolve on the worker', () => {
+    expect(
+      claudeWorkerLoginTrapPreflight({
+        agent: 'claude',
+        interactive: true,
+        deviceRole: 'worker',
+        hasSetupToken: true,
+      }),
+    ).toBeNull();
+  });
+
+  it('does NOT gate a headless worker run — the 401 is already loud', () => {
+    expect(
+      claudeWorkerLoginTrapPreflight({
+        agent: 'claude',
+        interactive: false,
+        deviceRole: 'worker',
+        hasSetupToken: false,
+      }),
+    ).toBeNull();
+  });
+
+  it('does NOT gate a headed box — its native login prompt is the correct flow', () => {
+    for (const deviceRole of ['personal', 'desktop'] as const) {
+      expect(
+        claudeWorkerLoginTrapPreflight({
+          agent: 'claude',
+          interactive: true,
+          deviceRole,
+          hasSetupToken: false,
+        }),
+      ).toBeNull();
+    }
+  });
+
+  it('only applies to claude — another harness is never gated here', () => {
+    expect(
+      claudeWorkerLoginTrapPreflight({
+        agent: 'codex',
+        interactive: true,
+        deviceRole: 'worker',
+        hasSetupToken: false,
+      }),
+    ).toBeNull();
   });
 });
