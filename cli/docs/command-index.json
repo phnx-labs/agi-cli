@@ -23501,7 +23501,7 @@
         },
         {
           "flags": "--dry-run",
-          "description": "Show what would be synced without making any changes",
+          "description": "Show what would be synced without making any changes — requires an agent scope (e.g. agents sync claude --dry-run); the umbrella verb refuses it",
           "long": "--dry-run",
           "required": false,
           "optional": false,
