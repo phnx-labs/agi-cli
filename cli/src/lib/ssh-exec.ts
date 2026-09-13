@@ -373,6 +373,125 @@ interface SshExecRawStreamOptions extends SshExecOptions {
  * offset-resumed log following where a UTF-8 decode boundary must not shift the
  * byte cursor.
  */
+/** Grace between SIGTERM and SIGKILL for a stream that will not stop. */
+export const SSH_STREAM_KILL_GRACE_MS = 3_000;
+/** Bytes of a stream's stderr retained; the rest is dropped, with a note. */
+export const SSH_STREAM_MAX_STDERR = 8 * 1024;
+
+export interface SshStreamResult {
+  code: number | null;
+  stderr: Buffer;
+  timedOut: boolean;
+  /** True when the child had to be SIGKILLed after ignoring SIGTERM. */
+  killed: boolean;
+  /** True when stderr was truncated at {@link SSH_STREAM_MAX_STDERR}. */
+  stderrTruncated: boolean;
+}
+
+/**
+ * Stream one ssh command's stdout, with the args and env a CALLER built.
+ *
+ * This exists because {@link sshExecRawStream} assembles its own ssh args, which
+ * means it cannot carry a device's canonical auth — the askpass shim for a
+ * password-auth box, `-i`/`IdentitiesOnly` for an explicit identity file, or the
+ * managed known-hosts pinning. A caller that has already built those through
+ * `buildSshInvocation` needs a way to run them, and duplicating the transport to
+ * get it would be the worse answer. So this takes `args`/`env` verbatim and adds
+ * only the lifecycle guarantees:
+ *
+ * - **SIGTERM then SIGKILL.** A timeout or abort that only sends SIGTERM leaks a
+ *   child that ignores it — ssh does, mid-handshake — and the promise never
+ *   settles. After {@link SSH_STREAM_KILL_GRACE_MS} the child is SIGKILLed and
+ *   `killed` says so.
+ * - **Bounded stderr.** A peer that writes endlessly to stderr would otherwise
+ *   grow this buffer without limit; it is capped and `stderrTruncated` says so.
+ * - **`onStdout` cannot break the caller's cleanup.** A throw from the consumer
+ *   is captured and re-thrown by the awaiting caller, so a write failure ends the
+ *   transfer instead of escaping as an unhandled error inside a stream event.
+ */
+export function sshStreamWithArgs(opts: {
+  args: string[];
+  env?: Record<string, string>;
+  onStdout: (chunk: Buffer) => void;
+  timeoutMs?: number;
+  killGraceMs?: number;
+  maxStderrBytes?: number;
+  signal?: AbortSignal;
+  sshBin?: string;
+}): Promise<SshStreamResult> {
+  const maxStderr = opts.maxStderrBytes ?? SSH_STREAM_MAX_STDERR;
+  const grace = opts.killGraceMs ?? SSH_STREAM_KILL_GRACE_MS;
+  return new Promise((resolve, reject) => {
+    const child = spawn(opts.sshBin ?? 'ssh', opts.args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: opts.env ? { ...process.env, ...opts.env } : process.env,
+      windowsHide: true,
+      // Own process group on POSIX so a kill reaches the whole tree. Killing only
+      // the ssh pid is not enough: a descendant that inherited stdout keeps the
+      // pipe open, `'close'` never fires, and the promise hangs for as long as
+      // that grandchild lives — which defeats the timeout entirely.
+      detached: process.platform !== 'win32',
+    });
+    const stderr: Buffer[] = [];
+    let stderrBytes = 0;
+    let stderrTruncated = false;
+    let timedOut = false;
+    let killed = false;
+    let consumerError: unknown;
+    let settled = false;
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+
+    /** Signal the whole group where the platform supports it, else just the child. */
+    const signal = (sig: NodeJS.Signals) => {
+      try {
+        if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, sig);
+        else child.kill(sig);
+      } catch { /* already gone */ }
+    };
+    const escalate = () => {
+      signal('SIGTERM');
+      // Escalation, not a second polite ask: a child still alive after the grace
+      // is one that is not going to honour SIGTERM.
+      killTimer = setTimeout(() => { killed = true; signal('SIGKILL'); }, grace);
+      killTimer.unref?.();
+    };
+    const stop = () => escalate();
+    const finish = (code: number | null) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      if (killTimer) clearTimeout(killTimer);
+      opts.signal?.removeEventListener('abort', stop);
+      if (consumerError !== undefined) { reject(consumerError); return; }
+      resolve({ code, stderr: Buffer.concat(stderr), timedOut, killed, stderrTruncated });
+    };
+    const timer = opts.timeoutMs
+      ? setTimeout(() => { timedOut = true; escalate(); }, opts.timeoutMs)
+      : null;
+
+    child.stdout.on('data', (chunk: Buffer) => {
+      if (consumerError !== undefined) return;
+      try { opts.onStdout(chunk); } catch (error) {
+        // Captured, not thrown: a throw here would surface as an unhandled error
+        // on the stream and skip the caller's cleanup entirely.
+        consumerError = error;
+        escalate();
+      }
+    });
+    child.stderr.on('data', (chunk: Buffer) => {
+      const room = maxStderr - stderrBytes;
+      if (room <= 0) { stderrTruncated = true; return; }
+      if (chunk.length > room) { stderrTruncated = true; stderr.push(chunk.subarray(0, room)); stderrBytes = maxStderr; return; }
+      stderr.push(chunk);
+      stderrBytes += chunk.length;
+    });
+    child.once('error', () => finish(null));
+    child.once('close', finish);
+    if (opts.signal?.aborted) escalate();
+    else opts.signal?.addEventListener('abort', stop, { once: true });
+  });
+}
+
 export function sshExecRawStream(
   target: string,
   remoteCmd: string,

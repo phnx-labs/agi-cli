@@ -104,19 +104,34 @@ export function fleetDialTarget(device: DeviceProfile): string {
 export function wrapRemoteCommand(
   device: DeviceProfile,
   cmd: string[],
-  opts: { argv?: boolean } = {},
+  opts: { argv?: boolean; prelude?: string[] } = {},
 ): string | undefined {
   if (cmd.length === 0) return undefined;
-  // `argv` mode quotes EACH token so the peer receives it byte-for-byte; the
-  // default joins raw, which is what lets a caller hand the remote shell
-  // something to interpret. See the docblock above for why both must exist.
-  const joined = opts.argv
-    ? cmd.map((token) => (device.shell === 'powershell' ? pwshQuote(token) : shellQuote(token))).join(' ')
-    : cmd.join(' ');
-  if (device.shell === 'powershell') {
-    return `powershell -NoProfile -EncodedCommand ${encodePwshBase64(joined)}`;
+  const prelude = opts.prelude ?? [];
+  let script: string;
+  if (opts.argv) {
+    // Quote EACH caller token so the peer receives it byte-for-byte, then prefix
+    // the prelude VERBATIM — it is already shell syntax and re-quoting it would
+    // break it (see `fleetRemotePrelude`).
+    const quoted = cmd.map((token) => (device.shell === 'powershell' ? pwshQuote(token) : shellQuote(token)));
+    if (device.shell === 'powershell') {
+      // `&` is required, not cosmetic: PowerShell evaluates a bare quoted string
+      // as a STRING EXPRESSION and echoes it. Without the call operator
+      // `'prog' 'arg'` runs nothing at all — it prints `prog`. POSIX needs no
+      // equivalent because a quoted first word is still a command word there.
+      script = [...prelude, '&', ...quoted].join(' ');
+    } else {
+      script = [...prelude, ...quoted].join(' ');
+    }
+  } else {
+    // The default joins raw, which is what lets a caller hand the remote shell
+    // something to interpret. See the docblock above for why both must exist.
+    script = [...prelude, ...cmd].join(' ');
   }
-  return joined;
+  if (device.shell === 'powershell') {
+    return `powershell -NoProfile -EncodedCommand ${encodePwshBase64(script)}`;
+  }
+  return script;
 }
 
 /**
@@ -164,24 +179,50 @@ export function isAgentsBrowserDrive(cmd: string[]): boolean {
  * fan-out stamps the marker before {@link buildSshInvocation}) is left unchanged
  * so nothing is doubled.
  */
+/**
+ * The provenance prefix as READY SHELL SYNTAX for the device's shell.
+ *
+ * These tokens are already quoted/escaped for their target shell — a POSIX
+ * `K=V` pair is `shellQuote`d here, and a PowerShell assignment is a complete
+ * statement with its own doubled quotes. That matters because argv mode quotes
+ * every token it is handed: quoting THESE again turns
+ * `'AGENTS_ACTOR=Some Name'` into `''\''AGENTS_ACTOR=Some Name'\'''` and turns a
+ * pwsh assignment into an inert string literal. So the prelude is composed
+ * SEPARATELY from the caller's argv rather than concatenated into it, and this is
+ * the single definition both paths use.
+ */
+export function fleetRemotePrelude(
+  device: Pick<DeviceProfile, 'shell'>,
+  provenanceEnv: Record<string, string> = actorEnv(resolveActor()),
+): string[] {
+  if (device.shell === 'powershell') {
+    return [
+      `$env:AGENTS_FLEET_REMOTE='1';`,
+      ...Object.entries(provenanceEnv).map(([k, v]) => `$env:${k}='${v.replace(/'/g, "''")}';`),
+    ];
+  }
+  return [
+    'env',
+    'AGENTS_FLEET_REMOTE=1',
+    ...Object.entries(provenanceEnv).map(([k, v]) => shellQuote(`${k}=${v}`)),
+  ];
+}
+
+/** True when `cmd` already carries the prelude {@link fleetRemotePrelude} emits. */
+function alreadyMarked(cmd: string[], device: Pick<DeviceProfile, 'shell'>): boolean {
+  if (device.shell === 'powershell') return cmd[0] === `$env:AGENTS_FLEET_REMOTE='1';`;
+  return cmd[0] === 'env' && cmd[1] === 'AGENTS_FLEET_REMOTE=1';
+}
+
 export function markFleetRemote(
   cmd: string[],
   device: Pick<DeviceProfile, 'shell'>,
   provenanceEnv: Record<string, string> = actorEnv(resolveActor()),
 ): string[] {
-  if (device.shell === 'powershell') {
-    // Exact-match guard, symmetric with the POSIX branch below: the marker token
-    // is always this literal, so `startsWith` would only loosen it for no gain.
-    if (cmd[0] === `$env:AGENTS_FLEET_REMOTE='1';`) return cmd;
-    const prelude = [
-      `$env:AGENTS_FLEET_REMOTE='1';`,
-      ...Object.entries(provenanceEnv).map(([k, v]) => `$env:${k}='${v.replace(/'/g, "''")}';`),
-    ];
-    return [...prelude, ...cmd];
-  }
-  if (cmd[0] === 'env' && cmd[1] === 'AGENTS_FLEET_REMOTE=1') return cmd;
-  const actorTokens = Object.entries(provenanceEnv).map(([k, v]) => shellQuote(`${k}=${v}`));
-  return ['env', 'AGENTS_FLEET_REMOTE=1', ...actorTokens, ...cmd];
+  // Exact-match guard: the marker token is always this literal, so `startsWith`
+  // would only loosen it for no gain.
+  if (alreadyMarked(cmd, device)) return cmd;
+  return [...fleetRemotePrelude(device, provenanceEnv), ...cmd];
 }
 
 /**
@@ -299,10 +340,16 @@ export function buildSshInvocation(
   // Stamp the consent marker on the REMOTE command, not the local ssh env:
   // SSH_ASKPASS lives on this side; AGENTS_FLEET_REMOTE must be visible to the
   // process that runs on the peer.
-  const remoteCmd = !interactive && isAgentsBrowserDrive(cmd) ? markFleetRemote(cmd, device) : cmd;
+  // Provenance is composed as a PRELUDE, not prepended to the argv array. In argv
+  // mode every token handed to `wrapRemoteCommand` is quoted, and the prelude is
+  // already shell syntax — mixing them in meant the actor pairs were quoted twice
+  // (breaking any value with a space or a quote) and the pwsh assignments became
+  // inert string literals.
+  const needsProvenance = !interactive && isAgentsBrowserDrive(cmd) && !alreadyMarked(cmd, device);
+  const prelude = needsProvenance ? fleetRemotePrelude(device) : [];
   const remote = interactive
     ? buildInteractiveShellCommand(device, opts.interactiveCwd)
-    : wrapRemoteCommand(device, remoteCmd, { ...(opts.argv ? { argv: true } : {}) });
+    : wrapRemoteCommand(device, cmd, { ...(opts.argv ? { argv: true } : {}), ...(prelude.length > 0 ? { prelude } : {}) });
   const env: Record<string, string> = {};
   const args: string[] = [
     ...hostKeyCheckingOpts(hostKey.pinned ?? false, hostKey.knownHostsFile),
