@@ -225,6 +225,12 @@ describe('cleanSessionPrompt', () => {
     expect(cleanSessionPrompt('<scr<b>ipt>alert(1)</scr</b>ipt> Do it')).toBe('alert(1) Do it');
   });
 
+  it('strips deeply nested tag fragments without input-size amplification', () => {
+    const depth = 32_000;
+    const raw = `<scr${'<a>'.repeat(depth)}ipt>alert(1)</script>`;
+    expect(cleanSessionPrompt(raw)).toBe('alert(1)');
+  }, 1_000);
+
   it('returns empty string for whitespace-only input', () => {
     expect(cleanSessionPrompt('   ')).toBe('');
   });

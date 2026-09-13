@@ -44,9 +44,14 @@ export function resolveBrandName(): string {
 }
 
 /** The active brand name, or null when unbranded. */
-function activeBrandName(): string | null {
+export function activeBrandName(): string | null {
   const name = resolveBrandName();
   return name === DEFAULT_CLI_NAME ? null : name;
+}
+
+/** True when this process is running under a brand (not the plain `agents` CLI). */
+export function isBranded(): boolean {
+  return activeBrandName() !== null;
 }
 
 /** Names that would clobber an agent CLI shim or the `agents`/`ag` binary. */

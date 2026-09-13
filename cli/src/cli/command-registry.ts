@@ -48,7 +48,7 @@ const loadCli: ModuleLoader = async () => (await import('../commands/cli.js')).r
 const loadSubagents: ModuleLoader = async () => (await import('../commands/subagents.js')).registerSubagentsCommands;
 const loadPlugins: ModuleLoader = async () => (await import('../commands/plugins.js')).registerPluginsCommands;
 const loadWorkflows: ModuleLoader = async () => (await import('../commands/workflows.js')).registerWorkflowsCommands;
-const loadVersions: ModuleLoader = async () => (await import('../commands/versions.js')).registerVersionsCommands;
+export const loadVersions: ModuleLoader = async () => (await import('../commands/versions.js')).registerVersionsCommands;
 export const loadUpdate: ModuleLoader = async () => (await import('../commands/update.js')).registerUpdateCommand;
 const loadImport: ModuleLoader = async () => (await import('../commands/import.js')).registerImportCommand;
 const loadPackages: ModuleLoader = async () => (await import('../commands/packages.js')).registerPackagesCommands;
@@ -62,10 +62,10 @@ const loadFork: ModuleLoader = async () => (await import('../commands/fork.js'))
 const loadConfig: ModuleLoader = async () => (await import('../commands/config.js')).registerConfigCommand;
 const loadModels: ModuleLoader = async () => (await import('../commands/models.js')).registerModelsCommand;
 const loadModes: ModuleLoader = async () => (await import('../commands/modes.js')).registerModesCommand;
-const loadPrune: ModuleLoader = async () => (await import('../commands/prune.js')).registerPruneCommand;
+export const loadPrune: ModuleLoader = async () => (await import('../commands/prune.js')).registerPruneCommand;
 const loadTrash: ModuleLoader = async () => (await import('../commands/trash.js')).registerTrashCommands;
 const loadRestore: ModuleLoader = async () => (await import('../commands/trash.js')).registerRestoreCommand;
-const loadDoctor: ModuleLoader = async () => (await import('../commands/doctor.js')).registerDoctorCommand;
+export const loadDoctor: ModuleLoader = async () => (await import('../commands/doctor.js')).registerDoctorCommand;
 const loadRoute: ModuleLoader = async () => (await import('../commands/route.js')).registerRouteCommands;
 const loadHarness: ModuleLoader = async () => (await import('../commands/harness.js')).registerHarnessCommands;
 // PHNX-3989: `agents secrets` is a thin passthrough to the standalone
@@ -91,7 +91,7 @@ const loadRepo: ModuleLoader = async () => (await import('../commands/repo.js'))
 const loadSetup: ModuleLoader = async () => (await import('../commands/setup.js')).registerSetupCommand;
 const loadUninstall: ModuleLoader = async () => (await import('../commands/uninstall.js')).registerUninstallCommands;
 const loadUpgrade: ModuleLoader = async () => (await import('../commands/upgrade.js')).registerUpgradeCommand;
-const loadSessions: ModuleLoader = async () => (await import('../commands/sessions.js')).registerSessionsCommands;
+export const loadSessions: ModuleLoader = async () => (await import('../commands/sessions.js')).registerSessionsCommands;
 export const loadTeams: ModuleLoader = async () => (await import('../commands/teams.js')).registerTeamsCommands;
 const loadCloud: ModuleLoader = async () => (await import('../commands/cloud.js')).registerCloudCommands;
 const loadMessage: ModuleLoader = async () => (await import('../commands/message.js')).registerMessageCommand;
