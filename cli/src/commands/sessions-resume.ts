@@ -36,7 +36,7 @@ import {
   type EngineContext,
   type Packing,
 } from '../lib/terminal/index.js';
-import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
+import { isInteractiveTerminal, isPromptCancelled, normalizeSingleDeviceOption } from './utils.js';
 import { setHelpSections } from '../lib/help.js';
 import { confirm } from '@inquirer/prompts';
 import { spawn } from 'node:child_process';
@@ -145,8 +145,59 @@ export function registerSessionsResumeCommand(sessionsCmd: Command): void {
   });
 
   cmd.action(async (query: string | undefined, prompt: string | undefined, options: ResumeOptions) => {
-    await sessionsResumeAction(query, prompt, options);
+    await sessionsResumeAction(query, prompt, resolveResumeOptions(cmd, options));
   });
+}
+
+/** Flag names `sessions resume` declares that also exist on its parent `sessions`
+ *  command. Booleans and strings only — `device` collides too but needs its own
+ *  array-merge handling below, so it is not in this list. */
+const RESUME_PARENT_COLLISION_FLAGS = ['agent', 'all', 'teams', 'since', 'limit', 'local'] as const;
+
+/**
+ * Recover the caller's real intent for flags `sessions resume` shares by name
+ * with its parent `sessions` command (-a/--agent, --all, --teams, --since,
+ * -n/--limit, --local, -D/--device, --devices).
+ *
+ * `root-command.ts` deliberately never calls `enablePositionalOptions()`
+ * (that broke other leaf subcommands that read `--since`/`--json` back via
+ * `optsWithGlobals()`), so commander's parser scans the FULL argv for options
+ * belonging to `sessions` before it ever recognizes `resume` as the
+ * subcommand — a colliding flag typed anywhere on the line, before or after
+ * `resume`, is consumed straight into the PARENT command's own option and
+ * never reaches the resume subcommand's `action` at all. The resume
+ * subcommand's own same-named `.option()` declarations therefore exist only
+ * to supply THEIR default (e.g. limit=200) — they never receive an explicit
+ * CLI value. Naively preferring "whichever is defined" is wrong too, since
+ * the parent's own `--limit` also carries a default (50): reading it
+ * unconditionally would silently override resume's 200 default on every
+ * plain `sessions resume` invocation with no `--limit` typed at all. So an
+ * explicit parent-level value (`getOptionValueSource(...) === 'cli'`)
+ * overrides the resume subcommand's own default; otherwise the resume
+ * default stands (PHNX-3940). `--device`/`--devices` get the same parent-wins
+ * treatment but additionally merge the two aliases and collapse to one
+ * device via the shared {@link normalizeSingleDeviceOption} (reused from
+ * `sessions inject`, PHNX-3688), since resume — like inject — targets exactly
+ * one device and a fan-out spelling is a user error, not a first-of-list guess.
+ */
+export function resolveResumeOptions(cmd: Command, local: ResumeOptions): ResumeOptions {
+  const parent = cmd.parent;
+  if (!parent) return local;
+  const resolved: ResumeOptions = { ...local };
+  const parentOpts = parent.opts() as Record<string, unknown>;
+  for (const key of RESUME_PARENT_COLLISION_FLAGS) {
+    if (parent.getOptionValueSource(key) === 'cli') {
+      (resolved as Record<string, unknown>)[key] = parentOpts[key];
+    }
+  }
+  const rawDeviceTargets = [
+    ...((parentOpts.device as string[] | undefined) ?? []),
+    ...((parentOpts.devices as string[] | undefined) ?? []),
+  ];
+  if (rawDeviceTargets.length > 0) {
+    resolved.device = normalizeSingleDeviceOption(rawDeviceTargets, 'sessions resume');
+  }
+  return resolved;
 }
 
 export async function sessionsResumeAction(
