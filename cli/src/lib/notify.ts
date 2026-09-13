@@ -2,7 +2,7 @@
  * Owner notifier — the one seam for "ping the human" messages.
  *
  * Every human-facing owner notification (feed urgent-block dispatch, monitor
- * `notify` action, `agents send --to owner`) funnels through the single channel seam:
+ * `notify` action, `agents notify`) funnels through the single channel seam:
  * `lookupTransport(channel, meta).provider.send(text, opts)`. The recipient comes
  * from `humans.yaml` — never a hardcoded chat id — so changing the
  * owner is honoured by every path at once. `notify.transports` picks the actual
@@ -167,7 +167,7 @@ export async function sendToOwner(text: string, options: OwnerNotifyOptions = {}
       }
     }
     // Echo the exact per-destination body delivered, so a caller (and
-    // `agents send --to owner --dry-run --json`) can see Slack got the labeled-link
+    // `agents notify --dry-run --json`) can see Slack got the labeled-link
     // variant and iMessage the plain one — the observable proof of PHNX-3698.
     deliveries.push({ ...result, body });
   }

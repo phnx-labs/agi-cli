@@ -1244,7 +1244,7 @@ export async function runDaemon(): Promise<void> {
       // "Routine started" and never told it failed.
       try { notifyRoutineStartFailed(config, message); } catch { /* best-effort */ }
       // RUSH-2288: the pre-spawn failure (e.g. auth_failed) is exactly the one the
-      // per-routine `agents send --to owner` prompt can never send — its agent never ran —
+      // per-routine `agents notify` prompt can never send — its agent never ran —
       // so the daemon reaches the owner directly.
       void notifyOwnerRoutineStartFailed(config, message)
         .then((r) => {

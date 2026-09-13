@@ -20,7 +20,7 @@
  * remote session resumed in whatever directory the user happened to be in.
  *
  * Callers act on the answer differently, and the difference is deliberate:
- * `agents sessions resume` HOPS to the owner over SSH, while
+ * `agents sessions resume` and `agents sessions attach` HOP to the owner over SSH, while
  * `resumeSessionInPlace` — the local takeover every routed caller reaches only
  * after deciding — REFUSES. The batch `sessions resume` needs no check of its
  * own: each of its tabs runs the canonical `agents sessions resume <id>`

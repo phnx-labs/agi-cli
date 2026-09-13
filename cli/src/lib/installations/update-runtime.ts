@@ -347,7 +347,7 @@ async function runAutoUpdatePassUntilCancelled(opts: AutoUpdatePassOptions, canc
       // (`ensureShimCurrent`/`ensureVersionedAliasCurrent`). Deliberately
       // NEVER `adoptShadowingLauncher`: that seizes a launcher this pass does
       // not own (a user's own PATH entry, or another install's), and is an
-      // operator-triggered `agents sync` action, not something an unattended
+      // operator-triggered `doctor --fix` action, not something an unattended
       // background pass may do on its own. Real-pass-only, same reason as the
       // migration above — a `--check` preview must not touch PATH or a
       // config-dir symlink.

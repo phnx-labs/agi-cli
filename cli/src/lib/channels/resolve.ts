@@ -9,7 +9,7 @@
  * Two entry points, deliberately: `lookupTransport` *returns* the failure, for
  * long-lived callers (the monitor daemon, the feed-dispatch loop) that must
  * survive a bad channel name; `resolveTransport` `die()`s on it, for the
- * interactive `agents send` command path where exiting with a
+ * interactive `agents send` / `agents notify` command path where exiting with a
  * loud message is the right answer. Never give a daemon the dying one.
  */
 import type { Meta } from '../types.js';
