@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -12,12 +12,17 @@ import { sshStreamWithArgs, SSH_STREAM_MAX_STDERR } from './ssh-exec.js';
  * stub binary exercises the REAL spawn/kill/stream code with a controllable
  * child, which is what these guarantees are about.
  */
+const fixtureDirs: string[] = [];
 function fakeSsh(body: string): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fake-ssh-'));
+  fixtureDirs.push(dir);
   const bin = path.join(dir, 'ssh');
   fs.writeFileSync(bin, `#!/usr/bin/env bash\n${body}\n`, { mode: 0o755 });
   return bin;
 }
+// One stub per case adds up over a suite run; remove them rather than leaving
+// temp dirs behind on every machine the suite touches.
+afterEach(() => { for (const dir of fixtureDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true }); });
 
 describe('sshStreamWithArgs lifecycle', () => {
   it('streams stdout and reports a clean exit', async () => {
@@ -33,33 +38,58 @@ describe('sshStreamWithArgs lifecycle', () => {
     expect(result.timedOut).toBe(false);
   });
 
-  it('SIGKILLs a child that ignores SIGTERM, instead of hanging forever', async () => {
-    // The bug this covers: sending SIGTERM and waiting means a child that traps or
-    // ignores it never exits, so the promise never settles and the transfer hangs.
-    const started = Date.now();
-    const result = await sshStreamWithArgs({
+  /**
+   * Run until the child says it is ready, then abort.
+   *
+   * Handshake-driven, NOT timing-driven. An earlier version used
+   * `timeoutMs: 150` and asserted escalation — but on a loaded machine the
+   * child's `trap` is not installed within 150ms, SIGTERM lands before it, the
+   * child dies politely and `killed` is correctly false. That made the test
+   * report a bug in the code when the only thing it had measured was bash
+   * startup latency. Waiting for the child's own readiness marker removes every
+   * assumption about how fast a process starts.
+   */
+  async function abortOnReady(body: string, killGraceMs: number) {
+    const controller = new AbortController();
+    return sshStreamWithArgs({
       args: ['t'],
-      sshBin: fakeSsh('trap "" TERM; printf "x"; sleep 30'),
-      timeoutMs: 150,
-      killGraceMs: 200,
-      onStdout: () => {},
+      sshBin: fakeSsh(body),
+      signal: controller.signal,
+      killGraceMs,
+      onStdout: (chunk) => { if (chunk.toString().includes('ready')) controller.abort(); },
     });
-    expect(result.timedOut).toBe(true);
+  }
+
+  it('SIGKILLs a child that ignores SIGTERM, instead of hanging forever', async () => {
+    // The bug this covers: sending SIGTERM and waiting means a child that traps
+    // or ignores it never exits, so the promise never settles and the transfer
+    // hangs. The trap is installed BEFORE the readiness marker, so by the time
+    // this aborts, SIGTERM is guaranteed to be ignored.
+    const started = Date.now();
+    const result = await abortOnReady('trap "" TERM; printf "ready"; sleep 30', 200);
     expect(result.killed).toBe(true);
     // Settled on the escalation, not after the child's own 30s sleep.
-    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(Date.now() - started).toBeLessThan(10_000);
   });
 
   it('does not escalate a child that exits on SIGTERM', async () => {
+    // Escalation must be a response to a child that ignores TERM, not something
+    // applied indiscriminately.
+    const result = await abortOnReady('printf "ready"; sleep 30', 5_000);
+    expect(result.killed).toBe(false);
+  });
+
+  it('still reports a real timeout, with the deadline doing the work', async () => {
+    // The timeout path itself is covered separately from escalation, with a
+    // deadline generous enough that it cannot be confused with slow startup.
     const result = await sshStreamWithArgs({
       args: ['t'],
-      sshBin: fakeSsh('printf "x"; sleep 30'),
-      timeoutMs: 120,
-      killGraceMs: 3_000,
+      sshBin: fakeSsh('printf "ready"; sleep 30'),
+      timeoutMs: 1_500,
+      killGraceMs: 5_000,
       onStdout: () => {},
     });
     expect(result.timedOut).toBe(true);
-    expect(result.killed).toBe(false);
   });
 
   it('bounds stderr instead of buffering whatever the peer writes', async () => {
