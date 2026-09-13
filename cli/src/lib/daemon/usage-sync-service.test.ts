@@ -36,6 +36,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../accounting/usage-sync.js', () => ({
   publishUsageSnapshotToSharedStore: mocks.publishUsage,
   consumeUsageSnapshotsFromSharedStore: mocks.consumeUsage,
+  USAGE_SYNC_INTERVAL_MS: 15 * 60_000,
 }));
 vi.mock('../session/mirror.js', () => ({
   publishSessionMirrorToSharedStore: mocks.publishMirror,
