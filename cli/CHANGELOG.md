@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.22.107
+
+- **A bare interactive run places itself like `--device auto` (PHNX-4083).**
+  `agents run <harness>` with no prompt on a real TTY (no `--json`) now
+  auto-places onto a fleet worker — the same engine, pool, and banner as
+  `--device auto` — instead of always running on the machine you typed it at;
+  headless runs (any prompt, `--json`, teams/routines/hooks) are unchanged and
+  still run in place. To keep a local interactive run, pass
+  `--device <this machine>` or pick this machine (listed first) in the
+  `<harness>@` device picker; when placement finds no healthy device (empty
+  pool, or the PHNX-4051 stale-usage refusal) the run fails loud with the
+  placement error plus `Run here instead: agents run <harness> --device
+  <this machine>` — never a silent local fallback. Source:
+  `src/commands/exec.ts`, `src/commands/run-account-picker.ts`.
+
+- **Run pickers move to `#` (account) and `@` (device), `#@` asks both
+  (PHNX-4083).** `agents run claude#` now opens the account picker (the old
+  `claude@` menu, same rows and code path); `agents run claude@` opens the new
+  fleet device picker — this machine first, offline rows disabled, cached-state
+  age in the prompt — and `claude#@` asks the account first, then the device,
+  dispatching with the picked account label. A picker combined with an explicit
+  pin of the same thing (`claude@2.1.218#`, `claude#work#`, `claude@@`) or a
+  conflicting flag (`--account`, `--device`/`--on`/`--computer`/`--host`) fails
+  loud; a cancelled menu launches nothing. Source: `src/commands/exec.ts`,
+  `src/lib/hosts/dispatch.ts`.
+
 ## 1.22.106
 
 - Fixed release packages omitting the session-tracking hook. Release qualification now uses the complete CLI build, so installed agents can record the account that owns each native session.
