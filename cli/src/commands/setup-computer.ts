@@ -11,7 +11,7 @@
 
 import type { Command } from 'commander';
 import os from 'node:os';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import chalk from 'chalk';
 import {
   installComputerHelperMacLocal,
@@ -20,6 +20,8 @@ import {
 } from './computer.js';
 import { resolveComputerBin, ComputerClientError } from '../lib/computer-client.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
+import { installSetupTool } from '../lib/setup-tool-install.js';
+import { refreshToolSetup } from '../lib/setup-tool-status.js';
 
 const ACCESSIBILITY_PANE = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility';
 const SCREEN_PANE = 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture';
@@ -55,9 +57,7 @@ export async function runComputerWizard(): Promise<boolean> {
     resolveComputerBin();
   } catch (error) {
     if (!(error instanceof ComputerClientError) || error.code !== 'COMPUTER_BIN_MISSING') throw error;
-    console.log('Installing @phnx-labs/computer-cli@0.1.2…');
-    const installed = spawnSync('npm', ['install', '-g', '@phnx-labs/computer-cli@0.1.2'], { stdio: 'inherit' });
-    if (installed.status !== 0) return false;
+    if (!(await installSetupTool('computer'))) return false;
     try { resolveComputerBin(); }
     catch { console.error('Computer CLI installation did not produce an executable on PATH.'); return false; }
   }
@@ -149,9 +149,12 @@ export function registerSetupComputerCommand(setupCmd: Command): void {
   setupCmd
     .command('computer')
     .description('Set up `agents computer` (macOS) — install the signed helper and grant control permissions.')
-    .action(async () => {
+    .option('--install-only', 'Install the standalone Computer CLI without starting the helper or changing permissions')
+    .action(async (options: { installOnly?: boolean }) => {
       try {
-        await runComputerWizard();
+        if (options.installOnly) { if (!(await installSetupTool('computer'))) process.exitCode = 1; return; }
+        if (!(await runComputerWizard())) process.exitCode = 1;
+        await refreshToolSetup('computer');
       } catch (err) {
         if (isPromptCancelled(err)) {
           console.log(chalk.yellow('\nCancelled'));
