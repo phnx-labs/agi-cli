@@ -88,8 +88,12 @@ import {
   stripRoutingFlags,
 } from '../lib/hosts/remote-cmd.js';
 import { resolveRemoteOsSync } from '../lib/hosts/remote-os.js';
-import { sshExec, SSH_OPTS, sshExecRawStream, shellQuote } from '../lib/ssh-exec.js';
+import { sshExec, SSH_OPTS, sshExecRawStream, shellQuote, sshStreamWithArgs } from '../lib/ssh-exec.js';
 import { getBrowserRuntimeDir } from '../lib/state.js';
+import { buildSshInvocation, writeAskpassShim } from '../lib/devices/connect.js';
+import { resolveDeviceProfile } from '../lib/devices/resolve-profile.js';
+import { resolveDeviceTarget } from '../lib/devices/resolve-target.js';
+import type { DeviceProfile } from '../lib/devices/registry.js';
 import { flagValue } from '../lib/hosts/routing-flag.js';
 import { browserTaskPicker, type BrowserTask } from './browser-picker.js';
 import { assertRemoteControlAllowed, isFleetRemoteInvocation } from '../lib/browser/remote-control.js';
@@ -255,13 +259,6 @@ export function remoteStartTaskName(stdout: string, explicit?: string): string |
   return trimmed.split('\n').map((line) => line.trim()).find(Boolean);
 }
 
-/**
- * Largest capture `browser show --device` will pull. A capture is a screenshot,
- * a PDF or a short recording; anything past this is not something a viewer should
- * stream over ssh, and the cap is what makes the transfer BOUNDED rather than
- * "however big the peer's file happens to be".
- */
-export const REMOTE_VIEW_MAX_BYTES = 64 * 1024 * 1024;
 
 /**
  * Fetch an absolute remote file into a private local path, bounded.
@@ -276,57 +273,140 @@ export const REMOTE_VIEW_MAX_BYTES = 64 * 1024 * 1024;
  * show anything that was on the peer's screen and a world-readable temp path
  * would publish it to every local user.
  */
+/**
+ * The command that streams one file's RAW BYTES to stdout on the device's shell.
+ *
+ * Platform-correct, not one command with a portable-looking name. On Windows
+ * `cat` is an alias for `Get-Content`, which is a TEXT reader: it decodes the
+ * file, splits it into lines, and re-encodes on output — so a screenshot arrives
+ * corrupted rather than merely reordered. The .NET path opens a `FileStream` and
+ * copies it into the raw stdout handle, bypassing PowerShell's object/text
+ * pipeline entirely, which is the only way binary survives.
+ */
+export function remoteReadFileArgv(remotePath: string, shell: DeviceProfile['shell']): string[] {
+  if (shell === 'powershell') {
+    // Single-quoted inside the script with pwsh's own doubling, because this whole
+    // script is ONE argv token to the outer powershell.
+    const literal = remotePath.replace(/'/g, "''");
+    return ['powershell', '-NoProfile', '-Command', [
+      '$ErrorActionPreference=' + "'Stop';",
+      `$in=[System.IO.File]::OpenRead('${literal}');`,
+      'try{$out=[System.Console]::OpenStandardOutput();$in.CopyTo($out);$out.Flush()}finally{$in.Dispose()}',
+    ].join(' ')];
+  }
+  // `--` so a path that begins with a dash is a path, not an option.
+  return ['cat', '--', remotePath];
+}
+
+/**
+ * Largest capture `browser show --device` will pull. A capture is a screenshot,
+ * a PDF or a short recording; anything past this is not something a viewer should
+ * stream over ssh, and the cap is what makes the transfer BOUNDED rather than
+ * "however big the peer's file happens to be".
+ */
+export const REMOTE_VIEW_MAX_BYTES = 64 * 1024 * 1024;
+
+/** Write a whole buffer, looping until it is all out. */
+function writeFully(handle: number, chunk: Buffer): void {
+  let offset = 0;
+  while (offset < chunk.length) {
+    // `writeSync` may write FEWER bytes than asked (a signal, a pipe boundary),
+    // and ignoring the return value silently truncated the file mid-capture.
+    const wrote = fs.writeSync(handle, chunk, offset, chunk.length - offset);
+    if (wrote <= 0) throw new Error('local write made no progress');
+    offset += wrote;
+  }
+}
+
+/**
+ * Fetch an absolute remote file into a private local path, bounded.
+ *
+ * Auth is the CANONICAL device path, not a hand-rolled ssh: `buildSshInvocation`
+ * supplies the askpass shim for a password-auth box, `-i`/`IdentitiesOnly` for an
+ * explicit identity file, and the managed known-hosts pinning. Building the ssh
+ * args here instead meant a password-auth device could not be reached at all and
+ * an explicit `identityFile` was silently ignored.
+ *
+ * Bounded for real, not by a pre-flight `stat`: the byte budget is enforced on the
+ * stream as it arrives, so a file that grows between a size check and the copy — or
+ * a peer that misreports its size — still cannot spend more than the budget.
+ *
+ * The local file is written 0600 inside a 0700 directory, because a capture can
+ * show anything that was on the peer's screen and a world-readable temp path
+ * would publish it to every local user.
+ */
 export async function fetchRemoteFileForViewing(
   device: string,
   remotePath: string,
   localPath: string,
-  opts: { maxBytes?: number } = {},
+  opts: { maxBytes?: number; timeoutMs?: number } = {},
 ): Promise<void> {
-  if (!path.posix.isAbsolute(remotePath) && !/^[A-Za-z]:[\\/]/.test(remotePath)) {
+  const posixAbsolute = path.posix.isAbsolute(remotePath);
+  const windowsAbsolute = /^[A-Za-z]:[\\/]/.test(remotePath) || /^\\\\/.test(remotePath);
+  if (!posixAbsolute && !windowsAbsolute) {
     throw new Error(
       `Remote path must be absolute: got "${remotePath}".\n`
       + 'This machine cannot resolve the peer\'s working directory, so a relative path\n'
       + 'would name a different file there than you meant here.',
     );
   }
-  const host = await resolveHost(device);
-  if (!host) throw new Error(`Unknown device "${device}". Next: agents devices list`);
-  const target = sshTargetFor(host);
+  // `resolveDeviceTarget` is the SAME resolver `agents ssh` uses, so it yields the
+  // full device profile — platform, shell and auth — that `buildSshInvocation`
+  // needs. `resolveHost` returns a hosts-registry `Host`, which carries none of
+  // that: with it, a password-auth device could not be reached and an explicit
+  // identityFile was silently dropped.
+  const resolved = await resolveDeviceTarget(device);
+  if (!resolved) throw new Error(`Unknown device "${device}". Next: agents devices list`);
+  const profile = resolveDeviceProfile(resolved);
   const maxBytes = opts.maxBytes ?? REMOTE_VIEW_MAX_BYTES;
 
-  const dir = path.dirname(path.resolve(localPath));
+  // A POSIX device cannot read a Windows path and vice versa; saying so here beats
+  // a confusing shell error from the peer.
+  if (profile.shell === 'powershell' && posixAbsolute && !windowsAbsolute) {
+    throw new Error(`"${remotePath}" is a POSIX path but ${device} runs PowerShell. Pass the Windows path (e.g. C:\\Users\\…).`);
+  }
+  if (profile.shell !== 'powershell' && windowsAbsolute) {
+    throw new Error(`"${remotePath}" is a Windows path but ${device} is a POSIX host. Pass the absolute POSIX path.`);
+  }
+
+  const resolvedLocal = path.resolve(localPath);
+  const dir = path.dirname(resolvedLocal);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   fs.chmodSync(dir, 0o700);
-  const handle = fs.openSync(path.resolve(localPath), 'w', 0o600);
+  const handle = fs.openSync(resolvedLocal, 'w', 0o600);
   let written = 0;
   let overflow = false;
   const controller = new AbortController();
   try {
-    const result = await sshExecRawStream(target, `cat -- ${shellQuote(remotePath)}`, {
-      timeoutMs: 120_000,
+    // `argv: true` is what makes a path containing a space or a quote survive —
+    // the same exact-token delivery `agents ssh --argv` exposes.
+    const { args, env } = buildSshInvocation(
+      profile,
+      remoteReadFileArgv(remotePath, profile.shell),
+      writeAskpassShim(),
+      {},
+      { argv: true },
+    );
+    const result = await sshStreamWithArgs({
+      args,
+      env,
+      timeoutMs: opts.timeoutMs ?? 120_000,
       signal: controller.signal,
-      // No ControlMaster for a one-shot byte stream. Multiplexing buys nothing
-      // here — there is no second command to share the connection — and it adds a
-      // failure mode that has nothing to do with the transfer: the control socket
-      // lives under the cache dir, and a long HOME pushes that path past the
-      // ~104-byte AF_UNIX limit, which fails the pull with a message about socket
-      // paths rather than about the file.
-      multiplex: false,
-      onStdout: (chunk) => {
+      onStdout: (chunk: Buffer) => {
         if (overflow) return;
         if (written + chunk.length > maxBytes) {
           overflow = true;
           controller.abort();
           return;
         }
-        fs.writeSync(handle, chunk);
+        writeFully(handle, chunk);
         written += chunk.length;
       },
     });
     if (overflow) {
       throw new Error(`Refusing to pull ${device}:${remotePath}: larger than the ${maxBytes}-byte view budget.`);
     }
-    if (result.timedOut) throw new Error(`Timed out pulling ${device}:${remotePath} after 120s.`);
+    if (result.timedOut) throw new Error(`Timed out pulling ${device}:${remotePath}.`);
     if (result.code !== 0) {
       const detail = result.stderr.toString('utf8').trim();
       throw new Error(`Failed to read ${device}:${remotePath}${detail ? `: ${detail}` : ` (ssh exited ${result.code})`}`);
@@ -334,7 +414,7 @@ export async function fetchRemoteFileForViewing(
     if (written === 0) throw new Error(`${device}:${remotePath} is empty or was not readable.`);
   } catch (error) {
     // Never leave a partial file behind for a viewer to open as if it were whole.
-    try { fs.unlinkSync(path.resolve(localPath)); } catch { /* nothing to clean */ }
+    try { fs.unlinkSync(resolvedLocal); } catch { /* nothing to clean */ }
     throw error;
   } finally {
     fs.closeSync(handle);

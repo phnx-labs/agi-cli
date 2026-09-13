@@ -335,6 +335,49 @@ viewer tab; see [Arc](#arc-attach-to-your-running-window)), not launchable here 
 the call falls back to the OS handler and prints one line saying why. It never
 silently ignores your configuration.
 
+### Viewing a capture that lives on another machine (`show --device`)
+
+`agents browser show <absolute-path> --device <host>` fetches the file from that
+host and opens it with the **local** viewer above. Nothing is opened on the remote
+box — this is a viewer, not a remote drive.
+
+```bash
+agents browser show '/home/me/.agents/.cache/browser/work/sessions/post/shot.png' --device yosemite-m4
+```
+
+**`--device` here names where the FILE is**, and `show` is the one browser verb
+where that is true. Every other verb refuses `--device` outright (`agents browser
+navigate --device X` prints "`--device` is only valid on `agents browser start`"),
+because a task is bound to its device at `start` and later verbs resolve that
+binding from the local task index. `show` binds no task and has nothing to route,
+so the flag can only mean the source location — which is why it is exempt rather
+than inconsistent.
+
+Four properties worth knowing:
+
+- **Absolute paths only.** This machine cannot resolve the peer's working
+  directory, so a relative path would name a different file there than you meant
+  here. A POSIX path against a PowerShell host (and vice versa) is refused with
+  that reason rather than passed through to a confusing remote shell error.
+- **A URL plus `--device` is refused.** It says the source is remote while naming
+  something that is not a file on that peer.
+- **Bounded as it streams.** The transfer stops at `REMOTE_VIEW_MAX_BYTES` (64 MiB)
+  while the bytes arrive, not after a size check, so a file that grows mid-copy
+  cannot exceed it. A partial file is deleted rather than left for the viewer to
+  open as though whole.
+- **Private on arrival.** The local copy is written `0600` inside a `0700`
+  directory under the browser runtime dir. A capture can show anything that was on
+  the peer's screen, so a world-readable temp path would publish it to every other
+  local user.
+
+Transport is the canonical device path — the same auth `agents ssh` uses, so a
+password-auth device resolves its secret through the askpass shim and an explicit
+`identityFile` is honoured. The read itself is platform-correct rather than one
+portable-looking command: POSIX hosts get `cat --`, and a PowerShell host gets a
+.NET `FileStream` copied into the raw stdout handle, because on Windows `cat` is an
+alias for `Get-Content` — a *text* reader that decodes, splits into lines and
+re-encodes, which corrupts a binary capture.
+
 ### Identity-bearing names vs loopback endpoints
 
 A name declared by exactly one device is identity-bearing. The daemon resolves

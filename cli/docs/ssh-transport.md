@@ -194,6 +194,44 @@ An **explicit** `agents ssh <device> <cmd…>` is unchanged: the command keeps t
 remote home and its cwd is never silently rewritten — mirroring is interactive-
 login-only.
 
+### 2e. Exact argv delivery: `--argv` (PHNX-3999)
+
+`wrapRemoteCommand` joins the command tokens with a space, and that is deliberate
+for the ordinary path: `agents ssh box 'bash -lc "cd x && make"'` arrives as ONE
+token whose pipeline, globs and redirections the peer's login shell must expand.
+Quoting it would ship the whole line as a single literal argument and break every
+caller that relies on that.
+
+But a caller holding a real argv **array** needs the opposite guarantee, and the
+raw join destroys it: `['--title', 'two words']` arrives as three arguments, and
+`'a & b'` arrives as a backgrounded command. So exact delivery is opt-in at the
+call site that knows which shape it has:
+
+```bash
+agents ssh box --argv '["agents","feed","post","--title","two words","a & b"]'
+```
+
+- Each array element is delivered as **exactly one token** on the peer.
+- Mutually exclusive with the positional form — passing both is an error rather
+  than a silent precedence rule, because the two are different delivery contracts.
+- Malformed JSON, a non-array, and a non-string element each fail loud naming the
+  problem, so a typo cannot quietly downgrade to shell-string semantics.
+
+Quoting reuses the existing helpers: `shellQuote` for POSIX, and `pwshQuote` for
+PowerShell, whose single-quote doubling is total over every byte (including `$`,
+backtick and newline) before `encodePwshBase64` encodes the script. **On PowerShell
+the script is led by the call operator `&`** — without it, pwsh evaluates a quoted
+program name as a string expression and echoes it instead of running anything.
+
+**Provenance is a prelude, never part of the argv.** `fleetRemotePrelude` emits the
+`AGENTS_FLEET_REMOTE` marker plus the caller's actor as ready shell syntax — a
+POSIX `K=V` pair is already `shellQuote`d and a PowerShell assignment is a complete
+statement. Those tokens are composed around the quoted argv rather than mixed into
+it: quoting them a second time turns `'AGENTS_ACTOR=Some Name'` into escaped
+garbage and turns a pwsh assignment into an inert string literal. `markFleetRemote`
+(the array-prefixing form the `--device` passthrough uses) shares that one prelude
+definition, so the two paths cannot drift.
+
 ### 3. The follow loop: one persistent stream (P1)
 
 The original loop made two calls per cycle — `tail -c +offset` for new log bytes,

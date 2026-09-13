@@ -1,11 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { pwshQuote, wrapRemoteCommand } from './connect.js';
+import { buildSshInvocation, fleetRemotePrelude, markFleetRemote, pwshQuote, wrapRemoteCommand } from './connect.js';
 import { parseArgvJson } from '../../commands/ssh.js';
 import type { DeviceProfile } from './registry.js';
 
 function dev(extra: Partial<DeviceProfile> = {}): DeviceProfile {
-  return { name: 'box', shell: 'posix', auth: { method: 'key' }, ...extra } as DeviceProfile;
+  // `address` is required by `buildSshInvocation` (via `sshTargetFor`), so the
+  // full-pipeline tests below need it; the quoter-only tests ignore it.
+  return {
+    name: 'box', platform: 'linux', shell: 'posix',
+    address: { via: 'manual', ip: '198.51.100.7' },
+    auth: { method: 'key' },
+    createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
+    ...extra,
+  } as DeviceProfile;
 }
 
 /**
@@ -26,9 +34,14 @@ function tokensAfterRealShell(command: string): string[] {
   return out.split('\u0000').slice(0, -1);
 }
 
+/** sh `printf` format that NUL-terminates each argument. */
+const PRINTF_NUL = '%s\\000';
+/** The same format, pre-quoted for inline use in a probe script. */
+const PRINTF_NUL_Q = "'%s\\000'";
+
 /** `printf` writing each token NUL-terminated, built through the code under test. */
 function printfArgv(tokens: string[]): string {
-  return wrapRemoteCommand(dev(), ['printf', '%s\\000', ...tokens], { argv: true })!;
+  return wrapRemoteCommand(dev(), ['printf', PRINTF_NUL, ...tokens], { argv: true })!;
 }
 
 describe('argv mode delivers exact tokens through a real shell', () => {
@@ -95,9 +108,10 @@ describe('argv mode on a PowerShell device', () => {
     expect(wrapped.startsWith('powershell -NoProfile -EncodedCommand ')).toBe(true);
     const encoded = wrapped.split(' ').pop()!;
     const script = Buffer.from(encoded, 'base64').toString('utf16le');
-    // Each token single-quoted; the embedded quote doubled, which is pwsh's own
-    // escape inside a single-quoted string.
-    expect(script).toBe("'Write-Output' 'two words' 'it''s'");
+    // Each token single-quoted, the embedded quote doubled (pwsh's own escape) —
+    // and led by `&`, without which PowerShell evaluates the quoted program as a
+    // string expression and echoes it instead of running anything.
+    expect(script).toBe("& 'Write-Output' 'two words' 'it''s'");
   });
 
   it('quotes every byte that would otherwise be pwsh syntax', () => {
@@ -146,5 +160,99 @@ describe('--argv parsing fails loud', () => {
     expect(errs.join(' ')).toMatch(/element 1 is number/);
     expect(parse('["a",null]')).toBeUndefined();
     expect(errs.join(' ')).toMatch(/element 1 is object/);
+  });
+});
+
+describe('the FULL buildSshInvocation pipeline, not just the quoter', () => {
+  /**
+   * The command string ssh would send, extracted from a real `buildSshInvocation`.
+   *
+   * The earlier tests here exercised `wrapRemoteCommand` in isolation, which is
+   * exactly where the provenance bug hid: `buildSshInvocation` applied
+   * `markFleetRemote` BEFORE quoting, so the already-quoted prelude got quoted a
+   * second time and nothing in a quoter-only test could see it.
+   */
+  function remoteCommandFrom(device: DeviceProfile, cmd: string[], argv: boolean): string {
+    const { args } = buildSshInvocation(device, cmd, '/nonexistent/askpass', {}, argv ? { argv: true } : {});
+    return args[args.length - 1]!;
+  }
+
+  const actor = {
+    AGENTS_ACTOR: 'Some Name',
+    AGENTS_ACTOR_ID: "o'brien",
+    GIT_AUTHOR_NAME: 'a & b',
+  };
+
+  it('quotes the actor pairs exactly ONCE on a POSIX browser drive', () => {
+    const remote = remoteCommandFrom(dev(), ['agents', 'browser', 'navigate', '--url', 'https://x.test/?a=1&b=2'], true);
+    expect(remote.startsWith('env AGENTS_FLEET_REMOTE=1 ')).toBe(true);
+    // The double-quoting signature must not appear anywhere.
+    expect(remote).not.toContain("'\\''");
+    // The URL's `&` survives as one token rather than backgrounding the command.
+    expect(remote).toContain("'https://x.test/?a=1&b=2'");
+  });
+
+  it('delivers provenance AND exact argv through a real shell, in one command', () => {
+    // The invoked program prints BOTH its argv and the variables it can see, so a
+    // single real execution proves the two halves together. Reading the variables
+    // in a *later* command would read the ambient shell instead: `env K=V cmd`
+    // scopes them to `cmd` alone, which is exactly what `markFleetRemote` relies on.
+    const prelude = fleetRemotePrelude(dev(), actor);
+    const script = 'printf ' + PRINTF_NUL_Q + ' "$@" "$AGENTS_FLEET_REMOTE" "$AGENTS_ACTOR" "$AGENTS_ACTOR_ID" "$GIT_AUTHOR_NAME"';
+    const remote = wrapRemoteCommand(
+      dev(),
+      ['sh', '-c', script, 'sh', 'two words', 'a & b'],
+      { argv: true, prelude },
+    )!;
+    expect(tokensAfterRealShell(remote)).toEqual([
+      // the caller's tokens, intact through quoting
+      'two words', 'a & b',
+      // the provenance the program actually received, intact
+      '1', 'Some Name', "o'brien", 'a & b',
+    ]);
+  });
+
+  it('keeps the marker exact-once when a caller pre-marked the command', () => {
+    const pre = markFleetRemote(['agents', 'browser', 'status'], dev(), actor);
+    const remote = remoteCommandFrom(dev(), pre, true);
+    // One marker, not two: `buildSshInvocation` must not add a second prelude on
+    // top of one the caller already applied.
+    expect(remote.match(/AGENTS_FLEET_REMOTE=1/g)).toHaveLength(1);
+  });
+
+  it('does not stamp provenance on a non-browser command', () => {
+    expect(remoteCommandFrom(dev(), ['uptime', '-p'], true)).not.toContain('AGENTS_FLEET_REMOTE');
+  });
+
+  it('emits an EXECUTABLE PowerShell script: call operator plus unquoted prelude', () => {
+    const remote = remoteCommandFrom(dev({ shell: 'powershell' }), ['agents', 'browser', 'navigate', '--url', 'https://x.test/?a=1&b=2'], true);
+    const script = Buffer.from(remote.split(' ').pop()!, 'base64').toString('utf16le');
+    // The prelude must be live pwsh STATEMENTS, not quoted strings.
+    expect(script).toContain("$env:AGENTS_FLEET_REMOTE='1';");
+    expect(script).not.toContain("'$env:AGENTS_FLEET_REMOTE=");
+    // `&` is what makes the quoted program run instead of being echoed.
+    expect(script).toMatch(/; & 'agents' 'browser'/);
+    expect(script).toContain("'--url' 'https://x.test/?a=1&b=2'");
+  });
+
+  it('escapes a quote in a PowerShell provenance value without breaking the statement', () => {
+    const prelude = fleetRemotePrelude(dev({ shell: 'powershell' }), actor);
+    const remote = wrapRemoteCommand(dev({ shell: 'powershell' }), ['prog'], { argv: true, prelude })!;
+    const script = Buffer.from(remote.split(' ').pop()!, 'base64').toString('utf16le');
+    // pwsh doubles an embedded single quote; the statement stays terminated.
+    expect(script).toContain("$env:AGENTS_ACTOR_ID='o''brien';");
+    expect(script).toContain("$env:AGENTS_ACTOR='Some Name';");
+    expect(script.endsWith("& 'prog'")).toBe(true);
+  });
+
+  it('leaves a NON-argv powershell drive as an unquoted command, as before', () => {
+    // The default mode must keep working: the program is a bare word there, so it
+    // needs no call operator and must not gain one.
+    const script = Buffer.from(
+      remoteCommandFrom(dev({ shell: 'powershell' }), ['agents', 'browser', 'status'], false).split(' ').pop()!,
+      'base64',
+    ).toString('utf16le');
+    expect(script).toContain('agents browser status');
+    expect(script).not.toContain("& 'agents'");
   });
 });

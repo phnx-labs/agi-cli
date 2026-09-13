@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { fetchRemoteFileForViewing, REMOTE_VIEW_MAX_BYTES } from './browser.js';
+import { fetchRemoteFileForViewing, remoteReadFileArgv, REMOTE_VIEW_MAX_BYTES } from './browser.js';
 
 const roots: string[] = [];
 function tempRoot(): string {
@@ -120,5 +120,39 @@ describe.runIf(loopbackSshOptedIn())('bounded private remote view over real ssh 
     await expect(fetchRemoteFileForViewing(device, '/tmp/definitely-not-here-xyz.png', out))
       .rejects.toThrow(/Failed to read|is empty or was not readable/);
     expect(fs.existsSync(out)).toBe(false);
+  });
+});
+
+describe('the read command is platform-correct, not portable-looking', () => {
+  it('uses cat -- on a POSIX host', () => {
+    expect(remoteReadFileArgv('/caps/a b.png', 'posix')).toEqual(['cat', '--', '/caps/a b.png']);
+  });
+
+  it('uses a .NET binary stream on PowerShell, never the cat alias', () => {
+    const argv = remoteReadFileArgv('C:\\caps\\a b.png', 'powershell');
+    expect(argv[0]).toBe('powershell');
+    expect(argv.slice(1, 3)).toEqual(['-NoProfile', '-Command']);
+    const script = argv[3]!;
+    // On Windows `cat` is an alias for Get-Content — a TEXT reader that decodes,
+    // splits into lines and re-encodes, corrupting any binary capture.
+    expect(script).not.toMatch(/\bcat\b/);
+    expect(script).not.toMatch(/Get-Content/);
+    // The raw handle is what bypasses PowerShell's text pipeline entirely.
+    expect(script).toContain('[System.IO.File]::OpenRead(');
+    expect(script).toContain('[System.Console]::OpenStandardOutput()');
+    expect(script).toContain('CopyTo');
+    // The stream is released whether or not the copy threw.
+    expect(script).toContain('finally{$in.Dispose()}');
+  });
+
+  it('escapes a quote in a Windows path with pwsh doubling', () => {
+    const script = remoteReadFileArgv("C:\\caps\\it's.png", 'powershell')[3]!;
+    expect(script).toContain("OpenRead('C:\\caps\\it''s.png')");
+  });
+
+  it('refuses a path whose shape does not match the host', async () => {
+    // Saying so here beats a confusing shell error from the peer.
+    await expect(fetchRemoteFileForViewing('no-such-device-xyz', '/posix/path', path.join(tempRoot(), 'o.bin')))
+      .rejects.toThrow(/Unknown device/);
   });
 });

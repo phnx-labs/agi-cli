@@ -46,11 +46,19 @@
   arrived as two arguments and `a & b` arrived as a backgrounded command. Pass
   `--argv '["prog","two words","a & b"]'` to deliver each element as exactly one
   token. The positional form is unchanged and still parsed by the remote shell, so
-  the two are mutually exclusive. Source: `cli/src/lib/devices/connect.ts`.
+  the two are mutually exclusive. On a PowerShell host the script is led by the call
+  operator, without which pwsh echoes a quoted program name instead of running it,
+  and the fleet-provenance prefix is composed around the quoted argv rather than
+  inside it — quoting it twice broke any actor value with a space or a quote.
+  Source: `cli/src/lib/devices/connect.ts`.
 - **`agents browser show <path> --device <host>` views a capture held on another
   machine (PHNX-3999).** The file is fetched into a private local path (0600 inside a
   0700 dir), bounded as it streams so an oversized file is refused rather than
   transferred, and then opened with the normal local viewer — nothing is opened on
   the remote box. `--device` here names where the FILE is; it requires an absolute
-  path and is refused together with a URL. Source: `cli/src/commands/browser.ts`.
+  path and is refused together with a URL. Transport uses the device's canonical
+  auth, so a password-auth box and an explicit identity file both work, and the read
+  is platform-correct: POSIX gets `cat`, while Windows gets a .NET binary stream
+  because `cat` there is a text reader that corrupts a capture. Source:
+  `cli/src/commands/browser.ts`.
 - **Setup from the menu uses a real terminal.** `agents setup browser|computer|secrets --terminal` hands interactive onboarding to the existing terminal engine and reports launch errors. Installation and readiness remain separate; only explicit checks run health probes, and concurrent checks share one probe.
