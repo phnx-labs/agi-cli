@@ -15,7 +15,7 @@ import type { InjectTarget } from '../terminal/index.js';
 /**
  * Map a session's `ReplyRail` to an engine `InjectTarget`. Today only tmux rails
  * are externally addressable (provenance.ts:143-149); a null rail yields null and
- * the caller must supply a target another way (a pty id, a macOS window).
+ * the caller must supply a target another way (a macOS window).
  */
 export function injectTargetFromReplyRail(rail: ReplyRail): InjectTarget | null {
   if (rail && rail.rail === 'tmux') {

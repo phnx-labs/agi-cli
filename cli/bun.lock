@@ -7,11 +7,9 @@
       "dependencies": {
         "@fontsource/inter": "^5.3.0",
         "@fontsource/jetbrains-mono": "^5.3.0",
-        "@homebridge/node-pty-prebuilt-multiarch": "0.14.1",
         "@inquirer/prompts": "8.5.2",
         "@resvg/resvg-wasm": "^2.6.2",
         "@types/proper-lockfile": "4.1.4",
-        "@xterm/headless": "6.0.0",
         "@zed-industries/agent-client-protocol": "0.4.5",
         "acorn": "8.18.0",
         "aws4fetch": "1.0.20",
@@ -35,6 +33,7 @@
         "yoga-wasm-web": "^0.3.3",
       },
       "devDependencies": {
+        "@homebridge/node-pty-prebuilt-multiarch": "0.14.1",
         "@types/diff": "8.0.0",
         "@types/marked-terminal": "6.1.1",
         "@types/node": "26.1.0",
@@ -319,8 +318,6 @@
     "@vitest/spy": ["@vitest/spy@4.1.9", "", {}, "sha512-fHpsS6mIi+PiEW+vcRVOMkX1oSaPKne3VOclSFICPcGOmfKgXPU5iAah+wcNcj2xPrCCmfq99IDGf+EojhhvhA=="],
 
     "@vitest/utils": ["@vitest/utils@4.1.9", "", { "dependencies": { "@vitest/pretty-format": "4.1.9", "convert-source-map": "^2.0.0", "tinyrainbow": "^3.1.0" } }, "sha512-A51o8ymO5PpqlWNnBP9ZHPXDIpuMtTLlGSjN7la4US+LJzoUMyhwjA5QXlm39JexgwHKW4Xjs8Z2d3dLCXOeuA=="],
-
-    "@xterm/headless": ["@xterm/headless@6.0.0", "", {}, "sha512-5Yj1QINYCyzrZtf8OFIHi47iQtI+0qYFPHmouEfG8dHNxbZ9Tb9YGSuLcsEwj9Z+OL75GJqPyJbyoFer80a2Hw=="],
 
     "@zed-industries/agent-client-protocol": ["@zed-industries/agent-client-protocol@0.4.5", "", { "dependencies": { "zod": "^3.0.0" } }, "sha512-OwHKfu5AiKul/GSJilHg36+kOSV9eOl2eYnjR6tenAQDdraSnt22WFk0SDFTeuAANz1Gxkv+DTf7Hq32rvX7FQ=="],
 

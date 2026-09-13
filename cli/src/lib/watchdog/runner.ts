@@ -388,7 +388,7 @@ function planDelivery(
   const resolution = resolveInjectTargetForSession(session, { allowGhosttyFocus });
   const route = resolveAnswerRoute({ mailboxId, answer: chosenText, session, block });
 
-  // A precise split (tmux / iTerm / vscodium / pty) is the authoritative target.
+  // A precise split (tmux / iTerm / vscodium) is the authoritative target.
   if (resolution.addressable) {
     return { via: 'inject', rail: resolution.rail, target: resolution.target };
   }
@@ -1121,7 +1121,7 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
 
     // Deliver. injectDryRun exercises the path without a real side effect: inject
     // still calls injectFn (which honors dryRun), mailbox/resume are short-circuited.
-    // `confirmed` distinguishes a delivery we KNOW reached the agent (tmux/iterm/pty,
+    // `confirmed` distinguishes a delivery we KNOW reached the agent (tmux/iterm,
     // mailbox, resume) from one merely dispatched (vscodium's fire-and-forget
     // --open-url). Only a CONFIRMED delivery is booked as a landed nudge.
     let delivered: { ok: boolean; confirmed: boolean; error?: string };

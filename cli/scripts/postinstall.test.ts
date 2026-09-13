@@ -111,7 +111,7 @@ describe('postinstall alias shims', () => {
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe('');
 
-    for (const name of ['browser', 'pty', 'teams']) {
+    for (const name of ['browser', 'teams']) {
       const script = readShim(home, name);
       expect(script).toContain(`exec "$AGENTS_BIN" ${name} "$@"`);
       expect(script).toContain(path.join(root, 'dist', 'index.js'));
@@ -119,6 +119,7 @@ describe('postinstall alias shims', () => {
     // Standalone binary names: never written as alias shims.
     expect(fs.existsSync(path.join(home, '.agents', '.cache', 'shims', 'secrets'))).toBe(false);
     expect(fs.existsSync(path.join(home, '.agents', '.cache', 'shims', 'sessions'))).toBe(false);
+    expect(fs.existsSync(path.join(home, '.agents', '.cache', 'shims', 'pty'))).toBe(false);
   });
 
   it('removes the retired `secrets` alias a previous install wrote, and only that (PHNX-3989)', () => {
@@ -136,6 +137,12 @@ describe('postinstall alias shims', () => {
       `#!/bin/sh\nAGENTS_BIN='/old/install/dist/index.js'\nexec "$AGENTS_BIN" sessions "$@"\n`,
       { mode: 0o755 },
     );
+    // pty (PHNX-4091): the engine moved to the standalone term-cli's `term`.
+    fs.writeFileSync(
+      path.join(shims, 'pty'),
+      `#!/bin/sh\nAGENTS_BIN='/old/install/dist/index.js'\nexec "$AGENTS_BIN" pty "$@"\n`,
+      { mode: 0o755 },
+    );
     // An unrelated file under a retired name is not ours and must survive.
     const foreign = path.join(shims, 'secrets-foreign');
     fs.writeFileSync(foreign, '#!/bin/sh\necho unrelated\n', { mode: 0o755 });
@@ -150,6 +157,7 @@ describe('postinstall alias shims', () => {
     expect(fs.existsSync(path.join(shims, 'secrets'))).toBe(false);
     expect(fs.existsSync(path.join(shims, 'secrets.cmd'))).toBe(false);
     expect(fs.existsSync(path.join(shims, 'sessions'))).toBe(false);
+    expect(fs.existsSync(path.join(shims, 'pty'))).toBe(false);
     expect(fs.existsSync(foreign)).toBe(true);
     expect(readShim(home, 'browser')).toContain('exec "$AGENTS_BIN" browser "$@"');
   });

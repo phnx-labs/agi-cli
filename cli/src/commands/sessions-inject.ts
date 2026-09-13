@@ -6,11 +6,11 @@
  *
  * Resolution: find the active session by id, then resolve its exact split through
  * the SAME canonical resolver the watchdog uses — `resolveInjectTargetForSession`
- * (lib/terminal/resolve.ts), precedence tmux > iterm > vscodium > pty. Sharing one
+ * (lib/terminal/resolve.ts), precedence tmux > iterm > vscodium. Sharing one
  * resolver keeps the manual unblock path and the watchdog in agreement on which
  * sessions are addressable (a prior duplicate resolver read only `provenance.reply`
  * and could not address a VSCodium/Cursor terminal the watchdog handled fine).
- * `--pane`/`--pty` target a backend directly when the handle is already known.
+ * `--pane` targets a backend directly when the handle is already known.
  */
 
 import type { Command } from 'commander';
@@ -26,7 +26,6 @@ import { normalizeSingleDeviceOption } from './utils.js';
 interface InjectOptions {
   pane?: string;
   socket?: string;
-  pty?: string;
   /**
    * The remote device. A single `--device box` arrives here as `['box']` because
    * the parent `sessions` command's variadic `-D, --device <target...>` shadows
@@ -82,7 +81,6 @@ export function buildRemoteInjectArgv(sessionId: string, text: string, options: 
   if (options.enter === false) argv.push('--no-enter');
   if (options.combined) argv.push('--combined');
   if (options.socket) argv.push('--socket', options.socket);
-  if (options.pty) argv.push('--pty', options.pty);
   if (options.pane) argv.push('--pane', options.pane);
   if (options.json) argv.push('--json');
   return argv;
@@ -153,13 +151,11 @@ async function runInject(sessionId: string, text: string, options: InjectOptions
     process.exit(1);
   }
 
-  // Direct-target shortcuts skip the session lookup — the watchdog often already
-  // holds the pane id or pty session it wants to type into. The pane's exact
-  // address is known, so it composes with --device (tmux send-keys over SSH).
+  // Direct-target shortcut skips the session lookup — the watchdog often already
+  // holds the pane id it wants to type into. The pane's exact address is known,
+  // so it composes with --device (tmux send-keys over SSH).
   let target: InjectTarget | null = null;
-  if (options.pty) {
-    target = { backend: 'pty', id: options.pty };
-  } else if (options.pane) {
+  if (options.pane) {
     target = { backend: 'tmux', pane: options.pane, socket: options.socket };
   } else if (device) {
     // A bare session id + a device: the session's tmux panes live ON that device,
@@ -200,7 +196,6 @@ export function registerSessionsInjectCommand(sessionsCmd: Command): void {
     .command('inject <sessionId> <text>')
     .description('Deliver text (+ Enter) into the terminal a running session lives in — nudge a stalled agent.')
     .option('--pane <id>', 'Target a tmux pane id directly (e.g. %3), skipping session lookup')
-    .option('--pty <id>', 'Target an agents-pty session id directly, skipping session lookup')
     .option('--socket <path>', 'tmux socket path (defaults to the session/shared socket)')
     .option('--device <target>', 'Deliver on a remote device over SSH. With a bare session id, the session is resolved ON that device; with --pane, the pane is addressed there directly.')
     .option('--no-enter', 'Send only the text, without a trailing Enter')
@@ -215,9 +210,6 @@ export function registerSessionsInjectCommand(sessionsCmd: Command): void {
       # Target a tmux pane directly (what a watchdog already holds)
       agents sessions inject _ "continue" --pane %3 --socket /tmp/agents/tmux.sock
 
-      # Type into an agents-pty session without submitting
-      agents sessions inject _ "ls" --pty $SID --no-enter
-
       # Nudge a live session on another box (resolved on the device)
       agents sessions inject 214edaae "continue" --device yosemite-s0
 
@@ -228,8 +220,8 @@ export function registerSessionsInjectCommand(sessionsCmd: Command): void {
       - Ink-TUI Enter semantics: by default the text and Enter are two separate
         writes, which is what Claude's Ink TUI needs. --combined fuses them.
       - A session is addressable by id when it resolves to a precise split —
-        tmux, iTerm, a VSCodium/Cursor/VS Code integrated terminal, or a pty
-        (resolveInjectTargetForSession). Use --pane/--pty for direct targeting.
+        tmux, iTerm, or a VSCodium/Cursor/VS Code integrated terminal
+        (resolveInjectTargetForSession). Use --pane for direct targeting.
       - The id may be the session id (short or full) OR the '<shortid>' suffix of
         a tmux target (ag-<agent>-<shortid>) — the only selector a live tmux
         session whose id column shows '-' exposes.

@@ -90,7 +90,7 @@ anyway (the model's deference reflex overrides explicit instruction). The watchd
 
 A nudge is delivered into the exact terminal split the session lives in, resolved by the
 single canonical resolver `resolveInjectTargetForSession` (`lib/terminal/resolve.ts`),
-precedence `tmux > iterm > vscodium > pty`, then injected by `injectIntoTerminal`
+precedence `tmux > iterm > vscodium`, then injected by `injectIntoTerminal`
 (`lib/terminal/inject.ts`). VSCodium/Cursor/VS Code integrated terminals are addressed via
 the extension's `/inject` URI handler. When no addressable split exists the tick falls back
 to a mailbox enqueue or a headless `--resume`, and refuses (flags for the menu-bar) only
@@ -98,8 +98,8 @@ when nothing can reach the session. `agents sessions inject` shares this same re
 the manual unblock path and the watchdog agree.
 
 **Confirmed delivery.** A nudge counts as landed — booked in the cooldown ledger and logged
-`nudge` — only when delivery is confirmed. tmux / iterm / pty self-confirm: a successful
-`send-keys` / `write text` / pty write IS delivery (a bad pane or session id errors).
+`nudge` — only when delivery is confirmed. tmux / iterm self-confirm: a successful
+`send-keys` / `write text` IS delivery (a bad pane or session id errors).
 vscodium's `codium --open-url` is fire-and-forget — exiting 0 only means the editor accepted
 the URL, not that the extension typed anything — so it is recorded `undelivered` (visible in
 `agents watchdog history`) until the swarm-ext extension acks the verb. This ends the

@@ -79,7 +79,6 @@ const loadRefreshRules: ModuleLoader = async () => (await import('../commands/re
 const loadFactory: ModuleLoader = async () => (await import('../commands/factory.js')).registerFactoryCommands;
 const loadInsights: ModuleLoader = async () => (await import('../commands/insights.js')).registerInsightsCommand;
 const loadTrace: ModuleLoader = async () => (await import('../commands/sessions-trace.js')).registerTraceCommand;
-const loadPty: ModuleLoader = async () => (await import('../commands/pty.js')).registerPtyCommands;
 const loadTmux: ModuleLoader = async () => (await import('../commands/tmux.js')).registerTmuxCommands;
 const loadWatchdog: ModuleLoader = async () => (await import('../commands/watchdog.js')).registerWatchdogCommand;
 const loadBrowser: ModuleLoader = async () => (await import('../commands/browser.js')).registerBrowserCommand;
@@ -197,7 +196,6 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   // `agents trace` is a top-level alias of `agents sessions trace` (precedent:
   // `agents insights` aliases `agents sessions insights`). One implementation.
   trace: [loadTrace],
-  pty: [loadPty],
   tmux: [loadTmux],
   watchdog: [loadWatchdog],
   browser: [loadBrowser],

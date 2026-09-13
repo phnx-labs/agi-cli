@@ -1544,18 +1544,17 @@ See the publication boundary in [observability](cli/docs/observability.md).
 
 ## PTY
 
-<p align="center">
-  <img src="assets/pty.svg" alt="agents pty: give an agent a real terminal for REPLs and TUIs; a sidecar server holds sessions alive between CLI calls." width="100%" />
-</p>
-
+Real pseudoterminals for REPLs, TUIs, and interactive programs moved to the
+standalone [`term` CLI](https://github.com/phnx-labs/term-cli)
+(`npm i -g @phnx-labs/term-cli`), published separately (PHNX-4091). Same
+verbs, flags, and JSON shapes `agents pty` used to have:
 
 ```bash
-# Give agents a real terminal for REPLs, TUIs, interactive programs.
-SID=$(agents pty start)
-agents pty exec $SID "python3"
-agents pty screen $SID                # Clean text, no ANSI -- what a human sees
-agents pty write $SID "print('hello')\n"
-agents pty stop $SID
+SID=$(term start)
+term exec $SID "python3"
+term screen $SID                # Clean text, no ANSI -- what a human sees
+term write $SID "print('hello')\n"
+term stop $SID
 ```
 
 A sidecar server holds sessions alive between CLI calls. `screen` renders via xterm-headless. Sessions auto-clean after 30 minutes idle.

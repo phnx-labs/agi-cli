@@ -8,7 +8,7 @@
  *   - headless run waiting on input (no next tool call; needs resume)
  *
  * This module picks the delivery mechanism from (open feed block × session
- * liveness × runtime rail). Pure — unit-testable without a live PTY.
+ * liveness × runtime rail). Pure — unit-testable without a live terminal.
  */
 import type { OpenBlock, BlockOption } from './feed/feed.js';
 import type { ActiveSession } from './session/active.js';
@@ -16,7 +16,7 @@ import type { InjectTarget } from './terminal/index.js';
 import { addressabilityRecoveryHint } from './terminal/resolve.js';
 import { injectTargetFromReplyRail } from './session/inject.js';
 
-export type AnswerRouteKind = 'mailbox' | 'pty' | 'tmux' | 'iterm' | 'resume' | 'refuse';
+export type AnswerRouteKind = 'mailbox' | 'tmux' | 'iterm' | 'resume' | 'refuse';
 
 export interface AnswerRoute {
   kind: AnswerRouteKind;
@@ -25,11 +25,11 @@ export interface AnswerRoute {
   /**
    * Keystrokes / payload for the chosen path.
    *  - mailbox: unused (text is enqueued as-is)
-   *  - pty/tmux/iterm: the digit or free-text to inject
+   *  - tmux/iterm: the digit or free-text to inject
    *  - resume: the free-text prompt to pass on re-entry
    */
   payload?: string;
-  /** Inject target when kind is pty/tmux/iterm. */
+  /** Inject target when kind is tmux/iterm. */
   inject?: InjectTarget;
   /** Session id + agent kind for resume. */
   resume?: { sessionId: string; agent: string };
@@ -53,7 +53,7 @@ interface AnswerRouterInput {
   session?: ActiveSession | null;
 }
 
-/** The Escape keystroke as its raw control byte — what a PTY/tmux/iterm rail reads as a real Escape. */
+/** The Escape keystroke as its raw control byte — what a tmux/iterm rail reads as a real Escape. */
 const ESCAPE_KEY = '\u001b';
 
 /**
@@ -92,7 +92,7 @@ export function keystrokesForAnswer(
   }
   // A symbolic cancel token — the `esc` deliveryKey a deny / send-back choice
   // carries — is the Escape KEY, not the letters "esc". Send the ESC control
-  // byte (a real cancel on every raw pty/tmux/iterm rail) and suppress the
+  // byte (a real cancel on every raw tmux/iterm rail) and suppress the
   // trailing Enter, so the prompt is dismissed rather than confirmed by a stray
   // newline. Runs after the option match so an option literally labelled "esc"
   // still wins as a selection.
@@ -132,11 +132,6 @@ function injectTargetForSession(session: ActiveSession): InjectTarget | null {
     const fromRail = injectTargetFromReplyRail(session.provenance.reply);
     if (fromRail) return fromRail;
   }
-  // Only the agents-pty sidecar is addressable by session id. Generic headless
-  // runs have no PTY server entry — those go through resume, not inject.
-  if (session.sessionId && session.host === 'pty') {
-    return { backend: 'pty', id: session.sessionId };
-  }
   return null;
 }
 
@@ -144,7 +139,7 @@ function injectTargetForSession(session: ActiveSession): InjectTarget | null {
  * Pick the delivery mechanism for one answer.
  *
  * Precedence:
- *   1. Parked on open question + injectable rail (tmux/iterm/pty) → keystroke
+ *   1. Parked on open question + injectable rail (tmux/iterm) → keystroke
  *   2. Parked on open question + headless (no rail) → resume with answer
  *   3. Parked on open question + no rail + interactive → refuse (don't mailbox-drop)
  *   4. Otherwise → mailbox (running agent between tool calls)
@@ -167,8 +162,7 @@ export function resolveAnswerRoute(input: AnswerRouterInput): AnswerRoute {
       const kind: AnswerRouteKind =
         inject.backend === 'tmux' ? 'tmux'
           : inject.backend === 'iterm' ? 'iterm'
-            : inject.backend === 'pty' ? 'pty'
-              : 'pty';
+            : 'tmux';
       return {
         kind,
         reason: `Parked on open question — drive ${inject.backend} selection (${matched}).`,
@@ -198,7 +192,7 @@ export function resolveAnswerRoute(input: AnswerRouterInput): AnswerRoute {
     return {
       kind: 'refuse',
       reason:
-        'Agent is parked on a question but has no addressable terminal (no tmux/iterm/pty rail). ' +
+        'Agent is parked on a question but has no addressable terminal (no tmux/iterm rail). ' +
         addressabilityRecoveryHint(session),
     };
   }

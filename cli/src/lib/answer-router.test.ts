@@ -164,7 +164,7 @@ describe('resolveAnswerRoute', () => {
     expect(r.enter).toBe(false);
   });
 
-  it('drives pty when parked headless with session id', () => {
+  it('resumes when parked headless with no injectable rail', () => {
     const r = resolveAnswerRoute({
       mailboxId: 's1',
       answer: 'Production',
@@ -175,26 +175,9 @@ describe('resolveAnswerRoute', () => {
         status: 'input_required',
       }),
     });
-    // headless with no rail still prefers resume over pty unless host is pty
     expect(r.kind).toBe('resume');
     expect(r.resume).toEqual({ sessionId: 's1', agent: 'claude' });
     expect(r.payload).toBe('Production');
-  });
-
-  it('uses pty backend when host is pty', () => {
-    const r = resolveAnswerRoute({
-      mailboxId: 's1',
-      answer: 'Staging',
-      block: block(),
-      session: session({
-        host: 'pty',
-        context: 'headless',
-        activity: 'waiting_input',
-        status: 'input_required',
-      }),
-    });
-    expect(r.kind).toBe('pty');
-    expect(r.inject).toEqual({ backend: 'pty', id: 's1' });
   });
 
   it('refuses a parked interactive agent with no rail and surfaces a recovery hint', () => {

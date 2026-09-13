@@ -560,7 +560,7 @@ endpoint takes any `sk-ant-oat01-` bearer, `usage.ts:624,957`):
   always sets secrets policy `never` — a no-biometry-ACL item (keychain on
   macOS, the platform default elsewhere), never the harness's own ACL'd login.
   Populated by the user OR **self-minted** by the agent (`claude setup-token`
-  via pty + computer-use).
+  via `term` + computer-use).
 
 ## Migration (priority order — Touch ID first, it's the live pain)
 

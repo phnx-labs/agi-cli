@@ -12,7 +12,7 @@
  *                          teams/agents, trash, backups). Backed up by
  *                          `agents repo push`.
  *   ~/.agents/.cache/    — regenerable runtime data (shims, packages, helpers
- *                          for daemon/pty, terminals, cloud, drive, browser
+ *                          for daemon, terminals, cloud, drive, browser
  *                          chrome-data, logs, companion). Gitignored.
  *
  * Resolution precedence for resources: project > user > system.
@@ -161,7 +161,6 @@ const COMPANION_CACHE_DIR = path.join(CACHE_DIR, 'companion');
 const BROWSER_RUNTIME_DIR = path.join(CACHE_DIR, 'browser');
 const HELPERS_DIR = path.join(CACHE_DIR, 'helpers');
 const DAEMON_DIR = path.join(HELPERS_DIR, 'daemon');
-const PTY_DIR = path.join(HELPERS_DIR, 'pty');
 const TMUX_DIR = path.join(HELPERS_DIR, 'tmux');
 const FETCH_CACHE_DIR = path.join(CACHE_DIR, '.fetch');
 const CLI_VERSION_CACHE_FILE = path.join(CACHE_DIR, '.cli-version-cache.json');
@@ -767,9 +766,6 @@ export function getHelpersDir(): string { return HELPERS_DIR; }
  * the daemon module is exercised. Never set in production code.
  */
 export function getDaemonDir(): string { return process.env.AGENTS_DAEMON_DIR ?? DAEMON_DIR; }
-
-/** Path to PTY server scratch (~/.agents/.cache/helpers/pty/). */
-export function getPtyDir(): string { return PTY_DIR; }
 
 /** Path to tmux scratch (~/.agents/.cache/helpers/tmux/) — shared server socket + per-session meta JSONs. */
 export function getTmuxDir(): string { return TMUX_DIR; }

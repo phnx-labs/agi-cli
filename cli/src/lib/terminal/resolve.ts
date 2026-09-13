@@ -11,7 +11,7 @@
  * Resolution reads the agent's INHERITED ENV (via session provenance) plus the
  * IDE's live-terminals registry (off disk) — no cooperation from the agent:
  *
- *   tmux  > iterm > vscodium > pty
+ *   tmux  > iterm > vscodium
  *
  * tmux wins whenever present: a `tmux send-keys -t <pane>` reaches the pane no
  * matter which host app (iTerm / Ghostty / VS Code) is above it, so it's correct
@@ -28,7 +28,7 @@ import { machineId } from '../machine-id.js';
 import type { InjectTarget } from './inject.js';
 
 /** A resolved rail, or an honest refusal. The watchdog acts only on `addressable: true`. */
-export type InjectRail = 'tmux' | 'iterm' | 'vscodium' | 'ghostty' | 'pty';
+export type InjectRail = 'tmux' | 'iterm' | 'vscodium' | 'ghostty';
 export type InjectResolution =
   | { addressable: true; rail: InjectRail; target: InjectTarget; note?: string }
   | { addressable: false; reason: string; hint?: string };
@@ -41,12 +41,6 @@ export interface ResolveOptions {
    * a Ghostty session with no tmux resolves to un-addressable instead.
    */
   allowGhosttyFocus?: boolean;
-  /**
-   * A known `agents pty` sidecar id for this session, if the caller has one. No
-   * automatic sessionId -> pty mapping exists yet, so pty is only emitted when
-   * supplied here (the lowest-precedence rail).
-   */
-  ptyId?: string;
 }
 
 /** The editor CLIs that speak the swarm-ext URI protocol, keyed by the host detectHost() reports. */
@@ -87,13 +81,13 @@ export function addressabilityRecoveryHint(session: ActiveSession, fallbackId?: 
     return `Host '${session.host}' has no addressable rail here. ${interactive ? `Enable tmux wrapping with \`${tmuxCmd}\` and re-launch, or ` : ''}use \`${resumeCmd}\` to continue this session.`;
   }
 
-  return `This session has no addressable terminal rail (not tmux, iTerm, an IDE terminal, or a pty sidecar). ${interactive ? `Enable tmux wrapping with \`${tmuxCmd}\` and re-launch, or ` : ''}use \`${resumeCmd}\` to continue this session.`;
+  return `This session has no addressable terminal rail (not tmux, iTerm, or an IDE terminal). ${interactive ? `Enable tmux wrapping with \`${tmuxCmd}\` and re-launch, or ` : ''}use \`${resumeCmd}\` to continue this session.`;
 }
 
 /**
  * Resolve a target from an already-fetched ActiveSession. Pure — no I/O — so the
  * precedence logic is unit-testable without the process table. This is where the
- * tmux > iterm > vscodium > pty precedence and the Ghostty refusal live.
+ * tmux > iterm > vscodium precedence and the Ghostty refusal live.
  */
 export function resolveInjectTargetForSession(
   session: ActiveSession,
@@ -139,12 +133,7 @@ export function resolveInjectTargetForSession(
     };
   }
 
-  // 4. pty — lowest precedence, only when the caller supplied a sidecar id.
-  if (opts.ptyId) {
-    return { addressable: true, rail: 'pty', target: { backend: 'pty', id: opts.ptyId } };
-  }
-
-  // 5. Ghostty — no per-split addressing exists. Refuse by default; the coarse,
+  // 4. Ghostty — no per-split addressing exists. Refuse by default; the coarse,
   //    focus-stealing window path is opt-in only.
   if (session.host === 'ghostty') {
     if (opts.allowGhosttyFocus) {
