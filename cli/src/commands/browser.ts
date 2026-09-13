@@ -88,7 +88,8 @@ import {
   stripRoutingFlags,
 } from '../lib/hosts/remote-cmd.js';
 import { resolveRemoteOsSync } from '../lib/hosts/remote-os.js';
-import { sshExec, SSH_OPTS } from '../lib/ssh-exec.js';
+import { sshExec, SSH_OPTS, sshExecRawStream, shellQuote } from '../lib/ssh-exec.js';
+import { getBrowserRuntimeDir } from '../lib/state.js';
 import { flagValue } from '../lib/hosts/routing-flag.js';
 import { browserTaskPicker, type BrowserTask } from './browser-picker.js';
 import { assertRemoteControlAllowed, isFleetRemoteInvocation } from '../lib/browser/remote-control.js';
@@ -98,7 +99,7 @@ import { registerCommandGroups, setHelpSections } from '../lib/help.js';
 import { buildHar } from '../lib/browser/har.js';
 import { getCliVersion } from '../lib/version.js';
 import { runBrowserIPCStream } from '../lib/browser/stream.js';
-import { machineId } from '../lib/machine-id.js';
+import { machineId, normalizeHost } from '../lib/machine-id.js';
 import { isArcRunning } from '../lib/browser/drivers/arc.js';
 import { resolveBrowserTarget } from '../lib/browser/resolve-target.js';
 
@@ -252,6 +253,92 @@ export function remoteStartTaskName(stdout: string, explicit?: string): string |
     // Human output is one task name on the first non-empty line.
   }
   return trimmed.split('\n').map((line) => line.trim()).find(Boolean);
+}
+
+/**
+ * Largest capture `browser show --device` will pull. A capture is a screenshot,
+ * a PDF or a short recording; anything past this is not something a viewer should
+ * stream over ssh, and the cap is what makes the transfer BOUNDED rather than
+ * "however big the peer's file happens to be".
+ */
+export const REMOTE_VIEW_MAX_BYTES = 64 * 1024 * 1024;
+
+/**
+ * Fetch an absolute remote file into a private local path, bounded.
+ *
+ * Bounded for real, not by a pre-flight `stat`: the byte budget is enforced on the
+ * stream as it arrives (`sshExecRawStream` + `cat`), so a file that grows between
+ * a size check and the copy — or a peer that lies about the size — still cannot
+ * spend more than the budget. `scp` could not do this; it would transfer
+ * everything before this process got a chance to refuse.
+ *
+ * The local file is written 0600 inside a 0700 directory, because a capture can
+ * show anything that was on the peer's screen and a world-readable temp path
+ * would publish it to every local user.
+ */
+export async function fetchRemoteFileForViewing(
+  device: string,
+  remotePath: string,
+  localPath: string,
+  opts: { maxBytes?: number } = {},
+): Promise<void> {
+  if (!path.posix.isAbsolute(remotePath) && !/^[A-Za-z]:[\\/]/.test(remotePath)) {
+    throw new Error(
+      `Remote path must be absolute: got "${remotePath}".\n`
+      + 'This machine cannot resolve the peer\'s working directory, so a relative path\n'
+      + 'would name a different file there than you meant here.',
+    );
+  }
+  const host = await resolveHost(device);
+  if (!host) throw new Error(`Unknown device "${device}". Next: agents devices list`);
+  const target = sshTargetFor(host);
+  const maxBytes = opts.maxBytes ?? REMOTE_VIEW_MAX_BYTES;
+
+  const dir = path.dirname(path.resolve(localPath));
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  fs.chmodSync(dir, 0o700);
+  const handle = fs.openSync(path.resolve(localPath), 'w', 0o600);
+  let written = 0;
+  let overflow = false;
+  const controller = new AbortController();
+  try {
+    const result = await sshExecRawStream(target, `cat -- ${shellQuote(remotePath)}`, {
+      timeoutMs: 120_000,
+      signal: controller.signal,
+      // No ControlMaster for a one-shot byte stream. Multiplexing buys nothing
+      // here — there is no second command to share the connection — and it adds a
+      // failure mode that has nothing to do with the transfer: the control socket
+      // lives under the cache dir, and a long HOME pushes that path past the
+      // ~104-byte AF_UNIX limit, which fails the pull with a message about socket
+      // paths rather than about the file.
+      multiplex: false,
+      onStdout: (chunk) => {
+        if (overflow) return;
+        if (written + chunk.length > maxBytes) {
+          overflow = true;
+          controller.abort();
+          return;
+        }
+        fs.writeSync(handle, chunk);
+        written += chunk.length;
+      },
+    });
+    if (overflow) {
+      throw new Error(`Refusing to pull ${device}:${remotePath}: larger than the ${maxBytes}-byte view budget.`);
+    }
+    if (result.timedOut) throw new Error(`Timed out pulling ${device}:${remotePath} after 120s.`);
+    if (result.code !== 0) {
+      const detail = result.stderr.toString('utf8').trim();
+      throw new Error(`Failed to read ${device}:${remotePath}${detail ? `: ${detail}` : ` (ssh exited ${result.code})`}`);
+    }
+    if (written === 0) throw new Error(`${device}:${remotePath} is empty or was not readable.`);
+  } catch (error) {
+    // Never leave a partial file behind for a viewer to open as if it were whole.
+    try { fs.unlinkSync(path.resolve(localPath)); } catch { /* nothing to clean */ }
+    throw error;
+  } finally {
+    fs.closeSync(handle);
+  }
 }
 
 async function pullRemoteFile(device: string, remotePath: string, localPath: string): Promise<void> {
@@ -2282,10 +2369,16 @@ function registerTaskCommands(browser: Command): void {
 
   browser
     .command('show <url>')
-    .description('Open a URL for a human to read: goes to browser.viewer (default: browser.profile), and binds no task')
+    .description('Open a URL or local file for a human to read: goes to browser.viewer (default: browser.profile), and binds no task')
     .option('--os-browser', 'Use the OS default handler instead of the configured viewer')
+    // `--device` here names WHERE THE FILE IS, not where to open it. `show` is the
+    // one browser verb narrowly exempt from the task-routing refusal
+    // (`REJECT_DEVICE_MESSAGE`) because it binds no task and has nothing to route:
+    // it is a local viewer, so the flag can only mean "the source lives there".
+    // Every other verb still refuses `--device` — a task is bound at `start`.
+    .option('--device <name>', 'fetch the file from this device, then view it locally (absolute path only)')
     .option('--json', 'Output machine-readable JSON')
-    .action(async (url: string, opts: { osBrowser?: boolean; json?: boolean }) => {
+    .action(async (url: string, opts: { osBrowser?: boolean; device?: string; json?: boolean }) => {
       // The entry point external tools need. `navigate` binds a task, which the
       // abandoned-task reaper closes when the calling session ends — wrong for a
       // page a person is reading. This does not.
@@ -2294,18 +2387,45 @@ function registerTaskCommands(browser: Command): void {
       // drive letter (`C:\Users\me\plan.html`), so a real path was treated as a
       // URL. A scheme is at least two characters.
       const isLocalFile = !/^[a-z][a-z0-9+.-]+:/i.test(url);
-      const outcome = isLocalFile
-        ? await showFile(path.resolve(url), { osBrowser: opts.osBrowser })
+      let localTarget = isLocalFile ? path.resolve(url) : undefined;
+      let fetched: string | undefined;
+      if (opts.device) {
+        // A URL is already reachable from here, so `--device` with one is a
+        // contradiction rather than a no-op: it says the source is remote while
+        // naming something that is not a file on that peer.
+        if (!isLocalFile) {
+          console.error(`--device names the device holding a FILE, so it cannot be combined with a URL.\n  Drop --device to open ${url} here, or pass an absolute path on ${opts.device}.`);
+          process.exit(1);
+        }
+        // The peer's path, verbatim — NOT path.resolve()'d, which would rewrite it
+        // against this machine's cwd and name a different file there.
+        const remotePath = url;
+        const dir = path.join(getBrowserRuntimeDir(), 'remote-views');
+        fetched = path.join(dir, `${normalizeHost(opts.device)}-${Date.now()}-${path.basename(remotePath) || 'capture'}`);
+        try {
+          await fetchRemoteFileForViewing(opts.device, remotePath, fetched);
+        } catch (error) {
+          console.error((error as Error).message);
+          process.exit(1);
+        }
+        localTarget = fetched;
+      }
+      const outcome = localTarget
+        ? await showFile(localTarget, { osBrowser: opts.osBrowser })
         : await showUrl(url, { osBrowser: opts.osBrowser });
 
+      // The fetched copy is what a viewer actually opened, so it is what the
+      // caller is told about — pointing at the peer's path would name a file that
+      // is not on this machine.
+      const shown = fetched ?? url;
       if (opts.json) {
-        console.log(JSON.stringify(outcome, null, 2));
+        console.log(JSON.stringify({ ...outcome, ...(fetched ? { source: `${opts.device}:${url}`, local: fetched } : {}) }, null, 2));
       } else if (outcome.via === 'none') {
-        console.error(`Could not open a browser — open this yourself:\n  ${url}`);
+        console.error(`Could not open a browser — open this yourself:\n  ${shown}`);
       } else if (outcome.via === 'profile') {
-        console.log(`Shown in ${outcome.profile}: ${url}`);
+        console.log(`Shown in ${outcome.profile}: ${shown}`);
       } else {
-        console.log(`Opened in the OS default browser: ${url}`);
+        console.log(`Opened in the OS default browser: ${shown}`);
       }
       if (outcome.via === 'none') process.exit(1);
     });

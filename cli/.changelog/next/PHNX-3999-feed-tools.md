@@ -41,3 +41,16 @@
   dialed every 60 s for two days. After ten consecutive failures the re-dial drops to
   15 minutes, still waking immediately on a device-registry change. Source:
   `cli/src/lib/session/remote/peer-stream.ts`.
+- **`agents ssh --argv` delivers exact argv tokens (PHNX-3999).** The remote command
+  was assembled by joining tokens with a space, so any token containing a space or a
+  shell metacharacter was destroyed on the way to the peer — `--title "two words"`
+  arrived as two arguments and `a & b` arrived as a backgrounded command. Pass
+  `--argv '["prog","two words","a & b"]'` to deliver each element as exactly one
+  token. The positional form is unchanged and still parsed by the remote shell, so
+  the two are mutually exclusive. Source: `cli/src/lib/devices/connect.ts`.
+- **`agents browser show <path> --device <host>` views a capture held on another
+  machine (PHNX-3999).** The file is fetched into a private local path (0600 inside a
+  0700 dir), bounded as it streams so an oversized file is refused rather than
+  transferred, and then opened with the normal local viewer — nothing is opened on
+  the remote box. `--device` here names where the FILE is; it requires an absolute
+  path and is refused together with a URL. Source: `cli/src/commands/browser.ts`.
