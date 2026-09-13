@@ -133,7 +133,7 @@ export function parseRemoteList(stdout: string, machine: string): SessionMeta[] 
  * malformed/non-array JSON is an incomplete source, not an empty machine. */
 const SAFE_RESOLVER_KEYS = new Set([
   'id', 'shortId', 'agent', 'origin', 'timestamp', 'lastActivity', 'project',
-  'version', 'label', 'topic', 'machine',
+  'version', 'harness', 'mode', 'label', 'topic', 'machine',
 ]);
 
 function isSafeResolverRow(value: Record<string, unknown>): boolean {
