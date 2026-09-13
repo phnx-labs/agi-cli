@@ -1,6 +1,6 @@
 /**
  * Detached-session store — the record `agents sessions detach` writes and both
- * `agents sessions attach` and the active-session scan read to know an agent is
+ * `agents sessions resume` and the active-session scan read to know an agent is
  * "backgrounded": running headless with no terminal, continuing its task
  * unattended.
  *

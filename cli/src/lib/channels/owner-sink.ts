@@ -1,7 +1,7 @@
 /**
  * Owner-delivery-sink reachability probe (RUSH-2262).
  *
- * The feed/notify owner-delivery lane (`agents notify`, `agents feed post
+ * The feed/notify owner-delivery lane (`agents send --to owner`, `agents feed post
  * --level important` / `--blocked`) reaches the owner over the rush-backed owner
  * channel (iMessage via `rush message send`). That transport can only deliver
  * from a context that BOTH finds the `rush` CLI on PATH and can read its
@@ -26,7 +26,7 @@
  * reads that file — checking it is the mistake that made a signed-in box look
  * signed out.
  *
- * `agents notify --dry-run` is NOT this probe: it short-circuits before the
+ * `agents send --to owner --dry-run` is NOT this probe: it short-circuits before the
  * `which rush` preflight (`providers/rush.ts`), so it reports `ok:true` on a box
  * with no rush at all. Resolvability (does the envelope build?) and reachability
  * (can this box actually deliver?) are different questions; this answers the
