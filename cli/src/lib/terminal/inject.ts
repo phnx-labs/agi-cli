@@ -116,6 +116,13 @@ export interface InjectResult {
   confirmed: boolean;
   /** Discrete writes delivered: 2 for the Ink-safe text+Enter split, 1 when combined or enter=false. */
   writes: number;
+  /**
+   * How many specs were STARTED. This -- not `writes` -- is what says whether
+   * anything may have reached the terminal: a spec that failed or timed out may
+   * still have written bytes before dying, so only `started === 0` proves
+   * nothing landed and the answer is cleanly retryable (PHNX-3999).
+   */
+  started: number;
   /** For the tmux / AppleScript backends (or any dryRun), the spec(s) that ran / would run. */
   specs?: LaunchSpec[];
   error?: string;
@@ -334,7 +341,7 @@ export async function injectIntoTerminal(
   // not silently deliver the raw text, which submits once per embedded newline.
   if (opts.paste === true && !backendCarriesPaste(target.backend)) {
     return {
-      ok: false, confirmed: false, backend: target.backend, writes: 0, specs: [],
+      ok: false, confirmed: false, backend: target.backend, writes: 0, started: 0, specs: [],
       error: `The ${target.backend} rail cannot deliver a bracketed paste — open the session and paste it there.`,
     };
   }
@@ -361,7 +368,7 @@ export async function injectIntoTerminal(
 
   const confirmed = backendConfirmsDelivery(target.backend);
 
-  if (opts.dryRun) return { ok: true, confirmed, backend: target.backend, writes, specs };
+  if (opts.dryRun) return { ok: true, confirmed, backend: target.backend, writes, started: 0, specs };
 
   // AppleScript backends: guard on the backend's own availability, but only for a
   // LOCAL run (a remote host is assumed to have the app — its ssh leg reports failure).
@@ -370,13 +377,14 @@ export async function injectIntoTerminal(
       const backend = target.backend === 'iterm' ? itermBackend : ghosttyBackend;
       const ctx = opts.ctx ?? currentContext();
       if (!backend.isAvailable(ctx)) {
-        return { ok: false, confirmed: false, backend: target.backend, writes: 0, specs, error: `${backend.label} is not available here (platform ${ctx.platform})` };
+        return { ok: false, confirmed: false, backend: target.backend, writes: 0, started: 0, specs, error: `${backend.label} is not available here (platform ${ctx.platform})` };
       }
     }
   }
 
   const endMs = opts.deadlineMs === undefined ? undefined : Date.now() + opts.deadlineMs;
   let sent = 0;
+  let started = 0;
   for (const spec of specs) {
     // Never START a spec the budget can no longer cover. Racing the caller's
     // promise instead let a write begin AFTER the operator had already been told
@@ -384,17 +392,19 @@ export async function injectIntoTerminal(
     const remaining = endMs === undefined ? undefined : endMs - Date.now();
     if (remaining !== undefined && remaining <= 0) {
       return {
-        ok: false, confirmed: false, backend: target.backend, writes: sent, specs,
+        ok: false, confirmed: false, backend: target.backend, writes: sent, started, specs,
         error: `injection ran out of budget after ${sent} of ${specs.length} write(s)`,
       };
     }
+    started += 1;
     const res = await runSpec(spec, opts.host, opts.resolveHost, remaining);
     if (!res.ok) {
-      // `writes` reports how many landed BEFORE the failure — the caller needs it
-      // to know whether text may already sit in the composer.
-      return { ok: false, confirmed: false, backend: target.backend, writes: sent, specs, error: res.error };
+      // `writes` counts specs that COMPLETED; `started` counts specs that began.
+      // The failing spec may have written bytes before dying, so the caller must
+      // branch on `started`, not on `writes`.
+      return { ok: false, confirmed: false, backend: target.backend, writes: sent, started, specs, error: res.error };
     }
     sent += 1;
   }
-  return { ok: true, confirmed, backend: target.backend, writes, specs };
+  return { ok: true, confirmed, backend: target.backend, writes, started, specs };
 }

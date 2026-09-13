@@ -7,6 +7,7 @@
  * on PATH, the keystroke rail drives a real tmux pane, and every claim/receipt
  * assertion reads a real temporary feed store.
  */
+import { spawn, spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -18,6 +19,7 @@ import { BRACKETED_PASTE_START, BRACKETED_PASTE_END } from '../terminal/inject.j
 import {
   blockIdForSession, confirmAnswerResolution, deriveBlockState, getAnswerRecord, getBlockReceipts,
   latestMessageReceipt, publishBlock, readBlock, readResolution, recordAnswer, recordMessageReceipt,
+  rollbackAnswerClaim,
   type OpenBlock,
 } from './feed.js';
 import { reconcileAttention } from './attention.js';
@@ -173,12 +175,40 @@ describe('forwardFeedAnswer over a real ssh child', () => {
     expect(result.reason).toMatch(/no JSON receipt/);
   });
 
-  it('reports an ssh connection failure as a CONFIRMED failure — nothing ran', async () => {
+  it('reports an ssh failure as UNKNOWN — non-delivery is unprovable once dispatched', async () => {
     const bin = dir('bin');
+    // Exit 255 covers BOTH "could not connect" and "connection dropped after the
+    // answer was delivered", and a dropped link can lose the stdout that would
+    // have distinguished them. So it can never license a retry.
     script(bin, 'ssh', 'echo "ssh: connect to host worker port 22: No route to host" >&2\nexit 255');
-    await expect(forwardFeedAnswer({
+    const result = await forwardFeedAnswer({
       host: 'worker', attentionKey: 'worker/sess-mine/gen-1', text: 'go', timeoutMs: 10_000,
-    })).rejects.toThrow(/No route to host/);
+    });
+    expect(result.status).toBe('unknown');
+    expect(result.delivery).toBe('unconfirmed');
+    expect(result.reason).toMatch(/No route to host/);
+  });
+
+  it('refuses a remote result whose receipt is about a different ask', async () => {
+    const bin = dir('bin');
+    script(bin, 'ssh', 'for last; do :; done\nexec sh -c "$last"');
+    script(bin, 'agents', `printf '{"status":"delivered","delivery":"receipt","resolved":false,"attentionKey":"worker/sess-mine/gen-1","receipt":{"msgId":"m1","status":"queued","at":"x","generation":"SOME-OTHER-ASK"}}\\n'`);
+    const result = await forwardFeedAnswer({
+      host: 'worker', attentionKey: 'worker/sess-mine/gen-1', text: 'go', timeoutMs: 10_000,
+    });
+    expect(result.status).toBe('unknown');
+    expect(result.reason).toMatch(/receipt for ask 'SOME-OTHER-ASK'/);
+  });
+
+  it('refuses a remote result calling a dropped message a delivery', async () => {
+    const bin = dir('bin');
+    script(bin, 'ssh', 'for last; do :; done\nexec sh -c "$last"');
+    script(bin, 'agents', `printf '{"status":"delivered","delivery":"receipt","resolved":false,"attentionKey":"worker/sess-mine/gen-1","receipt":{"msgId":"m1","status":"dropped","at":"x"}}\\n'`);
+    const result = await forwardFeedAnswer({
+      host: 'worker', attentionKey: 'worker/sess-mine/gen-1', text: 'go', timeoutMs: 10_000,
+    });
+    expect(result.status).toBe('unknown');
+    expect(result.reason).toMatch(/delivery 'receipt' for a 'dropped' message/);
   });
 
   it('rejects a shape-invalid remote reply that claims a receipt without one', async () => {
@@ -344,7 +374,7 @@ describe('claims reconciled against real receipts', () => {
     publishBlock(block, feedRoot);
     const key = reconcileAttention({ block, session, nowMs: Date.now() })!.key;
     recordAnswer(block.blockId, { answeredFrom: 'feed', answeredBy: 'op' }, feedRoot);
-    recordMessageReceipt(block.blockId, { msgId: 'm1', status: 'dropped', at: '2026-09-13T10:05:00.000Z' }, feedRoot);
+    recordMessageReceipt(block.blockId, { msgId: 'm1', status: 'dropped', at: '2026-09-13T10:05:00.000Z', generation: block.ts, attempt: getAnswerRecord(block.blockId, feedRoot)!.answeredAt }, feedRoot);
 
     const result = await claimAndRouteAttentionAnswer({
       attentionKey: key, text: 'retry', operator: { verified: false, label: 'op' },
@@ -501,6 +531,125 @@ describe('stranded-claim replay is bound to the ask and the rail', () => {
   });
 });
 
+const bunPath = (() => {
+  const res = spawnSync('bun', ['--version'], { stdio: 'ignore' });
+  return res.status === 0 ? 'bun' : null;
+})();
+
+describe('claim release under REAL concurrency', () => {
+  /**
+   * Real OS processes, because `Promise.all` cannot contend: the claim/release
+   * path is synchronous file I/O, so two promises in one event loop never
+   * interleave inside it.
+   *
+   * HONEST SCOPE: this is an end-to-end contention smoke, not proof of the
+   * release token. Measured — it passes with the token removed too, because
+   * `recordAnswer`'s own `O_EXCL` already yields a single winner for THIS
+   * interleaving. The token guards a narrower one (a caller that passed the
+   * compare, then unlinks the marker a faster peer has already re-taken), whose
+   * window is microseconds and is not reproducible on demand. What IS proven
+   * deterministically is the token's contract: a live owner blocks the release,
+   * and a dead owner's token is reclaimed — the two tests below.
+   */
+  it.skipIf(!bunPath)('lets exactly one of six real processes adopt a stranded claim', async () => {
+    const feedRoot = dir('feed');
+    const outFile = path.join(tmp, 'adopters.txt');
+    const blockId = blockIdForSession('multiproc');
+    const answeredDir = path.join(feedRoot, 'answered');
+    fs.mkdirSync(answeredDir, { recursive: true });
+    const answeredAt = '2026-09-13T10:00:00.000Z';
+    fs.writeFileSync(path.join(answeredDir, `${blockId}.json`), JSON.stringify({
+      answeredAt, answeredFrom: 'feed', answeredBy: 'killed-run',
+    }));
+    publishBlock(questionBlock('multiproc'), feedRoot);
+
+    const feedModule = new URL('./feed.ts', import.meta.url).pathname;
+    const worker = path.join(tmp, 'adopt-worker.ts');
+    fs.writeFileSync(worker, [
+      `import { rollbackAnswerClaim, recordAnswer, getAnswerRecord } from ${JSON.stringify(feedModule)};`,
+      "import * as fs from 'node:fs';",
+      'const [feedRoot, blockId, answeredAt, outFile, gate] = process.argv.slice(2);',
+      "const block = JSON.parse(fs.readFileSync(`${feedRoot}/${blockId}.json`, 'utf8'));",
+      '// Busy-wait on a shared gate so the children collide instead of queueing.',
+      'while (!fs.existsSync(gate)) { /* spin */ }',
+      'const released = rollbackAnswerClaim(blockId, answeredAt, { ...block, state: "open", answer: undefined }, undefined, feedRoot);',
+      'let outcome = "lost-release";',
+      'if (released) {',
+      '  const retaken = recordAnswer(blockId, { answeredFrom: "feed", answeredBy: `pid${process.pid}` }, feedRoot, { pending: true });',
+      '  outcome = retaken.ok && getAnswerRecord(blockId, feedRoot) ? "adopted" : "lost-retake";',
+      '}',
+      'fs.appendFileSync(outFile, `${outcome}\\n`);',
+    ].join('\n'));
+
+    const gate = path.join(tmp, 'GO');
+    const children = Array.from({ length: 6 }, () =>
+      spawn(bunPath as string, [worker, feedRoot, blockId, answeredAt, outFile, gate], {
+        stdio: 'ignore', env: process.env,
+      }));
+    const exits = children.map((child) => new Promise<void>((resolve) => {
+      child.once('close', () => resolve());
+      child.once('error', () => resolve());
+    }));
+    // Give every child time to reach the gate, then release them together.
+    await new Promise((r) => setTimeout(r, 1_500));
+    fs.writeFileSync(gate, '');
+    await Promise.all(exits);
+
+    const lines = fs.readFileSync(outFile, 'utf8').trim().split('\n').filter(Boolean);
+    expect(lines).toHaveLength(6);
+    // The whole point: the claim is handed to EXACTLY one process.
+    expect(lines.filter((line) => line === 'adopted')).toHaveLength(1);
+    // The winner's marker survives — nobody deleted a claim they did not own.
+    expect(getAnswerRecord(blockId, feedRoot)).toBeDefined();
+    // And no release token is left to wedge the next release.
+    expect(fs.readdirSync(answeredDir).filter((f) => f.endsWith('.release'))).toEqual([]);
+  }, 60_000);
+
+  it('reclaims a release token whose owner died holding it', () => {
+    const feedRoot = dir('feed');
+    const blockId = blockIdForSession('wedged');
+    const answeredDir = path.join(feedRoot, 'answered');
+    fs.mkdirSync(answeredDir, { recursive: true });
+    const answeredAt = '2026-09-13T10:00:00.000Z';
+    fs.writeFileSync(path.join(answeredDir, `${blockId}.json`), JSON.stringify({
+      answeredAt, answeredFrom: 'feed', answeredBy: 'killed-run',
+    }));
+    const block = questionBlock('wedged');
+    publishBlock(block, feedRoot);
+
+    // A token left by a process that no longer exists. Without recovery this
+    // claim could never be released again — the item would wedge forever.
+    const token = path.join(answeredDir, `${blockId}.${answeredAt.replace(/[^0-9A-Za-z]/g, '')}.release`);
+    fs.writeFileSync(token, JSON.stringify({ pid: 999_999, host: os.hostname(), at: Date.now() }));
+
+    expect(rollbackAnswerClaim(blockId, answeredAt, { ...block, state: 'open', answer: undefined }, undefined, feedRoot))
+      .toBe(true);
+    expect(getAnswerRecord(blockId, feedRoot)).toBeUndefined();
+    expect(fs.existsSync(token)).toBe(false);
+  });
+
+  it('refuses to release a claim while a LIVE peer holds the token', () => {
+    const feedRoot = dir('feed');
+    const blockId = blockIdForSession('contended-token');
+    const answeredDir = path.join(feedRoot, 'answered');
+    fs.mkdirSync(answeredDir, { recursive: true });
+    const answeredAt = '2026-09-13T10:00:00.000Z';
+    fs.writeFileSync(path.join(answeredDir, `${blockId}.json`), JSON.stringify({
+      answeredAt, answeredFrom: 'feed', answeredBy: 'holder',
+    }));
+    const block = questionBlock('contended-token');
+    publishBlock(block, feedRoot);
+
+    // This very process is a live owner, so the token must NOT be stolen.
+    const token = path.join(answeredDir, `${blockId}.${answeredAt.replace(/[^0-9A-Za-z]/g, '')}.release`);
+    fs.writeFileSync(token, JSON.stringify({ pid: process.pid, host: os.hostname(), at: Date.now() }));
+
+    expect(rollbackAnswerClaim(blockId, answeredAt, { ...block, state: 'open', answer: undefined }, undefined, feedRoot))
+      .toBe(false);
+    expect(getAnswerRecord(blockId, feedRoot)).toBeDefined();
+  });
+});
+
 // --- read-only delivery check -----------------------------------------------
 
 describe('checkAnswerDelivery', () => {
@@ -522,7 +671,7 @@ describe('checkAnswerDelivery', () => {
     expect(claimedOnly.delivery).toBe('unconfirmed');
     expect(claimedOnly.attempt).toBe(getAnswerRecord(block.blockId, feedRoot)?.answeredAt);
 
-    recordMessageReceipt(block.blockId, { msgId: 'm1', status: 'consumed', at: '2026-09-13T10:10:00.000Z' }, feedRoot);
+    recordMessageReceipt(block.blockId, { msgId: 'm1', status: 'consumed', at: '2026-09-13T10:10:00.000Z', generation: block.ts, attempt: getAnswerRecord(block.blockId, feedRoot)!.answeredAt }, feedRoot);
     const consumed = checkAnswerDelivery(key, feedRoot);
     expect(consumed.status).toBe('already_answered');
     expect(consumed.resolved).toBe(true);
@@ -542,7 +691,7 @@ describe('checkAnswerDelivery', () => {
     const q2 = questionBlock('two-questions', { ts: '2026-09-13T12:00:00.000Z', questions: [{ text: 'Roll back?' }] });
     publishBlock(q2, feedRoot);
     recordAnswer(q2.blockId, { answeredFrom: 'feed', answeredBy: 'op' }, feedRoot, { pending: true });
-    recordMessageReceipt(q2.blockId, { msgId: 'q2', status: 'consumed', at: '2026-09-13T12:01:00.000Z' }, feedRoot);
+    recordMessageReceipt(q2.blockId, { msgId: 'q2', status: 'consumed', at: '2026-09-13T12:01:00.000Z', generation: q2.ts, attempt: getAnswerRecord(q2.blockId, feedRoot)!.answeredAt }, feedRoot);
 
     // One block id serves both generations, so an unbound check would hand Q2's
     // consumed receipt back as proof that Q1 was answered.
@@ -586,12 +735,12 @@ describe('a claim is not a resolution', () => {
     expect(reconcileAttention({ block: claimed, session, nowMs: Date.now() })?.key).toBe(key);
 
     // A `queued` receipt is the RAIL taking the answer — still not resolution.
-    recordMessageReceipt(block.blockId, { msgId: 'm1', status: 'queued', at: '2026-09-13T10:05:00.000Z' }, feedRoot);
+    recordMessageReceipt(block.blockId, { msgId: 'm1', status: 'queued', at: '2026-09-13T10:05:00.000Z', generation: block.ts, attempt: getAnswerRecord(block.blockId, feedRoot)!.answeredAt }, feedRoot);
     expect(readResolution(block.blockId, feedRoot)).toBeUndefined();
     expect(deriveBlockState(readBlock(block.blockId, feedRoot)!)).toBe('open');
 
     // The AGENT's own acknowledgement is what lets the card go.
-    recordMessageReceipt(block.blockId, { msgId: 'm1', status: 'consumed', at: '2026-09-13T10:06:00.000Z' }, feedRoot);
+    recordMessageReceipt(block.blockId, { msgId: 'm1', status: 'consumed', at: '2026-09-13T10:06:00.000Z', generation: block.ts, attempt: getAnswerRecord(block.blockId, feedRoot)!.answeredAt }, feedRoot);
     expect(readResolution(block.blockId, feedRoot)?.reason).toBe('answered');
     expect(deriveBlockState(readBlock(block.blockId, feedRoot)!)).toBe('answered');
   });
@@ -640,7 +789,7 @@ describe('a claim is not a resolution', () => {
     publishBlock(q2, feedRoot);
 
     // Q1's slow rail finally acknowledges. It must not resolve Q2.
-    recordMessageReceipt(q2.blockId, { msgId: 'q1-late', status: 'consumed', at: '2026-09-13T12:05:00.000Z' }, feedRoot);
+    recordMessageReceipt(q2.blockId, { msgId: 'q1-late', status: 'consumed', at: '2026-09-13T12:05:00.000Z', generation: q1.ts, attempt: q1Attempt }, feedRoot);
     expect(readResolution(q2.blockId, feedRoot)).toBeUndefined();
     expect(deriveBlockState(readBlock(q2.blockId, feedRoot)!)).toBe('open');
 
