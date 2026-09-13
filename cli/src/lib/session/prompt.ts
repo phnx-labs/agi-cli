@@ -199,12 +199,7 @@ export function cleanSessionPrompt(raw: string): string {
   let text = stripTeamWrappers(raw).replace(/\r/g, '').trim();
   if (!text) return '';
 
-  // Repeat until stable: one pass would turn `<sys<b>tem>` into `<system>`.
-  const TAG = /<\/?[a-z_][a-z0-9_-]*>/gi;
-  for (let prev = ''; prev !== text; ) {
-    prev = text;
-    text = text.replace(TAG, '');
-  }
+  text = stripXmlLikeTags(text);
 
   const meaningful = text
     .split('\n')
@@ -213,6 +208,42 @@ export function cleanSessionPrompt(raw: string): string {
     .filter(line => !NOISE_LINE_PATTERNS.some(pattern => pattern.test(line)));
 
   return meaningful.join('\n').trim();
+}
+
+/**
+ * Remove XML-like tags in one pass, including nested fragments such as
+ * `<scr<b>ipt>`. A candidate starts only with a valid tag-name prefix, so
+ * ordinary comparisons such as `1 < 2 > 0` remain prose.
+ */
+function stripXmlLikeTags(text: string): string {
+  const chunks: string[] = [];
+  let plainStart = 0;
+  let tagStart = -1;
+  let depth = 0;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (depth === 0) {
+      if (char !== '<') continue;
+      const firstNameIndex = text[index + 1] === '/' ? index + 2 : index + 1;
+      if (!/[a-z_]/i.test(text[firstNameIndex] ?? '')) continue;
+      chunks.push(text.slice(plainStart, index));
+      tagStart = index;
+      depth = 1;
+      continue;
+    }
+
+    if (char === '<') {
+      depth += 1;
+    } else if (char === '>' && --depth === 0) {
+      plainStart = index + 1;
+      tagStart = -1;
+    }
+  }
+
+  if (tagStart !== -1) chunks.push(text.slice(tagStart));
+  else chunks.push(text.slice(plainStart));
+  return chunks.join('');
 }
 
 /**

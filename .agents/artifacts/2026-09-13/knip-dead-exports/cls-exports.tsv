@@ -13,7 +13,7 @@ cli/src/cli/command-registry.ts	loadCli	export	0	1	b
 cli/src/cli/command-registry.ts	loadSubagents	export	0	1	b
 cli/src/cli/command-registry.ts	loadPlugins	export	0	1	b
 cli/src/cli/command-registry.ts	loadWorkflows	export	0	1	b
-cli/src/cli/command-registry.ts	loadVersions	export	0	6	b
+cli/src/cli/command-registry.ts	loadVersions	export	1	6	c
 cli/src/cli/command-registry.ts	loadUpdate	export	5	1	c
 cli/src/cli/command-registry.ts	loadImport	export	0	1	b
 cli/src/cli/command-registry.ts	loadPackages	export	0	4	b
@@ -27,10 +27,10 @@ cli/src/cli/command-registry.ts	loadFork	export	0	1	b
 cli/src/cli/command-registry.ts	loadConfig	export	0	1	b
 cli/src/cli/command-registry.ts	loadModels	export	0	1	b
 cli/src/cli/command-registry.ts	loadModes	export	0	1	b
-cli/src/cli/command-registry.ts	loadPrune	export	0	1	b
+cli/src/cli/command-registry.ts	loadPrune	export	1	1	c
 cli/src/cli/command-registry.ts	loadTrash	export	0	1	b
 cli/src/cli/command-registry.ts	loadRestore	export	0	1	b
-cli/src/cli/command-registry.ts	loadDoctor	export	0	1	b
+cli/src/cli/command-registry.ts	loadDoctor	export	1	1	c
 cli/src/cli/command-registry.ts	loadRoute	export	0	2	b
 cli/src/cli/command-registry.ts	loadHarness	export	0	2	b
 cli/src/cli/command-registry.ts	loadSecrets	export	0	1	b
@@ -52,7 +52,7 @@ cli/src/cli/command-registry.ts	loadRepo	export	0	2	b
 cli/src/cli/command-registry.ts	loadSetup	export	0	1	b
 cli/src/cli/command-registry.ts	loadUninstall	export	0	1	b
 cli/src/cli/command-registry.ts	loadUpgrade	export	0	1	b
-cli/src/cli/command-registry.ts	loadSessions	export	0	1	b
+cli/src/cli/command-registry.ts	loadSessions	export	1	1	c
 cli/src/cli/command-registry.ts	loadTeams	export	13	1	c
 cli/src/cli/command-registry.ts	loadCloud	export	0	1	b
 cli/src/cli/command-registry.ts	loadMessage	export	0	1	b
@@ -213,8 +213,8 @@ cli/src/lib/auto-pull.ts	statusFilePath	export	2	0	c
 cli/src/lib/bench/runner.ts	executeCellViaAgentsRun	export	0	1	b
 cli/src/lib/bench/storage.ts	benchHistoryDir	export	0	3	b
 cli/src/lib/boot-profile.ts	bootProfileEnabled	export	0	0	a
-cli/src/lib/brand.ts	activeBrandName	export	0	2	b
-cli/src/lib/brand.ts	isBranded	export	0	0	a
+cli/src/lib/brand.ts	activeBrandName	export	2	2	c
+cli/src/lib/brand.ts	isBranded	export	2	0	c
 cli/src/lib/brand.ts	getActiveBrandConfig	export	0	2	b
 cli/src/lib/browser/arc-discovery.ts	arcSupportDir	export	0	1	b
 cli/src/lib/browser/cdp.ts	listTargets	export	16	0	c
