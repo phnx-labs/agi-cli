@@ -8,7 +8,7 @@ project: agents-cli
 repository: phnx-labs/agents-cli
 harness: claude
 agent: Claude
-host: yosemite-s1
+host: withheld
 human: owner
 date: "2026-09-06"
 tracking: PHNX-3992
