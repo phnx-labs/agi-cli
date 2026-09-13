@@ -4,12 +4,14 @@ import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import type { Command } from 'commander';
 import {
   buildSelectedResumeArgs,
   buildSessionLifecycleArgs,
   isDirectResumeSelector,
   partitionResumableSelections,
   resolveResumePacking,
+  resolveResumeOptions,
   buildSelectedResumeSurface,
   resumeHostMismatch,
   resumeUsesLifecycleDispatch,
@@ -19,6 +21,7 @@ import { sessionMatchesQuery } from './sessions-browser.js';
 import type { SessionMeta } from '../lib/session/types.js';
 import { shellQuote } from '../lib/terminal/index.js';
 import { execOnly } from '../lib/terminal/shell.js';
+import { buildFullCommandTree } from '../cli/command-registry.js';
 
 describe('resolveResumePacking', () => {
   it('opens every resumed session in its own tab by default', () => {
@@ -351,5 +354,112 @@ describe('partitionResumableSelections — the picker drops what recovery would 
       expect(resumable.map(s => s.shortId)).toEqual(['aaaaaaaa', 'cccccccc']);
       expect(skipped.map(s => s.shortId)).toEqual(['bbbbbbbb', 'dddddddd']);
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+});
+
+/**
+ * `sessions resume` shares flag names with its parent `sessions` command
+ * (-a/--agent, --all, --teams, --since, -n/--limit, --local, -D/--device,
+ * --devices). root-command.ts deliberately never calls
+ * `enablePositionalOptions()`, so commander's parser scans the FULL argv for
+ * options belonging to `sessions` before it recognizes `resume` as a
+ * subcommand — a colliding flag is consumed into the PARENT's own option and
+ * never reaches the resume subcommand's action. These tests parse the real,
+ * fully registered command tree (`buildFullCommandTree`, the same helper
+ * root-command.test.ts uses for the sibling RUSH-2687 collision) to prove the
+ * collision actually happens on live wiring, then exercise the exported
+ * `resolveResumeOptions` — which the resume action calls — against the real
+ * post-parse `Command` instances, not hand-fed options.
+ */
+describe('resolveResumeOptions — recovering resume flags the parent command swallows', () => {
+  async function parseResume(argv: string[]): Promise<{ resumeCmd: Command; captured: Record<string, unknown> }> {
+    const program = await buildFullCommandTree();
+    program.exitOverride();
+    const sessionsCmd = program.commands.find((c) => c.name() === 'sessions');
+    if (!sessionsCmd) throw new Error('sessions command not registered');
+    const resumeCmd = sessionsCmd.commands.find((c) => c.name() === 'resume');
+    if (!resumeCmd) throw new Error('sessions resume not registered');
+    let captured: Record<string, unknown> = {};
+    resumeCmd.action((..._args: unknown[]) => { captured = resumeCmd.opts(); });
+    await program.parseAsync(['node', 'agents', 'sessions', ...argv], { from: 'node' });
+    return { resumeCmd, captured };
+  }
+
+  it('reproduces the real collision: a --device typed after "resume" never reaches the subcommand\'s own opts', async () => {
+    const { resumeCmd, captured } = await parseResume(['resume', '019fd0c8b3e977a2a1a4444698c4d897', 'finish it', '--device', 'yosemite-m5', '--tmux']);
+    // The genuine bug: commander's parent-level scan ate --device before dispatch.
+    expect(captured.device).toBeUndefined();
+    expect(captured.tmux).toBe(true);
+    expect(resumeCmd.parent?.getOptionValueSource('device')).toBe('cli');
+    expect((resumeCmd.parent?.opts() as { device?: string[] }).device).toEqual(['yosemite-m5']);
+    // resolveResumeOptions recovers it onto the resume options the action uses.
+    const resolved = resolveResumeOptions(resumeCmd, captured as never);
+    expect(resolved.device).toBe('yosemite-m5');
+    expect((resolved as { tmux?: boolean }).tmux).toBe(true);
+  });
+
+  it('keeps resume\'s own 200 default when no --limit is typed, even though the parent default is 50', async () => {
+    const { resumeCmd, captured } = await parseResume(['resume', '019fd0c8b3e977a2a1a4444698c4d897']);
+    expect(resumeCmd.parent?.getOptionValueSource('limit')).toBe('default');
+    const resolved = resolveResumeOptions(resumeCmd, captured as never);
+    expect(resolved.limit).toBe('200');
+  });
+
+  it('an explicit --limit overrides resume\'s own default', async () => {
+    const { resumeCmd, captured } = await parseResume(['resume', '019fd0c8b3e977a2a1a4444698c4d897', '--limit', '9']);
+    expect(resumeCmd.parent?.getOptionValueSource('limit')).toBe('cli');
+    const resolved = resolveResumeOptions(resumeCmd, captured as never);
+    expect(resolved.limit).toBe('9');
+  });
+
+  it('supports the plural --devices alias, collapsing to the one device', async () => {
+    const { resumeCmd, captured } = await parseResume(['resume', '019fd0c8b3e977a2a1a4444698c4d897', '--devices', 'zion']);
+    const resolved = resolveResumeOptions(resumeCmd, captured as never);
+    expect(resolved.device).toBe('zion');
+  });
+
+  it('fails clearly on multiple devices instead of silently picking one', async () => {
+    const { resumeCmd, captured } = await parseResume(['resume', '019fd0c8b3e977a2a1a4444698c4d897', '--device', 'zion', 'yosemite-m5']);
+    expect(() => resolveResumeOptions(resumeCmd, captured as never)).toThrow(/sessions resume targets a single device/);
+  });
+
+  it('recovers --agent, --all, --teams, --since, and --local when explicitly typed', async () => {
+    const { resumeCmd, captured } = await parseResume([
+      'resume', '019fd0c8b3e977a2a1a4444698c4d897',
+      '--agent', 'codex', '--all', '--teams', '--since', '7d', '--local',
+    ]);
+    // None of these reached the subcommand's own opts — the parent ate them.
+    expect(captured.agent).toBeUndefined();
+    expect(captured.all).toBeUndefined();
+    expect(captured.teams).toBeUndefined();
+    expect(captured.since).toBeUndefined();
+    expect(captured.local).toBeUndefined();
+    const resolved = resolveResumeOptions(resumeCmd, captured as never);
+    expect(resolved.agent).toBe('codex');
+    expect(resolved.all).toBe(true);
+    expect(resolved.teams).toBe(true);
+    expect(resolved.since).toBe('7d');
+    expect(resolved.local).toBe(true);
+  });
+
+  it('leaves resume-only flags (--mode/--headless/--cwd/--attach-only) untouched', async () => {
+    const { resumeCmd, captured } = await parseResume(['resume', '019fd0c8b3e977a2a1a4444698c4d897', '--headless', '--cwd', '/tmp/work']);
+    const resolved = resolveResumeOptions(resumeCmd, captured as never);
+    expect(resolved.headless).toBe(true);
+    expect(resolved.cwd).toBe('/tmp/work');
+  });
+
+  it('normal sibling `sessions backfill tools` inherited parsing (--since/--json/--local via optsWithGlobals) is unaffected by this fix', async () => {
+    const program = await buildFullCommandTree();
+    program.exitOverride();
+    const sessionsCmd = program.commands.find((c) => c.name() === 'sessions')!;
+    const backfill = sessionsCmd.commands.find((c) => c.name() === 'backfill')!;
+    const tools = backfill.commands.find((c) => c.name() === 'tools')!;
+    let captured: Record<string, unknown> | undefined;
+    tools.action((_opts: unknown, command: Command) => { captured = command.optsWithGlobals(); });
+    await program.parseAsync(['node', 'agents', 'sessions', 'backfill', 'tools', '--since', '7d', '--json', '--local'], { from: 'node' });
+    expect(captured?.since).toBe('7d');
+    expect(captured?.json).toBe(true);
+    expect(captured?.local).toBe(true);
   });
 });
