@@ -13,11 +13,39 @@ import { sshStreamWithArgs, SSH_STREAM_MAX_STDERR } from './ssh-exec.js';
  * child, which is what these guarantees are about.
  */
 const fixtureDirs: string[] = [];
-function fakeSsh(body: string): string {
+function fixtureDir(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fake-ssh-'));
   fixtureDirs.push(dir);
-  const bin = path.join(dir, 'ssh');
+  return dir;
+}
+function fakeSsh(body: string): string {
+  const bin = path.join(fixtureDir(), 'ssh');
   fs.writeFileSync(bin, `#!/usr/bin/env bash\n${body}\n`, { mode: 0o755 });
+  return bin;
+}
+
+/**
+ * A fake `ssh` that is a NODE process with an explicit SIGTERM disposition,
+ * installed BEFORE it announces readiness.
+ *
+ * Bash was the wrong fixture for the escalation cases. Its default disposition
+ * while blocked in `sleep` is not "die promptly on SIGTERM" — it can defer until
+ * the child finishes — so the polite-exit case escalated and reported
+ * `killed: true` after the full grace, and the ignoring case depended on a `trap`
+ * being installed before the signal arrived. Neither outcome measured the code:
+ * both measured shell signal semantics and startup latency. Node lets the
+ * disposition be stated exactly, and the readiness marker is written only after
+ * the handler is in place, so the ordering is guaranteed rather than raced.
+ */
+function nodeSsh(mode: 'ignore' | 'exit'): string {
+  const bin = path.join(fixtureDir(), 'ssh.js');
+  const body = mode === 'ignore'
+    // Installed first, so SIGTERM can never arrive before it is ignored.
+    ? `process.on('SIGTERM', () => {});`
+    // An explicit prompt exit, so "polite" is a property of the fixture, not of a
+    // shell's defaults.
+    : `process.on('SIGTERM', () => process.exit(0));`;
+  fs.writeFileSync(bin, `${body}\nprocess.stdout.write('ready');\nsetInterval(() => {}, 1000);\n`);
   return bin;
 }
 // One stub per case adds up over a suite run; remove them rather than leaving
@@ -38,22 +66,12 @@ describe('sshStreamWithArgs lifecycle', () => {
     expect(result.timedOut).toBe(false);
   });
 
-  /**
-   * Run until the child says it is ready, then abort.
-   *
-   * Handshake-driven, NOT timing-driven. An earlier version used
-   * `timeoutMs: 150` and asserted escalation — but on a loaded machine the
-   * child's `trap` is not installed within 150ms, SIGTERM lands before it, the
-   * child dies politely and `killed` is correctly false. That made the test
-   * report a bug in the code when the only thing it had measured was bash
-   * startup latency. Waiting for the child's own readiness marker removes every
-   * assumption about how fast a process starts.
-   */
-  async function abortOnReady(body: string, killGraceMs: number) {
+  /** Run until the child says it is ready, then abort. */
+  async function abortOnReady(sshBin: string, args: string[], killGraceMs: number) {
     const controller = new AbortController();
     return sshStreamWithArgs({
-      args: ['t'],
-      sshBin: fakeSsh(body),
+      args,
+      sshBin,
       signal: controller.signal,
       killGraceMs,
       onStdout: (chunk) => { if (chunk.toString().includes('ready')) controller.abort(); },
@@ -61,32 +79,30 @@ describe('sshStreamWithArgs lifecycle', () => {
   }
 
   it('SIGKILLs a child that ignores SIGTERM, instead of hanging forever', async () => {
-    // The bug this covers: sending SIGTERM and waiting means a child that traps
-    // or ignores it never exits, so the promise never settles and the transfer
-    // hangs. The trap is installed BEFORE the readiness marker, so by the time
-    // this aborts, SIGTERM is guaranteed to be ignored.
+    // Sending SIGTERM and waiting means a child that ignores it never exits, so
+    // the promise never settles and the transfer hangs. The handler is installed
+    // before readiness, so by the time this aborts SIGTERM is certainly ignored.
     const started = Date.now();
-    const result = await abortOnReady('trap "" TERM; printf "ready"; sleep 30', 200);
+    const result = await abortOnReady(process.execPath, [nodeSsh('ignore')], 200);
     expect(result.killed).toBe(true);
-    // Settled on the escalation, not after the child's own 30s sleep.
+    // Settled on the escalation, not on the child's own lifetime.
     expect(Date.now() - started).toBeLessThan(10_000);
   });
 
   it('does not escalate a child that exits on SIGTERM', async () => {
-    // Escalation must be a response to a child that ignores TERM, not something
-    // applied indiscriminately.
-    const result = await abortOnReady('printf "ready"; sleep 30', 5_000);
+    // Escalation must answer a child that ignores TERM, not be applied blindly.
+    // A generous grace is deliberate: if escalation fired anyway, this fails.
+    const result = await abortOnReady(process.execPath, [nodeSsh('exit')], 5_000);
     expect(result.killed).toBe(false);
+    expect(result.code).toBe(0);
   });
 
   it('still reports a real timeout, with the deadline doing the work', async () => {
-    // The timeout path itself is covered separately from escalation, with a
-    // deadline generous enough that it cannot be confused with slow startup.
     const result = await sshStreamWithArgs({
-      args: ['t'],
-      sshBin: fakeSsh('printf "ready"; sleep 30'),
+      args: [nodeSsh('ignore')],
+      sshBin: process.execPath,
       timeoutMs: 1_500,
-      killGraceMs: 5_000,
+      killGraceMs: 200,
       onStdout: () => {},
     });
     expect(result.timedOut).toBe(true);

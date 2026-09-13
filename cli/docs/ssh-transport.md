@@ -217,11 +217,45 @@ agents ssh box --argv '["agents","feed","post","--title","two words","a & b"]'
 - Malformed JSON, a non-array, and a non-string element each fail loud naming the
   problem, so a typo cannot quietly downgrade to shell-string semantics.
 
-Quoting reuses the existing helpers: `shellQuote` for POSIX, and `pwshQuote` for
-PowerShell, whose single-quote doubling is total over every byte (including `$`,
-backtick and newline) before `encodePwshBase64` encodes the script. **On PowerShell
-the script is led by the call operator `&`** — without it, pwsh evaluates a quoted
-program name as a string expression and echoes it instead of running anything.
+On POSIX, quoting is `shellQuote` per token — total over every byte, and the peer's
+shell reconstructs the argv.
+
+**Windows needs more than quoting, because Windows has no argv array.** A process
+receives ONE string and splits it itself, and PowerShell 5.1 rebuilds that string
+when it invokes a native program using a lossy serializer. Measured on a real
+peer: an EMPTY argument is dropped (silently shifting every later argument) and an
+embedded `"` is discarded, so `say "hi"` arrives as `say hi`.
+
+The `--%` stop-parsing token looks like the fix and is not — measurement ruled it
+out three ways:
+
+| `--%` defect | Observed |
+|---|---|
+| applies only to a NATIVE command | `agents` on Windows is `agents.ps1`, so the script got `--%` as a literal argument and the rest as one string |
+| a token containing a NEWLINE ends the directive | parser error |
+| performs cmd-style `%VAR%` expansion | a literal `%PATH%` became six arguments |
+
+So the emitted script branches on what the peer's own command discovery finds:
+
+- **native executable** → launched through `System.Diagnostics.Process` with a
+  pre-built `Arguments` string escaped by `quoteWin32ExecArg` (the same canonical
+  quoter the `.cmd` shim path uses). .NET hands that string to `CreateProcess`
+  essentially verbatim, so the child's `CommandLineToArgvW` reconstructs the tokens
+  exactly. No shell is involved, so no `%VAR%` expansion and no newline
+  sensitivity. `UseShellExecute = $false` with no redirection keeps the child on
+  the inherited handles, which is what lets a binary stdout stream through.
+- **anything else** — a `.ps1`/`.cmd` launcher, a function, a cmdlet, an alias →
+  invoked with a **splatted** PowerShell array (`$__a = @(…); & $__c @__a`). That is
+  an in-process call, so the native serializer never runs and every token survives.
+  Note `& $cmd @(…)` on an array *literal* does **not** splat — it passes one
+  array-valued argument, which a real peer reported back as every token collapsed
+  into one.
+
+The exit code is propagated in both branches. Verified on a live Windows 5.1 peer
+for: a space, an empty argument, `'`, an embedded `"`, `&`, a literal `%PATH%`, an
+embedded newline, a trailing backslash and a trailing space — through both a native
+`node.exe` and the real `agents.ps1` launcher, including a subcommand that has to
+parse its own arguments.
 
 **Provenance is a prelude, never part of the argv.** `fleetRemotePrelude` emits the
 `AGENTS_FLEET_REMOTE` marker plus the caller's actor as ready shell syntax — a
