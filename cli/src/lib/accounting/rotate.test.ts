@@ -5,6 +5,7 @@ import * as path from 'path';
 import {
   rotationFailoverChain,
   preflightFallbackHandoff,
+  preflightHandoffEligible,
   shouldArmRotationFailover,
   DEFAULT_ROTATION_FAILOVER_LIMIT,
   pickBalancedCandidate,
@@ -312,6 +313,38 @@ describe('preflightFallbackHandoff (PHNX-3999 F19 — the alternate harness afte
   it('returns null with no spec, and null when nothing is exhausted', () => {
     expect(preflightFallbackHandoff(undefined, 'claude', throttled)).toBeNull();
     expect(preflightFallbackHandoff('codex', 'claude', [])).toBeNull();
+  });
+});
+
+describe('preflightHandoffEligible (PHNX-3999 F19 — the run shapes a handoff is valid on)', () => {
+  const eligible = {
+    hasPrompt: true,
+    interactive: false,
+    acp: false,
+    loop: false,
+    resumeCheckpoint: false,
+    resume: false,
+    workflowScoped: false,
+  };
+
+  it('allows an ordinary headless prompt run', () => {
+    expect(preflightHandoffEligible(eligible)).toBe(true);
+  });
+
+  it('refuses every shape the canonical --fallback validation rejects', () => {
+    // The regression this exists for: the handoff consumes the --fallback entry,
+    // so switching on one of these shapes would empty the spec and leave the
+    // later guard nothing to reject — `--interactive --fallback codex` would
+    // start an interactive Codex the CLI refuses today.
+    for (const shape of ['interactive', 'acp', 'loop', 'resumeCheckpoint'] as const) {
+      expect(preflightHandoffEligible({ ...eligible, [shape]: true })).toBe(false);
+    }
+    expect(preflightHandoffEligible({ ...eligible, hasPrompt: false })).toBe(false);
+  });
+
+  it('refuses a resume (bound to its own harness) and a workflow-scoped run (claude-only scoping)', () => {
+    expect(preflightHandoffEligible({ ...eligible, resume: true })).toBe(false);
+    expect(preflightHandoffEligible({ ...eligible, workflowScoped: true })).toBe(false);
   });
 });
 

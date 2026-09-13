@@ -1565,6 +1565,51 @@ export function rotationFailoverChain(
 }
 
 /**
+ * Whether a run SHAPE may take the preflight alternate-harness handoff
+ * ({@link preflightFallbackHandoff}) — the sibling of
+ * {@link shouldArmRotationFailover}, and load-bearing for the same reason.
+ *
+ * The handoff consumes the entry it uses from the `--fallback` spec, and the
+ * canonical `--fallback` validation runs LATER in the run command: it rejects a
+ * chain on an interactive, `--acp`, `--loop`, or `--resume-checkpoint` run, and
+ * requires a prompt. Handing off first on one of those shapes would empty the
+ * spec, leave that guard nothing to reject, and let the run proceed as the
+ * alternate harness — an interactive Codex launch from
+ * `agents run claude --interactive --fallback codex`, which the CLI refuses
+ * today. Gating the shape here keeps the original validation intact: an
+ * ineligible shape never switches, so the spec survives and still fails there
+ * with its own message.
+ *
+ * `resume` and `workflowScoped` are excluded for their own reasons: a resume is
+ * bound to the session's OWN harness, and a workflow's tool/MCP scoping is
+ * claude-only, so switching harness would silently drop the declared sandbox —
+ * the fail-open `runWithFallback` only warns about.
+ *
+ * Pure so the matrix is unit-testable without invoking the run command.
+ */
+export interface PreflightHandoffContext {
+  hasPrompt: boolean;
+  interactive: boolean;
+  acp: boolean;
+  loop: boolean;
+  resumeCheckpoint: boolean;
+  resume: boolean;
+  workflowScoped: boolean;
+}
+
+export function preflightHandoffEligible(ctx: PreflightHandoffContext): boolean {
+  return (
+    ctx.hasPrompt &&
+    !ctx.interactive &&
+    !ctx.acp &&
+    !ctx.loop &&
+    !ctx.resumeCheckpoint &&
+    !ctx.resume &&
+    !ctx.workflowScoped
+  );
+}
+
+/**
  * The permitted alternate harness to launch when EVERY account of the primary
  * agent is already exhausted at PREFLIGHT (PHNX-3999 F19).
  *
