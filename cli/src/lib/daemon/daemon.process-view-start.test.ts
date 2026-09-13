@@ -15,7 +15,10 @@ function exerciseStartup(legacy?: 'absent' | 'old-boot'): void {
   const launcher = path.join(home, 'test-agents');
   const quote = (value: string) => `'${value.replace(/'/g, `'"'"'`)}'`;
   fs.writeFileSync(launcher, `#!/bin/sh\nexec bun ${quote(daemon)} "$@"\n`, { mode: 0o700 });
-  const env: NodeJS.ProcessEnv = { ...process.env, HOME: home, AGENTS_REAL_HOME: home, AGENTS_DAEMON_TEST_HOME: home, AGENTS_SECRETS_NO_AGENT: '1', AGENTS_CLI_DISABLE_AUTO_UPDATE: '1' };
+  // The non-legacy path below calls startDaemon() directly under this
+  // deliberately redirected HOME, which is exactly the e2e opt-in
+  // assertDaemonLaunchHomeAllowed() (PHNX-3736) requires (daemon.ts).
+  const env: NodeJS.ProcessEnv = { ...process.env, HOME: home, AGENTS_REAL_HOME: home, AGENTS_DAEMON_TEST_HOME: home, AGENTS_ALLOW_TEST_DAEMON: '1', AGENTS_SECRETS_NO_AGENT: '1', AGENTS_CLI_DISABLE_AUTO_UPDATE: '1' };
   delete env.AGENTS_DAEMON_DIR;
   delete env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME;
   if (legacy) {
