@@ -125,7 +125,7 @@ agents sessions share a1b2c3d4 --reasoning fold
 # A link that does not decay
 agents sessions share a1b2c3d4 --expire never`,
     notes: `Publishes through the standalone artifacts CLI — install it with
-'npm i -g @phnx-labs/artifacts-cli' (or 'agents clis install artifacts'). Sign in with
+'npm i -g @phnx-labs/artifacts-cli'. Sign in with
 'artifacts auth login' for the managed endpoint (zero Cloudflare setup), or configure
 your own bucket with 'artifacts share setup' / 'artifacts share join <baseUrl>'.
 
@@ -221,7 +221,21 @@ Manage published sessions with 'artifacts share list' and 'artifacts share delet
         return;
       }
 
-      const result = JSON.parse(proc.stdout) as ArtifactsShareResult;
+      let result: ArtifactsShareResult;
+      try {
+        result = JSON.parse(proc.stdout) as ArtifactsShareResult;
+      } catch {
+        // A 0 exit with non-JSON stdout (a version-skewed `artifacts` that
+        // printed a banner before the JSON, or one predating `--json` here) must
+        // fail loud with the bytes it actually returned, not an uncaught parse
+        // stack trace — mirroring `secrets-client.ts`'s `parseResponse`.
+        const preview = proc.stdout.trim().slice(0, 200);
+        process.stderr.write(chalk.red(
+          `artifacts share returned a non-JSON response${preview ? `: ${preview}` : ' (empty output)'}\n`,
+        ));
+        process.exitCode = 1;
+        return;
+      }
       if (globals.json) {
         process.stdout.write(JSON.stringify({
           session: session.id,
