@@ -168,7 +168,7 @@ describe('live task identity, tabs and commands', () => {
     };
     const row = projectBrowserToolRow('m1', boundBrowserRow('post', live), { device: 'm1' }, live);
     expect(row.tabs?.map((tab) => tab.id)).toEqual(['a', 'b', 'c']);
-    expect(row.showCommand).toEqual({ command: 'agents', args: ['browser', 'show', '--task', 'post', '--tab', 'c'], runOn: 'm1' });
+    expect(row.showCommand).toEqual({ command: 'agents', args: ['browser', 'tab', 'focus', 'c', '--task', 'post'], runOn: 'm1' });
   });
 
   it('never offers to show a borrowed tab the task did not open', () => {

@@ -206,7 +206,7 @@ function readLiveTasksFor(profileDir: string): LiveBrowserTask[] {
     if (!value || typeof value !== 'object') continue;
     const record = value as Record<string, unknown>;
     // `tabs` maps the task's SHORT id -> the engine's target id. The short id is
-    // what `browser show --tab` takes and what stays stable across a reconnect,
+    // what `browser tab focus` takes and what stays stable across a reconnect,
     // so it is the id published; the target id is never surfaced.
     const borrowed = new Set(Array.isArray(record.borrowedTabs) ? record.borrowedTabs.filter((id): id is string => typeof id === 'string') : []);
     const tabs: ToolTab[] = [];
