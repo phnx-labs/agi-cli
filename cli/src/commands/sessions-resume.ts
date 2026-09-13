@@ -44,6 +44,7 @@ import { looksLikeSessionId } from '../lib/session/discover.js';
 import { machineId } from '../lib/session/sync/config.js';
 import { sessionOriginDevice, sessionRecoveryDestinationMatches, sessionRecoveryPeer, sessionTranscriptReadable } from '../lib/session/recovery.js';
 import { buildResumeRemoteArgs, runStrictResume, wantsStrictResume, type StrictResumeOptions } from './resume.js';
+import { toRemotePortable } from '../lib/project-root.js';
 import { attachLocalLiveSelector } from '../lib/session/local-tmux-attach.js';
 
 /** Opening more than this many live sessions at once asks for confirmation first. */
@@ -353,6 +354,7 @@ export async function sessionsResumeAction(
     }
   });
   console.log(chalk.gray(`\nOpened ${opened}/${items.length} in ${where}.`));
+  if (opened !== items.length) process.exitCode = 1;
 }
 
 /** Preserve run options and lifecycle intent when the picker opens its selected rows. */
@@ -366,12 +368,19 @@ export function buildSelectedResumeArgs(id: string, prompt: string | undefined, 
     // The outer surface already placed this terminal on the selected device.
     if (options.device) {
       let remoteCwd: string | undefined;
+      let localCwd: string | undefined;
       for (let i = 0; i < args.length && args[i] !== '--'; i++) {
         if (args[i] === '--remote-cwd') {
           remoteCwd = args[i + 1];
           args.splice(i--, 2);
         } else if (args[i].startsWith('--remote-cwd=')) {
           remoteCwd = args[i].slice('--remote-cwd='.length);
+          args.splice(i--, 1);
+        } else if (args[i] === '--cwd') {
+          localCwd = args[i + 1];
+          args.splice(i--, 2);
+        } else if (args[i].startsWith('--cwd=')) {
+          localCwd = args[i].slice('--cwd='.length);
           args.splice(i--, 1);
         } else if (['-D', '--device', '--host', '--where', '--on', '--computer'].includes(args[i])) {
           args.splice(i, 2);
@@ -381,9 +390,10 @@ export function buildSelectedResumeArgs(id: string, prompt: string | undefined, 
           i--;
         }
       }
-      if (remoteCwd !== undefined) {
+      const effectiveCwd = remoteCwd ?? options.cwd ?? (localCwd ? toRemotePortable(localCwd) : undefined);
+      if (effectiveCwd !== undefined) {
         const end = args.indexOf('--');
-        args.splice(end < 0 ? args.length : end, 0, '--cwd', remoteCwd);
+        args.splice(end < 0 ? args.length : end, 0, '--cwd', effectiveCwd);
       }
     }
     return args;

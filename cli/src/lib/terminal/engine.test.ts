@@ -64,6 +64,13 @@ describe('openSurface never throws', () => {
     expect(res.ok).toBe(false);
     expect(res.error).toMatch(/unknown backend/);
   });
+  it('validates a resolved host before probing a home-relative directory', async () => {
+    const res = await openSurface({
+      backend: 'tmux', layout: 'tab', cwd: '~/repo', command: ['true'], host: 'worker',
+    }, { resolveHost: () => 'bad;host' });
+    expect(res.ok).toBe(false);
+    expect(res.error).toBeTruthy();
+  });
 });
 
 describe('remoteCommand (serialize argv for ssh)', () => {

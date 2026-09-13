@@ -1,1 +1,1 @@
-- Terminal session resumes preserve follow-up prompts, including spaces and shell characters. Remote terminals use the origin directory or explicit `--cwd`; a missing remote directory is reported before launch.
+- Terminal session resumes preserve follow-up prompts, including spaces and shell characters. Remote terminals use the origin directory or explicit `--cwd`; run pickers retain `--remote-cwd` precedence, and home-relative paths expand on the target. An invalid remote directory or failed terminal launch reports failure.

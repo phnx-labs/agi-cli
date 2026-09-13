@@ -10,6 +10,8 @@ import type { Backend, EngineContext, LaunchRequest, LaunchResult, LaunchSpec } 
 import { BACKENDS } from './backends/index.js';
 import { planLayouts, type Packing } from './policy.js';
 import { runSpec, type HostResolver } from './transport.js';
+import { homeRemainder, remoteCdPrefix } from '../project-root.js';
+import { sshExec } from '../ssh-exec.js';
 
 const DEFAULT_STAGGER_MS = 400;
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -42,7 +44,17 @@ export async function openSurface(req: LaunchRequest, opts: OpenOptions = {}): P
     // Both can throw: specForRequest on an unknown backend, runSpec when the
     // SSH transport rejects an invalid --device target. Keep them inside the
     // catch so a bad request degrades to a per-surface failure, never a throw.
-    const spec: LaunchSpec = specForRequest(req);
+    let resolved = req;
+    if (req.host && req.host !== 'local' && homeRemainder(req.cwd) !== null) {
+      const target = opts.resolveHost ? opts.resolveHost(req.host) : req.host;
+      const result = sshExec(target, remoteCdPrefix(req.cwd) + 'pwd -P', { multiplex: true });
+      const cwd = result.stdout.replace(/\r?\n$/, '');
+      if (result.code !== 0 || !cwd.startsWith('/') || /[\r\n]/.test(cwd)) {
+        throw new Error(`Cannot resolve directory ${req.cwd} on ${req.host}: ${(result.stderr || '').trim() || 'no absolute working directory returned'}`);
+      }
+      resolved = { ...req, cwd };
+    }
+    const spec: LaunchSpec = specForRequest(resolved);
     const res = await runSpec(spec, req.host, opts.resolveHost);
     return { ok: res.ok, request: req, error: res.error };
   } catch (err: any) {
