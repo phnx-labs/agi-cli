@@ -41,7 +41,7 @@ import { confirm } from '@inquirer/prompts';
 import { spawn } from 'node:child_process';
 import { looksLikeSessionId } from '../lib/session/discover.js';
 import { machineId } from '../lib/session/sync/config.js';
-import { sessionOriginDevice, sessionRecoveryDestinationMatches } from '../lib/session/recovery.js';
+import { sessionOriginDevice, sessionRecoveryDestinationMatches, sessionTranscriptReadable } from '../lib/session/recovery.js';
 import { buildResumeRemoteArgs, runStrictResume, wantsStrictResume, type StrictResumeOptions } from './resume.js';
 import { attachLocalLiveSelector } from '../lib/session/local-tmux-attach.js';
 
@@ -136,6 +136,7 @@ export function registerSessionsResumeCommand(sessionsCmd: Command): void {
       - --vscodium opens each session as an agent terminal tab in VSCodium via the swarm-ext extension (works with --device too).
       - --device <alias> opens the terminal surface on that device only when it is the selected sessions' origin; recovery never migrates a session to another device.
       - Recovery uses the installed harness and the conversation's account on its origin device. Context replay requires an explicit choice.
+      - A pick with no transcript behind it is skipped, not resumed: recovery would refuse it, so no tab is spent on an empty conversation.
       - agents run claude --resume opens this same picker; claude#work filters it with --account work.
     `,
   });
@@ -280,8 +281,17 @@ export async function sessionsResumeAction(
   }
 
   // 2. Route every selection through the owning device's recovery resolver.
+  const { resumable, skipped } = partitionResumableSelections(chosen);
+  for (const s of skipped) {
+    console.log(chalk.yellow(`Skipping ${s.shortId} — nothing to resume (no transcript was written).`));
+  }
+  if (resumable.length === 0) {
+    console.error(chalk.red('Nothing to resume — no selected session has a transcript.'));
+    process.exitCode = 1;
+    return;
+  }
   const items: Array<SurfaceItem & { session: SessionMeta }> = [];
-  for (const s of chosen) {
+  for (const s of resumable) {
     const command = ['agents', ...buildSelectedResumeArgs(s.id, prompt, options)];
     const cwd = s.cwd && fs.existsSync(s.cwd) ? s.cwd : process.cwd();
     items.push({ session: s, cwd, command });
@@ -400,6 +410,23 @@ export function isDirectResumeSelector(query: string): boolean {
  * stay centralized. The child inherits this terminal for a real interactive resume. */
 export async function resumeSelectorInPlace(selector: string): Promise<void> {
   await spawnCliInPlace(['sessions', 'resume', selector]);
+}
+
+/**
+ * Split picker selections into the ones recovery can replay and the ones it
+ * would refuse. A pick with no transcript behind it is dropped HERE rather than
+ * given a terminal tab: `assertRecoverableTranscript` refuses it one hop later
+ * anyway, and a batch should not spend a tab per doomed id just to print that.
+ * Same predicate as recovery, not a second opinion.
+ */
+export function partitionResumableSelections(
+  chosen: SessionMeta[],
+  readable: (s: SessionMeta) => boolean = sessionTranscriptReadable,
+): { resumable: SessionMeta[]; skipped: SessionMeta[] } {
+  const resumable: SessionMeta[] = [];
+  const skipped: SessionMeta[] = [];
+  for (const s of chosen) (readable(s) ? resumable : skipped).push(s);
+  return { resumable, skipped };
 }
 
 /** Direct identities use focus as the lifecycle dispatcher: it rechecks the

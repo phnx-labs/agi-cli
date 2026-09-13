@@ -473,14 +473,25 @@ export function resolveSessionRecoveryFromCandidates(
   };
 }
 
-/** A mirror digest or live registry entry is not conversation content. */
-export function assertRecoverableTranscript(session: SessionMeta): void {
+/**
+ * Whether recovery has conversation content to replay for this session: a
+ * non-empty transcript file, or archived content in the index for a row this
+ * device owns. A mirror digest or live registry entry is not conversation
+ * content. The picker consults this before spending a terminal tab on a pick
+ * that {@link assertRecoverableTranscript} would refuse one hop later.
+ */
+export function sessionTranscriptReadable(session: SessionMeta): boolean {
   const file = splitSessionFilePath(session.filePath).container;
   try {
     if (file && fs.statSync(file).isFile() && fs.statSync(file).size > 0
-      && (session.agent !== 'opencode' || parseOpenCode(session.filePath).length > 0)) return;
+      && (session.agent !== 'opencode' || parseOpenCode(session.filePath).length > 0)) return true;
   } catch { /* The canonical scan already tried to repair this path. */ }
-  if (!session.mirrorSyncedAt && !session.mirrorSource && readSessionContent(session.id)?.trim()) return;
+  return !session.mirrorSyncedAt && !session.mirrorSource && Boolean(readSessionContent(session.id)?.trim());
+}
+
+/** Refuse recovery for a session with nothing to replay (PHNX-4080). */
+export function assertRecoverableTranscript(session: SessionMeta): void {
+  if (sessionTranscriptReadable(session)) return;
   throw new SessionRecoveryError(
     `Session ${session.shortId} has no readable transcript after checking its account homes and index. ` +
     `No agent was started. Start a new conversation with: agents run ${session.agent}`,

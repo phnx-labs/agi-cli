@@ -1,9 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import { randomBytes } from 'node:crypto';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import {
   buildSelectedResumeArgs,
   buildSessionLifecycleArgs,
   isDirectResumeSelector,
+  partitionResumableSelections,
   resolveResumePacking,
   resumeHostMismatch,
   resumeUsesLifecycleDispatch,
@@ -220,5 +224,52 @@ describe('selected resume argv', () => {
     expect(buildSelectedResumeArgs('abc12345', undefined, { vscodium: true, here: true })).toEqual([
       'sessions', 'resume', 'abc12345', '--here',
     ]);
+  });
+});
+
+describe('partitionResumableSelections — the picker drops what recovery would refuse', () => {
+  const meta = (over: Partial<SessionMeta>): SessionMeta => ({
+    id: '14567b8a-db63-4e27-9867-4846813157cc',
+    shortId: '14567b8a',
+    agent: 'claude',
+    timestamp: '2026-09-12T17:00:00.000Z',
+    filePath: '',
+    ...over,
+  }) as SessionMeta;
+
+  it('keeps a session with a real on-disk transcript', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-partition-'));
+    try {
+      const filePath = path.join(root, 't.jsonl');
+      fs.writeFileSync(filePath, '{}\n');
+      const { resumable, skipped } = partitionResumableSelections([meta({ filePath })]);
+      expect(resumable).toHaveLength(1);
+      expect(skipped).toHaveLength(0);
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it('skips a path-less live-registry row and a peer mirror stub, exactly as recovery refuses them', () => {
+    const { resumable, skipped } = partitionResumableSelections([
+      meta({ filePath: '' }),
+      meta({ shortId: 'bbbbbbbb', filePath: '', mirrorSyncedAt: Date.parse('2026-09-12T17:00:00.000Z'), mirrorSource: 'offline-worker' }),
+    ]);
+    expect(resumable).toHaveLength(0);
+    expect(skipped.map(s => s.shortId)).toEqual(['14567b8a', 'bbbbbbbb']);
+  });
+
+  it('partitions a mixed batch without reordering either side', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-partition-mixed-'));
+    try {
+      const good = path.join(root, 'g.jsonl');
+      fs.writeFileSync(good, '{}\n');
+      const { resumable, skipped } = partitionResumableSelections([
+        meta({ shortId: 'aaaaaaaa', filePath: good }),
+        meta({ shortId: 'bbbbbbbb', filePath: '' }),
+        meta({ shortId: 'cccccccc', filePath: good }),
+        meta({ shortId: 'dddddddd', filePath: '' }),
+      ]);
+      expect(resumable.map(s => s.shortId)).toEqual(['aaaaaaaa', 'cccccccc']);
+      expect(skipped.map(s => s.shortId)).toEqual(['bbbbbbbb', 'dddddddd']);
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
 });
