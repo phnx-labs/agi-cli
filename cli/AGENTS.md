@@ -1559,6 +1559,23 @@ never runs that command, so it routes explicitly via `resumeOnOwnerIfRemote`.
 peer-owned session, since reaching it with one means a caller skipped its routing
 step.
 
+**A distinct cwd bug on the `--device` terminal surface itself (PHNX-3940).**
+`resumeHostMismatch` already refuses a `--device` that isn't every selected
+session's origin, so the batch picker's opened tab genuinely executes there — but
+the tab's starting directory (`resolveSelectedResumeCwd` in `sessions-resume.ts`)
+used to probe the session's recorded `cwd` with a LOCAL `fs.existsSync`, which a
+remote path (e.g. a peer's `/home/...` cwd checked from a local `/Users` box)
+always fails, silently swapping in this box's `process.cwd()` instead. It now
+trusts the already-validated origin's recorded cwd under `--device` and leaves
+validation to that device; the local/`--here` path keeps the existence guard
+unchanged. The terminal command itself has a parallel fix: every backend joins
+`command` with a bare space before handing it to a shell
+(`loginExec`/`execOnly` in `lib/terminal/shell.ts`), so the batch picker's
+selected-resume command is now shell-quoted per word — the same contract
+`run-surface.ts`'s `buildRunCommand` follows — while the no-tab-backend
+`spawnCliInPlace` path keeps the raw argv, since `spawn()` takes literal argv
+with no shell in between.
+
 The hop uses `runOnPeer` ([`src/lib/session/remote/remote-list.ts`](src/lib/session/remote/remote-list.ts)),
 not the `--device` passthrough. Two reasons: the passthrough re-discovers locally and
 dead-ends for a session that exists only on the peer, and it marks the run
