@@ -16,8 +16,11 @@ import { spawnSync } from 'node:child_process';
 import { getHistoryDir } from '../lib/state.js';
 import { resolveSecretsBin, invocation, SecretsClientError, _resetSecretsClientForTest } from '../lib/secrets-client.js';
 import { installCli, resolveCliManifest } from '../lib/cli-resources.js';
+import { SECRETS_CLI_SPEC } from '../lib/secrets-cli.js';
 
-export const SECRETS_CLI_PACKAGE = '@phnx-labs/secrets-cli@0.1.4';
+// Re-exported for back-compat; the canonical pin lives in `secrets-cli.ts` so a
+// version bump touches ONE place (PHNX-3989 consolidation).
+export const SECRETS_CLI_PACKAGE = SECRETS_CLI_SPEC;
 export const INSTALL_HINT = `agents clis install secrets   # or: npm i -g ${SECRETS_CLI_PACKAGE}`;
 
 export function setupSecretsPrefsPath(): string {
