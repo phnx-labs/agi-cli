@@ -221,6 +221,10 @@ describe('cleanSessionPrompt', () => {
     expect(cleanSessionPrompt('<context>some info</context>\nDo something')).toBe('some info\nDo something');
   });
 
+  it('strips a tag that a nested tag would reassemble (CodeQL js/incomplete-multi-character-sanitization)', () => {
+    expect(cleanSessionPrompt('<scr<b>ipt>alert(1)</scr</b>ipt> Do it')).toBe('alert(1) Do it');
+  });
+
   it('returns empty string for whitespace-only input', () => {
     expect(cleanSessionPrompt('   ')).toBe('');
   });

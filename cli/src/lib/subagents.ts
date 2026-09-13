@@ -440,8 +440,9 @@ export function transformSubagentForCodex(subagentDir: string): string {
 
   const instructions = flattenSubagentInstructions(subagentDir);
 
-  // Escape TOML multi-line string (""") content — only """ needs escaping.
-  const safeInstructions = instructions.replace(/"""/g, '\\"""');
+  // TOML multi-line basic strings still process backslash escapes, so a literal
+  // backslash (a Windows path, a regex) must be doubled before """ is escaped.
+  const safeInstructions = instructions.replace(/\\/g, '\\\\').replace(/"""/g, '\\"""');
   const safeName = frontmatter.name.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   const safeDesc = frontmatter.description.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 

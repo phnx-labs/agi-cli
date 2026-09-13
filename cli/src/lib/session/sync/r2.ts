@@ -116,13 +116,11 @@ export class R2Client {
   }
 }
 
-function decodeXml(s: string): string {
-  return s
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'");
+const XML_ENTITIES: Record<string, string> = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&apos;': "'" };
+
+/** Single pass: sequential replaces would double-decode `&amp;lt;` into `<`. */
+export function decodeXml(s: string): string {
+  return s.replace(/&(?:amp|lt|gt|quot|apos);/g, (entity) => XML_ENTITIES[entity] ?? entity);
 }
 
 async function safeText(res: Response): Promise<string> {

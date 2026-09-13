@@ -46,6 +46,15 @@ describe('inlineLocalAssets', () => {
     expect(inlineLocalAssets(html, page)).toBe(html);
   });
 
+  it('leaves any other scheme alone, not just the ones on a list (CodeQL js/incomplete-url-scheme-check)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'share-html-'));
+    const page = join(dir, 'page.html');
+    for (const src of ['vbscript:x', 'javascript:x', 'blob:abc', 'agents:sess', 'mailto:a@b']) {
+      const html = `<img src="${src}">`;
+      expect(inlineLocalAssets(html, page)).toBe(html);
+    }
+  });
+
   it('leaves a missing relative src alone (no invented data URI)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'share-html-'));
     const page = join(dir, 'page.html');

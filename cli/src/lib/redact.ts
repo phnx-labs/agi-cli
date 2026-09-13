@@ -49,12 +49,82 @@ const SECRET_PATTERNS: Array<[RegExp, string]> = [
   [/\b([A-Z0-9_]*(?:TOKEN|KEY|SECRET|PASSWORD)[A-Z0-9_]*)=("[^"]*"|'[^']*'|\S+)/gi, '$1=[REDACTED]'],
 ];
 
-const TERMINAL_ESCAPE_REGEX = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x9d[^\x07\x9c]*(?:\x07|\x9c)|\x1b\[[0-?]*[ -/]*[@-~]|\x9b[0-?]*[ -/]*[@-~]|\x1b[@-_]|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g;
+const ESC = 0x1b;
+const BEL = 0x07;
+const CSI_8BIT = 0x9b;
+const OSC_8BIT = 0x9d;
+const ST_8BIT = 0x9c;
 
-/** Remove terminal control sequences from untrusted text before storage or display. */
+/** C0 controls (minus \t \n \r), DEL, and the C1 range. */
+function isControlByte(c: number): boolean {
+  return (c <= 0x08) || c === 0x0b || c === 0x0c || (c >= 0x0e && c <= 0x1f) || (c >= 0x7f && c <= 0x9f);
+}
+
+/** End (exclusive) of a CSI parameter/intermediate/final run starting at `i`, or `i` when unterminated. */
+function csiEnd(text: string, i: number): number {
+  let j = i;
+  while (j < text.length && text.charCodeAt(j) >= 0x30 && text.charCodeAt(j) <= 0x3f) j++;
+  while (j < text.length && text.charCodeAt(j) >= 0x20 && text.charCodeAt(j) <= 0x2f) j++;
+  if (j < text.length && text.charCodeAt(j) >= 0x40 && text.charCodeAt(j) <= 0x7e) return j + 1;
+  return i;
+}
+
+/**
+ * Remove terminal control sequences from untrusted text before storage or display.
+ *
+ * A single forward scan, not a regex: an OSC lookup for its terminator (BEL or
+ * ESC-\) is the classic polynomial-backtracking shape, and untrusted text can be
+ * built to trigger it. Each character is visited a bounded number of times here.
+ */
 export function sanitizeForTerminal(text: string): string {
   if (!text) return text;
-  return text.replace(TERMINAL_ESCAPE_REGEX, '');
+  let out = '';
+  let i = 0;
+  const n = text.length;
+  // Once an 8-bit OSC scan reaches the end without a terminator, no later one can find one either.
+  let noOsc8Terminator = false;
+  while (i < n) {
+    const c = text.charCodeAt(i);
+    if (c === ESC && i + 1 < n) {
+      const next = text.charCodeAt(i + 1);
+      if (next === 0x5d) {
+        // OSC: runs to BEL or ESC-\. Any other ESC aborts the sequence, so the
+        // scan never re-covers ground a later OSC start could claim.
+        let j = i + 2;
+        while (j < n && text.charCodeAt(j) !== BEL && text.charCodeAt(j) !== ESC) j++;
+        if (j < n && text.charCodeAt(j) === BEL) { i = j + 1; continue; }
+        if (j + 1 < n && text.charCodeAt(j) === ESC && text.charCodeAt(j + 1) === 0x5c) { i = j + 2; continue; }
+        i += 2;
+        continue;
+      }
+      if (next === 0x5b) {
+        const end = csiEnd(text, i + 2);
+        if (end > i + 2) { i = end; continue; }
+        i += 2;
+        continue;
+      }
+      if (next >= 0x40 && next <= 0x5f) { i += 2; continue; }
+      i += 1;
+      continue;
+    }
+    if (c === OSC_8BIT && !noOsc8Terminator) {
+      let j = i + 1;
+      while (j < n && text.charCodeAt(j) !== BEL && text.charCodeAt(j) !== ST_8BIT) j++;
+      if (j < n) { i = j + 1; continue; }
+      noOsc8Terminator = true;
+      i += 1;
+      continue;
+    }
+    if (c === CSI_8BIT) {
+      const end = csiEnd(text, i + 1);
+      i = end > i + 1 ? end : i + 1;
+      continue;
+    }
+    if (isControlByte(c)) { i += 1; continue; }
+    out += text[i];
+    i += 1;
+  }
+  return out;
 }
 
 /** Env vars whose NAME marks their VALUE as a credential worth masking literally. */

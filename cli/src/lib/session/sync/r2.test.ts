@@ -28,7 +28,7 @@ import { describe, it, expect, afterAll } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { R2Client } from './r2.js';
+import { R2Client, decodeXml } from './r2.js';
 import type { R2Config } from './config.js';
 import { objectKey } from './agents.js';
 import {
@@ -54,6 +54,13 @@ const ACCOUNT = process.env.AGENTS_TEST_R2_ACCOUNT_ID ?? 'test-account';
 // The endpoint is what makes this runnable without live R2 (MinIO/any S3). When
 // it is set (or a real account id is given), run; otherwise skip cleanly.
 const CONFIGURED = Boolean((ENDPOINT || ACCOUNT !== 'test-account') && BUCKET && ACCESS && SECRET);
+describe('decodeXml', () => {
+  it('decodes each entity once, so an escaped ampersand cannot double-decode (CodeQL js/double-escaping)', () => {
+    expect(decodeXml('a&amp;b&lt;c&gt;d&quot;e&apos;f')).toBe('a&b<c>d"e\'f');
+    expect(decodeXml('sessions/&amp;lt;id&amp;gt;.json')).toBe('sessions/&lt;id&gt;.json');
+  });
+});
+
 const suite = CONFIGURED ? describe : describe.skip;
 
 function testConfig(): R2Config {

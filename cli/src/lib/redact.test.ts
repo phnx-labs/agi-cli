@@ -122,6 +122,26 @@ describe('sanitizeForTerminal', () => {
   it('removes OSC, CSI, and C1 controls while retaining ordinary text', () => {
     expect(sanitizeForTerminal(`a\x1b]52;c;payload\x07b\x1b[2Jc\x9b1;31md`)).toBe('abcd');
   });
+
+  it('handles ST-terminated OSC, two-byte escapes, and unterminated sequences', () => {
+    expect(sanitizeForTerminal('a\x1b]0;title\x1b\\b')).toBe('ab');
+    expect(sanitizeForTerminal('a\x1bMb')).toBe('ab');
+    // An OSC with no terminator drops only its introducer; the payload is kept.
+    expect(sanitizeForTerminal('a\x1b]0;open')).toBe('a0;open');
+    expect(sanitizeForTerminal('a\x9d0;open')).toBe('a0;open');
+    expect(sanitizeForTerminal('a\x1b[31')).toBe('a31');
+  });
+
+  it('runs in linear time on adversarial OSC-introducer repetition (CodeQL js/polynomial-redos)', () => {
+    // The old regex took ~1.7s on 40k unterminated 8-bit OSC introducers; the
+    // scanner must stay flat on both the 8-bit and the ESC-] shape.
+    for (const introducer of ['\x9d', '\x1b]']) {
+      const hostile = introducer.repeat(200_000) + 'x';
+      const started = performance.now();
+      expect(sanitizeForTerminal(hostile)).toBe('x');
+      expect(performance.now() - started).toBeLessThan(500);
+    }
+  });
 });
 
 describe('knownSecretValuesFromEnv', () => {
