@@ -41,6 +41,7 @@ import { readShareConfig } from '../lib/share/config.js';
 import { loadDevices } from '../lib/devices/registry.js';
 import { getConfigValue } from '../lib/device-config.js';
 import { setupSecretsPrefsPath } from './setup-secrets.js';
+import { SETUP_TOOLS, getCachedToolSetup, refreshToolSetup, type SetupTool } from '../lib/setup-tool-status.js';
 
 const HOME = os.homedir();
 
@@ -459,7 +460,19 @@ export function registerSetupCommand(program: Command): void {
   setupCmd.command('status')
     .description('Show setup readiness for core, browser, computer, secrets, accounts, fleet, share, watchdog, and preferences.')
     .option('--json', 'print machine-readable JSON')
-    .action(async (options: { json?: boolean }) => {
+    .option('--tool <name>', 'Read cached standalone tool status: browser, computer, secrets, or all')
+    .option('--refresh', 'Explicitly refresh only the selected standalone tool health checks')
+    .action(async (options: { json?: boolean; tool?: string; refresh?: boolean }) => {
+      if (options.tool || options.refresh) {
+        const selected = options.tool ?? 'all';
+        if (selected !== 'all' && !SETUP_TOOLS.includes(selected as SetupTool)) throw new Error('Unknown tool. Choose browser, computer, secrets, or all.');
+        const rows = options.refresh
+          ? await refreshToolSetup(selected as SetupTool | 'all')
+          : getCachedToolSetup().filter((row) => selected === 'all' || row.tool === selected);
+        if (options.json) console.log(JSON.stringify(rows));
+        else for (const row of rows) console.log(`${row.tool}: ${row.installed === false ? 'not installed' : row.readiness} · ${row.detail}`);
+        return;
+      }
       const rows = await getSetupStatus();
       if (options.json) console.log(JSON.stringify(rows, null, 2));
       else renderSetupStatus(rows);
