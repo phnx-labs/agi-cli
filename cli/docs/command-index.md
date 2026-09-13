@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_68 command groups · 512 commands._
+_68 command groups · 513 commands._
 
 ## accounts — Browse and manage harness accounts
 
@@ -506,6 +506,7 @@ agents projects edit <name>          Open the project YAML in $EDITOR (it is han
 agents projects import               Import project definitions from Linear (via the `linear` CLI).
 agents projects link <name>          Attach an external tracker to a project definition (writes linear.projectId + name into the YAML; re-run to pick up a Linear rename).
 agents projects list                 List defined projects (definitions only by default; no session scan).
+agents projects prs <name>           Every OPEN pull request across a project's attached repos (drafts included, no author filter).
 agents projects pull <name>          Fast-forward every fleet checkout of a named project to its remote default branch.
 agents projects remove <name>        Remove a project definition. Never touches the repo.
 agents projects save                 Create or update one project from a complete ProjectDef JSON object on stdin.

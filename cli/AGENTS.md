@@ -1186,6 +1186,33 @@ The new command is a **facade over the existing YAML storage**
 `AGENTS_SUMMARIZER_BASEURL` / `AGENTS_SUMMARIZER_MODEL`. See
 [§Per-session summarizer](#per-session-summarizer-phnx-3939).
 
+`menubar.menu.*` (user-scope, central `agents.yaml`, syncs fleet-wide) are the
+**AGI Menu preferences** (PHNX-3999) — `defaultProject`, `workingRowsShown` (2/3/4),
+`showPreviews`, `projectPriorityFilter` (all/urgent/high/medium),
+`hideCompletedMilestones`, `bannerWhenNeedsYou`, `includeOtherDeviceRequests`,
+`groupBy` (none/project/agent/device), `thenBy` (none/project/agent/device),
+`projectScope` (cycle/all), `projectSort` (updated/priority/name),
+`ticketSort` (priority/updated/title), and `showPullRequests`. They are registered
+`agents config` keys, so the native menu reads them via `agents config list --json`
+(`{key,value,hint}` rows) and writes one per action; an **unset** key is omitted from
+the list so the menu falls back to its own baked-in default (the defaults in
+`config-keys.ts`/`device-config.ts` match those). No credential ever lives here.
+`agents menubar snapshot --json` also emits a `menuPreferences` map (each
+`menubar.menu.*` key → its effective value, i.e. the stored value or the registered
+default; `defaultProject` omitted when unset) so the menu consumes preferences from
+the snapshot it already polls rather than a second read path. On macOS, a one-shot
+sentinel-gated migration (`menubar/migrate-prefs.ts`, run from the snapshot compute)
+lifts legacy `com.phnx-labs.agents-menubar` UserDefaults into these keys — known keys
+only, never overriding an already-set value, never the `.dev` bundle, and never
+re-run after the sentinel is written (so a later `unset` cannot resurrect a legacy
+value).
+
+`devices.<name>.formFactor` (stored as `formFactor`, shared device-scope) is a
+factual hardware fact — `laptop`/`desktop`/`server`/`unknown` — the menu bar renders
+as an icon. Set it explicitly per device (`agents devices config <name> formFactor
+laptop`); it is **never** inferred from the OS platform, and unset reads as
+`unknown`. It rides `agents menubar snapshot --json` in each `devices[]` row.
+
 `devices.<name>.tmux` (stored as `tmux.enabled`) defaults off, so a LOCAL
 interactive `agents run` launch spawns the agent directly. Turn it on for a
 device to wrap eligible local launches in the shared-socket tmux session and give
