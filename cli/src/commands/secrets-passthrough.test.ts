@@ -1,9 +1,54 @@
-import { describe, expect, it, afterEach } from 'vitest';
+import { describe, expect, it, afterEach, vi, beforeEach } from 'vitest';
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
+
+const mockResolveRemoteDevice = vi.fn();
+vi.mock('../lib/ssh-tunnel.js', () => ({ resolveRemoteDevice: (...args: unknown[]) => mockResolveRemoteDevice(...args) }));
+
+// PHNX-4090: `secrets` has no fleet registry of its own, so `--device` must be
+// rewritten to `--host ssh://user@host` (the grammar it speaks) before exec.
+describe('rewriteDeviceToHost', () => {
+  beforeEach(() => mockResolveRemoteDevice.mockReset());
+
+  it('rewrites --device <name> to --host ssh://user@host', async () => {
+    const { rewriteDeviceToHost } = await import('./secrets-passthrough.js');
+    mockResolveRemoteDevice.mockResolvedValue({ target: 'deploy@staging' });
+    expect(await rewriteDeviceToHost(['export', 'prod', '--device', 'staging'])).toEqual([
+      'export', 'prod', '--host', 'ssh://deploy@staging',
+    ]);
+    expect(mockResolveRemoteDevice).toHaveBeenCalledWith('staging', {});
+  });
+
+  it('rewrites the -D short form and --device=name', async () => {
+    const { rewriteDeviceToHost } = await import('./secrets-passthrough.js');
+    mockResolveRemoteDevice.mockResolvedValue({ target: 'deploy@staging' });
+    expect(await rewriteDeviceToHost(['export', 'prod', '-D', 'staging'])).toEqual([
+      'export', 'prod', '--host', 'ssh://deploy@staging',
+    ]);
+    expect(await rewriteDeviceToHost(['export', 'prod', '--device=staging'])).toEqual([
+      'export', 'prod', '--host', 'ssh://deploy@staging',
+    ]);
+  });
+
+  it('leaves argv untouched with no --device', async () => {
+    const { rewriteDeviceToHost } = await import('./secrets-passthrough.js');
+    expect(await rewriteDeviceToHost(['export', 'prod', '--host', 'ssh://deploy@box'])).toEqual([
+      'export', 'prod', '--host', 'ssh://deploy@box',
+    ]);
+    expect(mockResolveRemoteDevice).not.toHaveBeenCalled();
+  });
+
+  it('never rewrites when the caller already typed --host — --host wins over --device', async () => {
+    const { rewriteDeviceToHost } = await import('./secrets-passthrough.js');
+    expect(await rewriteDeviceToHost(['export', 'prod', '--device', 'staging', '--host', 'ssh://explicit@box'])).toEqual([
+      'export', 'prod', '--device', 'staging', '--host', 'ssh://explicit@box',
+    ]);
+    expect(mockResolveRemoteDevice).not.toHaveBeenCalled();
+  });
+});
 
 /**
  * `agents secrets` is now a thin exec passthrough to the standalone `secrets`

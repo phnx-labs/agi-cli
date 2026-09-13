@@ -1170,6 +1170,7 @@ agents config set devices.mac-mini.role worker
 agents config set devices.mac-mini.max-agents 4
 agents config set devices.mac-mini.scheduler off
 agents config set devices.mac-mini.tmux off
+agents config set devices.linux-desk.computer.host vnc://10.0.0.5:5901
 agents config set summarizer.enabled on
 agents config set summarizer.baseUrl http://localhost:11434
 agents config set summarizer.model qwen2.5:3b
@@ -1185,6 +1186,17 @@ The new command is a **facade over the existing YAML storage**
 `summarizer.model`, each overridable per-process by `AGENTS_SUMMARIZER_ENABLED` /
 `AGENTS_SUMMARIZER_BASEURL` / `AGENTS_SUMMARIZER_MODEL`. See
 [§Per-session summarizer](#per-session-summarizer-phnx-3939).
+
+`devices.<name>.computer.host` (stored as `computerHost`, next to
+`defaultBrowserProfile`) is the `--host` address `agents computer --device
+<name>` forwards to the standalone `computer` engine (PHNX-4090): `ssh://[user@]host`
+(still resolved against the fleet for its ssh identity), `vnc://host[:port]`, or
+`tcp://host:port` — the same grammar shared with `secrets` (ssh-only) and
+`browser`. Unset falls back to the historical Windows-only ssh tunnel built from
+the fleet's own ssh identity. `agents secrets --device <name>` and `agents
+computer --device <name>` both rewrite `--device` to `--host` before exec —
+neither engine has a fleet registry of its own — while `agents view --device
+<name>` (not in `OWN_HOST_COMMANDS`) keeps SSHing the whole command, unchanged.
 
 `devices.<name>.tmux` (stored as `tmux.enabled`) defaults off, so a LOCAL
 interactive `agents run` launch spawns the agent directly. Turn it on for a

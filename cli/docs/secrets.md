@@ -44,6 +44,14 @@ modules:
   profile is full trust. `bundle@host` (remote resolution over SSH) is
   agents-cli's own flag syntax, parsed and validated before the client is ever
   called.
+- **`agents secrets --device <name>` rewrites to `--host ssh://user@host`
+  (PHNX-4090).** The standalone `secrets` engine has no fleet registry of its
+  own — it only speaks `--host` in the address grammar shared with
+  `computer`/`browser` (`ssh://[user@]host`, or a bare `user@host`/alias,
+  since `secrets` never drives anything but ssh). `secrets-passthrough.ts`
+  (`rewriteDeviceToHost`) resolves the name against the fleet and rewrites the
+  forwarded argv before exec; an explicit `--host` the caller already typed is
+  left untouched.
 - **Browser profile secrets.** `agents browser` resolves a profile's stored
   credentials the same way — through the client, scoped by harness.
 - **Accounts.** `agents accounts` reads and writes provider/native credentials

@@ -67,7 +67,7 @@ feed and the session ledger — that is what `agents computer sessions` and
 | Helper daemons, RPC, RFB/VNC, `run` loop | the engine | It is the automation; it releases on its own cadence |
 | Helper download + signature/notarization checks | the engine | It resolves its own helper releases; agents-cli version-pins nothing |
 | App allow list (`Computer(<bundle-id>)` rules) | agents-cli | Derived from the agents permissions resource layer |
-| `--device` name → a resolved ssh target | agents-cli | It owns the devices registry, ssh identity, and the fleet |
+| `--device` name → a `--host <address>` (PHNX-4090) | agents-cli | It owns the devices registry, `computer.host` config, ssh identity, and the fleet |
 | Windows provisioning, the helper token, the ssh tunnel | the engine | It mints the token and holds the tunnel state the transport needs; a half-connection from outside would auth-fail |
 | Action history, feed events, actor identity | agents-cli | It owns `sessions.db` and the feed |
 | Daemon service registration (launchd/systemd) | the engine | It writes its own manifest and inherits the redirected `HOME` |
@@ -91,13 +91,14 @@ the transport (`COMPUTER_HELPER_TCP`, `COMPUTER_HELPER_VNC`,
 `COMPUTER_HELPER_SOCKET`), the policy-file paths, and `HOME` / `AGENTS_REAL_HOME`
 all travel in the environment the child inherits. Restating any of them in the
 context would be a second copy of the same answer, free to drift from the first.
-That includes the remote endpoint: the engine opens the `--device` tunnel and
-hydrates its own `COMPUTER_HELPER_TCP` **together with the helper token it
+That includes the remote endpoint: the engine opens the `--host`-named tunnel
+and hydrates its own `COMPUTER_HELPER_TCP` **together with the helper token it
 minted at setup**, so a loopback endpoint published from agents-cli would be a
 port without the secret the daemon demands — the verb would fail `auth_failed`
-against a healthy tunnel. agents-cli's half is the NAME → target resolution in
-`target` above, plus the same `--device <name>` on the engine's argv so it
-selects the remote path at all.
+against a healthy tunnel. agents-cli's half is the NAME → address resolution in
+`target` above, plus `--host <address>` on the engine's argv (PHNX-4090) so it
+selects the remote path at all — the engine has no fleet registry of its own to
+resolve a bare `--device <name>` against, so `--device` never reaches its argv.
 
 Service-manager safety is the standalone's own. It renders and registers its own
 launchd/systemd manifest, and it inherits the redirected `HOME` directly, so it
@@ -364,8 +365,18 @@ the full text.
 
 Every verb takes `--device <device>` to drive a Windows machine registered with
 `agents devices`. agents-cli resolves the name against the fleet — registry, ssh
-identity, platform — and forwards both the resolved target (on fd 3) and the
-`--device` flag itself to the engine; the engine owns the rest. `setup --device`
+identity, platform — and forwards the resolved target on fd 3 **and** the
+standalone engine's own `--host <address>` (PHNX-4090; `resolveDeviceHost` in
+`commands/computer.ts`) — never `--device`, since the engine has no fleet
+registry of its own to resolve a bare name against. A device's `computer.host`
+config (`agents config set devices.<name>.computer.host <address>`, next to
+`defaultBrowserProfile`) wins when set — it can be `ssh://user@host` (still
+resolved against the fleet for its identity), or `vnc://host[:port]` /
+`tcp://host:port` for a non-Windows desktop, which carries no ssh identity at
+all. With no `computer.host` configured, the fallback is exactly the historical
+behavior below: a Windows-only ssh tunnel. `--vnc <host:port>` and the
+`COMPUTER_HELPER_*` env selectors remain aliases for one release; an explicit
+`--host` on the command line always wins over `--device`. `setup --device`
 pushes the C# daemon (`computer-helper-win.exe`), registers a LOGON scheduled
 task and mints the helper's auth token, `start --device` opens an `ssh -L`
 tunnel to its loopback port, and every other verb reconnects through that

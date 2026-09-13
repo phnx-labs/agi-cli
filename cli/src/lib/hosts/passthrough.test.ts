@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { flagValue, maybeRunOnHost, maybeRunStandaloneOnHost, passthroughSshOptions, runFleetPassthrough, buildPassthroughForwardedArgs, renderForwardDecision } from './passthrough.js';
+import { flagValue, maybeRunOnHost, maybeRunStandaloneOnHost, passthroughSshOptions, runFleetPassthrough, buildPassthroughForwardedArgs, renderForwardDecision, OWN_HOST_COMMANDS } from './passthrough.js';
 import { machineId } from '../session/sync/config.js';
 import type { DeviceProfile, DeviceRegistry } from '../devices/registry.js';
 
@@ -684,5 +684,21 @@ describe('sync fan-out roster surfaces a refused write', () => {
     // render as before rather than throw.
     expect(await syncRoster({ mode: 'umbrella', ok: true })).not.toContain('not written');
     expect(await syncRoster(null)).not.toContain('not written');
+  });
+});
+
+// PHNX-4090: computer/browser/secrets each resolve --device to the standalone
+// engine's own --host address grammar (no fleet registry on that side) — a
+// regression here would route --device through the generic SSH passthrough
+// instead, which knows nothing about vnc://, tcp://, or the engine's argv shape.
+describe('OWN_HOST_COMMANDS keeps computer/browser/secrets local', () => {
+  it('lists computer, browser and secrets so their own --device handling runs', () => {
+    expect(OWN_HOST_COMMANDS.has('computer')).toBe(true);
+    expect(OWN_HOST_COMMANDS.has('browser')).toBe(true);
+    expect(OWN_HOST_COMMANDS.has('secrets')).toBe(true);
+  });
+
+  it('does NOT list view — `agents view --device <name>` still SSHes the whole command, not a --host rewrite', () => {
+    expect(OWN_HOST_COMMANDS.has('view')).toBe(false);
   });
 });

@@ -47,8 +47,11 @@ import {
   resolveTcpEndpoint,
   resolveVncEndpoint,
 } from '../lib/computer/policy.js';
-import { buildComputerContext } from '../lib/computer/context.js';
+import { buildComputerContext, type ComputerTargetContext } from '../lib/computer/context.js';
 import { recordComputerAction } from '../lib/computer/record.js';
+import { resolveRemoteDevice } from '../lib/ssh-tunnel.js';
+import { getConfigValue } from '../lib/device-config.js';
+import { parseAddress } from '../lib/address.js';
 import {
   isComputerClientError,
   resolveComputerBin,
@@ -115,21 +118,55 @@ export function shouldBlockOffPlatform(opts: {
 }
 
 /**
- * Put `--device <name>` back on the argv handed to the engine.
+ * Put `--host <address>` on the argv handed to the engine.
  *
  * commander CONSUMES the `--device` it declares, so a verb that only read
  * `opts.device` forwarded an argv with no remote selector in it and the engine
  * — which selects the remote path from its own argv — ran the invocation
  * LOCALLY. That is how `setup --device win-mini` installed the macOS helper on
  * the laptop. The flag is re-inserted immediately after the verb rather than
- * appended, so a verb whose operands are variadic cannot swallow it.
+ * appended, so a verb whose operands are variadic cannot swallow it. A `--host`
+ * the caller already typed always wins — it is never overwritten (PHNX-4090).
  *
  * Pure, so the re-insertion is testable without spawning the engine.
  */
-export function withDeviceFlag(argv: string[], device?: string): string[] {
-  if (!device) return argv;
+export function withHostFlag(argv: string[], host?: string): string[] {
+  if (!host) return argv;
+  if (argv.some((arg) => arg === '--host' || arg.startsWith('--host='))) return argv;
   const [verb, ...rest] = argv;
-  return [verb, '--device', device, ...rest];
+  return [verb, '--host', host, ...rest];
+}
+
+/**
+ * Resolve `--device <name>` to the `--host <address>` the engine actually
+ * speaks (PHNX-4090). A device's `computer.host` config (`agents config set
+ * devices.<name>.computer.host <address>`) wins when set — `vnc://`/`tcp://`
+ * carries no ssh identity, `ssh://` still resolves one against the fleet. With
+ * no `computer.host`, fall back to the fleet's ssh identity exactly as before
+ * (Windows-only — the tunnel this repo has always provisioned).
+ */
+export async function resolveDeviceHost(device: string): Promise<{ host: string; target: ComputerTargetContext }> {
+  const configured = getConfigValue('computer.host', { device }).value as string | undefined;
+  if (configured) {
+    const addr = parseAddress(configured);
+    if (addr.scheme === 'vnc' || addr.scheme === 'tcp') {
+      // No ssh identity involved — the transport is RFB or a raw helper socket.
+      return { host: configured, target: { alias: device, host: addr.host, user: addr.user ?? '', hostname: addr.host, platform: addr.scheme, sshArgs: [] } };
+    }
+    const resolved = await resolveRemoteDevice(device, {});
+    return {
+      host: configured,
+      target: { alias: device, host: resolved.target, user: resolved.user, hostname: resolved.host, platform: resolved.device.platform, sshArgs: resolved.identityArgs },
+    };
+  }
+  const resolved = await resolveRemoteDevice(device, {
+    expectPlatform: 'windows',
+    forWhat: '`agents computer --device` drives the Windows computer-helper daemon, so it',
+  });
+  return {
+    host: `ssh://${resolved.target}`,
+    target: { alias: device, host: resolved.target, user: resolved.user, hostname: resolved.host, platform: resolved.device.platform, sshArgs: resolved.identityArgs },
+  };
 }
 
 /**
@@ -159,11 +196,20 @@ async function forwardToComputer(opts: {
   }
 
   const hostFlag = opts.argv.findIndex(arg => arg === '--host' || arg.startsWith('--host='));
-  const host = hostFlag < 0 ? undefined : (opts.argv[hostFlag].includes('=') ? opts.argv[hostFlag].slice(7) : opts.argv[hostFlag + 1]);
-  const context = await buildComputerContext({ device: opts.device, host, computerBin: bin });
+  let host = hostFlag < 0 ? undefined : (opts.argv[hostFlag].includes('=') ? opts.argv[hostFlag].slice(7) : opts.argv[hostFlag + 1]);
+  let target: ComputerTargetContext | undefined;
+  // A device is resolved to --host here rather than forwarded as --device: the
+  // engine has no fleet registry of its own (PHNX-4090). An explicit --host on
+  // the command line always wins over --device, so this only runs without one.
+  if (!host && opts.device) {
+    const resolved = await resolveDeviceHost(opts.device);
+    host = resolved.host;
+    target = resolved.target;
+  }
+  const context = await buildComputerContext({ device: opts.device, host, target, computerBin: bin });
 
   return runComputer({
-    argv: withDeviceFlag(opts.argv, opts.device),
+    argv: withHostFlag(opts.argv, host),
     context,
     capture: opts.capture,
     onEvent: opts.record === false

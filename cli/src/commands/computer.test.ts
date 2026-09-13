@@ -1,9 +1,16 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const mockGetConfigValue = vi.fn();
+const mockResolveRemoteDevice = vi.fn();
+vi.mock('../lib/device-config.js', () => ({ getConfigValue: (...args: unknown[]) => mockGetConfigValue(...args) }));
+vi.mock('../lib/ssh-tunnel.js', () => ({ resolveRemoteDevice: (...args: unknown[]) => mockResolveRemoteDevice(...args) }));
+
 import {
   COMPUTER_PASSTHROUGH_VERBS,
   parseTrustFromStatusJson,
+  resolveDeviceHost,
   shouldBlockOffPlatform,
-  withDeviceFlag,
+  withHostFlag,
 } from './computer.js';
 
 // The `computer` preAction hook calls process.exit(1) exactly when
@@ -97,21 +104,67 @@ describe('parseTrustFromStatusJson', () => {
   });
 });
 
-// The engine selects the remote path from its OWN argv, but commander consumes
-// the `--device` each verb declares — so the consumer has to put it back. This
-// is the regression that made `agents computer setup --device win-mini` install
-// the macOS helper locally instead of provisioning the Windows box.
-describe('withDeviceFlag', () => {
-  it('re-inserts --device right after the verb so the engine sees the remote selector', () => {
-    expect(withDeviceFlag(['setup'], 'win-mini')).toEqual(['setup', '--device', 'win-mini']);
+// The engine has no fleet registry of its own (PHNX-4090) — a resolved --device
+// becomes --host on the argv it actually sees. This is the descendant of the
+// regression that made `agents computer setup --device win-mini` install the
+// macOS helper locally instead of provisioning the Windows box: the selector
+// commander consumed has to be put back, now as --host.
+describe('withHostFlag', () => {
+  it('re-inserts --host right after the verb so the engine sees the remote selector', () => {
+    expect(withHostFlag(['setup'], 'ssh://Administrator@win-mini')).toEqual(['setup', '--host', 'ssh://Administrator@win-mini']);
   });
 
   it('keeps the verb\'s own operands, after the flag', () => {
-    expect(withDeviceFlag(['screenshot', '-o', '/tmp/win.png'], 'win-mini'))
-      .toEqual(['screenshot', '--device', 'win-mini', '-o', '/tmp/win.png']);
+    expect(withHostFlag(['screenshot', '-o', '/tmp/win.png'], 'vnc://10.0.0.5:5901'))
+      .toEqual(['screenshot', '--host', 'vnc://10.0.0.5:5901', '-o', '/tmp/win.png']);
   });
 
   it('leaves a local invocation untouched', () => {
-    expect(withDeviceFlag(['apps', '--json'])).toEqual(['apps', '--json']);
+    expect(withHostFlag(['apps', '--json'])).toEqual(['apps', '--json']);
+  });
+
+  it('never overwrites an explicit --host the caller already typed', () => {
+    expect(withHostFlag(['screenshot', '--host', 'vnc://explicit:5901'], 'ssh://fallback@win-mini'))
+      .toEqual(['screenshot', '--host', 'vnc://explicit:5901']);
+  });
+});
+
+// PHNX-4090: --device resolves to the --host the standalone engine speaks,
+// through the device's computer.host config when set.
+describe('resolveDeviceHost', () => {
+  beforeEach(() => {
+    mockGetConfigValue.mockReset();
+    mockResolveRemoteDevice.mockReset();
+  });
+
+  it('forwards a vnc:// computer.host with no fleet ssh identity resolution', async () => {
+    mockGetConfigValue.mockReturnValue({ value: 'vnc://10.0.0.5:5901' });
+    const result = await resolveDeviceHost('linux-desk');
+    expect(result.host).toBe('vnc://10.0.0.5:5901');
+    expect(result.target.sshArgs).toEqual([]);
+    expect(mockResolveRemoteDevice).not.toHaveBeenCalled();
+  });
+
+  it('resolves fleet ssh identity for an ssh:// computer.host, with no Windows expectation', async () => {
+    mockGetConfigValue.mockReturnValue({ value: 'ssh://muqsit@linux-desk' });
+    mockResolveRemoteDevice.mockResolvedValue({
+      target: 'muqsit@linux-desk', user: 'muqsit', host: 'linux-desk',
+      device: { platform: 'linux' }, identityArgs: ['-i', '/key'],
+    });
+    const result = await resolveDeviceHost('linux-desk');
+    expect(result.host).toBe('ssh://muqsit@linux-desk');
+    expect(result.target.sshArgs).toEqual(['-i', '/key']);
+    expect(mockResolveRemoteDevice).toHaveBeenCalledWith('linux-desk', {});
+  });
+
+  it('falls back to the Windows-only fleet ssh tunnel with no computer.host configured', async () => {
+    mockGetConfigValue.mockReturnValue({ value: undefined });
+    mockResolveRemoteDevice.mockResolvedValue({
+      target: 'Administrator@win-mini', user: 'Administrator', host: 'win-mini',
+      device: { platform: 'windows' }, identityArgs: [],
+    });
+    const result = await resolveDeviceHost('win-mini');
+    expect(result.host).toBe('ssh://Administrator@win-mini');
+    expect(mockResolveRemoteDevice).toHaveBeenCalledWith('win-mini', expect.objectContaining({ expectPlatform: 'windows' }));
   });
 });
