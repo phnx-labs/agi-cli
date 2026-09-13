@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.22.109
+
+- **`agents sessions backup-setup` provisions the managed session-backup endpoint (PHNX-3726).** The operator command that deploys `sessions.agents-cli.sh` — the Cloudflare Worker + R2 bucket a signed-in user's `agents sessions export --to-r2` backs up to with no `r2.backups` bucket of their own. Mirrors `agents traces setup`: reads Cloudflare credentials from the `cloudflare` secrets bundle (`agents secrets exec cloudflare -- agents sessions backup-setup`), idempotent (re-running redeploys the current Worker template in place). It is NOT a per-user step — signing in with `agents auth login` is all a user does; this is how the first-party endpoint itself is deployed. The Worker it deploys is Phoenix-only with no static token (PHNX-3726). Source: `cli/src/commands/sessions-backup-setup.ts`, `cli/src/lib/session/sync/provision.ts` (+ `provision.test.ts`), `cli/docs/sessions.md`.
+
+- **`agents doctor` flags a leaked daemon no owner record names (W4, PHNX-3736).**
+  A headless e2e session launched `agents __daemon-run` under
+  `HOME=/tmp/pin-e2e-<pid>` and never stopped it; the daemon ran 4+ days,
+  invisible to the pid-file takeover because it keeps its own pid file under the
+  temp home. `agents doctor` now reports any same-uid `__daemon-run` whose pid is
+  neither the service manager's unit main PID nor the recorded `daemon.pid` —
+  checked against both the caller's HOME and the real account home, so a
+  test-harness caller never accuses the production daemon — as a `leaked-daemon`
+  warning carrying the process's HOME and start time, with a `kill <pid>`
+  remediation. Source: `cli/src/lib/daemon/leaked-daemons.ts`,
+  `cli/src/lib/devices/doctor-findings.ts`.
+
+- **`agents daemon start` refuses under a redirected HOME unless
+  `AGENTS_ALLOW_TEST_DAEMON=1` (W4, PHNX-3736).** RUSH-3021 gated auto-start from
+  a sandbox/test HOME but left the explicit `startDaemon()` open — the path the
+  e2e harness took to leak the `/tmp/pin-e2e-<pid>` daemon. The launch now throws
+  `RedirectedHomeDaemonError` (printed without a stack, exit 1); a deliberate
+  test/e2e launch opts in with `AGENTS_ALLOW_TEST_DAEMON=1` and owns stopping
+  what it starts. Reporting an already-running daemon — and therefore
+  `agents daemon stop` of a leaked one — is not gated. Auto-start side effects
+  (`routines add`, webhook fires, `monitors add`) state the refusal and leave
+  the foreground command green, the same tier split as the auto-start circuit
+  breaker; only the explicit start commands fail loud. Source:
+  `cli/src/lib/daemon/daemon.ts` (`startDaemon`).
+
+- **The managed share Worker now proxies same-origin human collaboration to Prix (PHNX-3835).** The Cloudflare Worker that fronts a managed share gains a `/__collab/*` transport so authorized humans can review a hosted artifact together (comments now; agent mentions/wake-up later). It stays the trust boundary exactly as the page GET does: every `/__collab` request loads the R2 object FIRST (a missing/just-deleted share 404s, so existence is never enumerable), re-derives the share id (`SHA-256(ownerId + NUL + normalized path)`), current revision (etag), owner, visibility, org domain, and producer provenance SERVER-SIDE from R2 metadata — the browser-supplied `share` is a lookup key only, never trusted as identity — then reuses the EXACT page read gate (me/org identity gate + private viewer-token gate) with every denial normalized to 404. Public/unlisted readers may read anonymously; every write additionally requires a verified signed-in Phoenix human; private still requires its share token. It proxies to the Prix `/v1/artifact-collaboration` routes (`context`, `threads` list/create, thread replies, comment/thread PATCH, SSE `events`, and a best-effort authenticated `purge` on share delete) with the service token in `Authorization` (never surfaced to the browser) plus trusted `X-Artifact-*` / `X-Phoenix-Actor-*` headers, preserves the client `Idempotency-Key` and `Last-Event-ID`, streams SSE through unbuffered (cancel/disconnect propagated), and marks every collaboration response `no-store`. A visibility downgrade is immediate (re-gated per request) and a deleted share drops its comments the instant the object is gone. The whole surface fails closed (404) when `PRIX_ARTIFACT_COLLAB_BASE` / `ARTIFACT_COLLAB_SERVICE_TOKEN` are absent — so BYO endpoints (no Phoenix identity) never expose it and the artifact page GET is unaffected — and stays dormant until an operator sets both secrets, which `agents artifacts share update`/`setup` now apply on a managed deploy (both or neither). Because the Worker template changed, already-deployed managed endpoints read `outdated` until re-run through `agents artifacts share update`. Source: `cli/src/lib/share/worker-template.ts`, `cli/src/lib/share/provision.ts`, `cli/src/lib/share/backend.ts`, `cli/src/commands/share.ts`, `cli/docs/share.md`.
+
+- **`agents sync --dry-run` no longer mutates every native home (PHNX-3923).** The umbrella verb (bare `agents sync`, including `--local`/`--yes`/`--json`) ignored `--dry-run` entirely: it ran the full reconcile, evicted central browser profiles, verified, and repaired — mutating every installed version home despite the preview flag. The umbrella composes only mutating stages (repo `git pull`, `refresh()` reconcile, device sync, `repairAfterSync`) with no non-mutating preview, so it now refuses `--dry-run` LOUD and up front — before any change — and points at the scoped path (`agents sync <agent> --dry-run`), which honors it non-destructively. `--json` reports `{ ok: false, mode: 'umbrella', dryRun: true, error, hint, installedAgents }`. Source: `cli/src/commands/sync.ts`.
+
+- Terminal session resumes preserve follow-up prompts, including spaces and shell characters. Remote terminals use the origin directory or explicit `--cwd`; run pickers retain `--remote-cwd` precedence, and home-relative paths expand on the target. An invalid remote directory or failed terminal launch reports failure.
+
+- Publishes the session-resume fixes from the unshipped 1.22.108 candidate: account homes refresh their session tracker, Codex hook trust follows registration, empty local picks are skipped, and remote picks are validated on their origin device. The 1.22.108 tag is preserved; npm publication resumes with this patch after correcting its release notes.
+
+- **`agents view` shows OpenCode's real model, account, plan, and last-active (PHNX-3982).** The OpenCode row was the only one in the table with nothing usable in it — `1.18.15 (default)  default  id:meta+openai+opencode-go` — while every other harness showed a model, an email, and a plan. Three separate reads were pointed at the wrong place. (1) The model came from `<home>/.opencode/settings.json`, which is agents-cli's own plugin-enablement file; OpenCode reads `~/.config/opencode/opencode.{jsonc,json}`, and ships no catalog default, so the row fell through to the literal placeholder `default`. Both spellings are now read comment-tolerantly, and when nothing is configured the row shows the model OpenCode itself will start with, from the selection it persists to `$XDG_STATE_HOME/opencode/model.json`. (2) The account showed only the provider join because the code asserted OpenCode's `auth.json` carries no identity — it does, for `type: 'oauth'` providers, in the same namespaced JWT claims `case 'codex'` already decodes, so the email and plan now render (secrets are never read out, only claims). (3) `lastActive` was blank because the per-file session walk finds nothing for a harness that keeps every session in one sqlite file; it now dates from `opencode.db`. Live usage *windows* remain unavailable for OpenCode — it records no rate-limit state locally and each provider would need its own reader. Source: `cli/src/lib/agent-spec/agents.ts`, `cli/src/lib/models.ts`.
+
 ## 1.22.108
 
 - Account sync now refreshes the native session-tracking hook in every account home, replacing stale registrations from previous CLI installations so new sessions retain their account identity. Codex tracker installation also refreshes hook trust so headless runs can execute the registered hook.
