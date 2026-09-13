@@ -198,7 +198,7 @@ describe('computer captures come only from real producer records', () => {
       counts: { screenshot: 1, click: 1 },
     }));
     expect(row.captures).toEqual([
-      { kind: 'screenshot', name: 'window.jpg', path: '/caps/window.jpg', host: 'yosemite-m1', bytes: 7082, atMs: 3_000 },
+      { kind: 'screenshot', name: 'window.jpg', path: '/caps/window.jpg', host: 'm1', bytes: 7082, atMs: 3_000 },
     ]);
     expect(row.captureCounts).toEqual({ screenshot: 1 });
   });
@@ -214,11 +214,16 @@ describe('computer captures come only from real producer records', () => {
     expect(row.actionCounts).toEqual({ screenshot: 1 });
   });
 
-  it('scopes a remote run\'s capture host to the DRIVEN machine', () => {
+  it('keeps a remote run\'s capture host on the INVOKING machine, not the driven one', () => {
+    // The helper RPC returns the image as base64 and the invoking process writes
+    // the file locally, so a remote-desktop screenshot still lands here. Naming
+    // the driven host would send a consumer to a machine that never had the file.
     const row = projectComputerToolRow('m1', computerRow({
       remoteHost: 'win-mini',
-      actions: [{ verb: 'screenshot', ts: '2026-09-13T00:00:03Z', tsMs: 3_000, pid: 1, capture: { path: 'C:\\caps\\w.jpg', kind: 'screenshot', name: 'w.jpg' } }],
+      actions: [{ verb: 'screenshot', ts: '2026-09-13T00:00:03Z', tsMs: 3_000, pid: 1, capture: { path: '/caps/w.jpg', kind: 'screenshot', name: 'w.jpg' } }],
     }));
-    expect(row.captures[0]!.host).toBe('win-mini');
+    expect(row.captures[0]!.host).toBe('m1');
+    // The row still names the DRIVEN device — only the capture's holder differs.
+    expect(row.device).toBe('win-mini');
   });
 });
