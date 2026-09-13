@@ -14,7 +14,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { getSystemAgentsDir } from '../state.js';
-import { captureProcessStartTime } from '../pty-server.js';
+import { captureProcessStartTime } from '../platform/process.js';
 
 /** A session's foreground/background presence. */
 export type Presence = 'attached' | 'background' | 'parked';

@@ -18,7 +18,7 @@ const {
   isHeadlessAlive,
   presenceFromStore,
 } = await import('./detached.js');
-const { captureProcessStartTime } = await import('../pty-server.js');
+const { captureProcessStartTime } = await import('../platform/process.js');
 
 const children: ChildProcess[] = [];
 function longRunningChild(): ChildProcess {

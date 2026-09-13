@@ -20,7 +20,7 @@ import type { ActiveSession } from '../lib/session/active.js';
 import { killSession } from '../lib/tmux/index.js';
 import { getDefaultSocketPath } from '../lib/tmux/paths.js';
 import { getAgentsInvocation } from '../lib/daemon/daemon.js';
-import { captureProcessStartTime } from '../lib/pty-server.js';
+import { captureProcessStartTime } from '../lib/platform/process.js';
 import { writeDetachRecord } from '../lib/session/detached.js';
 import { getLogsDir } from '../lib/state.js';
 import { runOnPeer } from '../lib/session/remote-list.js';
