@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Browser setup installs standalone Browser CLI 0.1.3, which preserves a live browser and restores its task when the owning service is replaced.
+
 - Standalone Browser, Computer and Secrets CLI setup now separates executable installation from health. `agents setup status --tool <name> --json` reads cached metadata; `--refresh` performs a bounded, shared check for that tool. `agents setup <tool> --install-only` installs without starting services or changing permissions. The standalone Browser CLI owns the `browser` executable; Agents CLI retains `agents browser` and no longer installs the conflicting alias.
 
 - **AGI Menu updates itself.** Installed release helpers now move to the newest published `menubar/v<x.y.z>` build without anyone running `agents menubar setup`: `resolveMenubarVersion` reads the public release list once a day (cached in `~/.agents/.cache/menubar/latest.json`; the floor in `helper-versions.ts` stays the offline answer and the never-below line), and `updateMenubarHelperIfNewer` downloads and verifies the build through the existing path (sha256, codesign, Team, designated-requirement pin, notarization), swaps it atomically at the same path and identity so the Accessibility grant survives, and restarts the helper. Triggers: the daemon's periodic self-heal check `menubar-helper` (six-hourly; visible in `agents doctor`) and the end of `agents upgrade`. `agents menubar setup`/`enable`, `status` and `doctor` resolve upward too. Local-build installs, opted-out Macs and Macs without the menu bar are untouched. Source: `cli/src/lib/menubar/resolve-version.ts`, `cli/src/lib/menubar/install-menubar.ts`, `cli/src/lib/self-heal/checks/menubar-helper.ts`, `cli/src/bootstrap.ts`.
