@@ -1224,9 +1224,12 @@ export interface Meta {
     discovery?: Record<string, 'approved' | 'ignored'>;
     ignored?: import('./fleet/types.js').IgnoredDeviceEntry[];
   };
-  /** Artifact share endpoint (Cloudflare R2 + Worker). Set by `agents artifacts
-   * setup`/`join`; syncs fleet-wide via `agents repo push/pull`. The write token
-   * lives in the `share` secrets bundle, not here. */
+  /** Legacy artifact-share endpoint (Cloudflare R2 + Worker), synced fleet-wide
+   * via `agents repo push/pull`. Artifact sharing moved to the standalone
+   * `artifacts` CLI (PHNX-3992), so agents-cli no longer writes this — but
+   * `shareRuntimeEnv` (`lib/share-runtime.ts`) still reads `baseUrl` to decide
+   * whether to inject the `share` bundle's write token into spawned agents. The
+   * write token lives in the `share` secrets bundle, not here. */
   share?: {
     baseUrl?: string;
     accountId?: string;
@@ -1235,9 +1238,8 @@ export interface Meta {
     domain?: string;
     /** Cloudflare Web Analytics token injected into published HTML pages. */
     analyticsToken?: string;
-    /** sha256 of the Worker script deployed at the last provision/update, so
-     * `agents artifacts share status` can tell current vs outdated vs unknown (a config
-     * from before this field existed has no hash — always "unknown"). */
+    /** sha256 of the Worker script deployed at the last provision/update
+     * (legacy; a config from before this field existed has no hash). */
     templateHash?: string;
   };
   /**
