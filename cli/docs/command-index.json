@@ -3382,7 +3382,7 @@
           "name": "show",
           "path": "browser show",
           "aliases": [],
-          "description": "Open a URL for a human to read: goes to browser.viewer (default: browser.profile), and binds no task",
+          "description": "Open a URL or local file for a human to read: goes to browser.viewer (default: browser.profile), and binds no task",
           "args": [
             {
               "name": "url",
@@ -3397,6 +3397,15 @@
               "description": "Use the OS default handler instead of the configured viewer",
               "long": "--os-browser",
               "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--device <name>",
+              "description": "fetch the file from this device, then view it locally (absolute path only)",
+              "long": "--device",
+              "required": true,
               "optional": false,
               "variadic": false,
               "negate": false
@@ -21820,6 +21829,15 @@
         }
       ],
       "options": [
+        {
+          "flags": "--argv <json>",
+          "description": "run a JSON array of argv tokens with exact per-token fidelity (no shell splitting)",
+          "long": "--argv",
+          "required": true,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        },
         {
           "flags": "-h, --help",
           "description": "Show help",
