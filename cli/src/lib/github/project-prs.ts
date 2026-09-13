@@ -188,8 +188,11 @@ export async function resolveTargetSlugs(
   gh: GhExec,
 ): Promise<string[]> {
   const raw = projectRepoSlugs([def]);
-  const canon = new Map<string, string>();
-  for (const slug of raw) canon.set(slug, await canonicalizeRepo(slug, gh));
+  // Canonicalize CONCURRENTLY — each `gh repo view` can take up to gh's 30s
+  // timeout, so a sequential walk of N repos would stack N×30s and blow past a
+  // native caller's bounded deadline. Repo count per project is small.
+  const canonPairs = await Promise.all(raw.map(async (slug) => [slug, await canonicalizeRepo(slug, gh)] as const));
+  const canon = new Map<string, string>(canonPairs);
   const canonical = [...new Set(canon.values())];
   if (!repo) return canonical;
 

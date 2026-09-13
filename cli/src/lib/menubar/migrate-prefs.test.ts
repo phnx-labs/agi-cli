@@ -9,13 +9,14 @@ import { describe, expect, it } from 'vitest';
 import { planMenubarPrefMigration, coerceMenubarPrefValue } from './migrate-prefs.js';
 
 describe('planMenubarPrefMigration', () => {
-  it('imports only known keys present in UserDefaults and still unset in config', () => {
+  it('imports only known FULL keys present in UserDefaults and still unset in config', () => {
     const ud = {
-      workingRowsShown: 4,
-      showPreviews: false,
-      defaultProject: 'rush',
-      groupBy: 'agent',
-      unknownLegacyKey: 'ignored', // not a known menubar.menu.* key
+      'menubar.menu.workingRowsShown': 4,
+      'menubar.menu.showPreviews': false,
+      'menubar.menu.defaultProject': 'rush',
+      'menubar.menu.groupBy': 'agent',
+      workingRowsShown: 99, // a bare leaf key is NOT the stored name — ignored
+      unknownLegacyKey: 'ignored',
     };
     // groupBy is already set in config → must NOT be overridden.
     const setKeys = new Set(['menubar.menu.groupBy']);
@@ -26,11 +27,12 @@ describe('planMenubarPrefMigration', () => {
       'menubar.menu.showPreviews',
       'menubar.menu.workingRowsShown',
     ]);
+    expect(plan.find((p) => p.name === 'menubar.menu.workingRowsShown')?.value).toBe(4);
     expect(plan.find((p) => p.name === 'menubar.menu.groupBy')).toBeUndefined();
   });
 
   it('imports nothing when no known key is present (safe no-op)', () => {
-    expect(planMenubarPrefMigration({ somethingElse: 1 }, () => true)).toEqual([]);
+    expect(planMenubarPrefMigration({ somethingElse: 1, workingRowsShown: 2 }, () => true)).toEqual([]);
   });
 });
 
