@@ -4211,6 +4211,10 @@ export class BrowserService {
       const port = parseEndpointUrl(resolved.target)?.port ?? 9600;
       try {
         const ff = await connectFirefox(profile, key, port, { profileDir: profile.userDataDir });
+        // A served port that accepted a fresh BiDi session is this profile's own
+        // Firefox, so claim the record for this daemon (see the local-CDP claim
+        // below for why adoption waits for a proven attach).
+        adoptProfileRuntimeOwner(key);
         const tasks = this.loadTaskState(key);
         for (const [k, t] of diskTasks) {
           if (!tasks.has(k)) tasks.set(k, t);
@@ -4287,6 +4291,14 @@ export class BrowserService {
       const cdp = new CDPClient();
       await cdp.connect(wsUrl);
       await this.enableDomains(cdp);
+      // This is the path a replacement daemon takes to recover a browser its
+      // predecessor launched, so it is where ownership actually transfers. Only
+      // now — after `verifyBrowserIdentity` confirmed the browser family on the
+      // recorded port and CDP is attached — is it proven that this record
+      // describes a browser we are driving. `adoptProfileRuntimeOwner` rewrites
+      // `daemonPid` alone; an ambiguous identity throws above and adopts
+      // nothing, leaving the record (and the browser) untouched.
+      adoptProfileRuntimeOwner(key);
 
       const tasks = this.loadTaskState(key);
       for (const [k, t] of diskTasks) {
