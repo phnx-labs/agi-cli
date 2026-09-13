@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-migv46to48-'));
+const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-migv46to50-'));
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 
@@ -14,11 +14,12 @@ const Database = (await import('../sqlite.js')).default;
 
 {
   const seed = new Database(getSessionsDbPath());
-  // Authentic v46 shape: the PHNX-3792 mirror provenance columns exist, but NEITHER
-  // the PHNX-3798 phoenix_id column NOR the PHNX-3797 generated-title columns do.
-  // A real box on v46 upgrading straight to v48 (skipping no releases, just landing
-  // both merged migrations at once) must get BOTH — the collision-resolution case
-  // this whole rebase turned on (v47 = phoenix_id, v48 = generated_title*).
+  // Authentic v46 shape: the PHNX-3792 mirror provenance columns exist, but NONE
+  // of the PHNX-3798 phoenix_id (v47), PHNX-3939 last_user_message (v48),
+  // PHNX-3940 account_id (v49), or PHNX-3797 generated-title (v50) columns do.
+  // A real box on v46 upgrading straight to v50 (skipping no releases, just
+  // landing four independently-merged migrations at once) must get ALL of
+  // them — the collision-resolution case this whole rebase turned on.
   seed.exec(`
     CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
     CREATE TABLE sessions (
@@ -46,32 +47,40 @@ const Database = (await import('../sqlite.js')).default;
 
 const { getDB, SCHEMA_VERSION, setSessionGeneratedTitle, getSessionById } = await import('./db.js');
 
-describe('schema migration v46 -> v48 (both merged migrations land, neither dropped)', () => {
-  it('adds phoenix_id (<47, PHNX-3798) AND the generated-title columns (<48, PHNX-3797) in one upgrade', () => {
+describe('schema migration v46 -> v50 (four merged migrations land, none dropped)', () => {
+  it('adds phoenix_id (<47), last_user_message (<48), account_id (<49), and the generated-title columns (<50) in one upgrade', () => {
     const columns = (getDB().prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map((c) => c.name);
     // PHNX-3798's column (the v47 rung).
     expect(columns).toContain('phoenix_id');
-    // PHNX-3797's columns (the v48 rung).
+    // PHNX-3939's column (the v48 rung).
+    expect(columns).toContain('last_user_message');
+    // PHNX-3940's column (the v49 rung).
+    expect(columns).toContain('account_id');
+    // PHNX-3797's columns (the v50 rung).
     expect(columns).toContain('generated_title');
     expect(columns).toContain('generated_title_key');
     expect(columns).toContain('generated_title_at');
-    // The DB is stamped at the combined head, not stranded at 47.
+    // The DB is stamped at the combined head, not stranded partway.
     const version = getDB().prepare(`SELECT value FROM meta WHERE key = 'schema_version'`).get() as { value: string };
     expect(version.value).toBe(String(SCHEMA_VERSION));
-    expect(SCHEMA_VERSION).toBe(48);
+    expect(SCHEMA_VERSION).toBe(50);
   });
 
   it('leaves the legacy row intact — additive columns start NULL, existing content untouched', () => {
     const row = getDB()
-      .prepare(`SELECT phoenix_id, generated_title, generated_title_key, first_user_message, actor FROM sessions WHERE id = 'legacy'`)
+      .prepare(`SELECT phoenix_id, last_user_message, account_id, generated_title, generated_title_key, first_user_message, actor FROM sessions WHERE id = 'legacy'`)
       .get() as {
         phoenix_id: string | null;
+        last_user_message: string | null;
+        account_id: string | null;
         generated_title: string | null;
         generated_title_key: string | null;
         first_user_message: string;
         actor: string;
       };
     expect(row.phoenix_id).toBeNull();
+    expect(row.last_user_message).toBeNull();
+    expect(row.account_id).toBeNull();
     expect(row.generated_title).toBeNull();
     expect(row.generated_title_key).toBeNull();
     // The user's own words survive to be the ladder's honest fallback headline.
@@ -80,7 +89,7 @@ describe('schema migration v46 -> v48 (both merged migrations land, neither drop
   });
 
   it('the new generated_title column is writable after the combined migration', () => {
-    expect(setSessionGeneratedTitle('legacy', 'Triage the AGI board', 'k46to48', 1_760_000_000_000)).toBe(true);
+    expect(setSessionGeneratedTitle('legacy', 'Triage the AGI board', 'k46to50', 1_760_000_000_000)).toBe(true);
     expect(getSessionById('legacy')?.generatedTitle).toBe('Triage the AGI board');
   });
 });
