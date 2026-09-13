@@ -66,6 +66,16 @@ export interface MailboxMessage {
    */
   blockId?: string;
   /**
+   * Which ASK of that block this message answers, and which claim sent it. A
+   * blockId is per SESSION and is reused by every generation of that session's
+   * questions, so without these a `consumed` receipt raised on drain cannot say
+   * WHICH question it acknowledges -- and a late one for question N would
+   * resolve question N+1 (PHNX-3999). Carried on the message so the binding
+   * survives the process that enqueued it.
+   */
+  generation?: string;
+  attempt?: string;
+  /**
    * Drop reason when a message is archived without delivery (expired, dead box, etc.).
    * Set by the TTL/liveness layer, not by writers.
    */
@@ -126,7 +136,7 @@ function newMsgId(): string {
  * Enqueue a message into `boxDir` atomically. Returns the msgId. The `to` field
  * is stamped so a drain can refuse a message that lands in the wrong box.
  */
-export function enqueue(boxDir: string, msg: { to: string; text: string; from?: string; blockId?: string; ttlSeconds?: number }): string {
+export function enqueue(boxDir: string, msg: { to: string; text: string; from?: string; blockId?: string; generation?: string; attempt?: string; ttlSeconds?: number }): string {
   assertValidMailboxId(msg.to);
   ensureDirs(boxDir);
   const msgId = newMsgId();
@@ -138,6 +148,8 @@ export function enqueue(boxDir: string, msg: { to: string; text: string; from?: 
     ts: now.toISOString(),
     text: msg.text,
     blockId: msg.blockId,
+    ...(msg.generation !== undefined ? { generation: msg.generation } : {}),
+    ...(msg.attempt !== undefined ? { attempt: msg.attempt } : {}),
   };
   const ttlSeconds = msg.ttlSeconds ?? resolveDefaultTtlSeconds();
   if (ttlSeconds > 0) {
@@ -168,7 +180,14 @@ export function readMessage(file: string): MailboxMessage | null {
   if (typeof m?.msgId !== 'string' || typeof m?.to !== 'string' || typeof m?.text !== 'string') {
     return null;
   }
-  return { msgId: m.msgId, to: m.to, from: m.from, ts: m.ts ?? '', text: m.text, expiresAt: m.expiresAt, blockId: m.blockId, dropped: m.dropped };
+  // Field-by-field on purpose (an unknown key from a foreign writer is dropped),
+  // so EVERY field the receipt binding depends on must be listed here or it is
+  // silently lost on read and the binding it enables never fires.
+  return {
+    msgId: m.msgId, to: m.to, from: m.from, ts: m.ts ?? '', text: m.text,
+    expiresAt: m.expiresAt, blockId: m.blockId, generation: m.generation, attempt: m.attempt,
+    dropped: m.dropped,
+  };
 }
 
 /** True when a message has a parsed expiry in the past. */
@@ -276,7 +295,12 @@ function consumeClaimed(boxDir: string, name: string, expectedTo: string): Mailb
   if (msg.blockId) {
     try {
       const feedRoot = process.env.AGENTS_FEED_DIR;
-      recordMessageReceipt(msg.blockId, { msgId: msg.msgId, status: 'consumed', at: new Date().toISOString(), from: msg.from }, feedRoot);
+      // The origin rides the message, so the receipt names the ask it answers.
+      recordMessageReceipt(msg.blockId, {
+        msgId: msg.msgId, status: 'consumed', at: new Date().toISOString(), from: msg.from,
+        ...(msg.generation !== undefined ? { generation: msg.generation } : {}),
+        ...(msg.attempt !== undefined ? { attempt: msg.attempt } : {}),
+      }, feedRoot);
     } catch {
       // Receipt surfacing is best-effort; never stall delivery.
     }

@@ -10,7 +10,7 @@
  * This module picks the delivery mechanism from (open feed block × session
  * liveness × runtime rail). Pure — unit-testable without a live terminal.
  */
-import type { OpenBlock, BlockOption } from './feed/feed.js';
+import { deriveBlockState, type OpenBlock, type BlockOption } from './feed/feed.js';
 import type { ActiveSession } from './session/active.js';
 import type { InjectTarget } from './terminal/index.js';
 import { addressabilityRecoveryHint } from './terminal/resolve.js';
@@ -120,10 +120,20 @@ export function isParkedOnInput(session: ActiveSession | null | undefined): bool
   return false;
 }
 
-/** True when an open feed block still needs an answer. */
+/**
+ * True when an open feed block still needs an answer.
+ *
+ * Openness comes from {@link deriveBlockState}, not from `block.answer` being
+ * truthy: a PENDING claim records the answer while deliberately leaving the
+ * block `open` (feed.ts `recordAnswer`'s two-phase mode), so reading the field
+ * directly would call a claimed-but-undelivered block "closed" — and a retry of
+ * a stranded claim would then re-route a parked headless agent to the mailbox it
+ * will never drain (PHNX-3999).
+ */
 export function isOpenQuestionBlock(block: OpenBlock | null | undefined): boolean {
   if (!block) return false;
-  if (block.answer || block.parkedAt || block.continuedAt || block.defaultedAt) return false;
+  if (block.parkedAt || block.continuedAt || block.defaultedAt) return false;
+  if (deriveBlockState(block) !== 'open') return false;
   return (block.questions?.length ?? 0) > 0;
 }
 

@@ -83,6 +83,14 @@ export interface InjectOptions {
   /** Don't execute — return the spec(s) that WOULD run. Lets the macOS paths be asserted on Linux. */
   dryRun?: boolean;
   /**
+   * Hard bound for the WHOLE injection, in ms. Each spec is run under the
+   * remaining budget with process-group cancellation, and a spec is never
+   * STARTED once the budget is gone — an operator-facing caller must be able to
+   * return a verdict on time without leaving a launcher running behind it
+   * (PHNX-3999). Omitted keeps the historical unbounded behaviour.
+   */
+  deadlineMs?: number;
+  /**
    * Frame the text in bracketed-paste markers so a TUI inserts it verbatim
    * instead of reading each embedded newline as a submit. Required for a
    * multiline free-text answer. Only the tmux rail can carry it (see
@@ -131,8 +139,8 @@ const CR = '\r';
  * buffers every byte up to the end marker, so an embedded newline lands as a
  * literal newline in the draft instead of submitting the partial line.
  */
-export const BRACKETED_PASTE_START = '[200~';
-export const BRACKETED_PASTE_END = '[201~';
+export const BRACKETED_PASTE_START = '\u001b[200~';
+export const BRACKETED_PASTE_END = '\u001b[201~';
 
 /**
  * Only tmux can carry the framing: `send-keys -l` writes the marker bytes
@@ -367,9 +375,26 @@ export async function injectIntoTerminal(
     }
   }
 
+  const endMs = opts.deadlineMs === undefined ? undefined : Date.now() + opts.deadlineMs;
+  let sent = 0;
   for (const spec of specs) {
-    const res = await runSpec(spec, opts.host, opts.resolveHost);
-    if (!res.ok) return { ok: false, confirmed: false, backend: target.backend, writes: 0, specs, error: res.error };
+    // Never START a spec the budget can no longer cover. Racing the caller's
+    // promise instead let a write begin AFTER the operator had already been told
+    // the answer timed out.
+    const remaining = endMs === undefined ? undefined : endMs - Date.now();
+    if (remaining !== undefined && remaining <= 0) {
+      return {
+        ok: false, confirmed: false, backend: target.backend, writes: sent, specs,
+        error: `injection ran out of budget after ${sent} of ${specs.length} write(s)`,
+      };
+    }
+    const res = await runSpec(spec, opts.host, opts.resolveHost, remaining);
+    if (!res.ok) {
+      // `writes` reports how many landed BEFORE the failure — the caller needs it
+      // to know whether text may already sit in the composer.
+      return { ok: false, confirmed: false, backend: target.backend, writes: sent, specs, error: res.error };
+    }
+    sent += 1;
   }
   return { ok: true, confirmed, backend: target.backend, writes, specs };
 }

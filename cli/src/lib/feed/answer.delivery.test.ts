@@ -21,7 +21,9 @@ import {
   type OpenBlock,
 } from './feed.js';
 import { reconcileAttention } from './attention.js';
-import { drain, mailboxDir } from '../mailbox.js';
+import { isOpenQuestionBlock, resolveAnswerRoute } from '../answer-router.js';
+import { groupBlocksByOutcome } from '../feed-outcome.js';
+import { drain, enqueue, mailboxDir, readBox } from '../mailbox.js';
 import { resetPullRequestStatusCache } from './pr-status.js';
 import {
   answerOwnerIsLocal, checkAnswerDelivery, claimAndRouteAttentionAnswer, classifyReceipt,
@@ -402,6 +404,103 @@ describe('claims reconciled against real receipts', () => {
   });
 });
 
+describe('stranded-claim replay is bound to the ask and the rail', () => {
+  /** Write an answered marker directly, as a killed run would leave behind. */
+  function strandClaim(blockId: string, feedRoot: string, ageMs: number): string {
+    const answeredAt = new Date(Date.now() - ageMs).toISOString();
+    const dir = path.join(feedRoot, 'answered');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, `${blockId}.json`), JSON.stringify({
+      answeredAt, answeredFrom: 'feed', answeredBy: 'killed-run',
+    }));
+    return answeredAt;
+  }
+
+  it("does not mistake an OLD question's queued message for this question's delivery", async () => {
+    const feedRoot = dir('feed');
+    const mailboxRoot = dir('mail');
+    const session = parkedSession('two-asks');
+
+    // Question 1 was answered and its message is still in the spool.
+    enqueue(mailboxDir('two-asks', mailboxRoot), {
+      to: 'two-asks', text: 'answer to the FIRST question', blockId: blockIdForSession('two-asks'),
+      generation: '2026-09-13T10:00:00.000Z', attempt: '2026-09-13T10:00:01.000Z',
+    });
+
+    // The agent has since asked question 2, whose claim a kill stranded.
+    const q2 = questionBlock('two-asks', { ts: '2026-09-13T12:00:00.000Z', questions: [{ text: 'Second question?' }] });
+    publishBlock(q2, feedRoot);
+    const q2Key = reconcileAttention({ block: q2, session, nowMs: Date.now() })!.key;
+    strandClaim(q2.blockId, feedRoot, STRANDED_CLAIM_MS + 5_000);
+
+    const result = await claimAndRouteAttentionAnswer({
+      attentionKey: q2Key, text: 'answer to the SECOND question',
+      operator: { verified: false, label: 'op' }, feedRoot, mailboxRoot, sessions: [session],
+    });
+    expect(result.status).toBe('delivered');
+
+    // The block id is shared, so a bare-blockId match would have "re-used" the
+    // first question's message and reported delivered while sending nothing.
+    const spool = readBox(mailboxDir('two-asks', mailboxRoot));
+    expect(spool).toHaveLength(2);
+    expect(spool.map((m) => m.text).sort()).toEqual([
+      'answer to the FIRST question', 'answer to the SECOND question',
+    ]);
+  });
+
+  it('keeps a parked headless agent on its resume rail when a stranded claim is retried', async () => {
+    const feedRoot = dir('feed');
+    const mailboxRoot = dir('mail');
+    // Parked headless: the correct rail is resume, NOT the mailbox it will never drain.
+    const session = parkedSession('parked-headless', {
+      context: 'headless', status: 'input_required', activity: 'waiting_input',
+      awaitingReason: 'question', tty: false,
+    } as Partial<ActiveSession>);
+    const block = questionBlock('parked-headless');
+    publishBlock(block, feedRoot);
+    const key = reconcileAttention({ block, session, nowMs: Date.now() })!.key;
+
+    // A pending claim records an answer ON the block while leaving it open. If a
+    // consumer read `block.answer` truthiness instead of the canonical state, the
+    // route would silently downgrade to mailbox here.
+    recordAnswer(block.blockId, { answeredFrom: 'feed', answeredBy: 'killed-run' }, feedRoot, { pending: true });
+    const claimed = readBlock(block.blockId, feedRoot)!;
+    expect(claimed.answer).toBeDefined();
+    expect(deriveBlockState(claimed)).toBe('open');
+    expect(isOpenQuestionBlock(claimed)).toBe(true);
+    expect(resolveAnswerRoute({ mailboxId: 'parked-headless', answer: 'go', block: claimed, session }).kind)
+      .toBe('resume');
+
+    // And the operator's own feed still shows it as needing a human.
+    expect(groupBlocksByOutcome([claimed])[0].counts.open).toBe(1);
+    expect(fs.existsSync(path.join(mailboxRoot, 'parked-headless'))).toBe(false);
+    expect(key).toContain('parked-headless');
+  });
+
+  it('lets exactly ONE of two concurrent adopters take a stranded claim', async () => {
+    const feedRoot = dir('feed');
+    const mailboxRoot = dir('mail');
+    const session = parkedSession('contended');
+    const block = questionBlock('contended');
+    publishBlock(block, feedRoot);
+    const key = reconcileAttention({ block, session, nowMs: Date.now() })!.key;
+    strandClaim(block.blockId, feedRoot, STRANDED_CLAIM_MS + 5_000);
+
+    const common = { attentionKey: key, operator: { verified: false, label: 'op' }, feedRoot, mailboxRoot, sessions: [session] };
+    const results = await Promise.all([
+      claimAndRouteAttentionAnswer({ ...common, text: 'adopter A' }),
+      claimAndRouteAttentionAnswer({ ...common, text: 'adopter B' }),
+    ]);
+
+    // Exactly one delivers; the other reports rather than sending a second copy.
+    expect(results.filter((r) => r.status === 'delivered')).toHaveLength(1);
+    expect(fs.readdirSync(path.join(mailboxRoot, 'contended', 'inbox'))).toHaveLength(1);
+    // The release token must not be left behind.
+    const answered = fs.readdirSync(path.join(feedRoot, 'answered'));
+    expect(answered.filter((f) => f.endsWith('.release'))).toEqual([]);
+  });
+});
+
 // --- read-only delivery check -----------------------------------------------
 
 describe('checkAnswerDelivery', () => {
@@ -598,9 +697,15 @@ describe.skipIf(noTmux)('multiline free text over a real tmux rail', () => {
       if (typed.includes('third line')) break;
       await new Promise((r) => setTimeout(r, 50));
     }
+    // Asserted against the literal DEC-2004 bytes, NOT the exported constant:
+    // comparing the output to the same constant that produced it would pass even
+    // if the constant were missing its ESC.
+    const ESC = String.fromCharCode(0x1b);
+    expect(BRACKETED_PASTE_START).toBe(`${ESC}[200~`);
+    expect(BRACKETED_PASTE_END).toBe(`${ESC}[201~`);
     // One paste, framed — every line rode in a single insert.
-    expect(typed).toContain(BRACKETED_PASTE_START);
-    expect(typed).toContain(BRACKETED_PASTE_END);
+    expect(typed).toContain(`${ESC}[200~`);
+    expect(typed).toContain(`${ESC}[201~`);
     expect(typed).toContain('first line');
     expect(typed).toContain('second line');
     expect(typed).toContain('third line');

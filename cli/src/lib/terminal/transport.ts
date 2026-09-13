@@ -21,13 +21,46 @@ export interface RunResult {
   error?: string;
 }
 
-/** Run the spec on this machine: spawn the launcher, resolve when it exits. */
-export function runLocal(spec: LaunchSpec): Promise<RunResult> {
+/** Grace between SIGTERM and SIGKILL when a deadline cancels a launcher. */
+export const SPEC_KILL_GRACE_MS = 250;
+
+/**
+ * Run the spec on this machine: spawn the launcher, resolve when it exits.
+ *
+ * `timeoutMs` makes the call genuinely bounded rather than merely raced: the
+ * child is spawned in its OWN process group (`detached`) and the whole group is
+ * signalled on expiry, so a launcher that itself spawned something (osascript →
+ * the app, tmux → the server) cannot keep running after the caller has given up.
+ * Racing the promise alone leaves the process behind (PHNX-3999).
+ */
+export function runLocal(spec: LaunchSpec, timeoutMs?: number): Promise<RunResult> {
   return new Promise((resolve) => {
-    const child = spawn(spec.argv[0], spec.argv.slice(1), { stdio: 'ignore' });
-    child.on('error', (err: any) => resolve({ ok: false, error: err.message }));
+    const child = spawn(spec.argv[0], spec.argv.slice(1), { stdio: 'ignore', detached: !!timeoutMs });
+    let settled = false;
+    let killTimer: ReturnType<typeof setTimeout> | null = null;
+    const done = (result: RunResult): void => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      if (killTimer) clearTimeout(killTimer);
+      resolve(result);
+    };
+    const signalGroup = (signal: NodeJS.Signals): void => {
+      try {
+        if (child.pid) process.kill(timeoutMs ? -child.pid : child.pid, signal);
+      } catch { /* already gone */ }
+    };
+    const timer = timeoutMs
+      ? setTimeout(() => {
+          signalGroup('SIGTERM');
+          killTimer = setTimeout(() => signalGroup('SIGKILL'), SPEC_KILL_GRACE_MS);
+          killTimer.unref?.();
+          done({ ok: false, error: `${spec.argv[0]} did not finish in ${timeoutMs}ms` });
+        }, timeoutMs)
+      : null;
+    child.on('error', (err: any) => done({ ok: false, error: err.message }));
     child.on('close', (code) =>
-      resolve(code === 0 ? { ok: true } : { ok: false, error: `${spec.argv[0]} exited with code ${code}` }),
+      done(code === 0 ? { ok: true } : { ok: false, error: `${spec.argv[0]} exited with code ${code}` }),
     );
   });
 }
@@ -37,17 +70,20 @@ export function remoteCommand(spec: LaunchSpec): string {
   return spec.argv.map(shellQuote).join(' ');
 }
 
-/** Run the spec on a remote host over SSH. */
-export function runRemote(spec: LaunchSpec, target: string): RunResult {
-  const res = sshExec(target, remoteCommand(spec), { multiplex: true });
+/** Run the spec on a remote host over SSH. `timeoutMs` bounds the ssh client. */
+export function runRemote(spec: LaunchSpec, target: string, timeoutMs?: number): RunResult {
+  const res = sshExec(target, remoteCommand(spec), { multiplex: !timeoutMs, timeoutMs });
+  if (res.timedOut) return { ok: false, error: `ssh to ${target} did not finish in ${timeoutMs}ms` };
   if (res.code === 0) return { ok: true };
   const err = (res.stderr || '').trim();
   return { ok: false, error: err || `ssh exited with code ${res.code}` };
 }
 
 /** Run a spec locally (no host / 'local') or on a resolved remote host. */
-export async function runSpec(spec: LaunchSpec, host?: string, resolveHost?: HostResolver): Promise<RunResult> {
-  if (!host || host === 'local') return runLocal(spec);
+export async function runSpec(
+  spec: LaunchSpec, host?: string, resolveHost?: HostResolver, timeoutMs?: number,
+): Promise<RunResult> {
+  if (!host || host === 'local') return runLocal(spec, timeoutMs);
   const target = resolveHost ? resolveHost(host) : host;
-  return runRemote(spec, target);
+  return runRemote(spec, target, timeoutMs);
 }
