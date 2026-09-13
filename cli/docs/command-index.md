@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_67 command groups · 513 commands._
+_65 command groups · 486 commands._
 
 ## accounts — Browse and manage harness accounts
 
@@ -38,25 +38,6 @@ agents accounts view <name>               Show safe account metadata, custody, a
 
 ```
 agents add <specs...>  Download and install agent CLI versions. Enables subsidized API usage through managed binaries.
-```
-
-## artifacts — Publish agent-made artifacts (plans, reports, visuals) to a shareable link — managed if signed in, otherwise your Cloudflare R2.
-
-```
-agents artifacts                                    Publish agent-made artifacts (plans, reports, visuals) to a shareable link — managed if signed in, otherwise your Cloudflare R2.
-agents artifacts setup                              Provision (or join) the Cloudflare R2 + Worker endpoint that backs `agents artifacts share`.
-agents artifacts share [file]                       Publish an HTML file to a shareable link — managed if signed in, otherwise your Cloudflare R2.
-agents artifacts share analytics                    Show the Cloudflare Web Analytics status for this share endpoint.
-agents artifacts share delete <targets...>          Take down a published page (and by default its OG cover). Verifies the page 404s before reporting success. Nested alias: agents artifacts unshare.
-agents artifacts share edit <target>                Edit a published share's label or arbitrary metadata without republishing its body.
-agents artifacts share join [baseUrl]               Use an existing synced share endpoint and write token (no provisioning).
-agents artifacts share list                         List the pages you've published to your share namespace (human table; --list-json for scripts).
-agents artifacts share open <target>                Open your own published page in the browser signed in as the owner, so the page's inline visibility control is live. Mints a one-time login ticket and appends it to the URL.
-agents artifacts share revisions <target>           Show the retained prior versions of a published slug, newest first (human table; --revisions-json for scripts).
-agents artifacts share status                       Show the configured share endpoint and namespace.
-agents artifacts share update                       Re-deploy the Worker script to the current template on an already-provisioned endpoint (idempotent).
-agents artifacts share visibility <target> <level>  Change an already-published page's visibility in place (public | unlisted | me | org). The slug/URL is preserved; the body is untouched, so no revision is created.
-agents artifacts unshare <targets...>               Alias of `agents artifacts share delete` — take down a published page (and by default its OG cover).
 ```
 
 ## auth — Sign in to Phoenix ID — the account layer behind team spaces
@@ -418,10 +399,10 @@ agents menubar setup    Configure AGI Menu end-to-end: one instance, started at 
 agents menubar status   Show whether AGI Menu is installed and running
 ```
 
-## message — Send a message to a running or parked agent (mailbox / PTY-select / resume by runtime).
+## message — Send a message to a running or parked agent (mailbox / terminal-select / resume by runtime).
 
 ```
-agents message <target> <text>  Send a message to a running or parked agent (mailbox / PTY-select / resume by runtime).
+agents message <target> <text>  Send a message to a running or parked agent (mailbox / terminal-select / resume by runtime).
 ```
 
 ## models — Show the cost-tier map (cheap|default|best|ultra) for installed harnesses; pin overrides with `tier set`.
@@ -502,6 +483,7 @@ agents projects edit <name>          Open the project YAML in $EDITOR (it is han
 agents projects import               Import project definitions from Linear (via the `linear` CLI).
 agents projects link <name>          Attach an external tracker to a project definition (writes linear.projectId + name into the YAML; re-run to pick up a Linear rename).
 agents projects list                 List defined projects (definitions only by default; no session scan).
+agents projects prs <name>           Every OPEN pull request across a project's attached repos (drafts included, no author filter).
 agents projects pull <name>          Fast-forward every fleet checkout of a named project to its remote default branch.
 agents projects remove <name>        Remove a project definition. Never touches the repo.
 agents projects save                 Create or update one project from a complete ProjectDef JSON object on stdin.
@@ -514,25 +496,6 @@ agents projects status [nameOrPath]  Progress card for every project across the 
 ```
 agents prune <specs...>        Uninstall agent CLI versions. Moves version data to trash for recovery.
 agents prune cleanup [target]  Remove orphan resources, old versions, or routine runs
-```
-
-## pty — Drive interactive terminal programs from AI agents. Use this for REPLs, TUIs, or anything needing a real terminal.
-
-```
-agents pty                       Drive interactive terminal programs from AI agents. Use this for REPLs, TUIs, or anything needing a real terminal.
-agents pty exec <id> <command>   Send a command to a PTY session. Returns immediately (non-blocking). Use screen or read to see output.
-agents pty list                  List all active PTY sessions (running or idle).
-agents pty read <id>             Read raw output from the PTY (includes ANSI codes). Use screen for clean text instead.
-agents pty resize <id>           Resize a PTY session
-agents pty screen <id>           Render the terminal screen as clean text (no ANSI codes). This is what a human sees looking at the terminal.
-agents pty server                Manage the PTY sidecar server (auto-starts on first use, usually you do not need this).
-agents pty server start          Start the PTY server manually (auto-starts on first pty command anyway).
-agents pty server status         Check if the PTY server is running and how many sessions are active.
-agents pty server stop           Stop the PTY server and kill all active sessions.
-agents pty signal <id> [signal]  Send a POSIX signal to the running process. Defaults to INT (Ctrl-C).
-agents pty start                 Start a new PTY session and return its ID. The session persists until you stop it.
-agents pty stop <id>             Stop a PTY session and clean up. The session ID becomes invalid.
-agents pty write <id> <input>    Send keystrokes to the PTY (like typing into the terminal). Processes escape sequences by default.
 ```
 
 ## registry — Manage package registries
@@ -708,7 +671,7 @@ agents setup mine list                        Show your brands and what each has
 agents setup mine remove <name>               Remove a brand (its shim + config)
 agents setup mine toggle <name>               Enable/disable features for a brand
 agents setup secrets                          Install the standalone `secrets` CLI if missing, then run its `secrets migrate` onboarding.
-agents setup status                           Show setup readiness for core, browser, computer, secrets, accounts, fleet, share, watchdog, and preferences.
+agents setup status                           Show setup readiness for core, browser, computer, secrets, accounts, fleet, watchdog, and preferences.
 agents setup url-scheme                       Register/unregister/status the agents:// OS URL-scheme handler for artifact session deep links.
 agents setup url-scheme register              Register the agents:// URL scheme with the OS so artifact links resume sessions (idempotent).
 agents setup url-scheme status                Report whether the agents:// URL scheme handler is registered.
