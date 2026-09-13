@@ -4,6 +4,8 @@ import * as path from 'path';
 import { buildRoutineListJson } from '../scheduling/routines.js';
 import { backfillActiveRowsFromIndex, isRunningLiveSession, serializeActiveSessionsForJson, serializeSessionsJson } from '../session/active.js';
 import { getConfigValue, loadAutoLaunchPreferences } from '../device-config.js';
+import { MENUBAR_MENU_PROPERTIES } from '../config-keys.js';
+import { migrateMenubarPreferencesFromUserDefaults } from './migrate-prefs.js';
 import { loadDevices } from '../devices/registry.js';
 import { machineId } from '../machine-id.js';
 import { querySessions } from '../session/db.js';
@@ -24,6 +26,12 @@ import type { WatchdogTickResult } from '../watchdog/runner.js';
 interface MenubarDevice {
   name: string;
   platform: string;
+  /**
+   * Physical form factor for a factual hardware icon: `laptop` | `desktop` |
+   * `server` | `unknown` (PHNX-3999). A shared device-scope config fact set
+   * explicitly per device — never inferred from `platform`. `unknown` when unset.
+   */
+  formFactor: string;
   interactive: boolean;
   isLocal: boolean;
   preferred: boolean;
@@ -43,10 +51,36 @@ interface MenubarSnapshot {
   recentSessions: Record<string, unknown>[];
   activeSessions: Record<string, unknown>[];
   devices: MenubarDevice[];
+  /**
+   * AGI Menu preferences (PHNX-3999), keyed by the full `menubar.menu.*` config
+   * name, carrying the EFFECTIVE value — the stored value, else the registered
+   * default. The native menu consumes this from the snapshot it already polls
+   * rather than a second preference-read mechanism. `menubar.menu.defaultProject`
+   * is omitted when unset (it has no default); every other key is always present.
+   * Writes stay one `agents config set/unset <key>` per setting.
+   */
+  menuPreferences: Record<string, unknown>;
   watchdog: {
     enabled: boolean;
     lastTick: Pick<WatchdogTickResult, 'didNudge' | 'counts'> | null;
   };
+}
+
+/**
+ * The effective AGI Menu preferences map for the snapshot: each `menubar.menu.*`
+ * key's stored value, or its registered default when unset. A key with neither
+ * (only `defaultProject`) is omitted so the native app keeps its own default.
+ */
+export function buildMenuPreferences(): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const prop of MENUBAR_MENU_PROPERTIES) {
+    const name = `menubar.menu.${prop}`;
+    const entry = getConfigValue(name);
+    const value = entry.value !== undefined ? entry.value : entry.spec.defaultValue;
+    if (value === undefined) continue; // unset defaultProject — no default to emit
+    out[name] = value;
+  }
+  return out;
 }
 
 /**
@@ -66,6 +100,8 @@ async function buildMenubarDevices(): Promise<MenubarDevice[]> {
     .map((name) => ({
       name,
       platform: reg[name].platform,
+      // Shared device-scope fact (readable for any device); `unknown` when unset.
+      formFactor: (getConfigValue('formFactor', { device: name }).value as string | undefined) ?? 'unknown',
       interactive: name === interactiveHost,
       isLocal: name === self,
       preferred: prefs[name]?.preferred === true,
@@ -84,6 +120,10 @@ export function readLastWatchdogTick(
 
 /** One-process read model for AGI Menu's repeating three-minute refresh. */
 export async function computeMenubarSnapshot(): Promise<MenubarSnapshot> {
+  // One-shot, sentinel-gated, macOS-only lift of legacy UserDefaults prefs into
+  // config before we read them. After the first run it is a cheap existsSync
+  // no-op; it never throws into the snapshot.
+  migrateMenubarPreferencesFromUserDefaults();
   const [routines, recent, devices] = await Promise.all([
     Promise.resolve(buildRoutineListJson()),
     Promise.resolve(querySessions({ limit: 40, skipExistenceCheck: true })),
@@ -110,6 +150,7 @@ export async function computeMenubarSnapshot(): Promise<MenubarSnapshot> {
     recentSessions: JSON.parse(serializeSessionsJson(recent)) as Record<string, unknown>[],
     activeSessions: serializeActiveSessionsForJson(activeSessions) as Record<string, unknown>[],
     devices,
+    menuPreferences: buildMenuPreferences(),
     watchdog: {
       enabled: getConfigValue('watchdog.enabled').value === true,
       lastTick: (() => {

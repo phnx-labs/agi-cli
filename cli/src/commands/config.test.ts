@@ -135,6 +135,51 @@ describe('config command', () => {
     expect(runAgents(home, ['config', 'get', 'browser.device'])).toContain('(unset)');
   });
 
+  it('sets, gets, lists (--json), and unsets an AGI Menu preference (user-scope, fleet-synced)', () => {
+    runAgents(home, ['config', 'set', 'menubar.menu.workingRowsShown', '4']);
+    expect(runAgents(home, ['config', 'get', 'menubar.menu.workingRowsShown'])).toContain('4');
+
+    // Lands in the fleet-synced central config block (user scope).
+    const yaml = fs.readFileSync(path.join(home, '.agents', 'agents.yaml'), 'utf-8');
+    expect(yaml).toContain('menubarMenuWorkingRowsShown');
+
+    // config list --json is the native menu's read surface: [{key,value,hint}].
+    const jsonOut = runAgents(home, ['config', 'list', '--json']);
+    const parsed = JSON.parse(jsonOut) as Array<{ key: string; value: unknown; hint: string }>;
+    const row = parsed.find((r) => r.key === 'menubar.menu.workingRowsShown');
+    expect(row).toBeDefined();
+    expect(row!.value).toBe(4);
+    expect(typeof row!.hint).toBe('string');
+
+    runAgents(home, ['config', 'unset', 'menubar.menu.workingRowsShown']);
+    expect(runAgents(home, ['config', 'get', 'menubar.menu.workingRowsShown'])).toContain('(unset)');
+    // Unset keys are OMITTED from the list so the native app uses its defaults.
+    const after = JSON.parse(runAgents(home, ['config', 'list', '--json'])) as Array<{ key: string }>;
+    expect(after.find((r) => r.key === 'menubar.menu.workingRowsShown')).toBeUndefined();
+  });
+
+  it('rejects an out-of-set AGI Menu enum value', () => {
+    expect(() =>
+      runAgents(home, ['config', 'set', 'menubar.menu.groupBy', 'sideways']),
+    ).toThrow();
+  });
+
+  it('rejects a workingRowsShown outside 2..4', () => {
+    expect(() => runAgents(home, ['config', 'set', 'menubar.menu.workingRowsShown', '7'])).toThrow();
+  });
+
+  it('sets and lists a device formFactor (shared, fleet-synced)', () => {
+    const env = { AGENTS_SYNC_MACHINE_ID: 'testbox' };
+    runAgents(home, ['config', 'set', 'devices.testbox.formFactor', 'laptop'], env);
+    expect(runAgents(home, ['config', 'get', 'devices.testbox.formFactor'], env)).toContain('laptop');
+    expect(runAgents(home, ['config', 'list'], env)).toContain('devices.testbox.formFactor');
+  });
+
+  it('rejects an unknown formFactor value', () => {
+    const env = { AGENTS_SYNC_MACHINE_ID: 'testbox' };
+    expect(() => runAgents(home, ['config', 'set', 'devices.testbox.formFactor', 'tablet'], env)).toThrow();
+  });
+
   it('lists configured values', () => {
     runAgents(home, ['config', 'set', 'run.claude@*.model', 'best']);
     runAgents(home, ['config', 'set', 'run.claude@*.tier.best', 'claude-opus-4-8']);

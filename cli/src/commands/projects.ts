@@ -83,6 +83,7 @@ import {
   type ImportPlan,
   type RawImportFlags,
 } from '../lib/project-import.js';
+import { buildProjectPrs } from '../lib/github/project-prs.js';
 
 /** Recursion guard: a peer answering a probe fan-out never re-fans-out itself. */
 const PROJECTS_NO_FANOUT_ENV = 'AGENTS_PROJECTS_LOCAL';
@@ -959,6 +960,90 @@ async function runProjectCard(
       await runProjectCard(name, opts, mode);
     });
 
+
+  // ---- prs ----
+  const prsCmd = projects
+    .command('prs <name>')
+    .description('Every OPEN pull request across a project\'s attached repos (drafts included, no author filter).')
+    .option('--json', 'Machine-readable output (the AGI Menu contract shape)')
+    .option('--repo <owner/repo>', 'Restrict to one of the project\'s attached repos')
+    .option('--number <n>', 'Lazy detail: enrich exactly this PR with checks + reviewDecision (requires --repo)')
+    .action(async (name: string, opts: { json?: boolean; repo?: string; number?: string }) => {
+      const def = loadProjectDef(name);
+      if (!def) {
+        console.error(chalk.red(`No project named "${name}". List them: agents projects list`));
+        process.exit(1);
+      }
+      let number: number | undefined;
+      if (opts.number !== undefined) {
+        if (!opts.repo) {
+          console.error(chalk.red('--number names one PR in one repo; pass --repo <owner/repo> with it.'));
+          process.exit(1);
+        }
+        // Require the WHOLE token to be digits — Number.parseInt would accept
+        // "12junk" / "12.9" as 12 and silently query the wrong PR.
+        const raw = opts.number.trim();
+        number = /^\d+$/.test(raw) ? Number.parseInt(raw, 10) : NaN;
+        if (!Number.isSafeInteger(number) || number <= 0) {
+          console.error(chalk.red(`--number expects a positive integer, got "${opts.number}".`));
+          process.exit(1);
+        }
+      }
+      let envelope;
+      try {
+        envelope = await buildProjectPrs(def, { repo: opts.repo, number }, undefined);
+      } catch (e) {
+        // A restriction error (repo not attached) is a hard, up-front failure —
+        // distinct from a per-repo fetch failure, which rides in the envelope.
+        console.error(chalk.red(e instanceof Error ? e.message : String(e)));
+        process.exit(1);
+      }
+      if (opts.json) {
+        // A machine caller reads the envelope from stdout regardless of exit
+        // code: `partial` + per-repo `error` ARE the failure signal, and the
+        // successful repositories ride alongside them. So --json always exits 0
+        // (the envelope is authoritative); a native consumer must not discard
+        // stdout on a non-zero exit. Only the human path below exits non-zero.
+        console.log(JSON.stringify(envelope, null, 2));
+        return;
+      } else {
+        for (const r of envelope.repositories) {
+          if (r.error) {
+            console.log(`${chalk.bold(r.slug)}  ${chalk.red(`— fetch failed: ${r.error}`)}`);
+            continue;
+          }
+          console.log(`${chalk.bold(r.slug)}  ${chalk.dim(`${r.pullRequests.length} open`)}`);
+          for (const pr of r.pullRequests) {
+            const draft = pr.isDraft ? chalk.gray(' [draft]') : '';
+            console.log(`  #${pr.number}${draft}  ${pr.title}  ${chalk.gray(`@${pr.author.login} · ${pr.headRefName}`)}`);
+          }
+        }
+        if (envelope.partial) {
+          console.log(chalk.yellow('\nSome repositories could not be fetched — the list above is incomplete.'));
+        }
+      }
+      // A partial result (any repo fetch failed) is not a clean success.
+      if (envelope.partial) process.exit(1);
+    });
+
+  setHelpSections(prsCmd, {
+    examples: `
+      agents projects prs rush --json                       # every open PR across rush's repos
+      agents projects prs rush --json --repo phnx-labs/agi-cli
+      agents projects prs rush --json --repo phnx-labs/agi-cli --number 3646  # one PR, with checks + review
+    `,
+    notes: `
+      Repos come from the project definition's attached repos only (repo + repos[].slug);
+      --repo is refused unless it is one of them.
+
+      The list is read from GitHub over REST and paginated in full, drafts included,
+      with no author filter. checks and reviewDecision are null in the list; --number
+      enriches exactly that one PR against its live head SHA.
+
+      A repository whose fetch fails is reported with an error and marks the result
+      partial (JSON reports errors per repository; text mode exits non-zero).
+    `,
+  });
 
   // ---- edit ----
   projects

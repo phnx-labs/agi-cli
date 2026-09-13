@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 67,
-  "commands": 498,
+  "commands": 499,
   "root": {
     "name": "agents",
     "path": "",
@@ -14761,6 +14761,62 @@
               "negate": false
             }
           ],
+          "subcommands": []
+        },
+        {
+          "name": "prs",
+          "path": "projects prs",
+          "aliases": [],
+          "description": "Every OPEN pull request across a project's attached repos (drafts included, no author filter).",
+          "args": [
+            {
+              "name": "name",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--json",
+              "description": "Machine-readable output (the AGI Menu contract shape)",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--repo <owner/repo>",
+              "description": "Restrict to one of the project's attached repos",
+              "long": "--repo",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--number <n>",
+              "description": "Lazy detail: enrich exactly this PR with checks + reviewDecision (requires --repo)",
+              "long": "--number",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "agents projects prs rush --json                       # every open PR across rush's repos\n      agents projects prs rush --json --repo phnx-labs/agi-cli\n      agents projects prs rush --json --repo phnx-labs/agi-cli --number 3646  # one PR, with checks + review",
+          "notes": "Repos come from the project definition's attached repos only (repo + repos[].slug);\n      --repo is refused unless it is one of them.\n\n      The list is read from GitHub over REST and paginated in full, drafts included,\n      with no author filter. checks and reviewDecision are null in the list; --number\n      enriches exactly that one PR against its live head SHA.\n\n      A repository whose fetch fails is reported with an error and marks the result\n      partial (JSON reports errors per repository; text mode exits non-zero).",
           "subcommands": []
         },
         {

@@ -25,6 +25,7 @@ import {
   devicePropertyToConfigName,
   configKeyStorageHint,
   listKnownConfigKeys,
+  MENUBAR_MENU_PROPERTIES,
   type ParsedConfigKey,
   type ParsedRunConfigKey,
   type ParsedDeviceConfigKey,
@@ -44,6 +45,7 @@ import {
   setConfigValue,
   unsetConfigValue,
   listConfig,
+  configKeySpec,
   type ConfigEntry,
 } from '../lib/device-config.js';
 import { readMeta, updateMeta } from '../lib/state.js';
@@ -90,6 +92,19 @@ function parseValue(key: string, parsed: ParsedConfigKey, raw: string): unknown 
       return parsed.property === 'enabled' ? parseBool(raw, key) : raw.trim();
     case 'updates':
       return parseBool(raw, key);
+    case 'menubar': {
+      // The type (and enum validation) live in the device-config spec; parse the
+      // raw string to that type here so setConfigValue's assertion passes.
+      const spec = configKeySpec(formatConfigKey(parsed));
+      if (spec.type === 'bool') return parseBool(raw, key);
+      if (spec.type === 'int') {
+        if (!/^\d+$/.test(raw.trim())) {
+          throw new Error(`Config key '${key}' expects an integer, got '${raw}'.`);
+        }
+        return Number.parseInt(raw.trim(), 10);
+      }
+      return raw.trim();
+    }
     case 'device': {
       const property = parsed.property;
       switch (property) {
@@ -112,6 +127,8 @@ function parseValue(key: string, parsed: ParsedConfigKey, raw: string): unknown 
           }
           return Number.parseInt(raw.trim(), 10);
         case 'notes':
+          return raw.trim();
+        case 'formFactor':
           return raw.trim();
         case 'browser.profile':
         case 'browser.viewer':
@@ -182,6 +199,10 @@ function setConfig(parsed: ParsedConfigKey, value: unknown): void {
     case 'updates': {
       if (parsed.agent) setAgentAutoUpdateEnabled(parsed.agent, value as boolean);
       else setGlobalAutoUpdateEnabled(value as boolean);
+      return;
+    }
+    case 'menubar': {
+      setConfigValue(formatConfigKey(parsed), value);
       return;
     }
     case 'device': {
@@ -258,6 +279,12 @@ function unsetConfig(parsed: ParsedConfigKey): boolean {
       unsetGlobalAutoUpdateEnabled();
       return had;
     }
+    case 'menubar': {
+      const name = formatConfigKey(parsed);
+      const had = getConfigValue(name).value !== undefined;
+      unsetConfigValue(name);
+      return had;
+    }
     case 'device': {
       const configName = devicePropertyToConfigName(parsed.property);
       const had = getConfigValue(configName, { device: parsed.device }).value !== undefined;
@@ -296,6 +323,8 @@ function getConfig(parsed: ParsedConfigKey): unknown {
       return getConfigValue(`summarizer.${parsed.property}`).value;
     case 'updates':
       return parsed.agent ? rawAgentAutoUpdateSetting(parsed.agent) : rawGlobalAutoUpdateSetting();
+    case 'menubar':
+      return getConfigValue(formatConfigKey(parsed)).value;
     case 'device': {
       const configName = devicePropertyToConfigName(parsed.property);
       return getConfigValue(configName, { device: parsed.device }).value;
@@ -393,6 +422,16 @@ function* listCentralConfigEntries(): Generator<{ key: string; value: unknown; h
       yield { key, value, hint: configKeyStorageHint(parseConfigKey(key)) };
     }
   }
+
+  // AGI Menu preferences (PHNX-3999) — user scope, syncs fleet-wide. Only set
+  // keys are listed; the native menu falls back to its own defaults for the rest.
+  for (const prop of MENUBAR_MENU_PROPERTIES) {
+    const key = `menubar.menu.${prop}`;
+    const value = getConfigValue(key).value;
+    if (value !== undefined) {
+      yield { key, value, hint: configKeyStorageHint(parseConfigKey(key)) };
+    }
+  }
 }
 
 /** Collect device-scope config entries. */
@@ -425,6 +464,9 @@ function* listDeviceConfigEntries(device: string): Generator<{ key: string; valu
         break;
       case 'notes':
         key = `${prefix}notes`;
+        break;
+      case 'formFactor':
+        key = `${prefix}formFactor`;
         break;
       case 'browser.profile':
         // The self device's default browser profile is already surfaced as the
