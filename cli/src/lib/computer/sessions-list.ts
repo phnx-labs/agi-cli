@@ -58,6 +58,9 @@
  * `sessionId` doesn't resolve (a rotated/unindexed session) but `launchId`
  * still does via the more authoritative pid registry.
  */
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { getCacheDir } from '../state.js';
 import { query, truncate, type EventRecord } from '../feed/events.js';
 import { formatRelativeTime } from '../session/relative-time.js';
 import type { SessionMeta } from '../session/types.js';
@@ -101,6 +104,30 @@ export interface ComputerAction {
   agent?: string;
   machineId?: string;
   hostname?: string;
+  /**
+   * The file a successful `screenshot` action actually wrote.
+   *
+   * Recorded by the standalone engine only AFTER the write succeeded, so its
+   * presence is proof the file existed — which is why nothing here ever derives
+   * a path from the verb. An action from before the producer carried this field
+   * has no capture, and that is reported honestly as none rather than guessed at
+   * from an output flag that may never have been written.
+   */
+  capture?: { path: string; kind: 'screenshot'; name: string; bytes?: number };
+}
+
+/** A capture record, accepted only when the producer gave a real path + name. */
+function parseActionCapture(value: unknown): ComputerAction['capture'] | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const record = value as Record<string, unknown>;
+  if (typeof record.path !== 'string' || !record.path) return undefined;
+  const name = typeof record.name === 'string' && record.name ? record.name : path.basename(record.path);
+  return {
+    path: record.path,
+    kind: 'screenshot',
+    name,
+    ...(typeof record.bytes === 'number' ? { bytes: record.bytes } : {}),
+  };
 }
 
 function recordToAction(r: EventRecord): ComputerAction | null {
@@ -122,7 +149,125 @@ function recordToAction(r: EventRecord): ComputerAction | null {
     agent: typeof r.agent === 'string' ? r.agent : undefined,
     machineId: typeof r.machineId === 'string' ? r.machineId : undefined,
     hostname: typeof r.hostname === 'string' ? r.hostname : undefined,
+    capture: parseActionCapture(r.capture),
   };
+}
+
+/**
+ * The standalone engine's OWN action ledger.
+ *
+ * `agents computer` is a thin consumer of the standalone `computer` engine
+ * (PHNX-4075), and that engine ALWAYS appends every action it performs to
+ * `<cache>/computer/actions/<day>.jsonl` — independently of whether agents-cli
+ * was in the call at all. So a `computer` command the operator ran directly
+ * appears ONLY here: it never reached `recordComputerAction`, so it is in
+ * neither the feed event ledger nor `computer_sessions`. Reading only those two
+ * meant the actions an operator actually performed were invisible to every
+ * agents-cli surface.
+ */
+export function standaloneComputerActionsDir(): string {
+  return path.join(getCacheDir(), 'computer', 'actions');
+}
+
+/**
+ * One line of the standalone ledger as a {@link ComputerAction}.
+ *
+ * The on-disk record is the same `computer.action` event the engine reports on
+ * fd 4 — the contract `computer-client.ts` `ComputerActionEvent` already
+ * describes and `recordComputerAction` already consumes — so this maps the same
+ * fields rather than inventing a second vocabulary. A record missing the two
+ * fields that make it an action at all (`command`, a parseable timestamp) is
+ * skipped, never defaulted: the file is plain JSONL another process may be
+ * mid-append to.
+ */
+function standaloneLineToAction(line: string): ComputerAction | null {
+  let parsed: unknown;
+  try { parsed = JSON.parse(line); } catch { return null; }
+  if (!parsed || typeof parsed !== 'object') return null;
+  const record = parsed as Record<string, unknown>;
+  const verb = typeof record.command === 'string' ? record.command : undefined;
+  const ts = typeof record.ts === 'string' ? record.ts : undefined;
+  if (!verb || !ts) return null;
+  const tsMs = Date.parse(ts);
+  if (Number.isNaN(tsMs)) return null;
+  const text = (key: string): string | undefined => (typeof record[key] === 'string' ? record[key] as string : undefined);
+  const num = (key: string): number | undefined => (typeof record[key] === 'number' ? record[key] as number : undefined);
+  return {
+    verb, ts, tsMs,
+    // The engine's pid is its own; a record without one still groups by
+    // invocationId, which is the identity that actually matters here.
+    pid: num('pid') ?? 0,
+    invocationId: text('invocationId'),
+    targetPid: num('targetPid'),
+    bundle: text('bundle'),
+    host: text('host'),
+    task: text('task'),
+    sessionId: text('sessionId'),
+    launchId: text('launchId'),
+    agent: text('agent'),
+    machineId: text('machineId'),
+    hostname: text('hostname'),
+    capture: parseActionCapture(record.capture),
+  };
+}
+
+/**
+ * Read the standalone ledger, newest day first, bounded by `limit` actions.
+ *
+ * Bounded by construction: days are read newest-first and reading stops as soon
+ * as the budget is met, so a box with months of history costs the same as one
+ * with a day of it.
+ */
+export function listStandaloneComputerActions(opts: { limit?: number; dir?: string } = {}): ComputerAction[] {
+  const dir = opts.dir ?? standaloneComputerActionsDir();
+  const limit = opts.limit ?? DEFAULT_ACTION_LIMIT;
+  let days: string[];
+  try {
+    days = fs.readdirSync(dir).filter((name) => name.endsWith('.jsonl')).sort().reverse();
+  } catch {
+    return []; // The engine has never run here, or is not installed.
+  }
+  const out: ComputerAction[] = [];
+  for (const day of days) {
+    if (out.length >= limit) break;
+    let lines: string[];
+    try { lines = fs.readFileSync(path.join(dir, day), 'utf8').split('\n'); }
+    catch { continue; /* rotated or removed mid-read */ }
+    // Newest last within a day, and the budget favours the newest actions.
+    for (let index = lines.length - 1; index >= 0 && out.length < limit; index--) {
+      const line = lines[index]!;
+      if (!line) continue;
+      const action = standaloneLineToAction(line);
+      if (action) out.push(action);
+    }
+  }
+  out.sort((a, b) => b.tsMs - a.tsMs);
+  return out;
+}
+
+/**
+ * Union the two ledgers, preferring the standalone record for any run present in
+ * both.
+ *
+ * Dedupe keys on `invocationId`, NOT on a timestamp or pid. When a command is
+ * forwarded through `agents computer`, BOTH stores receive it — and the
+ * forwarding rewrites `ts` and `pid` on the way through, so the two copies of one
+ * action do not agree on either. `invocationId` is minted by the engine and
+ * echoed unchanged, which makes it the only field that identifies the same run in
+ * both files. A legacy feed record with no invocationId cannot be matched to
+ * anything, so it is kept: dropping it would lose history the standalone ledger
+ * never had.
+ */
+export function mergeComputerActionSources(standalone: ComputerAction[], legacy: ComputerAction[]): ComputerAction[] {
+  const standaloneRuns = new Set<string>();
+  for (const action of standalone) if (action.invocationId) standaloneRuns.add(action.invocationId);
+  const merged = [...standalone];
+  for (const action of legacy) {
+    if (action.invocationId && standaloneRuns.has(action.invocationId)) continue;
+    merged.push(action);
+  }
+  merged.sort((a, b) => b.tsMs - a.tsMs);
+  return merged;
 }
 
 /** Read `computer.action` events straight from the durable event ledger,
@@ -327,7 +472,10 @@ function appendPrunedRunsFromDb(rows: ComputerRunRow[], limit?: number): void {
  *  flat/`--json` printer's) data source. `machine` narrows to rows whose
  *  invoking hostname, machineId, or `--device` target contains the substring. */
 export function buildComputerSessionRows(opts: { limit?: number; machine?: string } = {}): ComputerRunRow[] {
-  const actions = listComputerActions({ limit: opts.limit });
+  const actions = mergeComputerActionSources(
+    listStandaloneComputerActions({ limit: opts.limit }),
+    listComputerActions({ limit: opts.limit }),
+  );
   const index = buildLaunchSessionIndex();
   const rows = groupIntoComputerRuns(
     actions,

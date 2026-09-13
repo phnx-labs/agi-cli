@@ -15,33 +15,12 @@ import { type ActivityEvent } from './activity.js';
 import { ActivityStream } from './activity-stream.js';
 import { collectToolRows, watchToolActivity, type ToolDiff } from './tool-activity.js';
 import { type ToolRow } from './tools.js';
+import { FeedWatchState, type FeedWatchEnvelope } from './envelope.js';
+import { FeedHub } from './hub.js';
+import { getCachedToolSetup, subscribeToolSetup, type ToolSetupRow } from '../setup-tool-status.js';
 import { PR_STATUS_TTL_MS, readPullRequestStatus, withPullRequestStatus, type PullRequestStatus } from './pr-status.js';
 import type { GhExec } from '../github/pr-mergeable.js';
-type Base = { v: 1; type: string; streamId: string; sequence: number; scope: string };
-export type FeedWatchEnvelope =
-  | Base & { type: 'reset'; capturedAt: number; agents: SessionWatchRow[]; attention: AttentionItem[]; tools: ToolRow[] }
-  | Base & { type: 'agent.upsert'; rowKey: string; agent: SessionWatchRow }
-  | Base & { type: 'agent.remove'; rowKey: string }
-  | Base & { type: 'attention.upsert'; rowKey: string; attention: AttentionItem }
-  | Base & { type: 'attention.remove'; rowKey: string }
-  | Base & { type: 'activity.append'; event: ActivityEvent }
-  /** A browser task or computer run, projected by `feed/tools.ts`. */
-  | Base & { type: 'tool.upsert'; rowKey: string; tool: ToolRow }
-  | Base & { type: 'tool.remove'; rowKey: string }
-  | Base & { type: 'scope'; capturedAt: number; status: SessionWatchScopeStatus; reason?: string }
-  | Base & { type: 'heartbeat'; capturedAt: number };
-type FeedWatchPayload = FeedWatchEnvelope extends infer Envelope
-  ? Envelope extends FeedWatchEnvelope ? Omit<Envelope, 'v' | 'streamId' | 'sequence'> : never
-  : never;
-
-export class FeedWatchState {
-  readonly streamId: string;
-  private sequence = 0;
-  constructor(streamId = randomUUID()) { this.streamId = streamId; }
-  emit(event: FeedWatchPayload): FeedWatchEnvelope {
-    return { v: 1, streamId: this.streamId, sequence: ++this.sequence, ...event } as unknown as FeedWatchEnvelope;
-  }
-}
+export { FeedWatchState, type FeedWatchEnvelope, type FeedWatchPayload } from './envelope.js';
 
 /** Reuse session ownership reconciliation for the combined operator stream. */
 export class FeedSessionProjection {
@@ -54,6 +33,8 @@ export class FeedSessionProjection {
    * the reason a peer reconnecting cannot erase the local machine's tasks.
    */
   private readonly toolsByScope = new Map<string, Map<string, ToolRow>>();
+  /** Whole-set per scope; see the `setup.snapshot` docblock in `envelope.ts`. */
+  private readonly setupByScope = new Map<string, ToolSetupRow[]>();
   constructor(private readonly state = new FeedWatchState()) {}
 
   apply(event: FeedWatchEnvelope): FeedWatchEnvelope[] {
@@ -69,6 +50,7 @@ export class FeedSessionProjection {
       }
       this.observations.set(scope, attention);
       this.toolsByScope.set(scope, new Map(event.tools.map((tool) => [tool.rowKey, tool])));
+      this.setupByScope.set(scope, event.setup);
     } else if (event.type === 'agent.upsert') {
       sessionEvent = { ...base, type: 'upsert', rowKey: event.rowKey, row: event.agent };
     } else if (event.type === 'agent.remove') {
@@ -86,6 +68,9 @@ export class FeedSessionProjection {
     } else if (event.type === 'tool.remove') {
       this.toolsByScope.get(scope)?.delete(event.rowKey);
       return [this.state.emit({ type: 'tool.remove', scope, rowKey: event.rowKey })];
+    } else if (event.type === 'setup.snapshot') {
+      this.setupByScope.set(scope, event.setup);
+      return [this.state.emit({ type: 'setup.snapshot', scope, capturedAt: event.capturedAt, setup: event.setup })];
     } else {
       const { v: _v, streamId: _streamId, sequence: _sequence, ...payload } = event;
       return [this.state.emit(payload)];
@@ -103,7 +88,8 @@ export class FeedSessionProjection {
         resetScopes.add(rowEvent.scope);
         result.push(this.state.emit({ type: 'reset', scope: rowEvent.scope, capturedAt: rowEvent.capturedAt, agents: rowEvent.rows,
           attention: [...next.values()].filter(value => value.scope === rowEvent.scope).map(value => value.item),
-          tools: [...(this.toolsByScope.get(rowEvent.scope)?.values() ?? [])] }));
+          tools: [...(this.toolsByScope.get(rowEvent.scope)?.values() ?? [])],
+          setup: this.setupByScope.get(rowEvent.scope) ?? [] }));
       } else if (rowEvent.type === 'upsert') {
         result.push(this.state.emit({ type: 'agent.upsert', scope: rowEvent.scope, rowKey: rowEvent.rowKey, agent: rowEvent.row }));
       } else if (rowEvent.type === 'remove') {
@@ -163,11 +149,11 @@ async function projectAgent(agent: SessionWatchRow, gh?: GhExec): Promise<{ agen
   return { agent: withPullRequestStatus(agent, pullRequest), attention: attentionFor(agent, pullRequest) };
 }
 
-export async function projectSessionEnvelope(event: SessionWatchEnvelope, state: FeedWatchState, gh?: GhExec, tools: ToolRow[] = []): Promise<FeedWatchEnvelope[]> {
+export async function projectSessionEnvelope(event: SessionWatchEnvelope, state: FeedWatchState, gh?: GhExec, tools: ToolRow[] = [], setup: ToolSetupRow[] = []): Promise<FeedWatchEnvelope[]> {
   if (event.type === 'reset') {
     const projected = await Promise.all(event.rows.map((row) => projectAgent(row, gh)));
     const attention = projected.map((p) => p.attention).filter((item): item is AttentionItem => item !== undefined);
-    return [state.emit({ type: 'reset', capturedAt: event.capturedAt, scope: event.scope, agents: projected.map((p) => p.agent), attention, tools })];
+    return [state.emit({ type: 'reset', capturedAt: event.capturedAt, scope: event.scope, agents: projected.map((p) => p.agent), attention, tools, setup })];
   }
   if (event.type === 'upsert') {
     const { agent, attention } = await projectAgent(event.row, gh);
@@ -228,6 +214,15 @@ interface WatchLocalFeedOptions {
   gh?: GhExec;
   /** Tool-activity inputs, forwarded verbatim to {@link watchToolActivity}. */
   tools?: Pick<Parameters<typeof watchToolActivity>[0], 'sweepMs' | 'roots' | 'sources'>;
+  /**
+   * Tool-setup readers. The setup teammate owns DETECTION
+   * (`lib/setup-tool-status.ts`); this stream only publishes what its cache
+   * already holds, and never triggers a probe of its own.
+   */
+  setup?: {
+    read?: typeof getCachedToolSetup;
+    subscribe?: typeof subscribeToolSetup;
+  };
 }
 
 export async function watchLocalFeed(options: WatchLocalFeedOptions): Promise<void> {
@@ -243,7 +238,14 @@ export async function watchLocalFeed(options: WatchLocalFeedOptions): Promise<vo
   // re-collected per reset: a session-watch reconnect emits a fresh reset, and
   // re-reading the browser tree and the ledger for it would reintroduce exactly
   // the per-render cost `tool-activity.ts` exists to remove.
-  let toolRows: ToolRow[] = collectToolRows(options.scope, options.tools?.sources);
+  let toolRows: ToolRow[] = collectToolRows(options.scope, options.tools?.sources).rows;
+  // Setup rows come from the setup teammate's cache, never from a probe here:
+  // `getCachedToolSetup` reads metadata plus the last EXPLICIT health check, so
+  // publishing it costs no subprocess and cannot unlock a secret store.
+  const readSetup = options.setup?.read ?? getCachedToolSetup;
+  let setupRows: ToolSetupRow[] = (() => {
+    try { return readSetup(); } catch { return []; }
+  })();
   const agents = new Map<string, SessionWatchRow>();
   const attention = new Map<string, string>();
   // The PR status last projected onto each row, so a merge or a check verdict
@@ -302,7 +304,16 @@ export async function watchLocalFeed(options: WatchLocalFeedOptions): Promise<vo
       }
     },
   });
-  const stopActivity = () => { clearInterval(activityTimer); stopAttentionWatch(); activity.close(); toolWatch.stop(); };
+  // The setup cache is file-backed and notifies on change, so a Settings pane
+  // costs no polling: `subscribeToolSetup` is the invalidation the setup side
+  // publishes for exactly this consumer.
+  const stopSetupWatch = (options.setup?.subscribe ?? subscribeToolSetup)((rows) => {
+    const next = JSON.stringify(rows);
+    if (next === JSON.stringify(setupRows)) return;
+    setupRows = rows;
+    options.emit(state.emit({ type: 'setup.snapshot', scope: options.scope, capturedAt: Date.now(), setup: rows }));
+  });
+  const stopActivity = () => { clearInterval(activityTimer); stopAttentionWatch(); activity.close(); toolWatch.stop(); stopSetupWatch(); };
   options.signal.addEventListener('abort', stopActivity, { once: true });
   try {
     await watchLocalSessions({ ...options.sessions, scope: options.scope, signal: options.signal, emit: (event) => {
@@ -311,7 +322,7 @@ export async function watchLocalFeed(options: WatchLocalFeedOptions): Promise<vo
         for (const row of event.rows) agents.set(row.rowKey, row);
       } else if (event.type === 'upsert') agents.set(event.rowKey, event.row);
       else if (event.type === 'remove') { agents.delete(event.rowKey); attention.delete(event.rowKey); prStatus.delete(event.rowKey); }
-      pending = pending.then(() => projectSessionEnvelope(event, state, options.gh, toolRows)).then((events) => {
+      pending = pending.then(() => projectSessionEnvelope(event, state, options.gh, toolRows, setupRows)).then((events) => {
         for (const projected of events) {
           if (projected.type === 'reset') {
             attention.clear();
@@ -352,8 +363,60 @@ function remoteFeedWatchCommand(os: string): string {
  * the whole fan-out down.
  */
 export function normalizePeerEnvelope(event: FeedWatchEnvelope): FeedWatchEnvelope {
-  if (event.type !== 'reset' || Array.isArray(event.tools)) return event;
-  return { ...event, tools: [] };
+  if (event.type !== 'reset') return event;
+  if (Array.isArray(event.tools) && Array.isArray(event.setup)) return event;
+  return { ...event, tools: event.tools ?? [], setup: event.setup ?? [] };
+}
+
+/**
+ * The process-wide local collector, shared by refcount.
+ *
+ * `watchLocalFeed` is cheap per tick but NOT free to duplicate: each call builds
+ * its own `ActivityStream` cursor set over the activity directory, its own
+ * recursive tool watchers, its own feed/resolution watchers and its own
+ * setup subscription. Two callers in one process paid all of that twice and
+ * produced identical envelopes — and there are genuinely two callers on a daemon
+ * box: the fleet fan-out (which watches the local scope alongside every peer)
+ * and anything else that wants this machine's rows.
+ *
+ * One {@link FeedHub} over `watchLocalFeed` collapses them: the watcher starts on
+ * the first subscriber, stops on the last, and a late subscriber is caught up
+ * from held state instead of constructing a second cursor set.
+ *
+ * This is deliberately PROCESS-wide and not machine-wide. Making `feed watch
+ * --json --local` attach to the daemon instead would be the machine-wide
+ * version, and it would put a daemon dependency on the one command the fleet
+ * fan-out runs over ssh on every peer — a peer with a sick daemon would drop off
+ * the fleet stream entirely rather than degrade. The cross-process sharing that
+ * matters is the FLEET stream, which is what the daemon hub serves.
+ */
+let sharedLocal: FeedHub | null = null;
+
+/** The shared local collector, constructed on first use. Exposed for tests. */
+export function sharedLocalFeedHub(): FeedHub {
+  return sharedLocal ??= new FeedHub({
+    watch: (hubOptions) => watchLocalFeed({
+      scope: machineId(), signal: hubOptions.signal, emit: hubOptions.emit,
+    }),
+  });
+}
+
+/** Reset the shared collector. Tests only — it must not leak across cases. */
+export async function resetSharedLocalFeedHub(): Promise<void> {
+  const hub = sharedLocal;
+  sharedLocal = null;
+  await hub?.close();
+}
+
+/**
+ * Subscribe to this machine's rows through the shared collector, until abort.
+ */
+export function subscribeSharedLocalFeed(options: { signal: AbortSignal; emit: (event: FeedWatchEnvelope) => void }): Promise<void> {
+  const detach = sharedLocalFeedHub().subscribe(options.emit);
+  return new Promise<void>((resolve) => {
+    if (options.signal.aborted) { detach(); resolve(); return; }
+    options.signal.addEventListener('abort', () => { detach(); resolve(); }, { once: true });
+  });
 }
 
 export async function watchFleetFeed(options: { signal: AbortSignal; emit: (event: FeedWatchEnvelope) => void; reconnectMs?: number }): Promise<void> {
@@ -362,7 +425,7 @@ export async function watchFleetFeed(options: { signal: AbortSignal; emit: (even
   const forward = (event: FeedWatchEnvelope) => {
     for (const projected of projection.apply(event)) options.emit(projected);
   };
-  const local = watchLocalFeed({ scope: machineId(), signal: options.signal, emit: forward });
+  const local = subscribeSharedLocalFeed({ signal: options.signal, emit: forward });
   let devices: Awaited<ReturnType<typeof loadDevices>>;
   try { devices = await loadDevices(); } catch { await local; return; }
   const self = machineId();

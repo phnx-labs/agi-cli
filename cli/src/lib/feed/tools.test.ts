@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { projectBrowserToolRow, projectComputerToolRow, redactToolUrl, sortToolRows, toolRowKey, TOOL_CAPTURE_LIMIT, TOOL_ACTION_LIMIT } from './tools.js';
+import { boundBrowserRow, projectBrowserToolRow, projectComputerToolRow, redactToolUrl, sortToolRows, toolRowKey, TOOL_CAPTURE_LIMIT, TOOL_ACTION_LIMIT } from './tools.js';
 import type { BrowserSessionRow } from '../browser/sessions-list.js';
 import type { ComputerRunRow } from '../computer/sessions-list.js';
 
@@ -49,9 +49,13 @@ describe('canonical tool rows', () => {
     expect(row.live).toBe(true);
     expect(row.device).toBe('zion');
     expect(row.scope).toBe('yosemite-m1');
-    expect(row.closeCommand).toEqual({ command: 'agents', args: ['browser', 'done', '--task', 'post'] });
+    // runOn is the OBSERVING host: `--device` on a later browser verb is refused,
+    // so acting on a peer's task means running the plain argv on that peer.
+    expect(row.closeCommand).toEqual({ command: 'agents', args: ['browser', 'done', '--task', 'post'], runOn: 'yosemite-m1' });
     expect(row.owner).toEqual({ sessionId: 'sess-1', device: 'zion', label: 'ship the feed', agent: 'claude' });
     expect(row.captures.map((capture) => capture.name)).toEqual(['b.png', 'a.png']);
+    // Every capture names the host that HOLDS the file, not the driven device.
+    expect(row.captures.map((capture) => capture.host)).toEqual(['yosemite-m1', 'yosemite-m1']);
     expect(row.captureCounts).toEqual({ screenshot: 2 });
     expect(row.startedAtMs).toBe(500);
     expect(row.updatedAtMs).toBe(2_000);
@@ -132,5 +136,89 @@ describe('canonical tool rows', () => {
       projectBrowserToolRow('m1', browserRow({ latestMtimeMs: 9_000 })),
     ]);
     expect(rows.map((row) => row.kind)).toEqual(['browser', 'computer']);
+  });
+});
+
+describe('live task identity, tabs and commands', () => {
+  it('reports a bound task as live with zero captures, and sorts it by its own start', () => {
+    // The regression: a task opened a second ago has no capture, so a
+    // capture-derived row set had nothing for it at all.
+    const row = projectBrowserToolRow('m1', boundBrowserRow('fresh', { profile: 'work' }), { device: 'm1', createdAt: 5_000 });
+    expect(row.live).toBe(true);
+    expect(row.captures).toEqual([]);
+    expect(row.captureCounts).toEqual({});
+    expect(row.startedAtMs).toBe(5_000);
+    // Not 0: a brand-new live task must not sort below every historical row.
+    expect(row.updatedAtMs).toBe(5_000);
+    expect(row.closeCommand?.args).toEqual(['browser', 'done', '--task', 'fresh']);
+  });
+
+  it('collapses the capture-derived and live records for one task onto ONE row key', () => {
+    // Keyed on the task, never the profile: a live record may not know the
+    // profile, and two keys would render the same task twice.
+    const fromCaptures = projectBrowserToolRow('m1', browserRow({ task: 'post', profile: 'work' }));
+    const fromBinding = projectBrowserToolRow('m1', boundBrowserRow('post', {}), { device: 'm1' });
+    expect(fromBinding.rowKey).toBe(fromCaptures.rowKey);
+  });
+
+  it('publishes the task\'s own short tab ids and targets show at a non-borrowed tab', () => {
+    const live = {
+      task: 'post', profile: 'work',
+      tabs: [{ id: 'a', borrowed: true }, { id: 'b' }, { id: 'c', current: true }],
+    };
+    const row = projectBrowserToolRow('m1', boundBrowserRow('post', live), { device: 'm1' }, live);
+    expect(row.tabs?.map((tab) => tab.id)).toEqual(['a', 'b', 'c']);
+    expect(row.showCommand).toEqual({ command: 'agents', args: ['browser', 'show', '--task', 'post', '--tab', 'c'], runOn: 'm1' });
+  });
+
+  it('never offers to show a borrowed tab the task did not open', () => {
+    const live = { task: 'post', tabs: [{ id: 'a', borrowed: true, current: true }] };
+    const row = projectBrowserToolRow('m1', boundBrowserRow('post', live), { device: 'm1' }, live);
+    expect(row.showCommand).toBeUndefined();
+    expect(row.closeCommand).toBeDefined();
+  });
+
+  it('omits tabs entirely when this host holds no live record, rather than claiming none', () => {
+    // A task bound to another device has its tabs on THAT box. `undefined` means
+    // "unknown here"; `[]` would be a false claim that it has none.
+    const row = projectBrowserToolRow('m1', boundBrowserRow('remote', {}), { device: 'win-mini' });
+    expect(row.tabs).toBeUndefined();
+    expect(row.device).toBe('win-mini');
+    expect(row.closeCommand?.runOn).toBe('m1');
+  });
+});
+
+describe('computer captures come only from real producer records', () => {
+  it('projects a recorded screenshot capture with the action\'s own timestamp', () => {
+    const row = projectComputerToolRow('m1', computerRow({
+      actions: [
+        { verb: 'screenshot', ts: '2026-09-13T00:00:03Z', tsMs: 3_000, pid: 1, capture: { path: '/caps/window.jpg', kind: 'screenshot', name: 'window.jpg', bytes: 7082 } },
+        { verb: 'click', ts: '2026-09-13T00:00:01Z', tsMs: 1_000, pid: 1 },
+      ],
+      counts: { screenshot: 1, click: 1 },
+    }));
+    expect(row.captures).toEqual([
+      { kind: 'screenshot', name: 'window.jpg', path: '/caps/window.jpg', host: 'yosemite-m1', bytes: 7082, atMs: 3_000 },
+    ]);
+    expect(row.captureCounts).toEqual({ screenshot: 1 });
+  });
+
+  it('reports no capture for a screenshot action that recorded no path', () => {
+    // A failed write, or a pre-capture-history producer. Never a guessed path.
+    const row = projectComputerToolRow('m1', computerRow({
+      actions: [{ verb: 'screenshot', ts: '2026-09-13T00:00:03Z', tsMs: 3_000, pid: 1 }],
+      counts: { screenshot: 1 },
+    }));
+    expect(row.captures).toEqual([]);
+    expect(row.captureCounts).toEqual({});
+    expect(row.actionCounts).toEqual({ screenshot: 1 });
+  });
+
+  it('scopes a remote run\'s capture host to the DRIVEN machine', () => {
+    const row = projectComputerToolRow('m1', computerRow({
+      remoteHost: 'win-mini',
+      actions: [{ verb: 'screenshot', ts: '2026-09-13T00:00:03Z', tsMs: 3_000, pid: 1, capture: { path: 'C:\\caps\\w.jpg', kind: 'screenshot', name: 'w.jpg' } }],
+    }));
+    expect(row.captures[0]!.host).toBe('win-mini');
   });
 });
