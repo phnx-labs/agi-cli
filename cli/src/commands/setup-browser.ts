@@ -9,6 +9,7 @@
  */
 
 import type { Command } from 'commander';
+import { openSetupTerminal } from './setup-terminal.js';
 import chalk from 'chalk';
 import { setConfigValue } from '../lib/device-config.js';
 import { listInstalledBrowsers } from '../lib/browser/chrome.js';
@@ -151,8 +152,10 @@ export function registerSetupBrowserCommand(setupCmd: Command): void {
     .command('browser')
     .description('Set up `agents browser` — detect an installed browser and create the default profile.')
     .option('--install-only', 'Install the standalone Browser CLI without changing profiles or starting a browser')
-    .action(async (options: { installOnly?: boolean }) => {
+    .option('--terminal [backend]', 'Open interactive setup in a detected or selected terminal')
+    .action(async (options: { installOnly?: boolean; terminal?: boolean | string }) => {
       try {
+        if (options.terminal !== undefined) { await openSetupTerminal('browser', options.terminal, options.installOnly); return; }
         if (options.installOnly) { if (!(await installSetupTool('browser'))) process.exitCode = 1; return; }
         await runBrowserWizard();
       } catch (err) {

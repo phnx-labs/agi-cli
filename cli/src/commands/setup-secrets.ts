@@ -9,6 +9,7 @@
  */
 
 import type { Command } from 'commander';
+import { openSetupTerminal } from './setup-terminal.js';
 import chalk from 'chalk';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -102,7 +103,13 @@ export function registerSetupSecretsCommand(setupCmd: Command): void {
     .command('secrets')
     .description('Install the standalone `secrets` CLI if missing, then run its `secrets migrate` onboarding.')
     .option('--install-only', 'Install the standalone Secrets CLI without migrating or unlocking secrets')
-    .action(async (options: { installOnly?: boolean }) => {
+    .option('--terminal [backend]', 'Open interactive setup in a detected or selected terminal')
+    .action(async (options: { installOnly?: boolean; terminal?: boolean | string }) => {
+      if (options.terminal !== undefined) {
+        try { await openSetupTerminal('secrets', options.terminal, options.installOnly); }
+        catch (error) { console.error(error instanceof Error ? error.message : String(error)); process.exitCode = 1; }
+        return;
+      }
       if (!(options.installOnly ? installSecretsCli() : await runSecretsSetupWizard())) process.exitCode = 1;
       await refreshToolSetup('secrets');
     });
