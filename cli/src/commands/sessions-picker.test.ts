@@ -15,6 +15,7 @@ import { stripVTControlCharacters } from 'node:util';
 import {
   buildPreview,
   buildSessionPreviewDigest,
+  loadSessionPreviewDigest,
   clearPreviewMemoryCacheForTest,
   clearRemoteDigestCacheForTest,
   extractTiming,
@@ -874,6 +875,102 @@ describe('buildPreview fits the picker preview slot at default height (RUSH-2198
       const slot = limitPreviewHeight(preview, availablePreviewRows, width);
       expect(slot).not.toBe('');
       expect(stripVTControlCharacters(slot)).toContain('Fix the picker preview pane');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+/**
+ * PHNX-3999: an uncached preview of a transcript over the bounded-parse limit
+ * must not fall back to a full synchronous `parseSession` (measured
+ * unbounded/slow on real 35+ MiB transcripts). It must also never misattribute
+ * the already-indexed last USER turn as the assistant's — a real regression
+ * caught in review of this change.
+ */
+describe('loadSessionPreviewDigest bounds an uncached parse (PHNX-3999)', () => {
+  it('degrades to a real, honestly-partial digest instead of a full parse, with no false authorship', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-preview-bounded-'));
+    try {
+      const filePath = path.join(dir, 'session.jsonl');
+      const sessionId = 'bounded-parse-session';
+      // One real Claude user line the tail reader can find, then padding well
+      // past the 16 MiB bounded-parse limit so `loadSessionPreviewDigest`'s
+      // cache-miss path must take the bounded branch, not a full parse.
+      const filler = JSON.stringify({
+        type: 'assistant', timestamp: '2026-08-01T14:00:05.000Z',
+        message: { role: 'assistant', model: 'claude-sonnet-4-20250514', usage: { input_tokens: 1, output_tokens: 1 }, content: [{ type: 'text', text: 'x'.repeat(500) }] },
+      });
+      const lines: string[] = [
+        JSON.stringify({ type: 'user', timestamp: '2026-08-01T14:00:00.000Z', cwd: dir, sessionId, version: '2.1.112', message: { role: 'user', content: 'Investigate the huge-transcript preview bound' } }),
+      ];
+      // ~17 MiB of filler, comfortably over the 16 MiB bound.
+      const targetBytes = 17 * 1024 * 1024;
+      while (lines.reduce((n, l) => n + l.length + 1, 0) < targetBytes) lines.push(filler);
+      fs.writeFileSync(filePath, lines.join('\n') + '\n');
+
+      const session = mk({
+        id: sessionId,
+        shortId: 'bounded1',
+        filePath,
+        cwd: dir,
+        firstUserMessage: 'Investigate the huge-transcript preview bound',
+        lastUserMessage: 'A LATER user follow-up that must never be shown as the assistant\'s words',
+      });
+
+      const start = Date.now();
+      const { digest, error } = loadSessionPreviewDigest(session);
+      const elapsedMs = Date.now() - start;
+
+      expect(error).toBeUndefined();
+      expect(digest).toBeDefined();
+      expect(digest!.partial).toBe(true);
+      expect(digest!.partialReason).toMatch(/bounded-parse limit/);
+      // Real content, not silently empty.
+      expect(digest!.firstUser).toBeTruthy();
+      // The false-authorship bug: lastAssistant must NEVER equal the indexed
+      // last USER message.
+      expect(digest!.lastAssistant).not.toBe(session.lastUserMessage);
+      // Bounded means fast: reading a 17 MiB file via a 128 KiB tail (not a
+      // full parse) should complete well under a second in CI.
+      expect(elapsedMs).toBeLessThan(5_000);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('recovers the REAL original request via a bounded head read when SessionMeta has no indexed firstUserMessage, never a tail follow-up', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-preview-bounded-head-'));
+    try {
+      const filePath = path.join(dir, 'session.jsonl');
+      const sessionId = 'bounded-head-session';
+      const originalRequest = 'Set up the original bootstrap task for this repo';
+      const followUp = 'This is a much later follow-up, not the original request';
+      const filler = JSON.stringify({
+        type: 'assistant', timestamp: '2026-08-01T14:00:05.000Z',
+        message: { role: 'assistant', model: 'claude-sonnet-4-20250514', usage: { input_tokens: 1, output_tokens: 1 }, content: [{ type: 'text', text: 'x'.repeat(500) }] },
+      });
+      const lines: string[] = [
+        JSON.stringify({ type: 'user', timestamp: '2026-08-01T14:00:00.000Z', cwd: dir, sessionId, version: '2.1.112', message: { role: 'user', content: originalRequest } }),
+      ];
+      const targetBytes = 5 * 1024 * 1024; // over the 4 MiB bound
+      while (lines.reduce((n, l) => n + l.length + 1, 0) < targetBytes) lines.push(filler);
+      // A follow-up user turn near the END — inside the tail window, but NOT
+      // the original request. If firstUser ever came from the tail fold, it
+      // would wrongly surface this instead.
+      lines.push(JSON.stringify({ type: 'user', timestamp: '2026-08-01T15:00:00.000Z', message: { role: 'user', content: followUp } }));
+      fs.writeFileSync(filePath, lines.join('\n') + '\n');
+
+      // Deliberately NO firstUserMessage/lastUserMessage on the session — the
+      // scenario this fallback exists for (an index row without them yet).
+      const session = mk({ id: sessionId, shortId: 'boundedhd', filePath, cwd: dir });
+
+      const { digest, error } = loadSessionPreviewDigest(session);
+
+      expect(error).toBeUndefined();
+      expect(digest!.partial).toBe(true);
+      expect(digest!.firstUser).toBe(originalRequest);
+      expect(digest!.firstUser).not.toBe(followUp);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

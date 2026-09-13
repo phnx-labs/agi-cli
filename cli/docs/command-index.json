@@ -20012,6 +20012,24 @@
               "negate": false
             },
             {
+              "flags": "--refresh",
+              "description": "Bypass the durable remote-preview cache and negative backoff for one bounded fetch (full ID + single --device only)",
+              "long": "--refresh",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--revision <cursor>",
+              "description": "Opaque caller-owned activity cursor (any stable value YOU track, e.g. your own feed's lastActivityMs) -- passing the SAME value as your last call confirms nothing changed and serves the cache with zero SSH indefinitely; a different value fetches once, still subject to backoff unless --refresh is also set (full ID + single --device only)",
+              "long": "--revision",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
               "flags": "-h, --help",
               "description": "Show help",
               "short": "-h",
@@ -20022,8 +20040,8 @@
               "negate": false
             }
           ],
-          "examples": "# Preview by the 8-character ID shown in agents sessions\n      agents sessions preview 407b8dd5\n\n      # A full UUID resolves on the first device that owns it\n      agents sessions preview c70ecdea-6210-4039-9845-246a3a7a9942\n\n      # Stay on this machine or restrict the authoritative lookup to one peer\n      agents sessions preview 407b8dd5 --local\n      agents sessions preview 407b8dd5 --device zion",
-          "notes": "- Full UUIDs are globally unique and may stop the fleet lookup at the first exact hit.\n      - Short IDs wait for every selected device so ambiguity is never hidden.\n      - Active status is refreshed through the bounded live-state TTL; transcript-derived details use the durable session index.",
+          "examples": "# Preview by the 8-character ID shown in agents sessions\n      agents sessions preview 407b8dd5\n\n      # A full UUID resolves on the first device that owns it\n      agents sessions preview c70ecdea-6210-4039-9845-246a3a7a9942\n\n      # Stay on this machine or restrict the authoritative lookup to one peer\n      agents sessions preview 407b8dd5 --local\n      agents sessions preview 407b8dd5 --device zion\n\n      # Full ID + one --device: durable-cached fast path (PHNX-3999); force a fresh fetch\n      agents sessions preview c70ecdea-6210-4039-9845-246a3a7a9942 --device zion --json --refresh",
+          "notes": "- Full UUIDs are globally unique and may stop the fleet lookup at the first exact hit.\n      - Short IDs wait for every selected device so ambiguity is never hidden.\n      - Active status is refreshed through the bounded live-state TTL; transcript-derived details use the durable session index.\n      - A full UUID with exactly one --device and --json is served from a local durable cache (~45s fresh window); the JSON envelope's \"cache\" field reports fresh/stale/offline state. --refresh forces one bounded re-fetch.",
           "subcommands": []
         },
         {

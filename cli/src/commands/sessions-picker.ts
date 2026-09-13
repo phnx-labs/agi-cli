@@ -8,13 +8,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import chalk from 'chalk';
-import { truncate, humanDuration } from '../lib/format.js';
+import { truncate, humanDuration, formatBytes } from '../lib/format.js';
 import type { SessionEvent, SessionMeta, TodoItem, TodoProgress } from '../lib/session/types.js';
 import { sessionDisplayAgent } from '../lib/session/types.js';
 import { fetchPeerPreviewDigest } from '../lib/session/remote-list.js';
 import { parseSession, sanitizeForTerminal, SNAPSHOT_TODO_TOOLS } from '../lib/session/parse.js';
+import { readSessionTail, readSessionHead } from '../lib/session/tail.js';
 import { safeTeamText } from '../lib/session/team-filter.js';
-import { cleanSessionPrompt, extractSessionTopic, isSyntheticUserMessage } from '../lib/session/prompt.js';
+import { cleanSessionPrompt, extractSessionTopic, isSyntheticUserMessage, firstUserMessageFromEvents } from '../lib/session/prompt.js';
 import { linkPath, linkUrl, relativeToCwd, shortenModel } from '../lib/session/render.js';
 import { linearIssueUrl } from '../lib/session/linear.js';
 import { extractTodoProgress, WORKTREE_RE } from '../lib/session/state.js';
@@ -385,7 +386,14 @@ export function loadSessionPreviewDigest(session: SessionMeta): {
       archived.plugins = getSessionPlugins(session.id);
       return { digest: archived, events: [] };
     }
-    return { events: [] };
+    // No file on disk AND no archived digest: a metadata-only row (a Rush
+    // dispatch/audit row, a synthesized attach-only entry, a live session not
+    // yet indexed) with nothing to read (PHNX-3999). Callers that only
+    // destructure `digest` (the picker's "not indexed here" note) are
+    // unaffected; a JSON caller reading `error` gets a truthful reason instead
+    // of a `preview: null` that looks identical to "this session genuinely has
+    // no content yet".
+    return { events: [], error: 'no local transcript for this session (metadata-only entry, no archived digest)' };
   }
   const safe = sanitizeMeta(session);
   let events: SessionEvent[] = [];
@@ -400,17 +408,71 @@ export function loadSessionPreviewDigest(session: SessionMeta): {
     fileSize: sourceStamp.size,
   });
   if (!digest) {
-    try {
-      events = parseSession(session.filePath, session.agent);
+    if (sourceStamp.size > PREVIEW_DIGEST_MAX_PARSE_BYTES) {
+      // A full `parseSession` on a cache miss is a synchronous, unbounded
+      // whole-file parse with no time/byte cap of its own (PHNX-3999) — real
+      // 6.3 MiB and 35.7 MiB screenshot-heavy transcripts on this fleet both
+      // lacked a computed digest/timeline, consistent with this path not
+      // finishing in a reasonable request budget for either. `PREVIEW_DIGEST_MAX_PARSE_BYTES`
+      // is deliberately smaller than the daemon's own background-work ceiling
+      // (see that constant's own doc) so this catches both real cases.
+      //
+      // This IS genuinely partial, not empty: rather than parsing nothing,
+      // `readSessionTail` (`tail.ts`) reads only the LAST 128 KiB of the file
+      // (already the live-view's own bounded reader, reused verbatim — no new
+      // parse logic) for a real recent-events window on the two harnesses it
+      // supports (Claude/Codex); event-derived fields below (toolCalls,
+      // toolTags, etc.) reflect that tail window, not the whole session, which
+      // `partialReason` states explicitly.
+      //
+      // `firstUser` is NEVER set from the tail fold: a tail window's "first
+      // user message IN THAT WINDOW" is a mid-session follow-up on any
+      // multi-turn session, not the session's actual original request, and
+      // there is no honest way to tell the two apart from the tail alone.
+      // Falling back to it would silently mislabel a follow-up as the
+      // original ask. Preference order for the CANONICAL original request:
+      // (1) the already-indexed `SessionMeta.firstUserMessage` (zero
+      // extra I/O); (2) failing that, a bounded HEAD read (`readSessionHead`,
+      // `tail.ts` — the mirror of the tail reader, first ~32 KiB from byte 0,
+      // where a session's opening turn always lives) so a row with no indexed
+      // value yet still gets the REAL original request rather than nothing.
+      // Only when neither is available does `firstUser` stay empty —
+      // `partial`/`partialReason` already say why detail is missing, which is
+      // the truthful signal, never a guessed value. The digest is cached
+      // against this stamp so the bound is paid once per transcript version,
+      // not once per call.
+      events = readSessionTail(session.filePath, session.agent);
       digest = buildSessionPreviewDigest(events, safe);
+      if (session.firstUserMessage) {
+        digest.firstUser = session.firstUserMessage;
+      } else {
+        // Reuse the canonical extractor (rejects synthetic/system-injected
+        // turns, unwraps a Grok/Cursor <user_query> wrapper) rather than a
+        // bespoke inline find — the same rules SessionMeta.firstUserMessage
+        // itself was built with.
+        digest.firstUser = firstUserMessageFromEvents(readSessionHead(session.filePath, session.agent)) ?? '';
+      }
+      digest.partial = true;
+      digest.partialReason = `transcript is ${formatBytes(sourceStamp.size)}, over the ${formatBytes(PREVIEW_DIGEST_MAX_PARSE_BYTES)} bounded-parse limit for an uncached preview; digest reflects only the last ~128 KiB (tail) of the transcript, not the whole session`;
       writeSessionPreviewCache({
         id: session.id,
         fileMtimeMs: sourceStamp.mtimeMs,
         fileSize: sourceStamp.size,
         preview: digest,
       });
-    } catch (err: any) {
-      return { events, error: sanitizeForTerminal(err?.message ?? String(err)) };
+    } else {
+      try {
+        events = parseSession(session.filePath, session.agent);
+        digest = buildSessionPreviewDigest(events, safe);
+        writeSessionPreviewCache({
+          id: session.id,
+          fileMtimeMs: sourceStamp.mtimeMs,
+          fileSize: sourceStamp.size,
+          preview: digest,
+        });
+      } catch (err: any) {
+        return { events, error: sanitizeForTerminal(err?.message ?? String(err)) };
+      }
     }
   }
   digest.plugins = getSessionPlugins(session.id);
@@ -793,6 +855,24 @@ const DIRS_TOUCHED_MAX = 5;
 // can't bloat the cached JSON. The `changes` counts stay the true totals.
 const CHANGED_FILES_MAX = 200;
 
+/**
+ * Bound for an uncached `loadSessionPreviewDigest` parse (PHNX-3999).
+ *
+ * Deliberately SMALLER than the daemon's own
+ * `TIMELINE_PASS_MAX_WHOLE_FILE_BYTES` (16 MiB, `timeline-pass.ts`) — that
+ * number bounds BACKGROUND work the daemon tick can afford to spend; this one
+ * bounds a SYNCHRONOUS request an interactive caller (the Menu, with its own
+ * end-to-end latency budget) is actively waiting on. Two real screenshot-heavy
+ * transcripts on this fleet (6.3 MiB and 35.7 MiB) both lacked any computed
+ * digest/timeline — a 16 MiB threshold here would still miss the smaller one.
+ * The exact per-byte cost of `parseSession` is not measured in this change;
+ * 4 MiB is a conservative invariant (well under the 6.3 MiB failure case,
+ * comfortably above ordinary non-screenshot transcript sizes), not a timing
+ * guarantee — verify against real transcripts before relying on a specific
+ * elapsed-time bound.
+ */
+const PREVIEW_DIGEST_MAX_PARSE_BYTES = 4 * 1024 * 1024;
+
 export interface SessionPreviewDigest {
   schemaVersion: 1;
   firstUser: string;
@@ -827,6 +907,17 @@ export interface SessionPreviewDigest {
   firstError?: string;
   toolHistogram: ReturnType<typeof toolHistogram>;
   test: ReturnType<typeof detectTestResult>;
+  /**
+   * True when this digest was built WITHOUT parsing the transcript (PHNX-3999):
+   * the file exceeded {@link PREVIEW_DIGEST_MAX_PARSE_BYTES} and no cached
+   * digest existed yet. `firstUser`/`lastAssistant` fall back to the already-
+   * indexed `SessionMeta.firstUserMessage`/`lastUserMessage` (cheap, no parse)
+   * rather than being silently empty; every event-derived field (toolCalls,
+   * changedFiles, artifacts, etc.) stays at its zero-value default because it
+   * genuinely was not computed, not because nothing happened.
+   */
+  partial?: boolean;
+  partialReason?: string;
 }
 
 /** Fold a harness-normalized event stream into the stable preview data model. */
