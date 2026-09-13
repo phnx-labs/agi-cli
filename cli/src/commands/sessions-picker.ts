@@ -8,11 +8,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import chalk from 'chalk';
-import { truncate, humanDuration } from '../lib/format.js';
+import { truncate, humanDuration, formatBytes } from '../lib/format.js';
 import type { SessionEvent, SessionMeta, TodoItem, TodoProgress } from '../lib/session/types.js';
 import { sessionDisplayAgent } from '../lib/session/types.js';
 import { fetchPeerPreviewDigest } from '../lib/session/remote-list.js';
 import { parseSession, sanitizeForTerminal, SNAPSHOT_TODO_TOOLS } from '../lib/session/parse.js';
+import { readSessionTail } from '../lib/session/tail.js';
 import { safeTeamText } from '../lib/session/team-filter.js';
 import { cleanSessionPrompt, extractSessionTopic, isSyntheticUserMessage } from '../lib/session/prompt.js';
 import { linkPath, linkUrl, relativeToCwd, shortenModel } from '../lib/session/render.js';
@@ -385,7 +386,14 @@ export function loadSessionPreviewDigest(session: SessionMeta): {
       archived.plugins = getSessionPlugins(session.id);
       return { digest: archived, events: [] };
     }
-    return { events: [] };
+    // No file on disk AND no archived digest: a metadata-only row (a Rush
+    // dispatch/audit row, a synthesized attach-only entry, a live session not
+    // yet indexed) with nothing to read (PHNX-3999). Callers that only
+    // destructure `digest` (the picker's "not indexed here" note) are
+    // unaffected; a JSON caller reading `error` gets a truthful reason instead
+    // of a `preview: null` that looks identical to "this session genuinely has
+    // no content yet".
+    return { events: [], error: 'no local transcript for this session (metadata-only entry, no archived digest)' };
   }
   const safe = sanitizeMeta(session);
   let events: SessionEvent[] = [];
@@ -400,17 +408,57 @@ export function loadSessionPreviewDigest(session: SessionMeta): {
     fileSize: sourceStamp.size,
   });
   if (!digest) {
-    try {
-      events = parseSession(session.filePath, session.agent);
+    if (sourceStamp.size > PREVIEW_DIGEST_MAX_PARSE_BYTES) {
+      // A full `parseSession` on a cache miss is a synchronous, unbounded
+      // whole-file parse with no time/byte cap of its own (PHNX-3999) — a real
+      // 35.7 MiB screenshot-heavy transcript on this fleet lacked ANY computed
+      // digest/timeline, consistent with this path never finishing in a
+      // reasonable request budget. The daemon's timeline pass already draws
+      // this exact line (TIMELINE_PASS_MAX_WHOLE_FILE_BYTES); reuse the same
+      // bound rather than blocking the request path on a file this large.
+      // NOTE: this only bounds the ONE reparse-on-cache-miss path — a smaller
+      // transcript still under this cap (e.g. the fleet's other 6.3 MiB
+      // screenshot session) still takes a real, unmeasured-here `parseSession`
+      // cost; see the PR description for this residual scope note.
+      //
+      // This IS genuinely partial, not empty: rather than parsing nothing,
+      // `readSessionTail` (`tail.ts`) reads only the LAST 128 KiB of the file
+      // (already the live-view's own bounded reader, reused verbatim — no new
+      // parse logic) for a real recent-events window on the two harnesses it
+      // supports (Claude/Codex); event-derived fields below (toolCalls,
+      // toolTags, etc.) reflect that tail window, not the whole session, which
+      // `partialReason` states explicitly. `firstUser` additionally falls back
+      // to the already-indexed `SessionMeta.firstUserMessage` when the tail
+      // didn't capture the session's actual first turn (the common case for a
+      // multi-hundred-turn session). A harness the tail reader doesn't support
+      // yields no tail events, so the digest degrades to that indexed
+      // `firstUser` alone — still real content, never a blank string. The
+      // digest is cached against this stamp so the bound is paid once per
+      // transcript version, not once per call.
+      events = readSessionTail(session.filePath, session.agent);
       digest = buildSessionPreviewDigest(events, safe);
+      digest.firstUser = digest.firstUser || session.firstUserMessage || '';
+      digest.partial = true;
+      digest.partialReason = `transcript is ${formatBytes(sourceStamp.size)}, over the ${formatBytes(PREVIEW_DIGEST_MAX_PARSE_BYTES)} bounded-parse limit for an uncached preview; digest reflects only the last ~128 KiB (tail) of the transcript, not the whole session`;
       writeSessionPreviewCache({
         id: session.id,
         fileMtimeMs: sourceStamp.mtimeMs,
         fileSize: sourceStamp.size,
         preview: digest,
       });
-    } catch (err: any) {
-      return { events, error: sanitizeForTerminal(err?.message ?? String(err)) };
+    } else {
+      try {
+        events = parseSession(session.filePath, session.agent);
+        digest = buildSessionPreviewDigest(events, safe);
+        writeSessionPreviewCache({
+          id: session.id,
+          fileMtimeMs: sourceStamp.mtimeMs,
+          fileSize: sourceStamp.size,
+          preview: digest,
+        });
+      } catch (err: any) {
+        return { events, error: sanitizeForTerminal(err?.message ?? String(err)) };
+      }
     }
   }
   digest.plugins = getSessionPlugins(session.id);
@@ -793,6 +841,15 @@ const DIRS_TOUCHED_MAX = 5;
 // can't bloat the cached JSON. The `changes` counts stay the true totals.
 const CHANGED_FILES_MAX = 200;
 
+/**
+ * Bound for an uncached `loadSessionPreviewDigest` parse (PHNX-3999). Reuses
+ * the daemon's own `TIMELINE_PASS_MAX_WHOLE_FILE_BYTES` limit
+ * (`timeline-pass.ts`) rather than inventing a second number for the same
+ * "how big a whole-file transcript parse may this process do synchronously"
+ * question.
+ */
+const PREVIEW_DIGEST_MAX_PARSE_BYTES = 16 * 1024 * 1024;
+
 export interface SessionPreviewDigest {
   schemaVersion: 1;
   firstUser: string;
@@ -827,6 +884,17 @@ export interface SessionPreviewDigest {
   firstError?: string;
   toolHistogram: ReturnType<typeof toolHistogram>;
   test: ReturnType<typeof detectTestResult>;
+  /**
+   * True when this digest was built WITHOUT parsing the transcript (PHNX-3999):
+   * the file exceeded {@link PREVIEW_DIGEST_MAX_PARSE_BYTES} and no cached
+   * digest existed yet. `firstUser`/`lastAssistant` fall back to the already-
+   * indexed `SessionMeta.firstUserMessage`/`lastUserMessage` (cheap, no parse)
+   * rather than being silently empty; every event-derived field (toolCalls,
+   * changedFiles, artifacts, etc.) stays at its zero-value default because it
+   * genuinely was not computed, not because nothing happened.
+   */
+  partial?: boolean;
+  partialReason?: string;
 }
 
 /** Fold a harness-normalized event stream into the stable preview data model. */

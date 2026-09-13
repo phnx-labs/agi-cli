@@ -532,6 +532,32 @@ CREATE TABLE IF NOT EXISTS computer_sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_computer_sessions_session ON computer_sessions(session_id);
 CREATE INDEX IF NOT EXISTS idx_computer_sessions_started ON computer_sessions(started_at DESC);
+
+-- Durable requester-side cache for a REMOTE session's preview envelope
+-- (PHNX-3999). Keyed on (normalized owning device, full session id, schema
+-- version) rather than transcript bytes, since this box never reads the peer's
+-- transcript directly -- it only holds the last envelope one bounded
+-- 'sessions preview <id> --local --json' hop returned FROM that device. Content
+-- freshness (this row) is deliberately independent of live status, which is
+-- never cached here and always re-read from the live registry when available.
+-- ok=1 rows carry the last successful envelope_json; ok=0 rows carry no payload,
+-- only a failure_reason, so a session that was resolvable once but is now
+-- offline still degrades to the last GOOD payload (read separately, ok=1 only)
+-- annotated stale rather than losing it to a later failed attempt overwriting it.
+CREATE TABLE IF NOT EXISTS session_remote_preview_cache (
+  device TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  schema_version INTEGER NOT NULL,
+  fetched_at INTEGER NOT NULL,
+  ok INTEGER NOT NULL,
+  envelope_json TEXT,
+  envelope_bytes INTEGER NOT NULL DEFAULT 0,
+  failure_reason TEXT,
+  consecutive_failures INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (device, session_id, schema_version)
+);
+CREATE INDEX IF NOT EXISTS idx_remote_preview_cache_fetched ON session_remote_preview_cache(fetched_at DESC);
 `;
 
 /**
@@ -3906,6 +3932,191 @@ export function writeSessionPreviewCache<T>(entry: {
     PREVIEW_EXTRACTOR_VERSION,
     Date.now(),
     JSON.stringify(entry.preview),
+  );
+}
+
+/** Bump when the cached remote preview envelope shape changes so cached rows recompute (PHNX-3999 v1). */
+export const REMOTE_PREVIEW_SCHEMA_VERSION = 1;
+
+/** Cap on distinct (device, sessionId) rows this cache holds — a requester box
+ * previews many peers' sessions over a long uptime, so this bounds growth the
+ * same way the fleet session mirror bounds itself to 200 rows (db.ts, PHNX-3792):
+ * oldest-by-last-fetch is evicted first. Row count alone is not a real bound —
+ * every field the cached envelope carries is already bounded (digest fields,
+ * `detail.messages` <= 8 x 4000 chars, `detail.timeline` <= 8 steps, etc.), but
+ * 500 rows x an unbounded per-row size is still unbounded storage, so this is
+ * paired with a total-byte budget below. */
+const REMOTE_PREVIEW_CACHE_MAX_ROWS = 500;
+
+/**
+ * Total on-disk budget for `envelope_json` across every cached row, enforced
+ * ALONGSIDE the row cap (whichever evicts more aggressively wins). At the
+ * 500-row cap this is a ~32 KiB/row average, which comfortably fits the
+ * bounded envelope shape above — a single row is refused entry above
+ * {@link REMOTE_PREVIEW_ENVELOPE_MAX_BYTES} rather than being allowed to
+ * consume the whole budget by itself.
+ */
+const REMOTE_PREVIEW_CACHE_MAX_TOTAL_BYTES = 16 * 1024 * 1024;
+
+/**
+ * Per-envelope cache-write cap. The bounded fields above make a well-formed
+ * envelope small; this exists to refuse an outlier (a version-skewed peer, or
+ * a future field that forgets to bound itself) rather than let ONE session
+ * blow the total budget. A refused write is NOT an error — the caller still
+ * gets the live envelope for this call, it simply is not persisted, so the
+ * next call re-fetches instead of silently caching a giant blob.
+ */
+export const REMOTE_PREVIEW_ENVELOPE_MAX_BYTES = 512 * 1024;
+
+export interface RemotePreviewCacheRow {
+  /** When the envelope currently stored here (if `ok`) was fetched. */
+  fetchedAt: number;
+  /** Whether `envelope` is a real, successfully-fetched payload. */
+  ok: boolean;
+  envelope?: unknown;
+  failureReason?: string;
+  consecutiveFailures: number;
+  /** Epoch ms before which a fresh fetch attempt should be skipped (negative backoff). */
+  nextAttemptAt: number;
+}
+
+/** Read the durable cached remote preview row for one (device, sessionId) pair,
+ * regardless of whether it currently holds a successful envelope. Undefined
+ * means this box has never attempted (or recorded) a fetch for that pair. */
+export function readRemotePreviewCache(device: string, sessionId: string): RemotePreviewCacheRow | undefined {
+  const row = getDB().prepare(`
+    SELECT fetched_at AS fetchedAt, ok, envelope_json AS envelopeJson, failure_reason AS failureReason,
+           consecutive_failures AS consecutiveFailures, next_attempt_at AS nextAttemptAt
+    FROM session_remote_preview_cache
+    WHERE device = ? AND session_id = ? AND schema_version = ?
+  `).get(device, sessionId, REMOTE_PREVIEW_SCHEMA_VERSION) as {
+    fetchedAt: number;
+    ok: number;
+    envelopeJson: string | null;
+    failureReason: string | null;
+    consecutiveFailures: number;
+    nextAttemptAt: number;
+  } | undefined;
+  if (!row) return undefined;
+  let envelope: unknown;
+  if (row.envelopeJson) {
+    try {
+      envelope = JSON.parse(row.envelopeJson);
+    } catch {
+      // Corrupt cache row: treat as no payload rather than throwing.
+    }
+  }
+  return {
+    fetchedAt: row.fetchedAt,
+    ok: row.ok === 1 && envelope !== undefined,
+    envelope,
+    failureReason: row.failureReason ?? undefined,
+    consecutiveFailures: row.consecutiveFailures,
+    nextAttemptAt: row.nextAttemptAt,
+  };
+}
+
+function pruneRemotePreviewCache(maxRows: number = REMOTE_PREVIEW_CACHE_MAX_ROWS): void {
+  const db = getDB();
+  db.prepare(`
+    DELETE FROM session_remote_preview_cache
+    WHERE rowid NOT IN (
+      SELECT rowid FROM session_remote_preview_cache ORDER BY fetched_at DESC LIMIT ?
+    )
+  `).run(maxRows);
+  // Total-byte budget, independent of row count: walk newest-first, keep
+  // rows until the running total would exceed the budget, drop the rest.
+  const rows = db.prepare(`
+    SELECT rowid AS rowid, envelope_bytes AS envelopeBytes
+    FROM session_remote_preview_cache
+    ORDER BY fetched_at DESC
+  `).all() as Array<{ rowid: number; envelopeBytes: number }>;
+  let total = 0;
+  const evict: number[] = [];
+  for (const row of rows) {
+    total += row.envelopeBytes;
+    if (total > REMOTE_PREVIEW_CACHE_MAX_TOTAL_BYTES) evict.push(row.rowid);
+  }
+  if (evict.length > 0) {
+    const placeholders = evict.map(() => '?').join(',');
+    db.prepare(`DELETE FROM session_remote_preview_cache WHERE rowid IN (${placeholders})`).run(...evict);
+  }
+}
+
+/**
+ * Record a successful remote fetch: replaces the payload and resets backoff.
+ * An envelope over {@link REMOTE_PREVIEW_ENVELOPE_MAX_BYTES} is refused —
+ * this is a write-path bound, not a request failure: the caller already has
+ * the live envelope for this call from the fetch that produced it, this only
+ * decides whether it is worth persisting.
+ */
+export function writeRemotePreviewCacheSuccess(
+  device: string,
+  sessionId: string,
+  envelope: unknown,
+  fetchedAt: number = Date.now(),
+): void {
+  const envelopeJson = JSON.stringify(envelope);
+  const envelopeBytes = Buffer.byteLength(envelopeJson, 'utf8');
+  if (envelopeBytes > REMOTE_PREVIEW_ENVELOPE_MAX_BYTES) return;
+  getDB().prepare(`
+    INSERT INTO session_remote_preview_cache
+      (device, session_id, schema_version, fetched_at, ok, envelope_json, envelope_bytes, failure_reason, consecutive_failures, next_attempt_at)
+    VALUES (?, ?, ?, ?, 1, ?, ?, NULL, 0, 0)
+    ON CONFLICT(device, session_id, schema_version) DO UPDATE SET
+      fetched_at = excluded.fetched_at,
+      ok = 1,
+      envelope_json = excluded.envelope_json,
+      envelope_bytes = excluded.envelope_bytes,
+      failure_reason = NULL,
+      consecutive_failures = 0,
+      next_attempt_at = 0
+  `).run(device, sessionId, REMOTE_PREVIEW_SCHEMA_VERSION, fetchedAt, envelopeJson, envelopeBytes);
+  pruneRemotePreviewCache();
+}
+
+/**
+ * Record a failed remote fetch attempt with exponential backoff, WITHOUT
+ * discarding a prior good envelope — a session that answered once and is now
+ * offline still degrades to that last-good payload (read back via
+ * {@link readRemotePreviewCache}'s `ok`/`envelope`), annotated stale by the
+ * caller, rather than losing it the moment one attempt fails.
+ */
+export function writeRemotePreviewCacheFailure(
+  device: string,
+  sessionId: string,
+  reason: string,
+  backoffMs: (consecutiveFailures: number) => number,
+  now: number = Date.now(),
+): void {
+  const existing = readRemotePreviewCache(device, sessionId);
+  const consecutiveFailures = (existing?.consecutiveFailures ?? 0) + 1;
+  const nextAttemptAt = now + backoffMs(consecutiveFailures);
+  const keepOk = existing?.ok ? 1 : 0;
+  const envelopeJson = existing?.ok ? JSON.stringify(existing.envelope) : null;
+  const envelopeBytes = envelopeJson ? Buffer.byteLength(envelopeJson, 'utf8') : 0;
+  getDB().prepare(`
+    INSERT INTO session_remote_preview_cache
+      (device, session_id, schema_version, fetched_at, ok, envelope_json, envelope_bytes, failure_reason, consecutive_failures, next_attempt_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(device, session_id, schema_version) DO UPDATE SET
+      ok = excluded.ok,
+      envelope_json = excluded.envelope_json,
+      envelope_bytes = excluded.envelope_bytes,
+      failure_reason = excluded.failure_reason,
+      consecutive_failures = excluded.consecutive_failures,
+      next_attempt_at = excluded.next_attempt_at
+  `).run(
+    device,
+    sessionId,
+    REMOTE_PREVIEW_SCHEMA_VERSION,
+    existing?.fetchedAt ?? now,
+    keepOk,
+    envelopeJson,
+    envelopeBytes,
+    reason,
+    consecutiveFailures,
+    nextAttemptAt,
   );
 }
 

@@ -20,7 +20,7 @@ import { listProjectDefs, resolveProjectNameForCwd, type ProjectDef } from '../l
 import ora from 'ora';
 import { interruptibleSpinner } from '../lib/spinner.js';
 import type { AgentId } from '../lib/types.js';
-import type { SessionAgentId, SessionMeta, ViewMode } from '../lib/session/types.js';
+import type { SessionAgentId, SessionEvent, SessionMeta, ViewMode } from '../lib/session/types.js';
 import { SESSION_AGENTS, isAgentTmuxAlias, sessionDisplayAgent } from '../lib/session/types.js';
 import { discoverArtifacts, readArtifact, resolveArtifact } from '../lib/session/artifacts.js';
 import { looksLikePath, toComparablePath, homeDir, needsWindowsShell, composeWin32CommandLine } from '../lib/platform/index.js';
@@ -42,7 +42,7 @@ import { stringWidth, truncateToWidth, padToWidth, terminalWidth } from '../lib/
 import type { SessionActivity, AwaitingReason } from '../lib/session/state.js';
 import { inferSessionState } from '../lib/session/state.js';
 import { discoverSessions, queryIndexedSessions, countSessionsInScope, resolveSessionById, isCompleteSessionId, looksLikeSessionId, searchContentIndex, parseTimeFilter, getSessionRoots, scopeToManaged, type DiscoverOptions, type ScanProgress } from '../lib/session/discover.js';
-import { findSessionsById, querySessions, getSessionById, readSessionContent, readArchivedSessionPreview } from '../lib/session/db.js';
+import { findSessionsById, querySessions, getSessionById, readSessionContent, readArchivedSessionPreview, readSessionTimelineAny } from '../lib/session/db.js';
 import { liveSessionMetas, fleetExecutionMachineById, reconcileLiveMetaMachine } from '../lib/session/live-metadata.js';
 import { sessionHeadline } from '../lib/session/title.js';
 import {
@@ -2299,12 +2299,128 @@ function canonicalSessionsCommand(query: string | undefined, options: SessionsOp
   return 'ag ' + a.join(' ');
 }
 
+/** Bound on the `details.messages` array and on each message's `text` — this
+ * rides a cached JSON payload (and, for the remote fast path, an SSH capture
+ * with its own byte cap), so it is capped independently of either. */
+const SESSION_DETAIL_MAX_MESSAGES = 8;
+const SESSION_DETAIL_MESSAGE_MAX_CHARS = 4_000;
+
+export interface SessionDetailMessage {
+  role: 'user' | 'assistant';
+  text: string;
+  at: string | null;
+}
+
+/**
+ * The additive `details` block on `sessions preview --json` (PHNX-3999):
+ * `request`/`timeline`/`files` are read STRAIGHT from the existing
+ * `session_timelines` projection (`readSessionTimelineAny` — the daemon's own
+ * bounded, incrementally-folded cache, `SessionTimelineProjection` in
+ * `lib/session/db.ts`) rather than re-derived here, so this never triggers a
+ * transcript parse of its own. When that projection has not been computed yet
+ * for this session (daemon hasn't reached it, or the harness has no
+ * transcript at all), the fields are `null` and `partial`/`reason` say so —
+ * never a silently-empty-but-"successful" timeline.
+ *
+ * `messages` is a best-effort bounded recent-turn list: when `loadSessionPreviewDigest`
+ * just did a fresh parse (`events` non-empty — only happens on a cache miss
+ * under the bounded-parse limit), the last few message events are used;
+ * otherwise it falls back to the cached digest's `firstUser`/`lastAssistant`
+ * (zero extra parse cost) so a cache hit still returns *some* real content
+ * rather than an empty array. `sourceRevision` is the transcript's own last-
+ * activity timestamp — a stable content-change cursor a caller can compare
+ * across calls, deliberately separate from the live run/idle `active` status.
+ */
+function buildSessionDetailBlock(
+  session: SessionMeta,
+  digest: SessionPreviewDigest | undefined,
+  events: SessionEvent[],
+): {
+  request: unknown;
+  timeline: unknown;
+  files: unknown;
+  messages: SessionDetailMessage[];
+  sourceRevision: string | null;
+  partial: boolean;
+  reason: string | null;
+} {
+  const bound = (text: string): string => redactSecrets(sanitizeForTerminal(text)).slice(0, SESSION_DETAIL_MESSAGE_MAX_CHARS);
+  const timelineProjection = readSessionTimelineAny(session.id);
+
+  let messages: SessionDetailMessage[];
+  if (events.length > 0) {
+    messages = events
+      .filter((e): e is SessionEvent & { role: 'user' | 'assistant'; content: string } =>
+        e.type === 'message' && !e._synthetic && Boolean(e.content) && (e.role === 'user' || e.role === 'assistant'))
+      .slice(-SESSION_DETAIL_MAX_MESSAGES)
+      .map(e => ({ role: e.role, text: bound(e.content), at: e.timestamp ?? null }));
+  } else {
+    messages = [];
+    if (digest?.firstUser) messages.push({ role: 'user', text: bound(digest.firstUser), at: session.timestamp ?? null });
+    if (digest?.lastAssistant) messages.push({ role: 'assistant', text: bound(digest.lastAssistant), at: session.lastActivity ?? null });
+  }
+
+  const partial = Boolean(digest?.partial) || !timelineProjection;
+  const reason = digest?.partialReason
+    ?? (!timelineProjection ? 'request/timeline/files have not been computed yet by the background timeline pass for this session' : null);
+
+  return {
+    request: timelineProjection?.request ?? null,
+    timeline: timelineProjection?.timeline ?? null,
+    files: timelineProjection?.files ?? null,
+    messages,
+    sourceRevision: session.lastActivity ?? session.timestamp ?? null,
+    partial,
+    reason,
+  };
+}
+
 /** Resolve a session by id/query globally and print its compact preview (no pager).
  * Backs `--preview` — the fast path for the "peek before resume" hot loop. */
 export async function renderSessionPreview(
   query: string,
-  scope: { agent?: string; project?: string; local?: boolean; hosts?: string[]; json?: boolean },
+  scope: { agent?: string; project?: string; local?: boolean; hosts?: string[]; json?: boolean; refresh?: boolean; revision?: string },
 ): Promise<void> {
+  // Exact ID + exactly one named, non-local device: the canonical bounded
+  // preview loader (PHNX-3999) answers in ONE ssh hop plus a durable local
+  // cache, instead of the general resolver's metadata fan-out followed by a
+  // second render hop. Scoped tightly on purpose — a short id/label is not a
+  // stable cache key across devices, and this never touches local discovery.
+  //
+  // Gated on `isCompleteSessionId`, NOT a bare-UUID regex: measured over this
+  // fleet's own index, a "full session id" is a bare UUID for most harnesses
+  // but `session_<uuid>` for kimi/rush and `ses_<ulid>` for opencode
+  // (discover.ts). A bare-UUID-only check would silently skip this fast path
+  // (falling through to the slower general resolver, never wrong, but wrong
+  // to claim as "the fast path" for those harnesses) for a real, exact,
+  // caller-supplied full id on those three.
+  if (scope.json && !scope.local && scope.hosts?.length === 1
+    && scope.hosts[0] !== machineId() && isCompleteSessionId(query.trim())) {
+    const { getRemoteSessionPreview } = await import('../lib/session/remote-preview-cache.js');
+    const result = await getRemoteSessionPreview(query.trim(), scope.hosts[0], {
+      refresh: scope.refresh,
+      revision: scope.revision,
+    });
+    const envelope = result.envelope as {
+      session?: unknown; active?: unknown; preview?: unknown; error?: unknown; details?: unknown;
+    } | undefined;
+    console.log(JSON.stringify({
+      schemaVersion: 1,
+      session: envelope?.session ?? null,
+      active: envelope?.active ?? null,
+      preview: envelope?.preview ?? null,
+      error: envelope?.error ?? (envelope ? null : result.cache.reason),
+      // The peer's own `sessions preview --local --json` already computed
+      // `details` (request/timeline/files/messages) with its own bounded reader
+      // (see buildSessionDetailBlock) — this hop just forwards it verbatim,
+      // never re-derives it, so a metadata-only/no-transcript peer row's
+      // explicit unavailable reason survives the hop unchanged.
+      details: envelope?.details ?? null,
+      cache: result.cache,
+    }));
+    return;
+  }
+
   let outcome = await resolveSessionMetadataValue(query, scope);
   // resolveSessionMetadataValue already consults the live registry for a running
   // session with no transcript row (RUSH-2682), so a live session resolves above.
@@ -2381,7 +2497,7 @@ export async function renderSessionPreview(
     live = indexActiveBySessionId(loaded.sessions).get(session.id);
   } catch { /* plain preview on any probe failure */ }
   if (scope.json) {
-    const { digest, error } = loadSessionPreviewDigest(session);
+    const { digest, error, events } = loadSessionPreviewDigest(session);
     console.log(JSON.stringify({
       schemaVersion: 1,
       session: {
@@ -2417,6 +2533,7 @@ export async function renderSessionPreview(
       } : null,
       preview: digest ?? null,
       error: error ?? null,
+      details: buildSessionDetailBlock(session, digest, events),
     }));
     return;
   }
@@ -6147,7 +6264,9 @@ export function registerSessionsCommands(program: Command): void {
     .option('-p, --project <name>', 'Narrow the ID to one project')
     .option('--local', 'Only this machine; do not resolve the ID across the fleet')
     .option('-D, --device <target...>', 'Resolve only on the named device(s)')
-    .option('--json', 'Output the session preview as JSON');
+    .option('--json', 'Output the session preview as JSON')
+    .option('--refresh', 'Bypass the durable remote-preview cache and negative backoff for one bounded fetch (full ID + single --device only)')
+    .option('--revision <cursor>', 'Opaque content-revision cursor from a prior response\'s details.sourceRevision; a match serves the cache with zero SSH past the freshness window, a mismatch fetches once (full ID + single --device only)');
 
   setHelpSections(previewCmd, {
     examples: `
@@ -6160,11 +6279,15 @@ export function registerSessionsCommands(program: Command): void {
       # Stay on this machine or restrict the authoritative lookup to one peer
       agents sessions preview 407b8dd5 --local
       agents sessions preview 407b8dd5 --device zion
+
+      # Full ID + one --device: durable-cached fast path (PHNX-3999); force a fresh fetch
+      agents sessions preview c70ecdea-6210-4039-9845-246a3a7a9942 --device zion --json --refresh
     `,
     notes: `
       - Full UUIDs are globally unique and may stop the fleet lookup at the first exact hit.
       - Short IDs wait for every selected device so ambiguity is never hidden.
       - Active status is refreshed through the bounded live-state TTL; transcript-derived details use the durable session index.
+      - A full UUID with exactly one --device and --json is served from a local durable cache (~45s fresh window); the JSON envelope's "cache" field reports fresh/stale/offline state. --refresh forces one bounded re-fetch.
     `,
   });
 
@@ -6176,6 +6299,8 @@ export function registerSessionsCommands(program: Command): void {
     host?: string[];
     device?: string[];
     json?: boolean;
+    refresh?: boolean;
+    revision?: string;
     };
     const hosts = [...(options.host ?? []), ...(options.device ?? [])];
     await renderSessionPreview(id, {
@@ -6184,6 +6309,8 @@ export function registerSessionsCommands(program: Command): void {
       local: options.local,
       hosts: hosts.length > 0 ? hosts : undefined,
       json: options.json,
+      refresh: options.refresh,
+      revision: options.revision,
     });
   });
 

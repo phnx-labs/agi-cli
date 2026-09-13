@@ -640,18 +640,42 @@ export async function fetchPeerPreviewDigest(
   machine: string,
   timeoutMs = PEER_PREVIEW_TIMEOUT_MS,
 ): Promise<unknown | undefined> {
+  const envelope = await fetchPeerPreviewEnvelope(sessionId, machine, timeoutMs);
+  if (!envelope.ok) return undefined;
+  return parsePeerPreviewDigest(envelope.envelope);
+}
+
+export type PeerPreviewEnvelopeResult =
+  | { ok: true; envelope: unknown }
+  | { ok: false; reason: 'no-target' | 'unreachable' | 'invalid-json' };
+
+/**
+ * Fetch the FULL `agents sessions preview <id> --local --json` envelope
+ * (session/active/preview/error, not just the `.preview` slice
+ * {@link fetchPeerPreviewDigest} narrows to) from a session's owning peer in
+ * exactly ONE bounded {@link sshCapture} hop. This is the canonical exact
+ * ID+owner preview loader (PHNX-3999): the peer's own command already runs the
+ * owner-side bounded parsers/fold (`loadSessionPreviewDigest`) and existing
+ * redaction, so a caller that already knows the owning device needs no
+ * separate metadata round trip before this one — unlike the general fleet
+ * resolver, which fans out a `sessions <id> --json --all` metadata query first
+ * because it does NOT yet know which peer (if any) holds the id.
+ */
+export async function fetchPeerPreviewEnvelope(
+  sessionId: string,
+  machine: string,
+  timeoutMs = PEER_PREVIEW_TIMEOUT_MS,
+): Promise<PeerPreviewEnvelopeResult> {
   const peer = await resolvePeerTarget(machine);
-  if (!peer) return undefined;
+  if (!peer) return { ok: false, reason: 'no-target' };
   const cmd = remoteListCommand(['sessions', 'preview', sessionId, '--local', '--json'], peer.os);
   const capture = await sshCapture(peer.target, cmd, timeoutMs);
-  if (capture.code !== 0) return undefined;
-  let parsed: unknown;
+  if (capture.code !== 0) return { ok: false, reason: 'unreachable' };
   try {
-    parsed = JSON.parse(stripClixml(capture.stdout));
+    return { ok: true, envelope: JSON.parse(stripClixml(capture.stdout)) };
   } catch {
-    return undefined;
+    return { ok: false, reason: 'invalid-json' };
   }
-  return parsePeerPreviewDigest(parsed);
 }
 
 /** Parse the JSON envelope returned by `sessions preview --json`. */
