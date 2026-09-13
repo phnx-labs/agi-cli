@@ -8727,7 +8727,7 @@
           "name": "watch",
           "path": "feed watch",
           "aliases": [],
-          "description": "Stream the canonical agent, attention, and activity projection as NDJSON",
+          "description": "Stream the canonical agent, attention, tool, and activity projection as NDJSON",
           "args": [],
           "options": [
             {
@@ -8760,7 +8760,7 @@
             }
           ],
           "examples": "agents feed watch --json\nagents feed watch --json --local",
-          "notes": "Order by streamId + sequence. Unavailable scopes retain their last rows until reset on reconnect.",
+          "notes": "Order by streamId + sequence. Unavailable scopes retain their last rows until reset on reconnect. The fleet stream is served by the daemon's shared collector, so several readers cost one connection per peer; --local is the per-machine stream the collector itself subscribes to over ssh.",
           "subcommands": []
         }
       ]
