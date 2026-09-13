@@ -159,8 +159,6 @@ export const RUN_OPTION_FORWARDING: Record<string, RunOptionForwarding> = {
   // On a --device dispatch the remote box runs its own run-exit sync, so this
   // flag is never forwarded — it is a local-exit-behavior toggle, not remote.
   traceSync: 'local-only',
-  // Deprecated alias for --device auto; resolved on the launching box before SSH.
-  smart: 'local-only',
   // Broadcast mode (agents run --broadcast) is its own fan-out dispatch — mutually
   // exclusive with --host. All broadcast options are local-only; exec.ts handles them
   // before any SSH dispatch path is reached.
