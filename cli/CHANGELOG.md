@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.22.108
+
+- Account sync now refreshes the native session-tracking hook in every account home, replacing stale registrations from previous CLI installations so new sessions retain their account identity. Codex tracker installation also refreshes hook trust so headless runs can execute the registered hook.
+
+- Resume selection validates peer-owned transcripts on their origin device instead of treating a missing local copy as a missing session. Local empty picks are still skipped; explicit local replay still requires readable local content.
+
+- **The resume picker skips a session with no transcript instead of opening a tab
+  on it (PHNX-4080).** Recovery already refuses a transcript-less id (a live-registry
+  row that never wrote one, or a peer's mirror stub) and starts no agent. The
+  `agents sessions resume` picker now applies that same judgement before opening
+  terminal tabs: a doomed pick is reported as skipped, a batch with nothing left to
+  resume exits 1, and no tab is spent on `/continue <id>` for an empty conversation.
+  Source: `src/commands/sessions-resume.ts`, `src/lib/session/recovery.ts`.
+
 ## 1.22.107
 
 - **A bare interactive run places itself like `--device auto` (PHNX-4083).**

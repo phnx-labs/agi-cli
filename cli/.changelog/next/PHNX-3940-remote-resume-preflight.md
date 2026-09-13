@@ -1,1 +1,0 @@
-- Resume selection validates peer-owned transcripts on their origin device instead of treating a missing local copy as a missing session. Local empty picks are still skipped; explicit local replay still requires readable local content.
