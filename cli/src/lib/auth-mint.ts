@@ -2,7 +2,7 @@
  * First-class setup-token mint + seed (PHNX-2364).
  *
  * Closes the mint-auth manual recipe: drive `claude setup-token` through the
- * same injectable PTY driver `agents fleet login` uses, capture a well-formed
+ * same injectable term driver `agents fleet login` uses, capture a well-formed
  * `sk-ant-oat01-…` token (the #1767 ANSI-banner guard), and seed BOTH:
  *
  *   1. a named provider account (`agents accounts add` shape, policy never)
@@ -45,9 +45,9 @@ import {
 import { getBinaryPath, getGlobalDefault, getVersionHomePath, listInstalledVersions } from './installations/versions.js';
 import { shellQuote } from './ssh-exec.js';
 import {
-  defaultPtyDriver,
+  defaultTermDriver,
   type DriveOptions,
-  type PtyDriver,
+  type TermDriver,
 } from './fleet/remote-login.js';
 import { showUrl } from './open-url.js';
 import { loadDevices } from './devices/registry.js';
@@ -69,7 +69,7 @@ export interface MintFlow {
   mintArgs: string[] | null;
   /** api-key flows: the env var the collected key injects as on a worker (e.g. OPENAI_API_KEY). */
   apiKeyEnv?: string;
-  /** setup-token flows: authorize-URL and token patterns scraped from the PTY. */
+  /** setup-token flows: authorize-URL and token patterns scraped from the term session. */
   verificationUrlRegex?: RegExp;
   tokenCapture?: RegExp;
 }
@@ -444,7 +444,7 @@ export function seedNamedAccount(name: string, token: string, flow: MintFlow): C
 }
 
 export interface MintDriveHooks {
-  driver?: PtyDriver;
+  driver?: TermDriver;
   openUrl?: (url: string) => Promise<void>;
   /** Asked once the authorize URL is on screen, when `--code` was not given. */
   readCode?: () => Promise<string | undefined>;
@@ -469,7 +469,7 @@ function emitMintProgress(line: string, json?: boolean): void {
 }
 
 /**
- * Drive `claude setup-token` in a PTY: scrape the authorize URL, open it,
+ * Drive `claude setup-token` in a term session: scrape the authorize URL, open it,
  * optionally paste `--code`, then capture the token with the #1767 guard.
  * Tears the session down on the way out (success, timeout, or throw).
  */
@@ -481,7 +481,7 @@ export async function driveSetupTokenMint(
   if (flow.auth !== 'setup-token' || !flow.tokenCapture) {
     throw new Error(`Harness '${flow.harness}' has no interactive mint command.`);
   }
-  const driver = opts.driver ?? defaultPtyDriver();
+  const driver = opts.driver ?? defaultTermDriver();
   const initialDelayMs = opts.drive?.initialDelayMs ?? 1500;
   const pollMs = opts.drive?.pollMs ?? 500;
   const timeoutMs = opts.drive?.timeoutMs ?? 180_000;
@@ -602,14 +602,14 @@ export interface MintAndSeedResult {
 }
 
 /**
- * End-to-end mint: resolve identity, obtain a token (stdin or PTY drive),
+ * End-to-end mint: resolve identity, obtain a token (stdin or term drive),
  * seed the named account + reserved auth bundle, optionally sync the fleet.
  * Never returns or logs the token.
  */
 export async function mintAndSeed(input: MintAndSeedInput): Promise<MintAndSeedResult> {
   const flow = getMintFlow(input.harness);
   const json = input.json === true;
-  // An injected PTY driver is a complete substitute for exec'ing the local
+  // An injected term driver is a complete substitute for exec'ing the local
   // binary, so the install lookup is only required on the real drive path.
   const install = input.token
     ? null

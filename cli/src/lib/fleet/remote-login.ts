@@ -17,8 +17,9 @@
  * Layering — pure vs I/O, so the valuable logic is unit-testable without SSH:
  *  - `scrapeLogin` / `classifyLoginFlow` / `selectLoginTargets` /
  *    `buildRemoteLoginSshCommand` / `buildDashboardHtml` are PURE.
- *  - `driveRemoteLogin` drives a PTY through an injectable {@link PtyDriver}
- *    (fake in tests; real over the pty sidecar in prod).
+ *  - `driveRemoteLogin` drives a terminal through an injectable {@link TermDriver}
+ *    (fake in tests; real over the standalone `term` CLI in prod — see
+ *    `../term-client.js`).
  *  - `detectPending` / `runFleetLogin` do the real fleet I/O.
  *
  * The device codes have a ~15 min TTL, so the default (bulk) mode requests every
@@ -34,7 +35,7 @@ import { deviceIdentityArgs, fleetDialTarget } from '../devices/connect.js';
 import { planFleetTargets } from '../devices/fleet.js';
 import { assertValidSshTarget, shellQuote, sshExecAsync } from '../ssh-exec.js';
 import { machineId } from '../session/sync/config.js';
-import { ptyRequest } from '../pty-client.js';
+import { termStart, termExec, termWrite, termScreen, termStop } from '../term-client.js';
 import { showUrl } from '../open-url.js';
 import {
   readAuthHealthCache,
@@ -194,7 +195,7 @@ export function selectLoginTargets(
 
 /**
  * Build the `ssh -tt <target> <loginCommand>` command string driven through the
- * PTY sidecar. `-tt` forces a tty so the remote CLI enters its interactive
+ * `term` CLI. `-tt` forces a tty so the remote CLI enters its interactive
  * device-code flow; `accept-new` learns a first-seen host key without a prompt.
  * Both the target and the login command are shell-quoted. Pure/testable.
  *
@@ -408,11 +409,11 @@ export function buildDashboardHtml(pending: PendingLogin[], mode: LoginMode): st
 }
 
 // ---------------------------------------------------------------------------
-// PTY driver (injectable) + driveRemoteLogin
+// term driver (injectable) + driveRemoteLogin
 // ---------------------------------------------------------------------------
 
-/** The subset of the PTY sidecar `driveRemoteLogin` needs — faked in tests. */
-export interface PtyDriver {
+/** The subset of the `term` CLI `driveRemoteLogin` needs — faked in tests. */
+export interface TermDriver {
   start(opts?: { rows?: number; cols?: number }): Promise<string>;
   exec(id: string, command: string): Promise<void>;
   write(id: string, input: string): Promise<void>;
@@ -420,30 +421,30 @@ export interface PtyDriver {
   stop(id: string): Promise<void>;
 }
 
-/** Real driver over the pty sidecar (`ptyRequest`). */
-export function defaultPtyDriver(): PtyDriver {
+/** Real driver over the standalone `term` CLI (`../term-client.js`). */
+export function defaultTermDriver(): TermDriver {
   const expectOk = (res: { ok: boolean; error?: string }, what: string) => {
-    if (!res.ok) throw new Error(`pty ${what} failed: ${res.error ?? 'unknown'}`);
+    if (!res.ok) throw new Error(`term ${what} failed: ${res.error ?? 'unknown'}`);
   };
   return {
     async start(opts) {
-      const res = await ptyRequest('start', undefined, { rows: opts?.rows ?? 40, cols: opts?.cols ?? 120 });
+      const res = await termStart({ rows: opts?.rows ?? 40, cols: opts?.cols ?? 120 });
       expectOk(res, 'start');
       return res.id as string;
     },
     async exec(id, command) {
-      expectOk(await ptyRequest('exec', id, { command }), 'exec');
+      expectOk(await termExec(id, command), 'exec');
     },
     async write(id, input) {
-      expectOk(await ptyRequest('write', id, { input }), 'write');
+      expectOk(await termWrite(id, input), 'write');
     },
     async screen(id) {
-      const res = await ptyRequest('screen', id);
+      const res = await termScreen(id);
       expectOk(res, 'screen');
       return { screen: (res.screen as string) ?? '', exited: Boolean(res.exited) };
     },
     async stop(id) {
-      await ptyRequest('stop', id).catch(() => undefined);
+      await termStop(id).catch(() => undefined);
     },
   };
 }
@@ -462,22 +463,22 @@ export interface DriveOptions {
 interface DriveResult extends ScrapedLogin {
   /** True when the underlying ssh session already exited (login finished or failed). */
   exited: boolean;
-  /** The pty session id, so the caller can keep polling / stop it. */
+  /** The term session id, so the caller can keep polling / stop it. */
   sessionId: string;
 }
 
 /**
  * Drive one remote device-code login: launch `ssh -tt <target> <loginCommand>`
- * in a PTY, send the flow's `deviceCodeSelect` keystrokes (if any) to reach the
+ * in a `term` session, send the flow's `deviceCodeSelect` keystrokes (if any) to reach the
  * device-code path, then poll the screen until {@link scrapeLogin} yields both a
  * URL and a code (or the deadline / session-exit). The human completes the code
  * in the browser; the caller polls the credential file for completion. Testable
- * against a fake {@link PtyDriver}.
+ * against a fake {@link TermDriver}.
  */
 export async function driveRemoteLogin(
   target: string,
   flow: LoginFlow,
-  driver: PtyDriver,
+  driver: TermDriver,
   opts: DriveOptions = {},
   extraSshArgs: string[] = [],
 ): Promise<DriveResult> {
@@ -487,8 +488,8 @@ export async function driveRemoteLogin(
 
   const id = await driver.start();
   // Everything past start() must tear the session down on a mid-flight throw —
-  // otherwise the caller never receives a sessionId and the PTY (and the
-  // `ssh -tt` process it drives) leaks until the sidecar's idle reaper. On the
+  // otherwise the caller never receives a sessionId and the term session (and
+  // the `ssh -tt` process it drives) leaks until term's own idle reaper. On the
   // normal return paths the caller owns stop() via the returned sessionId.
   try {
     await driver.exec(id, buildRemoteLoginSshCommand(target, flow, extraSshArgs));
@@ -576,7 +577,7 @@ interface RunFleetLoginOptions {
   /** Target every device-code pair regardless of cached login state (cold cache / forced re-login). */
   all?: boolean;
   /** Overrides for testing / non-default cadence. */
-  driver?: PtyDriver;
+  driver?: TermDriver;
   drive?: DriveOptions;
   /** Port for the local dashboard (0 = ephemeral). */
   port?: number;
@@ -655,7 +656,7 @@ export async function runFleetLogin(opts: RunFleetLoginOptions = {}): Promise<Lo
     }
   }
 
-  const driver = opts.driver ?? defaultPtyDriver();
+  const driver = opts.driver ?? defaultTermDriver();
   const remotable = pending.filter((p) => p.remotable);
 
   const driveOne = async (p: PendingLogin): Promise<void> => {
