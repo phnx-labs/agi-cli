@@ -1081,7 +1081,7 @@ export interface Meta {
   /**
    * `agents feed post` fan-out. `broadcast` maps a sink name to either an argv
    * template (`command:`, run for each post) or an in-process channel delivery
-   * (`channel:`, the same registry `agents send`/`agents notify` use). Channel
+   * (`channel:`, the same registry `agents send` use). Channel
    * sinks may set `message:` with feed placeholders; a missing placeholder
    * skips that sink, so `{ticket}` cleanly gates a tracker-specific channel. Thus
    * mirroring to a tracker, a messaging CLI, or a channel provider is the
@@ -1243,8 +1243,8 @@ export interface Meta {
     templateHash?: string;
   };
   /**
-   * Owner/channel notification config for `agents send` / `agents notify`.
-   * `owner` is the address expanded by `--to owner` and by `agents notify`
+   * Owner/channel notification config for `agents send`.
+   * `owner` is the address expanded by `--to owner` and by `agents send --to owner`
    * (channel + target). `transports` maps a user-facing channel name to the
    * provider that actually delivers it — explicit, one provider per channel,
    * no fallback. Omitted keys default to name-identity (channel `slack` ->
