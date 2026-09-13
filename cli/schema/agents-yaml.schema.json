@@ -269,7 +269,7 @@
     },
     "notify": {
       "type": "object",
-      "description": "Owner/channel notification config for `agents send` / `agents notify`.",
+      "description": "Owner/channel notification config for `agents send` and feed broadcasts.",
       "properties": {
         "owner": {
           "type": "object",

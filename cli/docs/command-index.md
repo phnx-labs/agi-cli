@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_68 command groups · 512 commands._
+_67 command groups · 513 commands._
 
 ## accounts — Browse and manage harness accounts
 
@@ -239,6 +239,8 @@ agents devices apply                           Reconcile the fleet to a declared
 agents devices capture                         Snapshot the live environment (roster names, agents, browser, secret-bundle names, routines) into agents.yaml fleet:.
 agents devices config [name] [key] [value...]  Get, set, or unset a device’s settings (scheduler, agent cap, ssh overrides, auto-launch, notes). Bare opens an interactive settings menu (TTY) or prints the resolved config (piped). Per-device values live in the tracked devices/<name>/agents.yaml config: block; --fleet targets the fleet-wide defaults (central fleet.defaults.config) every device inherits unless it overrides the key.
 agents devices describe <name> [text...]       Show or set the one-line description of what a device is FOR ("gpu box — cuda 12.4"). Rendered as the tail column of `agents devices list` and synced fleet-wide. Same key as `agents devices config <name> description` — one store, two names.
+agents devices disable <name>                  Drop a device from every automatic-placement path (sets auto-launch.enabled off)
+agents devices enable <name>                   Put a device back in the automatic-placement pool (clears auto-launch.enabled)
 agents devices harnesses                       Per device, one row per installed agent@version: account, signed-in, quota, and a single ready verdict. SSH-probes each online box.
 agents devices ignore <name>                   Dismiss a node and record the decision in this box's device doc (fleet.ignored), unioned fleet-wide (also removes it locally).
 agents devices ignored                         List dismissed tailscale nodes — what was dismissed, when, and on which machine.
@@ -370,7 +372,7 @@ agents install <identifier>  Install a package: mcp:, skill:, plugin:, or GitHub
 
 ```
 agents logs [id]    Show a run log, audit trail, or stats. Subcommands: audit, stats, rotate.
-agents logs audit   Alias for `agents events --audit`
+agents logs audit   Alias for `agents events audit`
 agents logs rotate  Apply event retention and the storage ceiling immediately
 agents logs stats   Show aggregate audit statistics
 ```
@@ -387,7 +389,7 @@ agents mailboxes prune  Run a liveness sweep: archive pending messages in dead b
 
 ```
 agents mcp                                 Connect agents to external tools via Model Context Protocol servers
-agents mcp add <name> [command_or_url...]  Add an MCP server to the manifest (run "agents mcp register" afterward to apply)
+agents mcp add <name> [command_or_url...]  Add an MCP server to the manifest (run "agents sync --mcp" afterward to apply)
 agents mcp list [agent]                    Show which MCP servers are registered and which agent versions they are synced to
 agents mcp remove [name]                   Unregister an MCP server from agents (interactive picker if no name given)
 agents mcp trust                           Trust this project so its .agents/mcp/ servers may be registered and spawned
@@ -454,12 +456,6 @@ agents monitors resume [name]     Re-enable a paused monitor so the daemon watch
 agents monitors runs [name]       See a monitor’s fire history: when it fired, the action, and the outcome.
 agents monitors test [name]       DRY-RUN: evaluate the source once and print the emitted event + whether it would fire. No action is taken.
 agents monitors view [name]       Show a monitor’s full YAML config plus its current watched-state and recent fires.
-```
-
-## notify — [DEPRECATED] Deliver to the owner (alias of send --to owner). Use "agents feed post" for new code.
-
-```
-agents notify [text]  [DEPRECATED] Deliver to the owner (alias of send --to owner). Use "agents feed post" for new code.
 ```
 
 ## packages — Portable agent packages — materialize schema-v3 agent.yaml into an ephemeral harness home

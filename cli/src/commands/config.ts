@@ -65,7 +65,7 @@ interface ConfigListOptions {
 }
 
 
-/** Parse a boolean value the same way `agents devices configure` does. */
+/** Parse the boolean vocabulary shared by the configuration surfaces. */
 function parseBool(value: string, key: string): boolean {
   const v = value.trim().toLowerCase();
   if (v === 'on' || v === 'true') return true;

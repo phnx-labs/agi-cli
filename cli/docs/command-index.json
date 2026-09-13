@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "command": "agents",
-  "groups": 68,
-  "commands": 512,
+  "groups": 67,
+  "commands": 513,
   "root": {
     "name": "agents",
     "path": "",
@@ -80,7 +80,7 @@
         }
       ],
       "examples": "agents accounts add claude work\nagents accounts add codex personal --api-key sk-…\nagents accounts login claude#work\nagents accounts default claude work\nagents accounts add work --provider anthropic --auth setup-token\nagents accounts add openrouter-work --provider openrouter --auth api-key --from-secrets openrouter.ai:OPENROUTER_API_KEY\nagents accounts set-key work\nagents accounts view work --json\nagents accounts view codex#icloud\nagents accounts sync openrouter-work yosemite-s0\nagents run claude#work\nagents accounts logout claude\nagents accounts migrate --dry-run\nagents accounts migrate --apply",
-      "notes": "An account is a credential SLOT, not an installation: `accounts add <harness> [name]` runs the native login in a fresh HOME-shaped slot of the one managed install, registers the fleet-wide row, and mints the durable worker credential (claude: setup-token; codex/grok/cursor/opencode: --api-key or a prompt) in one step. Headed devices only — workers are provisioned automatically. `accounts login <harness>#<name>` re-auths into the same slot and re-mints; `accounts default <harness> [name]` is the one default write path. Native account records contain metadata only; harness-owned OAuth credentials are never copied. Provider accounts are explicit portable bundles with policy never. Harness-native OAuth sign-out is `agents accounts logout <harness>` (API-key accounts use `accounts remove`). Leftover per-account installations fold with `agents accounts migrate --dry-run|--apply`. Synced vault unlock is `agents secrets vault unlock`. The legacy connect/name/label/mint/attach/detach/switch/set-default verbs still work this release and print their replacement.",
+      "notes": "An account is a credential SLOT, not an installation: `accounts add <harness> [name]` runs the native login in a fresh HOME-shaped slot of the one managed install, registers the fleet-wide row, and mints the durable worker credential (claude: setup-token; codex/grok/cursor/opencode: --api-key or a prompt) in one step. Headed devices only — workers are provisioned automatically. `accounts login <harness>#<name>` re-auths into the same slot and re-mints; `accounts default <harness> [name]` is the one default write path. Native account records contain metadata only; harness-owned OAuth credentials are never copied. Provider accounts are explicit portable bundles with policy never. Harness-native OAuth sign-out is `agents accounts logout <harness>` (API-key accounts use `accounts remove`). Leftover per-account installations fold with `agents accounts migrate --dry-run|--apply`. Synced vault unlock is `agents secrets vault unlock`.",
       "subcommands": [
         {
           "name": "add",
@@ -257,7 +257,7 @@
             }
           ],
           "examples": "agents accounts default claude\nagents accounts default claude work\nagents accounts default claude --json",
-          "notes": "The one write path for the per-harness default (the hidden set-default/switch share it). Pass a name to skip the picker. Rotation already honors the default.",
+          "notes": "The one write path for the per-harness default. Pass a name to skip the picker. Rotation already honors the default.",
           "subcommands": []
         },
         {
@@ -7149,7 +7149,7 @@
           "negate": false
         }
       ],
-      "examples": "Discover & register:\n        agents devices sync            # pick which tailscale nodes to keep (TTY)\n        agents devices sync --yes      # register all non-ignored nodes\n        agents devices ignore ipad165  # dismiss a node so it's never re-suggested\n        agents devices ignored         # list dismissed nodes (when / which machine)\n\n      Inspect:\n        agents devices list            # what's registered (★ = interactive host)\n        agents devices status          # live reachability + load\n        agents devices ping            # quick liveness probe\n        agents devices lease list      # disposable crabbox devices available for reuse\n\n      Configure a device:\n        agents devices config mac-mini                       # settings menu (TTY) / print (piped)\n        agents devices config mac-mini agents.max-concurrent 4\n        agents devices config mac-mini scheduler.enabled off\n        agents devices config mac-mini notes \"runs the releases\"\n        agents devices config win-mini ssh.auth password\n        agents devices config worker ssh.identity-file ~/.ssh/worker_ed25519\n        agents devices config mac-mini auto-launch.enabled off\n        agents devices describe mark-1 \"gpu box — cuda 12.4\"  # one-line purpose, shown in the list\n        agents devices config mac-mini interactive.host zion # where agents show YOU artifacts\n        agents devices render --write  # write ~/.ssh/config.d/agents include\n\n      Fleet operations:\n        agents fleet update              # roll out latest agents-cli everywhere\n        agents fleet run uname -a        # run a command on every online device",
+      "examples": "Discover & register:\n        agents devices sync            # pick which tailscale nodes to keep (TTY)\n        agents devices sync --yes      # register all non-ignored nodes\n        agents devices ignore ipad165  # dismiss a node so it's never re-suggested\n        agents devices ignored         # list dismissed nodes (when / which machine)\n\n      Inspect:\n        agents devices list            # what's registered (★ = interactive host)\n        agents devices status          # live reachability + load\n        agents devices ping            # quick liveness probe\n        agents devices lease list      # disposable crabbox devices available for reuse\n\n      Configure a device:\n        agents devices config mac-mini                       # settings menu (TTY) / print (piped)\n        agents devices config mac-mini agents.max-concurrent 4\n        agents devices config mac-mini scheduler.enabled off\n        agents devices config mac-mini notes \"runs the releases\"\n        agents devices config win-mini ssh.auth password\n        agents devices config worker ssh.identity-file ~/.ssh/worker_ed25519\n        agents devices disable mac-mini                       # leave the auto-placement pool (auto-launch.enabled off)\n        agents devices enable mac-mini                        # rejoin it\n        agents devices describe mark-1 \"gpu box — cuda 12.4\"  # one-line purpose, shown in the list\n        agents devices config mac-mini interactive.host zion # where agents show YOU artifacts\n        agents devices render --write  # write ~/.ssh/config.d/agents include\n\n      Fleet operations:\n        agents fleet update              # roll out latest agents-cli everywhere\n        agents fleet run uname -a        # run a command on every online device",
       "notes": "`agents fleet` is an alias for `agents devices` — same subcommands.",
       "subcommands": [
         {
@@ -7549,6 +7549,60 @@
           ],
           "examples": "agents devices describe mark-1 \"gpu box — cuda 12.4\"  # set it (80 chars, one line)\n      agents devices describe mark-1                        # read it back\n      agents devices describe mark-1 --unset                # remove it\n      agents devices describe mark-1 --json                 # machine-readable\n      agents devices config mark-1 description \"gpu box\"    # equivalent — same store",
           "notes": "The description is the device-scope 'description' config key: stored in\n      the tracked per-device doc (devices/<name>/agents.yaml config: block),\n      synced fleet-wide with 'agents repo push/pull', and rendered as the tail\n      column of 'agents devices list'. It replaces on each set — for appended\n      long-form scratch use 'agents devices config <name> notes \"…\"'.",
+          "subcommands": []
+        },
+        {
+          "name": "disable",
+          "path": "devices disable",
+          "aliases": [],
+          "description": "Drop a device from every automatic-placement path (sets auto-launch.enabled off)",
+          "args": [
+            {
+              "name": "name",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "enable",
+          "path": "devices enable",
+          "aliases": [],
+          "description": "Put a device back in the automatic-placement pool (clears auto-launch.enabled)",
+          "args": [
+            {
+              "name": "name",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
           "subcommands": []
         },
         {
@@ -8759,15 +8813,6 @@
           "negate": false
         },
         {
-          "flags": "--fix",
-          "description": "(deprecated) doctor is diagnose-only — this errors with a pointer to `agents sync`, the one fixer",
-          "long": "--fix",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
           "flags": "--kind <kinds>",
           "description": "Restrict to comma-separated resource kinds (commands,skills,hooks,rules,mcp,permissions,subagents,plugins,workflows,memory)",
           "long": "--kind",
@@ -8985,15 +9030,6 @@
           "description": "Tail today's operational log live",
           "short": "-f",
           "long": "--follow",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--audit",
-          "description": "Deprecated: operational events only — prefer --include ops or --exclude activity",
-          "long": "--audit",
           "required": false,
           "optional": false,
           "variadic": false,
@@ -11736,7 +11772,7 @@
           "name": "audit",
           "path": "logs audit",
           "aliases": [],
-          "description": "Alias for `agents events --audit`",
+          "description": "Alias for `agents events audit`",
           "args": [],
           "options": [
             {
@@ -12122,7 +12158,7 @@
           "name": "add",
           "path": "mcp add",
           "aliases": [],
-          "description": "Add an MCP server to the manifest (run \"agents mcp register\" afterward to apply)",
+          "description": "Add an MCP server to the manifest (run \"agents sync --mcp\" afterward to apply)",
           "args": [
             {
               "name": "name",
@@ -12390,7 +12426,7 @@
           "negate": false
         }
       ],
-      "examples": "# List all memory facts (project > user > system)\n      agents memory list\n\n      # Add a fact\n      agents memory add preferred-editor --body \"User prefers vim keybindings\"\n\n      # View a fact\n      agents memory view preferred-editor\n\n      # Remove a fact from the user layer\n      agents memory remove preferred-editor\n\n      # Fan out to all capable installed agent versions\n      agents memory sync",
+      "examples": "# List all memory facts (project > user > system)\n      agents memory list\n\n      # Add a fact\n      agents memory add preferred-editor --body \"User prefers vim keybindings\"\n\n      # View a fact\n      agents memory view preferred-editor\n\n      # Remove a fact from the user layer\n      agents memory remove preferred-editor\n\n      # Fan out to all capable installed agent versions\n      agents sync --memory",
       "notes": "Memory is the knowledge store (learned facts), distinct from rules\n      (instructions / AGENTS.md persona). Stored under ~/.agents/memory/ and\n      synced into capable agents' version homes (claude/codex/openclaw/grok).\n\n      Format: MEMORY.md index + one <slug>.md file per fact.",
       "subcommands": [
         {
@@ -12758,7 +12794,7 @@
           "negate": false
         }
       ],
-      "notes": "Planes (do not mix them up):\n    message / sessions inject  - CONTROL a running agent (mailbox answer, PTY keystroke, or resume by runtime)\n    send / notify              - DELIVER a message to a human recipient over a channel provider\n    feed post                  - RECORD progress / milestones (optional broadcast may call send/notify)\n\n  <text> here is consumed BY THE TARGET AGENT (an answer, a keystroke, or the\n  argument to a resume) -- it is not a notification a person reads on their\n  phone. To reach the operator instead, use `agents send` / `agents notify`\n  (or a feed.broadcast `channel:` sink).",
+      "notes": "Planes (do not mix them up):\n    message / sessions inject  - CONTROL a running agent (mailbox answer, PTY keystroke, or resume by runtime)\n    send / notify              - DELIVER a message to a human recipient over a channel provider\n    feed post                  - RECORD progress / milestones (optional broadcast may call send)\n\n  <text> here is consumed BY THE TARGET AGENT (an answer, a keystroke, or the\n  argument to a resume) -- it is not a notification a person reads on their\n  phone. To reach the operator instead, use `agents send --to owner`\n  (or a feed.broadcast `channel:` sink).",
       "subcommands": []
     },
     {
@@ -13708,125 +13744,6 @@
           "subcommands": []
         }
       ]
-    },
-    {
-      "name": "notify",
-      "path": "notify",
-      "aliases": [],
-      "description": "[DEPRECATED] Deliver to the owner (alias of send --to owner). Use \"agents feed post\" for new code.",
-      "args": [
-        {
-          "name": "text",
-          "required": false,
-          "variadic": false,
-          "description": ""
-        }
-      ],
-      "options": [
-        {
-          "flags": "--text <text>",
-          "description": "message body (preferred over positional text)",
-          "long": "--text",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--channel <name>",
-          "description": "override owner channel",
-          "long": "--channel",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--to <target>",
-          "description": "override owner target (or pass a non-owner dest with --channel)",
-          "long": "--to",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--thread <id>",
-          "description": "channel thread id / timestamp",
-          "long": "--thread",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--attach <path...>",
-          "description": "local file attachment path (repeatable)",
-          "long": "--attach",
-          "required": true,
-          "optional": false,
-          "variadic": true,
-          "negate": false
-        },
-        {
-          "flags": "--attachment <path...>",
-          "description": "alias of --attach",
-          "long": "--attachment",
-          "required": true,
-          "optional": false,
-          "variadic": true,
-          "negate": false
-        },
-        {
-          "flags": "--url <url...>",
-          "description": "link or remote media URL to include in the body (repeatable)",
-          "long": "--url",
-          "required": true,
-          "optional": false,
-          "variadic": true,
-          "negate": false
-        },
-        {
-          "flags": "--from <who>",
-          "description": "sender label (mailbox)",
-          "long": "--from",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--json",
-          "description": "output JSON",
-          "long": "--json",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--dry-run",
-          "description": "resolve + build but do not send",
-          "long": "--dry-run",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "examples": "# Deprecated: prefer \"agents feed post --title \"…\" \"…\" --level important\"\n      agents notify --text \"Build finished — PR #1346 is green\"\n      agents notify \"legacy positional still works\"\n\n      # Override channel for this one ping\n      agents notify --text \"fallback\" --channel desktop --to local\n\n      agents notify --text \"probe\" --dry-run --json",
-      "notes": "DEPRECATED. notify ≡ send --to owner and still works, but new callers\n      should use \"agents feed post\" (record + optional broadcast) instead.\n      Set owner.channels + owner.policy.normal in humans.yaml once per fleet.\n      Every channel listed in the normal policy receives an owner-addressed send.\n\n      Owner sends go through the same composer as \"feed post\": the body is\n      short-shaped, any TEAM-N key becomes a Linear URL, and the session crumb\n      becomes a tappable https://prix.dev/console/sessions/<id> link.\n\n      \n  Planes (do not mix them up):\n    send              - DELIVER a message to a recipient (this command)\n    feed post         - RECORD progress / milestones (optional broadcast may call send)\n    activity          - READ the activity stream (not a send path)\n    message / inject  - CONTROL a running agent (mailbox answer or terminal keystroke)\n\n  --to owner is an address alias for notify.owner in agents.yaml, not a\n  special control path. Agent resume / PTY inject stay on message and\n  sessions inject.",
-      "subcommands": []
     },
     {
       "name": "packages",
@@ -19819,7 +19736,7 @@
           "negate": false
         }
       ],
-      "examples": "# Flag-first envelope (preferred)\n      agents send --channel imessage --to \"+18055550100\" --text \"PR #1803 is green\"\n      agents send --to owner --text \"need a decision on the release\"\n      agents send --channel desktop --to local --text \"deploy finished\" --url https://example.com/pr/1\n      agents send --channel mailbox --to <session-id> --text \"peer note\" --from orchestrator\n\n      # Attach a local file\n      agents send --to owner --text \"screenshot\" --attach ./out/cover.png\n\n      # Owner alias without the notify verb\n      agents send --to owner --text \"wiring test\"\n\n      # Legacy positional text still works\n      agents send \"hi\" --channel desktop --to local\n\n      # Dry-run (resolve provider, no delivery)\n      agents send --to owner --text \"probe\" --dry-run --json",
+      "examples": "# Flag-first envelope (preferred)\n      agents send --channel imessage --to \"+18055550100\" --text \"PR #1803 is green\"\n      agents send --to owner --text \"need a decision on the release\"\n      agents send --channel desktop --to local --text \"deploy finished\" --url https://example.com/pr/1\n      agents send --channel mailbox --to <session-id> --text \"peer note\" --from orchestrator\n\n      # Attach a local file\n      agents send --to owner --text \"screenshot\" --attach ./out/cover.png\n\n      # Legacy positional text still works\n      agents send \"hi\" --channel desktop --to local\n\n      # Dry-run (resolve provider, no delivery)\n      agents send --to owner --text \"probe\" --dry-run --json",
       "notes": "Planes (do not mix them up):\n    send              - DELIVER a message to a recipient (this command)\n    feed post         - RECORD progress / milestones (optional broadcast may call send)\n    activity          - READ the activity stream (not a send path)\n    message / inject  - CONTROL a running agent (mailbox answer or terminal keystroke)\n\n  --to owner is an address alias for notify.owner in agents.yaml, not a\n  special control path. Agent resume / PTY inject stay on message and\n  sessions inject.",
       "subcommands": []
     },
@@ -20361,7 +20278,7 @@
         }
       ],
       "examples": "# Search indexed transcripts by topic, file path, or command\n      agents sessions \"add auth middleware\"\n\n      # Read a session as markdown (user + assistant + thinking + tools)\n      agents sessions a1b2c3d4 --markdown\n\n      # Just the user turns — useful for recalling intent\n      agents sessions a1b2c3d4 --include user\n\n      # Show only what's running right now (terminals, teams, cloud, headless)\n      agents sessions --active\n\n      # Filter the live fleet by the status word shown in the roster\n      agents sessions --working\n      agents sessions --idle\n      agents sessions --orphan\n      agents sessions --crashed\n\n      # --- Session lifecycle ---\n      # Get back into a session — attaches a live pane, or recovers an ended one\n      agents sessions resume a1b2c3d4\n      # Same, by the tmux name shown in: agents tmux ls\n      agents sessions resume ag-claude-a1b2c3d4\n      # Attach only — never fork a copy\n      agents sessions resume a1b2c3d4 --attach-only\n      # Multi-select history and open each in a tab\n      agents sessions resume\n      # The other direction: interactive → headless (keep working unattended)\n      agents sessions detach a1b2c3d4\n\n      # The interactive list folds in other online machines automatically,\n      # labelled by host with this machine first. Stay local with --local:\n      agents sessions --local\n\n      # Search across every directory, not just this project\n      agents sessions \"topic\" --all\n\n      # Filter one installed harness version (equivalent forms)\n      agents sessions claude@2.1.181\n      agents sessions --agent claude --version 2.1.181\n\n      # Team-spawned sessions, grouped by team (spawner + spawn time per team,\n      # teammate mode/handle per row; team-flagged spawns with no team record\n      # in a trailing (no team) bucket)\n      agents sessions --teams\n\n      # Who spawned which team: an orchestrator row carries team:<name>, and a\n      # teammate row [<team>/<handle>]. --in-team narrows to one team's lineage.\n      agents sessions --in-team redesign --teams\n\n      # Pick a routine across every directory, then open one of its run sessions\n      agents sessions --routine\n      agents sessions --routine nightly-review\n      agents sessions 2026-07-21T10-30-00-000Z\n\n      # Export for analysis\n      agents sessions --since 30d --limit 200 --json > sessions.json\n\n      # List indexed tool calls in recent Codex sessions on one device\n      agents sessions --include tools --agent codex --device mac-mini --since 7d\n\n      # Each repeated clause must match a different call in the same session\n      agents sessions --include tools --query 'program:git input:merge' --query 'program:gh output:CONFLICT' --fleet --json\n\n      # Count every pre-indexed static git site without reparsing transcripts\n      agents sessions --include tools --query 'program:git' --count --fleet --json\n\n      # Explicitly populate historical tool rows once on every device\n      agents sessions backfill tools --fleet\n\n      # Resolve one historical selector to metadata only, across the fleet\n      agents sessions --resolve d3470b57 --json\n\n      # Search another machine's sessions live over SSH (no sync needed)\n      agents sessions \"auth bug\" --last 3 --device yosemite-s1\n\n      # Fan the same query out across several machines\n      agents sessions --all \"deploy script\" --device box-a --device box-b",
-      "notes": "Session lifecycle — ONE verb gets you back in, it detects the state:\n        resume <id|alias>       live pane -> attach; headless -> foreground; ended -> recover\n        resume <id> --attach-only  attach only; never fork a copy\n        resume                  multi-select history -> open tabs\n        detach <id>             the other direction: interactive -> headless\n        (retired, still working for one release: sessions attach, sessions go, reconnect)\n      - The interactive listing and every live-status flag fold in your other online machines automatically (live over SSH, no sync) — each row is labelled by host, this machine first. Use --local to skip the fan-out; single-id lookups stay local.\n      - --all is not a device flag: it widens historical directory and time filters. Fleet collection is already the default. A status flag (--working/--idle/--waiting/--orphan/--crashed/--closed/--abandoned/--queued/--unknown) implies --active; combine status flags for a union.\n      - --version <version> requires --agent and is equivalent to --agent <agent@version>.\n      - --device runs the query on the remote's own index over SSH (host alias or user@host); repeat or pass several to fan out. SSH access is the only auth.\n      - --in-team matches both ends of the lineage: the session that ran 'agents teams create/add', and (with --teams) that team's teammates. In the interactive list, 't' cycles the same filter over the teams in view.\n      - --include and --exclude are mutually exclusive.\n      - With --include tools, repeat --query for same-session AND across distinct calls. Fields: tool, program, input, output, status, exit, error.\n      - --count accepts exactly one program:<name> clause and reports static source occurrences, containing tool calls, and sessions.\n      - Tool queries read SQLite only. Run 'agents sessions backfill tools' once for historical transcripts; normal scans index new and changed sessions.\n      - Tool evidence is redacted and bounded before it reaches SQLite. --markdown and --no-redact conflict with --include tools.\n      - Tool queries accept 32 clauses (4 KiB each), --limit 1–1,000, and at most 8 MiB of materialized evidence.\n      - --first and --last are mutually exclusive.\n      - A filter flag (--include/--exclude/--first/--last) without --markdown/--json defaults to --markdown output.\n      - --cloud sources from Rush Cloud captured runs instead of local disk.\n      - --routine [name] spans every directory and shows transcripts archived from routine runs. On a TTY, omit the name to pick a routine; a name accepts exact, substring, or unambiguous typo matches. --routines is an alias. Routine rows also resolve by run id.\n      - Without --teams, team-spawned sessions are hidden by default.",
+      "notes": "Session lifecycle — ONE verb gets you back in, it detects the state:\n        resume <id|alias>       live pane -> attach; headless -> foreground; ended -> recover\n        resume <id> --attach-only  attach only; never fork a copy\n        resume                  multi-select history -> open tabs\n        detach <id>             the other direction: interactive -> headless\n      - The interactive listing and every live-status flag fold in your other online machines automatically (live over SSH, no sync) — each row is labelled by host, this machine first. Use --local to skip the fan-out; single-id lookups stay local.\n      - --all is not a device flag: it widens historical directory and time filters. Fleet collection is already the default. A status flag (--working/--idle/--waiting/--orphan/--crashed/--closed/--abandoned/--queued/--unknown) implies --active; combine status flags for a union.\n      - --version <version> requires --agent and is equivalent to --agent <agent@version>.\n      - --device runs the query on the remote's own index over SSH (host alias or user@host); repeat or pass several to fan out. SSH access is the only auth.\n      - --in-team matches both ends of the lineage: the session that ran 'agents teams create/add', and (with --teams) that team's teammates. In the interactive list, 't' cycles the same filter over the teams in view.\n      - --include and --exclude are mutually exclusive.\n      - With --include tools, repeat --query for same-session AND across distinct calls. Fields: tool, program, input, output, status, exit, error.\n      - --count accepts exactly one program:<name> clause and reports static source occurrences, containing tool calls, and sessions.\n      - Tool queries read SQLite only. Run 'agents sessions backfill tools' once for historical transcripts; normal scans index new and changed sessions.\n      - Tool evidence is redacted and bounded before it reaches SQLite. --markdown and --no-redact conflict with --include tools.\n      - Tool queries accept 32 clauses (4 KiB each), --limit 1–1,000, and at most 8 MiB of materialized evidence.\n      - --first and --last are mutually exclusive.\n      - A filter flag (--include/--exclude/--first/--last) without --markdown/--json defaults to --markdown output.\n      - --cloud sources from Rush Cloud captured runs instead of local disk.\n      - --routine [name] spans every directory and shows transcripts archived from routine runs. On a TTY, omit the name to pick a routine; a name accepts exact, substring, or unambiguous typo matches. --routines is an alias. Routine rows also resolve by run id.\n      - Without --teams, team-spawned sessions are hidden by default.",
       "subcommands": [
         {
           "name": "backfill",
@@ -21771,7 +21688,7 @@
             }
           ],
           "examples": "# Strict resume by full id (former top-level agents resume)\n      agents sessions resume 019fd0c8-b3e9-77a2-a1a4-444698c4d897\n      agents sessions resume 019fd0c8-b3e9-77a2-a1a4-444698c4d897 \"finish the tests\"\n      agents sessions resume ag-codex-c1f3d813 --mode edit\n\n      # Pick several sessions; each opens in its own tab\n      agents sessions resume\n\n      # Pre-filter the pool before selecting (space in the filter → use [query])\n      agents sessions resume \"auth middleware\"\n\n      # Reopen one session from any device by UUID prefix or tmux alias\n      agents sessions resume 019fd114\n      agents sessions resume ag-codex-c1f3d813\n\n      # Attach a living pane only — never resume a copy (the old go)\n      agents sessions resume 019fd114 --attach-only\n\n      # Force a backend / side-by-side splits / a remote host\n      agents sessions resume --ghostty\n      agents sessions resume --vscodium\n      agents sessions resume --splits\n      agents sessions resume --device zion --tmux",
-          "notes": "- Strict path (id/tmux alias/label + optional prompt/--mode/--headless/--here): restores the harness, device, account, cwd, model, and mode using the installed binary. Searches the fleet; a local full-id hit resumes with zero SSH. Replaces the former top-level agents sessions resume.\n      - Attach a live pane without forking: agents sessions focus <id>.\n      - This is the ONE verb for getting back in. It detects the state: a live tmux pane is attached, a headless session comes to the foreground, an ended one recovers on its owning device.\n      - A UUID/prefix or ag-<agent>-<suffix> alias bypasses the picker. A live alias attaches by name even when the session index cannot attribute it.\n      - Retired spellings still work for one release and print the replacement: sessions attach, sessions go, reconnect.\n      - Going the other way (foreground -> background) is 'agents sessions detach <id>'.\n      - With no identity selector, space toggles a session, enter confirms, and tab toggles the preview pane.\n      - Layout: one tab per session by default. --splits packs session pairs side by side in each tab.\n      - Backend: auto-detected from the terminal you're in (iTerm / Ghostty / tmux); override with --iterm/--ghostty/--tmux/--vscodium.\n      - --vscodium opens each session as an agent terminal tab in VSCodium via the swarm-ext extension (works with --device too).\n      - --device <alias> opens the terminal surface on that device only when it is the selected sessions' origin; recovery never migrates a session to another device.\n      - Recovery uses the installed harness and the conversation's account on its origin device. Context replay requires an explicit choice.\n      - Local picks without transcripts are skipped before opening a tab. Remote picks are validated on their origin device.\n      - agents run claude --resume opens this same picker; claude#work filters it with --account work.",
+          "notes": "- Strict path (id/tmux alias/label + optional prompt/--mode/--headless/--here): restores the harness, device, account, cwd, model, and mode using the installed binary. Searches the fleet; a local full-id hit resumes with zero SSH. Replaces the former top-level agents sessions resume.\n      - Attach a live pane without forking: agents sessions focus <id>.\n      - This is the ONE verb for getting back in. It detects the state: a live tmux pane is attached, a headless session comes to the foreground, an ended one recovers on its owning device.\n      - A UUID/prefix or ag-<agent>-<suffix> alias bypasses the picker. A live alias attaches by name even when the session index cannot attribute it.\n      - Going the other way (foreground -> background) is 'agents sessions detach <id>'.\n      - With no identity selector, space toggles a session, enter confirms, and tab toggles the preview pane.\n      - Layout: one tab per session by default. --splits packs session pairs side by side in each tab.\n      - Backend: auto-detected from the terminal you're in (iTerm / Ghostty / tmux); override with --iterm/--ghostty/--tmux/--vscodium.\n      - --vscodium opens each session as an agent terminal tab in VSCodium via the swarm-ext extension (works with --device too).\n      - --device <alias> opens the terminal surface on that device only when it is the selected sessions' origin; recovery never migrates a session to another device.\n      - Recovery uses the installed harness and the conversation's account on its origin device. Context replay requires an explicit choice.\n      - Local picks without transcripts are skipped before opening a tab. Remote picks are validated on their origin device.\n      - agents run claude --resume opens this same picker; claude#work filters it with --account work.",
           "subcommands": []
         },
         {
