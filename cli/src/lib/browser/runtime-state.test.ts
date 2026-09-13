@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import { execFileSync, spawn } from 'child_process';
+import { execFileSync, spawn, type ChildProcess } from 'child_process';
 import {
   writeProfileRuntime,
   readProfileRuntime,
@@ -12,6 +12,7 @@ import {
   listProfileCacheDirs,
   listAllProfileSnapshots,
   isProcessAlive,
+  liveProcessCommand,
   reapOrphanedProcesses,
   adoptProfileRuntimeOwner,
   isProfileInUse,
@@ -26,20 +27,72 @@ import { getBrowserRuntimeDir, getProfileRuntimeDir } from './profiles.js';
 let prefix: string;
 const created: string[] = [];
 
-// Use whatever `ps` reports for THIS process — that's what the matcher
-// compares against at runtime. Test runners (vitest, bun) set process.title,
-// which mutates /proc/<pid>/comm on Linux, so `path.basename(process.execPath)`
-// disagrees with the live ps output. Fall back to execPath basename if `ps`
-// is unavailable.
-function currentProcessCommand(): string {
-  try {
-    const out = execFileSync('ps', ['-p', String(process.pid), '-o', 'comm='], {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
-    if (out) return path.basename(out);
-  } catch { /* fall through */ }
-  return path.basename(process.execPath);
+// Record whatever the OS actually reports for a pid — that is exactly what
+// `matchesCommand` compares against at runtime, and it differs per platform and
+// per runtime: Linux `ps -o comm=` prints the *thread* name, so a Node 24 child
+// reports `MainThread` rather than `node`, while Windows `tasklist` prints
+// `node.exe`. Guessing from `process.execPath` gets all of these wrong, so reuse
+// the production probe instead of a second copy of the same branching.
+function liveCommandOf(pid: number = process.pid): string {
+  return path.basename(liveProcessCommand(pid) ?? process.execPath);
+}
+
+/**
+ * Real long-lived children spawned by a test, torn down in `afterEach`.
+ *
+ * Registering at spawn time (rather than a per-test `finally`) is what makes the
+ * teardown unconditional: a child spawned before the `try`, or a test that fails
+ * an assertion mid-body, is still killed and still awaited.
+ */
+const children: ChildProcess[] = [];
+
+/**
+ * A REAL long-lived process, recorded the way a launched browser is.
+ *
+ * Not a mock and not a stand-in for CDP: the reaper's entire decision is "is this
+ * pid alive and does it still run the command we recorded", so a real process with
+ * a real recorded command is the faithful subject. The CDP/tab-target half of the
+ * contract belongs to the live-browser suite.
+ *
+ * It runs this runtime's own executable rather than POSIX `sleep`, so the suite is
+ * portable to Windows, where there is no `sleep` and `matchesCommand` reads
+ * `tasklist` instead of `ps`.
+ */
+function spawnLive(): LiveProcess {
+  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 3_600_000)'], {
+    stdio: 'ignore',
+  });
+  children.push(child);
+  const pid = child.pid!;
+  // Probe now, while it is certainly alive: a dead pid reports nothing, and a
+  // test that asserts a process was reaped still needs the command it had.
+  return { child, pid, command: liveCommandOf(pid) };
+}
+
+interface LiveProcess {
+  child: ChildProcess;
+  pid: number;
+  /** What the OS reports for this pid, probed while it was alive. */
+  command: string;
+}
+
+/** Kill every tracked child and WAIT for it to actually exit. */
+async function killTrackedChildren(): Promise<void> {
+  const pending = children.splice(0);
+  await Promise.all(
+    pending.map(
+      (child) =>
+        new Promise<void>((resolve) => {
+          if (child.exitCode !== null || child.signalCode !== null) return resolve();
+          child.once('exit', () => resolve());
+          try {
+            child.kill('SIGKILL');
+          } catch {
+            resolve();
+          }
+        }),
+    ),
+  );
 }
 
 function uniq(base: string): string {
@@ -52,7 +105,8 @@ beforeEach(() => {
   prefix = `tst-${crypto.randomBytes(6).toString('hex')}`;
 });
 
-afterEach(() => {
+afterEach(async () => {
+  await killTrackedChildren();
   const root = getBrowserRuntimeDir();
   for (const name of created) {
     const dir = path.join(root, name);
@@ -64,7 +118,7 @@ afterEach(() => {
 describe('writeProfileRuntime + readProfileRuntime', () => {
   it('round-trips pid/port/command for a live process', () => {
     const name = uniq('p1');
-    const command = currentProcessCommand();
+    const command = liveCommandOf();
     writeProfileRuntime(name, { pid: process.pid, port: 9222, command });
     const got = readProfileRuntime(name);
     expect(got).toEqual({ pid: process.pid, port: 9222, command });
@@ -98,7 +152,7 @@ describe('writeProfileRuntime + readProfileRuntime', () => {
 
   it('does not persist a CDP port for pipe-launched browsers', () => {
     const name = uniq('pipe');
-    writeProfileRuntime(name, { pid: process.pid, command: currentProcessCommand() });
+    writeProfileRuntime(name, { pid: process.pid, command: liveCommandOf() });
     const dir = getProfileRuntimeDir(name);
 
     expect(fs.existsSync(path.join(dir, 'port'))).toBe(false);
@@ -176,7 +230,7 @@ describe('readProfileRuntimeMeta', () => {
     writeProfileRuntime(name, {
       pid: process.pid,
       port: 9222,
-      command: currentProcessCommand(),
+      command: liveCommandOf(),
       kind: 'browser',
       userDataDir: '/tmp/nope',
     });
@@ -231,56 +285,46 @@ describe('reapOrphanedProcesses', () => {
 });
 
 describe('reapOrphanedProcesses preserves a live browser across daemon replacement', () => {
-  /**
-   * A REAL long-lived child, recorded the way a launched browser is.
-   *
-   * Not a mock and not a stand-in for CDP: the reaper's whole decision is
-   * "is this pid alive and does it still run the command we recorded", so a real
-   * process with a real recorded command is the faithful subject. The CDP/tab-target
-   * half of the contract is covered by the live-browser suite.
-   */
   function spawnRecorded(name: string, extra: Partial<Parameters<typeof writeProfileRuntime>[1]> = {}) {
-    // `sleep` outlives the test and matches its own recorded command.
-    const child = spawn('sleep', ['300'], { stdio: 'ignore' });
+    const live = spawnLive();
     writeProfileRuntime(name, {
-      pid: child.pid!,
+      pid: live.pid,
       port: 9222,
-      command: 'sleep',
+      command: live.command,
       daemonPid: 999997, // a dead daemon: the replacement case
       ...extra,
     });
-    return child;
+    return live;
   }
 
-  it('does NOT signal a live local browser, and leaves its record intact', async () => {
+  it('does NOT signal a live local browser, and leaves its record intact', () => {
     const name = uniq('live');
-    const child = spawnRecorded(name);
-    try {
-      const before = readProfileRuntimeMeta(name)!;
-      const result = reapOrphanedProcesses();
+    const live = spawnRecorded(name);
+    const before = readProfileRuntimeMeta(name)!;
 
-      // The process is untouched — this is the bug: it used to be SIGTERMed.
-      expect(isProcessAlive(child.pid!, 'sleep')).toBe(true);
-      expect(result.reaped).toBe(0);
-      expect(result.details.join(' ')).toContain(`preserved live browser ${child.pid}`);
+    const result = reapOrphanedProcesses();
 
-      // The record survives whole, so the next attach can still find the port.
-      const after = readProfileRuntimeMeta(name)!;
-      expect(after).toEqual(before);
-      // Ownership is deliberately NOT adopted here: only a proven attach may.
-      expect(after.daemonPid).toBe(999997);
-    } finally { child.kill('SIGKILL'); }
+    // The process is untouched — this is the bug: it used to be SIGTERMed.
+    expect(isProcessAlive(live.pid, live.command)).toBe(true);
+    expect(result.reaped).toBe(0);
+    expect(result.details.join(' ')).toContain(`preserved live browser ${live.pid}`);
+
+    // The record survives whole, so the next attach can still find the port.
+    const after = readProfileRuntimeMeta(name)!;
+    expect(after).toEqual(before);
+    // Ownership is deliberately NOT adopted here: only a proven attach may.
+    expect(after.daemonPid).toBe(999997);
   });
 
-  it('is idempotent — a second replacement still preserves it', async () => {
+  it('is idempotent — a second replacement still preserves it', () => {
     const name = uniq('live-twice');
-    const child = spawnRecorded(name);
-    try {
-      reapOrphanedProcesses();
-      reapOrphanedProcesses();
-      expect(isProcessAlive(child.pid!, 'sleep')).toBe(true);
-      expect(readProfileRuntimeMeta(name)).not.toBeNull();
-    } finally { child.kill('SIGKILL'); }
+    const live = spawnRecorded(name);
+
+    reapOrphanedProcesses();
+    reapOrphanedProcesses();
+
+    expect(isProcessAlive(live.pid, live.command)).toBe(true);
+    expect(readProfileRuntimeMeta(name)).not.toBeNull();
   });
 
   it('still clears a DEAD browser record, without signalling anything', () => {
@@ -290,7 +334,9 @@ describe('reapOrphanedProcesses preserves a live browser across daemon replaceme
     fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({
       pid: 999998, port: 9222, command: 'node', daemonPid: 999997,
     }));
+
     const result = reapOrphanedProcesses();
+
     expect(readProfileRuntimeMeta(name)).toBeNull();
     // Nothing was alive, so nothing was reaped — the record was merely stale.
     expect(result.reaped).toBe(0);
@@ -299,33 +345,37 @@ describe('reapOrphanedProcesses preserves a live browser across daemon replaceme
 
   it('treats a recycled pid as dead, because the command no longer matches', () => {
     const name = uniq('recycled');
-    const child = spawn('sleep', ['300'], { stdio: 'ignore' });
-    try {
-      // Alive pid, but recorded as a DIFFERENT command — not our browser.
-      writeProfileRuntime(name, { pid: child.pid!, port: 9222, command: 'definitely-not-sleep', daemonPid: 999997 });
-      reapOrphanedProcesses();
-      // Cleared as stale, and crucially the unrelated process is left running.
-      expect(readProfileRuntimeMeta(name)).toBeNull();
-      expect(isProcessAlive(child.pid!, 'sleep')).toBe(true);
-    } finally { child.kill('SIGKILL'); }
+    const live = spawnLive();
+    // Alive pid, but recorded as a DIFFERENT command — not our browser.
+    writeProfileRuntime(name, {
+      pid: live.pid, port: 9222, command: 'definitely-not-this-runtime', daemonPid: 999997,
+    });
+
+    reapOrphanedProcesses();
+
+    // Cleared as stale, and crucially the unrelated process is left running.
+    expect(readProfileRuntimeMeta(name)).toBeNull();
+    expect(isProcessAlive(live.pid, live.command)).toBe(true);
   });
 
   it('reaps a stale tunnel — that IS an orphan — and clears only that record', async () => {
     const name = uniq('tunnel');
-    const tunnel = spawn('sleep', ['300'], { stdio: 'ignore' });
+    const tunnel = spawnLive();
     writeProfileRuntime(name, {
       pid: 0,                 // a tunnel record's `pid` is the REMOTE browser
       port: 9222,
-      command: 'sleep',
+      command: tunnel.command,
       kind: 'tunnel',
-      tunnelPid: tunnel.pid!,
+      tunnelPid: tunnel.pid,
       daemonPid: 999997,
     });
+
     const result = reapOrphanedProcesses();
+
     expect(result.details.join(' ')).toContain(`reaped tunnel ${tunnel.pid}`);
     expect(result.reaped).toBe(1);
     // A local ssh -L cannot outlive its purpose, so it really is signalled.
-    await vi.waitFor(() => expect(isProcessAlive(tunnel.pid!, 'sleep')).toBe(false), { timeout: 5_000 });
+    await vi.waitFor(() => expect(isProcessAlive(tunnel.pid, tunnel.command)).toBe(false), { timeout: 5_000 });
     expect(readProfileRuntimeMeta(name)).toBeNull();
   });
 
@@ -333,49 +383,49 @@ describe('reapOrphanedProcesses preserves a live browser across daemon replaceme
     // The old code shared one kill path for both, which is how a live browser got
     // caught by tunnel cleanup.
     const name = uniq('both');
-    const browser = spawn('sleep', ['300'], { stdio: 'ignore' });
-    const tunnel = spawn('sleep', ['300'], { stdio: 'ignore' });
-    try {
-      writeProfileRuntime(name, {
-        pid: browser.pid!, port: 9222, command: 'sleep',
-        kind: 'browser', tunnelPid: tunnel.pid!, daemonPid: 999997,
-      });
-      reapOrphanedProcesses();
-      await vi.waitFor(() => expect(isProcessAlive(tunnel.pid!, 'sleep')).toBe(false), { timeout: 5_000 });
-      expect(isProcessAlive(browser.pid!, 'sleep')).toBe(true);
-      // The browser record survives so it remains re-attachable.
-      expect(readProfileRuntimeMeta(name)).not.toBeNull();
-    } finally { browser.kill('SIGKILL'); tunnel.kill('SIGKILL'); }
+    const browser = spawnLive();
+    const tunnel = spawnLive();
+    writeProfileRuntime(name, {
+      pid: browser.pid, port: 9222, command: browser.command,
+      kind: 'browser', tunnelPid: tunnel.pid, daemonPid: 999997,
+    });
+
+    reapOrphanedProcesses();
+
+    await vi.waitFor(() => expect(isProcessAlive(tunnel.pid, tunnel.command)).toBe(false), { timeout: 5_000 });
+    expect(isProcessAlive(browser.pid, browser.command)).toBe(true);
+    // The browser record survives so it remains re-attachable.
+    expect(readProfileRuntimeMeta(name)).not.toBeNull();
   });
 });
 
 describe('adoptProfileRuntimeOwner', () => {
   it('rewrites daemonPid ALONE, retaining the original launch metadata', () => {
     const name = uniq('adopt');
-    const child = spawn('sleep', ['300'], { stdio: 'ignore' });
-    try {
-      writeProfileRuntime(name, {
-        pid: child.pid!, port: 9333, command: 'sleep',
-        userDataDir: '/tmp/udd-original', kind: 'browser',
-        spawnedAt: 1_700_000_000_000, daemonPid: 999997,
-      });
-      const before = readProfileRuntimeMeta(name)!;
+    const live = spawnLive();
+    writeProfileRuntime(name, {
+      pid: live.pid, port: 9333, command: live.command,
+      userDataDir: '/tmp/udd-original', kind: 'browser',
+      spawnedAt: 1_700_000_000_000, daemonPid: 999997,
+    });
+    const before = readProfileRuntimeMeta(name)!;
 
-      expect(adoptProfileRuntimeOwner(name, 4242)).toBe(true);
+    expect(adoptProfileRuntimeOwner(name, 4242)).toBe(true);
 
-      const after = readProfileRuntimeMeta(name)!;
-      expect(after.daemonPid).toBe(4242);
-      // Everything else is the ORIGINAL launch's provenance and must be intact —
-      // the reaper and the hygiene pass both read these.
-      expect({ ...after, daemonPid: undefined }).toEqual({ ...before, daemonPid: undefined });
-    } finally { child.kill('SIGKILL'); }
+    const after = readProfileRuntimeMeta(name)!;
+    expect(after.daemonPid).toBe(4242);
+    // Everything else is the ORIGINAL launch's provenance and must be intact —
+    // the reaper and the hygiene pass both read these.
+    expect({ ...after, daemonPid: undefined }).toEqual({ ...before, daemonPid: undefined });
   });
 
   it('is a no-op when this daemon already owns it', () => {
     const name = uniq('adopt-own');
-    writeProfileRuntime(name, { pid: 1, port: 9334, command: 'sleep' });
+    writeProfileRuntime(name, { pid: 1, port: 9334, command: liveCommandOf() });
     expect(readProfileRuntimeMeta(name)!.daemonPid).toBe(process.pid);
+
     expect(adoptProfileRuntimeOwner(name)).toBe(true);
+
     expect(readProfileRuntimeMeta(name)!.daemonPid).toBe(process.pid);
   });
 
@@ -392,7 +442,7 @@ describe('isProcessAlive', () => {
   });
 
   it('returns true for the current process when command matches', () => {
-    expect(isProcessAlive(process.pid, currentProcessCommand())).toBe(true);
+    expect(isProcessAlive(process.pid, liveCommandOf())).toBe(true);
   });
 
   it('returns false for the current process when command does NOT match', () => {
@@ -473,7 +523,7 @@ describe('isProfileInUse', () => {
 
   it('is true while a live browser process is recorded', () => {
     const name = uniq('live');
-    writeProfileRuntime(name, { pid: process.pid, port: 9222, command: currentProcessCommand() });
+    writeProfileRuntime(name, { pid: process.pid, port: 9222, command: liveCommandOf() });
     expect(isProfileInUse(name)).toBe(true);
   });
 
@@ -489,7 +539,7 @@ describe('isProfileInUse', () => {
     const name = uniq('composite');
     const fork = `${name}@endpoint-0`;
     created.push(fork);
-    writeProfileRuntime(fork, { pid: process.pid, port: 9222, command: currentProcessCommand() });
+    writeProfileRuntime(fork, { pid: process.pid, port: 9222, command: liveCommandOf() });
     expect(isProfileInUse(name)).toBe(true);
   });
 
@@ -571,7 +621,7 @@ describe('planProfilePrune', () => {
 
   it('never removes a profile that is in use, even with no binary here', () => {
     const name = uniq('busy');
-    writeProfileRuntime(name, { pid: process.pid, port: 9222, command: currentProcessCommand() });
+    writeProfileRuntime(name, { pid: process.pid, port: 9222, command: liveCommandOf() });
     const plan = planProfilePrune([local(name, false)]);
     expect(plan.candidates).toEqual([]);
     expect(plan.kept[0].why).toMatch(/in use/);

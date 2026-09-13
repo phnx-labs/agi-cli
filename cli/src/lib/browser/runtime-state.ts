@@ -678,7 +678,7 @@ function matchesCommand(pid: number, expectedCommand: string): boolean {
  * determined. The process-listing API differs per OS: Windows has no `ps`, so
  * we query `tasklist` (CSV image name in column 1); POSIX uses `ps -o comm=`.
  */
-function liveProcessCommand(pid: number): string | null {
+export function liveProcessCommand(pid: number): string | null {
   try {
     if (process.platform === 'win32') {
       const out = execFileSync('tasklist', ['/FI', `PID eq ${pid}`, '/NH', '/FO', 'CSV'], {
