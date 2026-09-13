@@ -664,6 +664,36 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
     expect(log).toContain('mcp add docs --url https://developers.openai.com/mcp');
   });
 
+  it('umbrella sync --local reconciles HTTP MCPs from the manifest to Codex with --url', () => {
+    const home = makeTempHome();
+    const logPath = path.join(home, 'mcp-http-reconcile.log');
+    tempHomes.push(home);
+    writeLoggingManagedVersion(home, 'codex', '0.2.0', 'codex', logPath);
+
+    const addResult = runAgents(home, [
+      'mcp',
+      'add',
+      'docs',
+      'https://developers.openai.com/mcp',
+      '--transport',
+      'http',
+      '--agents',
+      'codex@0.2.0',
+    ]);
+    expect(addResult.status).toBe(0);
+    // Only the reconcile stage's calls count: bare `agents sync` reaches MCP
+    // registration through refresh(), which skipped every HTTP server.
+    fs.writeFileSync(logPath, '');
+
+    const syncResult = runAgents(home, ['sync', '--local', '--yes']);
+    const log = fs.readFileSync(logPath, 'utf-8');
+
+    expect(syncResult.status, `${syncResult.stdout}\n${syncResult.stderr}`).toBe(0);
+    expect(syncResult.stdout).toContain('docs -> Codex@0.2.0');
+    expect(log).toContain(path.join(home, '.agents', '.history', 'versions', 'codex', '0.2.0', 'home'));
+    expect(log).toContain('mcp add docs --url https://developers.openai.com/mcp');
+  });
+
   it('removes MCPs only from the requested explicit version target', () => {
     const home = makeTempHome();
     const logPath = path.join(home, 'mcp-remove.log');
