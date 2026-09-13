@@ -319,11 +319,11 @@ The commands read like the task, object first:
 | `agents accounts add <harness> [name]` | The onboarding verb: one managed install (reused) + a fresh credential SLOT (HOME-shaped, no binary) + native login in the slot + fleet-wide row + durable worker credential (claude: `setup-token` driven in the slot; codex/grok/cursor/opencode: `--api-key` or a prompt; codex `--per-device` for a ChatGPT-plan seat; kimi/antigravity log in per box). **Headed devices only** — on a worker it refuses before any slot, install, or browser; workers are provisioned automatically from the minted credential. Idempotent: an already-registered name or identity points at `accounts login`. |
 | `agents accounts add <name> --provider <p> --auth <t>` | Provider form (first arg NOT a harness id): store a durable provider credential account. Mixing the two forms (harness id + `--provider`) fails loud as ambiguous. |
 | `agents accounts login <harness>#<name>` | Re-auth into the SAME slot (never a new home); fails closed on a different identity; re-mints + re-syncs the worker credential. On a per-device harness any box may run it — that is how that box logs in. |
-| `agents accounts default <harness> [name]` | The one write path for the fleet-wide per-harness default (picker with no name, `--json` to list or report). The hidden `set-default`/`switch` share it. |
+| `agents accounts default <harness> [name]` | The one write path for the fleet-wide per-harness default (picker with no name, `--json` to list or report). The deleted `set-default`/`switch` verbs used to share it. |
 | `agents accounts view <account>` (alias `inspect`) | Show one account — kind, custody, and its attachments. Target may be `<harness>#<name>` when the same name exists for several harnesses; an ambiguous bare name is refused, never guessed. |
 | `agents accounts rename <old> <new>` / `remove <name>` | Rename or remove either kind. Target may be `<harness>#<name>` when the same name exists for several harnesses; an ambiguous bare name is refused, never guessed. `remove` refuses while a binding, a per-harness default, or a harness profile still references the account |
 | `agents accounts sync <account> <device>` | Copy a provider account bundle to a worker (native records have no bytes to copy) |
-| hidden: `connect`, `name`, `label`, `mint`, `attach`, `detach`, `switch`, `set-default` | Still execute for one release and print the pointer to their replacement (`add` / `login` / `default` / `run <harness>#<name>`). |
+| deleted: `connect`, `name`, `label`, `mint`, `attach`, `detach`, `switch`, `set-default` | Use `add` / `login` / `default` / `run <harness>#<name>` instead. |
 
 `--json` (`agents accounts --json`, `accounts list --json`) is the version 2
 account schema: `{ version: 2, accounts: AccountListEntryJson[] }`. Each entry
@@ -346,8 +346,8 @@ RUSH-2581.)
 consulted after an exact `agent@version` or device-scoped binding.
 `agents accounts default <harness>` (optional `[name]`, `--json`) is the one
 write path (picker with no name): it lists named accounts with usage / headroom /
-signed-out state and writes the default. The hidden `set-default` and `switch`
-verbs share that path. No extra persistent state.
+signed-out state and writes the default. The deleted `set-default` and `switch`
+verbs used to share that path. No extra persistent state.
 `resolveAccountSelection` orders resolution: explicit `--account` → exact target
 binding → device-scoped binding → per-harness default. Runtime injection of the
 resolved account (live-fingerprint validation for native, env for provider) and

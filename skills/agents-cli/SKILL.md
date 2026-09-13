@@ -64,14 +64,14 @@ pick which one a run uses. `agents accounts` is the surface.
 # See every native login and named account bundle
 agents accounts list
 
-# Label a signed-in login so you can select it by name later
-agents accounts label claude@2.1.220 work
+# Add a second named login for a harness (runs native login into its own slot)
+agents accounts add claude work
 
 # Run on a specific account for just this one run
 agents run claude --account work "audit the auth middleware"
 
-# Switch the default account for a harness
-agents accounts switch claude work
+# Set the default account for a harness
+agents accounts default claude work
 
 # Spread load automatically across the accounts you're signed into
 agents run claude -b "fix the failing test"     # -b = --strategy balanced
