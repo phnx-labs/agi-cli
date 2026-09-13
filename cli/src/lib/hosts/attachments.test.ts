@@ -95,11 +95,14 @@ describe('validateAttachments', () => {
     const link = path.join(FIXTURES, 'latest.mov');
     fs.symlinkSync(real, link);
     const [attachment] = await validateAttachments([link]);
+    // The digest is the TARGET's bytes (every read here dereferences), while the
+    // path and name stay as typed — scp into a slot dir carries the source
+    // basename, so a resolved path would transfer `recording-…mov` and then fail
+    // verifying `latest.mov`.
     expect(attachment.sha256).toBe(sha256('linked'));
-    // The bytes come from the target — a hardlink to the link itself would
-    // stage a pointer back into the operator's tree, not the file.
-    expect(attachment.localPath).toBe(real);
+    expect(attachment.localPath).toBe(link);
     expect(attachment.name).toBe('latest.mov');
+    expect(real).not.toBe(link);
   });
 
   it('rejects an empty file', async () => {
@@ -329,7 +332,7 @@ describe('the remote staging protocol, executed by a real shell', () => {
  * `~/.ssh/config` (where the fleet aliases live) is not readable here. An alias
  * fails at connect for a reason that has nothing to do with the transport.
  *
- *   AGENTS_TEST_ATTACH_HOST=muqsit@100.82.16.108 bunx vitest run src/lib/hosts/attachments.test.ts
+ *   AGENTS_TEST_ATTACH_HOST=user@198.51.100.7 bunx vitest run src/lib/hosts/attachments.test.ts
  */
 const REMOTE_TARGET = process.env.AGENTS_TEST_ATTACH_HOST;
 describe.skipIf(!REMOTE_TARGET)('stageAttachmentsOnHost against a real peer', () => {
@@ -358,6 +361,27 @@ describe.skipIf(!REMOTE_TARGET)('stageAttachmentsOnHost against a real peer', ()
     // Teardown really removed it — staging does not accumulate on the worker.
     const listing = spawnSync('ssh', [target, `ls -d -- ${JSON.stringify(staged.dir)}`], { encoding: 'utf-8' });
     expect(listing.status).not.toBe(0);
+  }, 120_000);
+
+  it('transfers a symlinked attachment under the typed name, with the target bytes', async () => {
+    const { stageAttachmentsOnHost, removeRemoteStaging } = await import('./attachments.js');
+    const target = REMOTE_TARGET!;
+    const host = { name: target, provider: 'local', status: 'online', dispatchable: true } as never;
+
+    const dir = path.join(FIXTURES, 'remote-sym');
+    const real = fixture('recording-2026-09-13.mov', 'symlinked target bytes', dir);
+    const link = path.join(dir, 'latest.mov');
+    fs.symlinkSync(real, link);
+
+    const staged = await stageAttachmentsOnHost(host, await validateAttachments([link]), { target });
+    try {
+      // The peer must hold `latest.mov`, not the link's dated target name.
+      expect(path.basename(staged.files[0].path)).toBe('latest.mov');
+      const remote = execFileSync('ssh', [target, `sha256sum < ${JSON.stringify(staged.files[0].path)}`], { encoding: 'utf-8' });
+      expect(remote.trim().split(/\s+/)[0]).toBe(sha256('symlinked target bytes'));
+    } finally {
+      removeRemoteStaging(target, staged.dir);
+    }
   }, 120_000);
 
   it('fails before dispatch when a file vanishes between validation and transfer', async () => {

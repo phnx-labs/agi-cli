@@ -70,15 +70,23 @@ export interface ResolvedAttachment {
   /** The `--attach` value exactly as typed, for error messages. */
   input: string;
   /**
-   * Absolute, symlink-RESOLVED path on the machine that parsed the flag. Resolved
-   * because `link(2)` does not dereference: hardlinking a symlink would stage a
-   * dangling pointer back at the operator's tree rather than the file's bytes.
+   * Absolute path exactly as the operator named it — NOT symlink-resolved.
+   *
+   * Every consumer here dereferences: `stat`, the sha256 read, `copyFileSync`,
+   * and `scp` all follow a symlink to its target. Resolving it would only change
+   * the BASENAME, and the basename is load-bearing — `scp` into a slot directory
+   * carries the source's own name, and the verification script looks for
+   * {@link name}. Resolving here made those two disagree, so `latest.mov ->
+   * dated.mov` transferred `dated.mov` and then failed verifying `latest.mov`.
+   *
+   * Nothing hardlinks this path, which is the one operation that would NOT
+   * dereference (`link(2)`) — local staging copies, deliberately.
    */
   localPath: string;
   /**
    * Basename the operator pointed AT, preserved byte-exact — spaces, quotes and
-   * Unicode included. Taken before symlink resolution, so attaching
-   * `~/latest.mov` shows the agent `latest.mov` rather than the dated real name.
+   * Unicode included. Attaching `~/latest.mov` shows the agent `latest.mov`
+   * rather than whatever dated name the link resolves to.
    */
   name: string;
   bytes: number;
@@ -137,12 +145,10 @@ export async function validateAttachments(inputs: string[]): Promise<ResolvedAtt
     const abs = path.resolve(expanded);
 
     let stat: fs.Stats;
-    let real: string;
     try {
       // statSync follows symlinks: a link to a real file is a legitimate
       // attachment, a dangling one lands here as ENOENT like any missing path.
       stat = fs.statSync(abs);
-      real = fs.realpathSync(abs);
     } catch {
       throw new AttachmentError(`--attach ${input}: no such file (${abs}).`);
     }
@@ -165,13 +171,12 @@ export async function validateAttachments(inputs: string[]): Promise<ResolvedAtt
     } catch {
       throw new AttachmentError(`--attach ${input}: not readable (${abs}).`);
     }
-    // From the path the operator typed, not the realpath — see `name` above.
     const name = path.basename(abs);
     if (CONTROL_CHARS_RE.test(name)) {
       throw new AttachmentError(`--attach ${input}: the filename contains a control character, which cannot be transferred safely. Rename the file.`);
     }
 
-    resolved.push({ input, localPath: real, name, bytes: stat.size, sha256: await sha256File(real) });
+    resolved.push({ input, localPath: abs, name, bytes: stat.size, sha256: await sha256File(abs) });
   }
   return resolved;
 }
@@ -354,6 +359,10 @@ function sshFailure(host: Host, what: string, res: { code: number | null; stdout
  * target makes scp carry the basename inside the transfer protocol, so a name
  * with spaces or quotes is never re-parsed by the remote shell. Our slot paths
  * are synthesized ASCII, so the one string that does reach that shell is inert.
+ *
+ * The consequence is that the file lands under its SOURCE basename, which is why
+ * `localPath` must stay unresolved: it has to agree with the `name` the
+ * verification script and the prompt both use.
  * The path is home-relative for the same reason — no `$HOME` to expand, and it
  * resolves identically under scp's legacy and SFTP modes.
  */
