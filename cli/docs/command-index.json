@@ -12794,7 +12794,7 @@
           "negate": false
         }
       ],
-      "notes": "Planes (do not mix them up):\n    message / sessions inject  - CONTROL a running agent (mailbox answer, PTY keystroke, or resume by runtime)\n    send / notify              - DELIVER a message to a human recipient over a channel provider\n    feed post                  - RECORD progress / milestones (optional broadcast may call send)\n\n  <text> here is consumed BY THE TARGET AGENT (an answer, a keystroke, or the\n  argument to a resume) -- it is not a notification a person reads on their\n  phone. To reach the operator instead, use `agents send --to owner`\n  (or a feed.broadcast `channel:` sink).",
+      "notes": "Planes (do not mix them up):\n    message / sessions inject  - CONTROL a running agent (mailbox answer, PTY keystroke, or resume by runtime)\n    send                       - DELIVER a message to a human recipient over a channel provider\n    feed post                  - RECORD progress / milestones (optional broadcast may call send)\n\n  <text> here is consumed BY THE TARGET AGENT (an answer, a keystroke, or the\n  argument to a resume) -- it is not a notification a person reads on their\n  phone. To reach the operator instead, use `agents send --to owner`\n  (or a feed.broadcast `channel:` sink).",
       "subcommands": []
     },
     {

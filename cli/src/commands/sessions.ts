@@ -59,6 +59,7 @@ import { formatRelativeTime, formatCompactAge, sessionAgeParts, type SessionAgeP
 import { renderConversationMarkdown, renderSummary, renderSummaryHeader, computeSummaryStats, renderJson, filterEvents, parseRoleList, linkPath, linkUrl, shortenModel, formatTokenCount, type FilterOptions } from '../lib/session/render.js';
 import { linearIssueUrl } from '../lib/session/linear.js';
 import { sessionOwnerDevice, RESUME_PINNED_ENV } from '../lib/session/resume-owner.js';
+import { takeOverDetachedSession } from '../lib/session/detached.js';
 import { renderMarkdown } from '../lib/markdown.js';
 import { AGENTS, colorAgent, resolveAgentName } from '../lib/agents.js';
 import { getShimsDir } from '../lib/state.js';
@@ -4532,6 +4533,8 @@ export async function resumeSessionInPlace(session: SessionMeta): Promise<void> 
     process.exitCode = 1;
     return;
   }
+
+  await takeOverDetachedSession(session.id);
 
   const cwd = session.cwd && fs.existsSync(session.cwd)
     ? session.cwd

@@ -634,7 +634,8 @@ async function runUmbrella(
   // into. Any explicit flag, --yes, or --json keeps the non-interactive path.
   // --json is a machine consumer (and the fleet fan-out injects it), so never
   // open a picker under it.
-  const anyExplicitFlag = !!(opts.repos || opts.secrets || opts.cloud || opts.local);
+  const kindSelection = parseKindSelection(opts);
+  const anyExplicitFlag = !!(opts.repos || opts.secrets || opts.cloud || opts.local || kindSelection);
   if (!quiet && !json && !opts.yes && !anyExplicitFlag && isInteractiveTerminal()) {
     await runInteractiveReconcile(opts, outLog, errLog);
     return;
@@ -645,7 +646,10 @@ async function runUmbrella(
     repos: opts.repos,
     secrets: opts.secrets,
     cloud: opts.cloud,
-    local: opts.local,
+    // A resource selector is a local reconcile unless the caller explicitly
+    // asks to fetch repos/secrets first. This keeps replacements such as
+    // `sync --mcp demo` scoped like the retired resource verb.
+    local: opts.local || (!!kindSelection && !opts.repos && !opts.secrets && !opts.cloud),
   };
   // Same chokepoint as `agents secrets push/pull` — prefers AGENTS_SYNC_PASSPHRASE,
   // falls back to the deprecated master-key name with a single warning.
@@ -663,6 +667,8 @@ async function runUmbrella(
       passphrase,
       // quiet under --json so refresh() cannot pollute the JSON stdout the fleet parses.
       quiet: quiet || json,
+      selection: kindSelection,
+      allowExecSurfaces: !!opts.allowExecSurfaces,
       log: (msg) => { if (!quiet && !json) outLog(chalk.gray(`  ${msg}`)); },
     });
 
@@ -670,13 +676,13 @@ async function runUmbrella(
     // we act on central as converged by this sync rather than a stale pre-pull
     // copy that could re-claim a profile a peer already migrated. Skipped under
     // --cloud (fetch-only, no local reconcile).
-    if (!opts.cloud) evictCentralBrowserProfilesForSync(quiet, json, outLog, errLog);
+    if (!opts.cloud && !kindSelection) evictCentralBrowserProfilesForSync(quiet, json, outLog, errLog);
 
     // Post-reconcile verification (PHNX-3186): re-read every version the reconcile
     // wrote into and confirm it now matches source. Without this the umbrella
     // printed `✓ sync: reconciled` unconditionally, the exact false-success the
     // ticket reports. Residual drift downgrades the line and sets a non-zero exit.
-    const residual = result.reconciled
+    const residual = result.reconciled && !kindSelection
       ? verifyReconciled(
           result.reconciledVersions.map((r) => ({ agent: r.agent as AgentId, version: r.version })),
           cwd,
@@ -687,7 +693,9 @@ async function runUmbrella(
     // agent, re-wire hooks the diff left behind, and repair managed hook runtime
     // shims. The stale-CLI purge runs ONLY with `--prune-clis` (never automatic).
     // Skipped under --cloud (fetch-only: nothing was reconciled to repair).
-    const repair = opts.cloud ? null : await repairAfterSync({ cwd, pruneClis: !!opts.pruneClis });
+    const repair = opts.cloud || kindSelection
+      ? null
+      : await repairAfterSync({ cwd, pruneClis: !!opts.pruneClis });
     // A repair that left something for a human (an unresolvable shim, a failed
     // rewire/purge) is a non-zero outcome, same as the deleted `doctor --fix`.
     const repairFailed = repair !== null && repairHadFailures(repair);
@@ -704,6 +712,7 @@ async function runUmbrella(
         secrets: result.secrets,
         devices: result.devices,
         reconciled: result.reconciled,
+        selection: kindSelection ?? null,
         declined: result.declined,
         residualDrift: residual,
         repair: repair ? repairAfterSyncJson(repair) : null,

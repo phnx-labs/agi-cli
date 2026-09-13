@@ -16,6 +16,7 @@ const {
   clearDetachRecord,
   listDetachRecords,
   isHeadlessAlive,
+  takeOverDetachedSession,
   presenceFromStore,
 } = await import('./detached.js');
 const { captureProcessStartTime } = await import('../pty-server.js');
@@ -111,6 +112,55 @@ describe('isHeadlessAlive', () => {
 
   it('is false for a bogus pid', () => {
     expect(isHeadlessAlive({ sessionId: 'x', agent: 'claude', headlessPid: 0, headlessStartTime: null, detachedAtMs: 0 })).toBe(false);
+  });
+});
+
+describe('takeOverDetachedSession', () => {
+  it('SIGTERMs the matching live continuation and clears its record', async () => {
+    const child = longRunningChild();
+    const rec = {
+      sessionId: 'takeover-live',
+      agent: 'claude',
+      headlessPid: child.pid!,
+      headlessStartTime: captureProcessStartTime(child.pid!),
+      detachedAtMs: Date.now(),
+    };
+    writeDetachRecord(rec);
+
+    await expect(takeOverDetachedSession(rec.sessionId)).resolves.toBe(true);
+
+    expect(isHeadlessAlive(rec)).toBe(false);
+    expect(readDetachRecord(rec.sessionId)).toBeUndefined();
+  });
+
+  it('clears a PID-reuse record without signalling the unrelated process', async () => {
+    const child = longRunningChild();
+    const rec = {
+      sessionId: 'takeover-reused',
+      agent: 'claude',
+      headlessPid: child.pid!,
+      headlessStartTime: 'stale-fingerprint',
+      detachedAtMs: Date.now(),
+    };
+    writeDetachRecord(rec);
+
+    await expect(takeOverDetachedSession(rec.sessionId)).resolves.toBe(true);
+
+    expect(() => process.kill(child.pid!, 0)).not.toThrow();
+    expect(readDetachRecord(rec.sessionId)).toBeUndefined();
+  });
+
+  it('clears a parked record without signalling anything', async () => {
+    writeDetachRecord({
+      sessionId: 'takeover-parked',
+      agent: 'codex',
+      headlessPid: 0,
+      headlessStartTime: null,
+      detachedAtMs: Date.now(),
+    });
+
+    await expect(takeOverDetachedSession('takeover-parked')).resolves.toBe(true);
+    expect(readDetachRecord('takeover-parked')).toBeUndefined();
   });
 });
 

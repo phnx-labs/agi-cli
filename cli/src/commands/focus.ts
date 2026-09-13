@@ -228,7 +228,7 @@ export function registerFocusCommand(program: Command): void {
       Lifecycle siblings (not synonyms):
         focus              attach if alive, otherwise recover (default "take me there")
         focus --attach-only  attach only; never fork (replaces go)
-        detach / attach    interactive ↔ headless presence
+        detach / resume    interactive ↔ headless presence
         resume             multi-select history → tabs
         run --resume       single scripted continue
     `,

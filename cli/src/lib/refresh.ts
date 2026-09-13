@@ -75,6 +75,10 @@ interface RefreshOptions {
    * (`agents sync --json` / fleet fan-out) so stdout stays a single JSON object.
    */
   quiet?: boolean;
+  /** Limit reconciliation to the requested resource kinds/names. */
+  selection?: ResourceSelection;
+  /** Explicit consent for selected plugins that add executable surfaces. */
+  allowExecSurfaces?: boolean;
 }
 
 /**
@@ -128,7 +132,14 @@ interface RefreshResult {
 }
 
 export async function refresh(options: RefreshOptions = {}): Promise<RefreshResult> {
-  const { agentFilter, skipPrompts = false, skipClis = false, quiet = false } = options;
+  const {
+    agentFilter,
+    skipPrompts = false,
+    skipClis = false,
+    quiet = false,
+    selection: requestedSelection,
+    allowExecSurfaces = false,
+  } = options;
   const agentsDir = getUserAgentsDir();
   // Gate every human progress line so --json / fleet fan-out can parse stdout.
   const log = (...args: unknown[]) => { if (!quiet) console.log(...args); };
@@ -174,10 +185,11 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
   }
 
   // 2. Register MCP servers
-  if (manifest?.mcp && Object.keys(manifest.mcp).length > 0) {
+  if ((!requestedSelection || requestedSelection.mcp) && manifest?.mcp && Object.keys(manifest.mcp).length > 0) {
     log(chalk.bold('\nMCP Servers:\n'));
 
     for (const [name, config] of Object.entries(manifest.mcp)) {
+      if (Array.isArray(requestedSelection?.mcp) && !requestedSelection.mcp.includes(name)) continue;
       const transport = config.transport || 'stdio';
       const commandOrUrl = transport === 'http' ? config.url : config.command;
       if (!commandOrUrl) {
@@ -203,7 +215,8 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
         name,
         commandOrUrl,
         config.scope || 'user',
-        transport
+        transport,
+        { headers: config.headers },
       );
 
       for (const result of results) {
@@ -258,7 +271,9 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
       let selection: ResourceSelection | undefined;
       let forceFullSync = false;
 
-      if (skipPrompts) {
+      if (requestedSelection) {
+        selection = requestedSelection;
+      } else if (skipPrompts) {
         forceFullSync = true;
       } else if (!hasAnySynced) {
         log(chalk.yellow(`\n${agentLabel(agentId)}@${defaultVer} has no synced resources.`));
@@ -281,7 +296,11 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
             agentId,
             ver,
             selection,
-            { available, ...(forceFullSync ? { force: true as const } : {}) },
+            {
+              available,
+              allowExecSurfaces,
+              ...(forceFullSync || requestedSelection ? { force: true as const } : {}),
+            },
           );
           reconciled.push({ agent: agentId, version: ver });
           if (syncResult.commands) kinds.add('commands');

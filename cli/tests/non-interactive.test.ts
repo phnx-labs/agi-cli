@@ -638,6 +638,72 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
     expect(log).not.toContain(path.join(home, '.agents', '.history', 'versions', 'codex', '0.1.0', 'home'));
   });
 
+  it('sync --mcp <name> registers only that manifest server', () => {
+    const home = makeTempHome();
+    const logPath = path.join(home, 'mcp-selection.log');
+    tempHomes.push(home);
+    writeLoggingManagedVersion(home, 'codex', '0.2.0', 'codex', logPath);
+
+    expect(runAgents(home, ['mcp', 'add', 'chosen', '--agents', 'codex@0.2.0', '--', 'chosen-server']).status).toBe(0);
+    expect(runAgents(home, ['mcp', 'add', 'other', '--agents', 'codex@0.2.0', '--', 'other-server']).status).toBe(0);
+
+    const result = runAgents(home, ['sync', '--mcp', 'chosen', '--yes']);
+    const log = fs.readFileSync(logPath, 'utf-8');
+
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+    expect(log).toContain('mcp add chosen -- chosen-server');
+    expect(log).not.toContain('other-server');
+  });
+
+  it('sync --mcp preserves HTTP headers for Claude registration', () => {
+    const home = makeTempHome();
+    const logPath = path.join(home, 'mcp-http-headers.log');
+    tempHomes.push(home);
+    writeLoggingManagedVersion(home, 'claude', '0.2.0', 'claude', logPath);
+
+    const addResult = runAgents(home, [
+      'mcp', 'add', 'private-docs', 'https://mcp.example.com',
+      '--transport', 'http',
+      '--header', 'Authorization: Bearer test-token',
+      '--agents', 'claude@0.2.0',
+    ]);
+    const syncResult = runAgents(home, ['sync', '--mcp', 'private-docs', '--yes']);
+    const log = fs.readFileSync(logPath, 'utf-8');
+
+    expect(addResult.status, `${addResult.stdout}\n${addResult.stderr}`).toBe(0);
+    expect(syncResult.status, `${syncResult.stdout}\n${syncResult.stderr}`).toBe(0);
+    expect(log).toContain('mcp add --transport http --scope user private-docs https://mcp.example.com --header Authorization: Bearer test-token');
+  });
+
+  it('sync --plugin forwards explicit exec-surface consent through umbrella reconcile', () => {
+    const home = makeTempHome();
+    tempHomes.push(home);
+    writeFakeManagedVersion(home, 'opencode', '1.0.0', 'opencode');
+    expect(runAgents(home, ['use', 'opencode@1.0.0']).status).toBe(0);
+
+    const pluginRoot = path.join(home, '.agents', 'plugins', 'trusted-plugin');
+    fs.mkdirSync(path.join(pluginRoot, '.claude-plugin'), { recursive: true });
+    fs.mkdirSync(path.join(pluginRoot, 'opencode'), { recursive: true });
+    fs.writeFileSync(
+      path.join(pluginRoot, '.claude-plugin', 'plugin.json'),
+      JSON.stringify({ name: 'trusted-plugin', version: '1.0.0', description: 'test' }),
+    );
+    fs.writeFileSync(path.join(pluginRoot, 'opencode', 'index.ts'), 'export default {};\n');
+    fs.writeFileSync(
+      path.join(pluginRoot, '.mcp.json'),
+      JSON.stringify({ mcpServers: { demo: { command: 'node', args: ['server.js'] } } }),
+    );
+
+    const result = runAgents(home, ['sync', '--plugin', 'trusted-plugin', '--allow-exec-surfaces', '--yes']);
+    const installed = path.join(
+      home, '.agents', '.history', 'versions', 'opencode', '1.0.0', 'home',
+      '.config', 'opencode', 'plugins', 'trusted-plugin.ts',
+    );
+
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+    expect(fs.existsSync(installed)).toBe(true);
+  });
+
   it('registers HTTP MCPs from the manifest to Codex with --url', () => {
     const home = makeTempHome();
     const logPath = path.join(home, 'mcp-http-register.log');

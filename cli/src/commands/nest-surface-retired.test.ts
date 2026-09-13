@@ -111,6 +111,24 @@ describe('RUSH-2989 nested leftover aliases', () => {
   );
 });
 
+describe('deleted shim names stay out of living help', () => {
+  it('message help names send as the human-delivery plane, never notify', () => {
+    const home = guardedHome();
+    const r = run(home, 'message', '--help');
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('send');
+    expect(r.stdout).not.toMatch(/\bnotify\b/);
+  });
+
+  it('session lifecycle help pairs detach with resume, never attach', () => {
+    const home = guardedHome();
+    const r = run(home, 'sessions', 'focus', '--help');
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('detach / resume');
+    expect(r.stdout).not.toMatch(/detach \/ attach/);
+  });
+});
+
 describe('RUSH-3079 removed `usage` command (duplicate of `agents view`)', () => {
   it('usage is gone from the root tree and marked retired', async () => {
     const program = await buildFullCommandTree();
