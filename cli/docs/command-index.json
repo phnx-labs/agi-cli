@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 68,
-  "commands": 511,
+  "commands": 512,
   "root": {
     "name": "agents",
     "path": "",
