@@ -2,10 +2,9 @@
   connection per peer (PHNX-3999).** `agents feed watch --json` carries a third row
   kind alongside agents and attention: canonical tool rows for each browser task and
   computer run, with the driven device, the owning agent session, captures, and — for
-  a still-bound browser task only — the command that closes it. A consumer switching
-  an All/Agents/Browser/Computer filter now spawns zero commands, where it previously
-  shelled out to `browser sessions` and `computer sessions` per tool, per device, on a
-  timer. Computer runs are ledger history: they report `live: false` and carry no
+  a still-bound browser task only — the commands that show a tab or close the task.
+  Switching an All/Agents/Browser/Computer filter launches no commands: every row for
+  every tab is already on the one stream. Computer runs are ledger history: they report `live: false` and carry no
   stop/close affordance, because the process that performed them has exited. Task URLs
   are redacted (userinfo stripped, credential-shaped query parameters replaced) before
   they leave the producing machine. Source: `cli/src/lib/feed/tools.ts`,

@@ -172,11 +172,13 @@ fan-out down.
 
 Browser tasks and computer runs are the third row kind on the stream, projected by
 [`feed/tools.ts`](src/lib/feed/tools.ts) from the sources that already own them —
-`browser sessions`' task-first rows and `computer sessions`' ledger rows. Before
-this, a status surface had exactly one way to ask "what tools are running": shell
-out to both commands, per tool, per device, on a timer. Now the rows ride the one
-open stream, so a consumer switching its All/Agents/Browser/Computer filter
-**spawns zero commands**.
+`browser sessions`' task-first rows, `computer sessions`' ledger rows, and — for a
+task's tabs — the live `tasks.json`. The rows ride the one open stream, so a
+consumer switching its All/Agents/Browser/Computer filter **launches no commands**:
+every row for every tab is already there, and the filter is applied client-side on
+`row.kind`. A surface built on per-tool, per-device polling would be the wrong shape
+for the same reason the activity lane is read incrementally — keep new consumers on
+the stream.
 
 The envelope gains `tool.upsert` / `tool.remove` and `setup.snapshot`, and `reset`
 gains `tools: ToolRow[]` + `setup: ToolSetupRow[]` beside `agents` and
