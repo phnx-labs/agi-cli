@@ -142,7 +142,7 @@ export interface WorkflowFrontmatter {
 }
 
 /** A workflow found during repo discovery. */
-export interface DiscoveredWorkflow {
+interface DiscoveredWorkflow {
   name: string;
   path: string;
   frontmatter: WorkflowFrontmatter;
@@ -347,7 +347,7 @@ export interface ForEachTeammate {
 }
 
 /** Result of expanding a `for_each` spec: the teammates plus cap accounting. */
-export interface ForEachExpansion {
+interface ForEachExpansion {
   teammates: ForEachTeammate[];
   /** How many items the producer emitted (pre-cap). */
   producedCount: number;
@@ -473,7 +473,7 @@ export function resolveAllowedSubagents(
 /** The Claude tool an orchestrator uses to dispatch subagents. Must stay in a
  *  workflow's `--tools` allowlist whenever the workflow ships dispatchable
  *  subagents, or the orchestrator has no way to reach them. */
-export const SUBAGENT_DISPATCH_TOOL = 'Task';
+const SUBAGENT_DISPATCH_TOOL = 'Task';
 
 /**
  * Keep the subagent-dispatch tool (`Task`) in a `tools:`-restricted workflow's
@@ -800,7 +800,7 @@ export function isBareWorkflowName(ref: string): boolean {
 }
 
 /** Parsed `agents run` workflow reference (docs/07-entrypoints). */
-export interface ParsedWorkflowRef {
+interface ParsedWorkflowRef {
   /** Workflow directory name (WORKFLOW.md parent). */
   name: string;
   /**

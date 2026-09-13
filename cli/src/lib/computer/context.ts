@@ -40,7 +40,7 @@ import { loadComputerAllowList, loadDefaultPeers } from './policy.js';
 import { resolveRemoteDevice } from '../ssh-tunnel.js';
 
 /** A `--device <name>` target, resolved against the fleet. */
-export interface ComputerTargetContext {
+interface ComputerTargetContext {
   /** The device name as the user typed it. */
   alias: string;
   /** `user@host`, already validated against ssh option injection. */
@@ -54,13 +54,13 @@ export interface ComputerTargetContext {
 }
 
 /** Who is acting, so the engine can stamp the action it reports back. */
-export interface ComputerSessionContext {
+interface ComputerSessionContext {
   sessionId?: string;
   launchId?: string;
   actor: string;
 }
 
-export interface ComputerContext {
+interface ComputerContext {
   version: 1;
   permissions?: { allow: string[] };
   peers: { allow: string[] };
@@ -82,7 +82,7 @@ function agentSessionId(env: NodeJS.ProcessEnv = process.env): string | undefine
     || undefined;
 }
 
-export interface BuildContextOptions {
+interface BuildContextOptions {
   /** `--device <name>`, if given. */
   device?: string;
   /** Direct host targeting, which bypasses fleet resolution. */

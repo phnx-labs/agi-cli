@@ -24,11 +24,11 @@ import * as path from 'node:path';
 import { getAgentsBinPath } from '../cli-entry.js';
 
 export const AGENTS_URL_SCHEME = 'agents';
-export const MAC_BUNDLE_ID = 'dev.agents.urlhandler';
+const MAC_BUNDLE_ID = 'dev.agents.urlhandler';
 const LINUX_DESKTOP_FILE = 'agents-url-handler.desktop';
 const MAC_APP_NAME = 'AgentsURLHandler.app';
 
-export interface SchemeStatus {
+interface SchemeStatus {
   registered: boolean;
   platform: NodeJS.Platform;
   /** One human line: where the handler is, or why it is not registered. */
@@ -55,7 +55,7 @@ export function shQuote(p: string): string {
  * absolute path. Prefer the `agents` shim on PATH (directly executable); fall
  * back to `<node> <entry>` for a bare JS install.
  */
-export function resolveAgentsInvocation(platform: NodeJS.Platform = os.platform()): string {
+function resolveAgentsInvocation(platform: NodeJS.Platform = os.platform()): string {
   const onPath = whichAgents(platform);
   if (onPath) return platform === 'win32' ? `"${onPath}"` : shQuote(onPath);
   const entry = getAgentsBinPath();
@@ -140,7 +140,7 @@ export function linuxDesktopPath(home = os.homedir()): string {
   return path.join(home, '.local', 'share', 'applications', LINUX_DESKTOP_FILE);
 }
 
-export function macAppPath(home = os.homedir()): string {
+function macAppPath(home = os.homedir()): string {
   return path.join(home, 'Applications', MAC_APP_NAME);
 }
 
@@ -184,7 +184,7 @@ function windowsSchemeRegistered(): boolean {
 // Register / unregister (side-effecting, never throw).
 // ---------------------------------------------------------------------------
 
-export interface RegisterOptions {
+interface RegisterOptions {
   platform?: NodeJS.Platform;
   home?: string;
   /** Skip if already present (used by best-effort callers like setup). */

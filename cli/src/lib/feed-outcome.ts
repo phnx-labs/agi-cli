@@ -19,7 +19,7 @@
 import { detectTicket, extractPrUrl } from './session/state.js';
 import type { OpenBlock } from './feed/feed.js';
 
-export type OutcomeKind = 'ticket' | 'pr' | 'worktree' | 'unassigned';
+type OutcomeKind = 'ticket' | 'pr' | 'worktree' | 'unassigned';
 
 /** Stable attribution of a block (or agent) to one deliverable. */
 export interface OutcomeRef {
@@ -34,7 +34,7 @@ export interface OutcomeRef {
  * Signals used to derive an outcome. All optional — callers pass whatever they
  * already know (block fields, session meta, free-text questions).
  */
-export interface OutcomeSignals {
+interface OutcomeSignals {
   ticket?: string | null;
   pr?: string | null;
   worktreeSlug?: string | null;
@@ -72,7 +72,7 @@ export function normalizePrRef(raw: string | null | undefined): string | undefin
 }
 
 /** `https://github.com/owner/repo/pull/N` → `owner/repo`. */
-export function repoFromPrUrl(url: string | null | undefined): string | undefined {
+function repoFromPrUrl(url: string | null | undefined): string | undefined {
   if (!url) return undefined;
   const m = /github\.com\/([^/\s]+)\/([^/\s]+)\/pull\/\d+/i.exec(url);
   if (!m) return undefined;
@@ -146,7 +146,7 @@ export function deriveOutcome(signals: OutcomeSignals): OutcomeRef {
 }
 
 /** Join question headers + bodies into one scan target for ticket/PR detection. */
-export function blockScanText(block: Pick<OpenBlock, 'questions'>): string {
+function blockScanText(block: Pick<OpenBlock, 'questions'>): string {
   return block.questions
     .map((q) => [q.header, q.text].filter(Boolean).join(' '))
     .filter(Boolean)

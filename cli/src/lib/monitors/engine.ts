@@ -65,7 +65,7 @@ interface MonitorLivenessLike {
 }
 
 /** The fire/no-fire decision for one observation, plus what to persist. */
-export interface FireDecision {
+interface FireDecision {
   fire: boolean;
   /** The value whose de-dupe signature is stored on persist. */
   value: string;

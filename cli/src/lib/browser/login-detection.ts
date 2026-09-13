@@ -89,7 +89,7 @@ export function loginUrlForService(service: string): string | null {
   return AUTH_SIGNATURES[service]?.login?.loginUrl ?? null;
 }
 
-export interface CookieRow {
+interface CookieRow {
   host_key: string;
   name: string;
 }
@@ -233,7 +233,7 @@ function readCookieRows(dbPath: string): CookieRow[] {
 
 /** A saved-login row from Chromium `Login Data` (username plaintext; password
  *  encrypted and never read). */
-export interface LoginRow {
+interface LoginRow {
   origin_url: string;
   username_value: string;
   signon_realm: string;

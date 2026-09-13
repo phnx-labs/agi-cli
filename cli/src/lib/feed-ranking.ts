@@ -32,7 +32,7 @@ export interface FeedSessionSignal {
   cloudTaskId?: string;
 }
 
-export interface RankedFeedBlock extends OpenBlock {
+interface RankedFeedBlock extends OpenBlock {
   delayRank: NonNullable<OpenBlock['delayRank']>;
 }
 
@@ -170,7 +170,7 @@ export function rankFeedBlocks(
     });
 }
 
-export function recentAskCount(stats: FeedAskStats, now: Date = new Date()): number {
+function recentAskCount(stats: FeedAskStats, now: Date = new Date()): number {
   const cutoff = now.getTime() - 60 * 60_000;
   return stats.recentAskTimestamps.filter((ts) => {
     const parsed = Date.parse(ts);

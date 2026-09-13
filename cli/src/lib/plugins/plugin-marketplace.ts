@@ -113,7 +113,7 @@ interface MarketplacePluginEntry {
   author?: { name: string; email?: string };
 }
 
-export interface MarketplaceManifest {
+interface MarketplaceManifest {
   $schema?: string;
   name: string;
   description?: string;

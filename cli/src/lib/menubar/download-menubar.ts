@@ -21,14 +21,7 @@
  * `scripts/verify-menubar-helper.sh`.
  */
 
-import {
-  EXPECTED_TEAM_ID,
-  type HelperSpec,
-  downloadHelperApp,
-  helperAssetUrls,
-  helperCacheDir,
-  verifyHelperApp,
-} from '../helper-download.js';
+import { EXPECTED_TEAM_ID, type HelperSpec, downloadHelperApp, helperAssetUrls, helperCacheDir } from '../helper-download.js';
 import { helperFloor } from '../helper-versions.js';
 
 /** The zipped `.app` release asset name. */
@@ -62,11 +55,6 @@ export function menubarHelperAssetUrls(version: string): { zip: string; sha256: 
 /** Cache dir for the downloaded menu-bar helper, one subdir per release tag. */
 export function menubarHelperCacheDir(version: string): string {
   return helperCacheDir(MENUBAR_HELPER_SPEC, version);
-}
-
-/** Verify a menu-bar helper `.app`: codesign + Team + DR pin + notarization. */
-export function verifyMenubarHelper(appPath: string): void {
-  verifyHelperApp(appPath, MENUBAR_HELPER_SPEC);
 }
 
 /**

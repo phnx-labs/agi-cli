@@ -152,7 +152,7 @@ export function createSpinner(opts: {
   };
 }
 
-export interface LeaseOutputRouter {
+interface LeaseOutputRouter {
   /** Feed a raw chunk of the crabbox run's combined stdout/stderr. */
   push(chunk: string): void;
   /** Flush any buffered partial line (call once the stream closes). */

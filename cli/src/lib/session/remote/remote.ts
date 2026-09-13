@@ -127,7 +127,7 @@ export function buildRemoteCommand(forwardedArgs: string[], columns?: number, os
 
 
 /** The four outcomes of one `ssh <host> agents sessions …` invocation. */
-export type SshOutcome = 'ok' | 'unreachable' | 'query-failed' | 'spawn-error';
+type SshOutcome = 'ok' | 'unreachable' | 'query-failed' | 'spawn-error';
 
 /**
  * Classify an ssh `spawnSync` result. ssh(1) reserves exit 255 for its own
@@ -177,7 +177,7 @@ export function isRemoteCacheFresh(
   return nowMs - mtimeMs <= maxAgeMs;
 }
 
-export interface RemoteCacheHit {
+interface RemoteCacheHit {
   output: string;
   mtimeMs: number;
 }
@@ -261,7 +261,7 @@ export function replayRemoteCache(host: string, forwardedArgs: string[]): boolea
   return true;
 }
 
-export interface RunRemoteSessionsOptions {
+interface RunRemoteSessionsOptions {
   /** Skip warm cache and SSH every host (force-refresh). */
   forceRefresh?: boolean;
   /** Override freshness window for the warm path. */

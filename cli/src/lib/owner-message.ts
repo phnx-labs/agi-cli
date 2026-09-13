@@ -22,7 +22,7 @@ import { getSessionById, resolveFullSessionId } from './session/db.js';
 import { linearIssueUrl } from './session/linear.js';
 import type { SinkMessageFormat } from './sink-format.js';
 
-export interface OwnerMessageOptions {
+interface OwnerMessageOptions {
   /** Scannable subject line, when the caller has one (feed post does; notify does not). */
   title?: string;
   /** Explicit session id (`--session`); otherwise resolved from the run environment. */
@@ -43,7 +43,7 @@ export interface OwnerMessageOptions {
  * for feed posts. Built ONCE so the owner fan-out can render it in more than one
  * format (Slack vs iMessage) without re-walking the pid registry per destination.
  */
-export function ownerMessageContext(rawText: string, opts: OwnerMessageOptions = {}): FeedBroadcastContext {
+function ownerMessageContext(rawText: string, opts: OwnerMessageOptions = {}): FeedBroadcastContext {
   const identity = resolvePostIdentity({ sessionId: opts.sessionId });
   // A footer crumb that would 404 (an 8-char short id) is upgraded to the full
   // indexed id so the console URL resolves; a full/native id passes through.

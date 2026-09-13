@@ -49,41 +49,6 @@ export async function hasUncommittedChanges(worktreePath: string): Promise<boole
   }
 }
 
-/** Default cap on diff text so one giant worktree can't blow up the serve dashboard. */
-export const DEFAULT_DIFF_MAX_BYTES = 200_000;
-
-/**
- * Return the uncommitted working-tree diff for a worktree (staged + unstaged,
- * relative to HEAD), capped so a huge diff can't overwhelm the read-only serve
- * dashboard. Read-only: shells out to `git diff HEAD` and never mutates state.
- * Returns '' when the path isn't a git worktree or has no pending changes.
- */
-export async function gitDiff(
-  worktreePath: string,
-  maxBytes: number = DEFAULT_DIFF_MAX_BYTES,
-): Promise<string> {
-  // Size the capture buffer off the cap (not an arbitrary 1MB floor) so a diff
-  // that overshoots gets TRUNCATED, never silently dropped. A diff larger than
-  // the buffer overflows maxBuffer, but Node still hands us the captured prefix
-  // on the rejection — we truncate that below rather than losing it to ''.
-  const maxBuffer = maxBytes * 4;
-  const truncate = (s: string) => s.slice(0, maxBytes) + `\n… [diff truncated at ${maxBytes} bytes]`;
-  try {
-    const { stdout } = await execFileAsync('git', ['diff', 'HEAD'], {
-      cwd: worktreePath,
-      maxBuffer,
-    });
-    return stdout.length > maxBytes ? truncate(stdout) : stdout;
-  } catch (err) {
-    // ENOBUFS on an oversized diff still carries the partial capture; truncate
-    // it so the dashboard shows "[diff truncated]" instead of "no changes".
-    // A genuine non-git-worktree error has no stdout → fall through to ''.
-    const partial = (err as { stdout?: string })?.stdout;
-    if (typeof partial === 'string' && partial.length > 0) return truncate(partial);
-    return '';
-  }
-}
-
 /**
  * Resolve the repo's default branch name (origin/HEAD → `main`/`master`/…).
  * Refreshes origin/HEAD first so a repo cloned before the default was set resolves.

@@ -41,7 +41,7 @@ export interface UsernsStatus {
 }
 
 /** The raw signals the pure interpreter reasons over. */
-export interface UsernsInputs {
+interface UsernsInputs {
   platform: NodeJS.Platform;
   /**
    * Contents of {@link APPARMOR_USERNS_SYSCTL_PATH} trimmed, or null when the
@@ -149,9 +149,4 @@ export function probeUnprivilegedUserns(
     unshareProbe: probeUnshare(),
   });
   return cached;
-}
-
-/** Test-only: drop the process cache so a test can re-probe. */
-export function resetUsernsCacheForTests(): void {
-  cached = null;
 }

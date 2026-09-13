@@ -69,13 +69,13 @@ import {
   syncMarketplaceManifest,
 } from './plugins/plugin-marketplace.js';
 
-export interface LaunchSyncOptions {
+interface LaunchSyncOptions {
   agent: AgentId;
   version: string;
   cwd: string;
 }
 
-export interface LaunchSyncResult {
+interface LaunchSyncResult {
   /** Project rules were re-compiled into cwd/AGENTS.md (+ per-agent symlinks). */
   rulesCompiled: boolean;
   /** Number of workspace resource symlinks created or refreshed. */

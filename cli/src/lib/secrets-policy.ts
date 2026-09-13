@@ -33,7 +33,6 @@ import { claudeAccountTokenKey, isClaudeWorkerHomeSeeded, provisionWorkerSlot, r
 import { configuredDeviceRole, isHeadedDeviceRole, selfConfiguredDeviceRole } from './device-config.js';
 import {
   AUTH_STORE_ALIAS,
-  AUTH_BUNDLE_NAME,
   AUTH_BUNDLE_BACKEND,
   RESERVED_BUNDLE_NAMES,
   isReservedBundleName,
@@ -59,7 +58,6 @@ import {
 // importers of `secrets-policy.js`.
 export {
   AUTH_STORE_ALIAS,
-  AUTH_BUNDLE_NAME,
   AUTH_BUNDLE_BACKEND,
   RESERVED_BUNDLE_NAMES,
   isReservedBundleName,
@@ -84,7 +82,7 @@ export {
 // the client's own documented default.
 
 /** Filter `names` down to the ones the active resource profile allows for `secrets`. */
-export function filterBundleNamesForActiveProfile(names: string[]): string[] {
+function filterBundleNamesForActiveProfile(names: string[]): string[] {
   return filterNamesForActiveResourceProfile('secrets', names);
 }
 
@@ -153,7 +151,7 @@ export function assertRemoteBundleFlagsUnsupported(
 // ---------------------------------------------------------------------------
 
 /** Each import/read-back SSH operation gets this deadline plus the SSH hard-kill grace. */
-export const AUTH_SYNC_PUSH_DEADLINE_MS = 20_000;
+const AUTH_SYNC_PUSH_DEADLINE_MS = 20_000;
 
 export interface AuthSyncDevice {
   name: string;
@@ -162,7 +160,7 @@ export interface AuthSyncDevice {
   remoteAuth: SharedAuthStatus | 'unknown';
 }
 
-export type AuthSyncPlanItem =
+type AuthSyncPlanItem =
   | { action: 'push'; device: string }
   | { action: 'skip'; device: string; reason: string };
 
@@ -191,7 +189,7 @@ export function planAuthBundlePush(
   });
 }
 
-export interface AuthSyncResult {
+interface AuthSyncResult {
   publisher: string | null;
   stateChanged: boolean;
   pushed: string[];
@@ -199,7 +197,7 @@ export interface AuthSyncResult {
   errors: Array<{ device: string; message: string }>;
 }
 
-export interface AuthSyncDeps {
+interface AuthSyncDeps {
   inspectLocal?: () => { exists: boolean; ok: boolean };
   listDevices?: () => DeviceProfile[];
   localName?: string;
@@ -228,13 +226,13 @@ export function electPublisher(
   return [...ready].sort((a, b) => rank(a) - rank(b) || normalizeHost(a).localeCompare(normalizeHost(b)))[0] ?? null;
 }
 
-export interface PublishAuthVerdictOptions {
+interface PublishAuthVerdictOptions {
   inspectLocal?: () => { exists: boolean; ok: boolean };
   localName?: string;
   userAgentsDir?: string;
 }
 
-export interface PublishAuthVerdictResult {
+interface PublishAuthVerdictResult {
   device: string;
   status: SharedAuthStatus;
   changed: boolean;
@@ -394,7 +392,7 @@ export interface ReservedSyncPeer {
   presentKeys: Record<string, ReadonlySet<string>>;
 }
 
-export type ReservedSyncPlanItem =
+type ReservedSyncPlanItem =
   | { action: 'push'; device: string; bundle: string; keys: string[] }
   | { action: 'skip'; device: string; reason: string };
 
@@ -478,7 +476,7 @@ function memoKey(peer: string, bundle: string, key: string): string {
   return `${normalizeHost(peer)} ${bundle} ${key}`;
 }
 
-export function readDeliveryMemo(root?: string): Record<string, string> {
+function readDeliveryMemo(root?: string): Record<string, string> {
   try {
     const parsed = JSON.parse(fs.readFileSync(deliveryMemoPath(root), 'utf-8')) as unknown;
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, string>;
@@ -514,7 +512,7 @@ export function peerPresentKeys(
   return present;
 }
 
-export interface ReservedStoreSyncResult {
+interface ReservedStoreSyncResult {
   publisher: string | null;
   /** Legacy raw reserved items adopted into their bundle on this box before planning (local repair). */
   adopted: Array<{ bundle: string; key: string }>;
@@ -523,7 +521,7 @@ export interface ReservedStoreSyncResult {
   errors: Array<{ device: string; message: string }>;
 }
 
-export interface ReservedStoreSyncDeps {
+interface ReservedStoreSyncDeps {
   listDevices?: () => DeviceProfile[];
   localName?: string;
   userAgentsDir?: string;
@@ -642,13 +640,13 @@ export async function syncReservedStores(deps: ReservedStoreSyncDeps = {}): Prom
   return result;
 }
 
-export interface ReconcileWorkerSlotsResult {
+interface ReconcileWorkerSlotsResult {
   provisioned: string[];
   skipped: Array<{ accountId: string; reason: string }>;
   errors: Array<{ accountId: string; message: string }>;
 }
 
-export interface ReconcileWorkerSlotsDeps {
+interface ReconcileWorkerSlotsDeps {
   selfRole?: ReturnType<typeof selfConfiguredDeviceRole>;
   readMetaFn?: () => Pick<Meta, 'accounts' | 'deviceAccounts'>;
   hasLocalKey?: (bundle: string, key: string) => boolean;

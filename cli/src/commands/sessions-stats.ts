@@ -63,7 +63,7 @@ const RECORDING_SKILL_HARNESSES = ['claude', 'kimi'] as const;
 const RECORDING_COMMAND_HARNESSES = ['claude'] as const;
 
 /** One installed resource, keyed the same way session_resource_usage stores it. */
-export interface InstalledResource {
+interface InstalledResource {
   kind: 'skill' | 'command';
   name: string;
   plugin: string | null;

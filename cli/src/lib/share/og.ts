@@ -11,7 +11,7 @@
 const OG_MARK_OPEN = '<!-- agents-share:og -->';
 const OG_MARK_CLOSE = '<!-- /agents-share:og -->';
 
-export interface OgFields {
+interface OgFields {
   title: string;
   description: string;
   imageUrl: string;

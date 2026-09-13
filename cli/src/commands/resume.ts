@@ -10,7 +10,7 @@ import { resolveSessionMetadataValue } from './sessions.js';
 import { sessionOwnerDevice, consumeResumePinned, RESUME_PINNED_ENV } from '../lib/session/resume-owner.js';
 import { machineId } from '../lib/machine-id.js';
 
-export const RESUME_SOURCE_ENV = 'AGENTS_RESUME_SOURCE_JSON';
+const RESUME_SOURCE_ENV = 'AGENTS_RESUME_SOURCE_JSON';
 
 /** Inspect local archived context after the owner hop fails. Recovery still
  * requires readable content and explicit replay consent before starting a run. */

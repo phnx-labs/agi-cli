@@ -26,7 +26,7 @@ import { agentConfigDirName } from './agents.js';
 import { supports } from './capabilities.js';
 import { claudeProjectDirName } from './project-key.js';
 
-export interface MemoryFact {
+interface MemoryFact {
   /** Filename without .md (slug). */
   name: string;
   /** Absolute path to the fact file. */
@@ -37,7 +37,7 @@ export interface MemoryFact {
   summary: string;
 }
 
-export interface MemoryLayerDir {
+interface MemoryLayerDir {
   layer: 'project' | 'user' | 'system';
   dir: string;
 }
@@ -48,12 +48,12 @@ export function getUserMemoryDir(): string {
 }
 
 /** System-layer memory root (~/.agents/.system/memory/). */
-export function getSystemMemoryDir(): string {
+function getSystemMemoryDir(): string {
   return path.join(getSystemAgentsDir(), 'memory');
 }
 
 /** Project-layer memory root when a project agents dir exists. */
-export function getProjectMemoryDir(cwd: string = process.cwd()): string | null {
+function getProjectMemoryDir(cwd: string = process.cwd()): string | null {
   const project = getProjectAgentsDir(cwd);
   return project ? path.join(project, 'memory') : null;
 }
@@ -105,7 +105,7 @@ function summarize(content: string): string {
 }
 
 /** Layer dirs highest-priority first. */
-export function getMemoryLayerDirs(cwd: string = process.cwd()): MemoryLayerDir[] {
+function getMemoryLayerDirs(cwd: string = process.cwd()): MemoryLayerDir[] {
   const out: MemoryLayerDir[] = [];
   const project = getProjectMemoryDir(cwd);
   if (project && fs.existsSync(project)) out.push({ layer: 'project', dir: project });
@@ -187,7 +187,7 @@ export function removeMemoryFact(name: string): boolean {
 }
 
 /** Rebuild MEMORY.md index from sibling fact files in a single layer dir. */
-export function rebuildMemoryIndex(dir: string): void {
+function rebuildMemoryIndex(dir: string): void {
   let facts: string[] = [];
   try {
     facts = fs.readdirSync(dir).filter(isFactFile).sort();

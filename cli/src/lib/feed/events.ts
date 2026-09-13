@@ -472,7 +472,7 @@ function ensureLogsDir(): void {
  * so no record is overwritten or silently discarded. The legacy active-file
  * lock serializes this with older installed processes that still append there.
  */
-export function migrateLegacyEventLogs(userDir: string = userAgentsDir()): number {
+function migrateLegacyEventLogs(userDir: string = userAgentsDir()): number {
   if (_eventsPathOverride || _legacyMigrationChecked) return 0;
   _legacyMigrationChecked = true;
 
@@ -940,60 +940,6 @@ export function time<T>(label: string, fn: () => T, payload: EventPayload = {}):
 }
 
 /**
- * Measure execution time of an async function.
- * Emits a perf.timing event with the duration.
- *
- * @example
- * const result = await timeAsync('fetch-data', () => fetchData(url));
- */
-export async function timeAsync<T>(
-  label: string,
-  fn: () => Promise<T>,
-  payload: EventPayload = {}
-): Promise<T> {
-  const start = Date.now();
-  try {
-    const result = await fn();
-    const durationMs = Date.now() - start;
-    emit('perf.timing', {
-      ...payload,
-      label,
-      durationMs,
-      status: 'success',
-    });
-    recordPerfTiming({
-      label,
-      durationMs,
-      status: 'success',
-      agent: payload.agent,
-      version: payload.version,
-      sessionId: payload.sessionId,
-      cwd: payload.cwd,
-    });
-    return result;
-  } catch (err) {
-    const durationMs = Date.now() - start;
-    emit('perf.timing', {
-      ...payload,
-      label,
-      durationMs,
-      status: 'error',
-      error: err instanceof Error ? err.message : String(err),
-    });
-    recordPerfTiming({
-      label,
-      durationMs,
-      status: 'error',
-      agent: payload.agent,
-      version: payload.version,
-      sessionId: payload.sessionId,
-      cwd: payload.cwd,
-    });
-    throw err;
-  }
-}
-
-/**
  * Create a timing context for measuring multiple phases of an operation.
  * Useful for tracking startup time vs execution time.
  *
@@ -1044,63 +990,6 @@ export function createTimer(label: string, payload: EventPayload = {}): {
   };
 }
 
-/**
- * Higher-order function that wraps an async function with timing.
- * The wrapper emits start/end events automatically.
- *
- * @example
- * const timedFetch = withTiming('fetch', fetchData, { service: 'api' });
- * const result = await timedFetch(url);
- */
-export function withTiming<Args extends unknown[], R>(
-  label: string,
-  fn: (...args: Args) => Promise<R>,
-  basePayload: EventPayload = {}
-): (...args: Args) => Promise<R> {
-  return async (...args: Args): Promise<R> => {
-    const start = Date.now();
-    try {
-      const result = await fn(...args);
-      const durationMs = Date.now() - start;
-      emit('perf.timing', {
-        ...basePayload,
-        label,
-        durationMs,
-        status: 'success',
-      });
-      recordPerfTiming({
-        label,
-        durationMs,
-        status: 'success',
-        agent: basePayload.agent,
-        version: basePayload.version,
-        sessionId: basePayload.sessionId,
-        cwd: basePayload.cwd,
-      });
-      return result;
-    } catch (err) {
-      const durationMs = Date.now() - start;
-      emit('perf.timing', {
-        ...basePayload,
-        label,
-        durationMs,
-        status: 'error',
-        error: err instanceof Error ? err.message : String(err),
-      });
-      recordPerfTiming({
-        label,
-        durationMs,
-        status: 'error',
-        agent: basePayload.agent,
-        version: basePayload.version,
-        sessionId: basePayload.sessionId,
-        cwd: basePayload.cwd,
-      });
-      throw err;
-    }
-  };
-}
-
 // ─── Command Tracking ─────────────────────────────────────────────────────────
 
 /**
@@ -1123,23 +1012,6 @@ export function emitCommand(
     command,
     args: args.slice(0, 20), // Limit args to first 20
     cwd: process.cwd(),
-  });
-}
-
-// ─── Error Tracking ───────────────────────────────────────────────────────────
-
-/**
- * Emit an error event with full details.
- */
-export function emitError(
-  err: Error | string,
-  payload: EventPayload = {}
-): void {
-  const error = err instanceof Error ? err : new Error(err);
-  emit('error', {
-    ...payload,
-    error: error.message,
-    errorStack: truncate(error.stack, 1000),
   });
 }
 
@@ -1282,7 +1154,7 @@ function finalizePastDayLogs(): void {
   }
 }
 
-export interface RotationResult {
+interface RotationResult {
   removedByAge: number;
   removedBySize: number;
   bytesReclaimed: number;
@@ -1502,46 +1374,9 @@ export function queryToolUsageForSessions(
   return result;
 }
 
-// ─── Stats ────────────────────────────────────────────────────────────────────
-
-/**
- * Get performance stats for a specific label.
- */
-export function getTimingStats(label: string, options: { days?: number } = {}): {
-  count: number;
-  avgMs: number;
-  minMs: number;
-  maxMs: number;
-  p50Ms: number;
-  p95Ms: number;
-} | null {
-  const days = options.days ?? 7;
-  const startDate = new Date();
-  startDate.setDate(startDate.getDate() - days);
-
-  const events = query({
-    startDate,
-    eventTypes: ['perf.timing'],
-  }).filter(e => e.label === label && typeof e.durationMs === 'number');
-
-  if (events.length === 0) return null;
-
-  const durations = events.map(e => e.durationMs as number).sort((a, b) => a - b);
-  const sum = durations.reduce((a, b) => a + b, 0);
-
-  return {
-    count: durations.length,
-    avgMs: Math.round(sum / durations.length),
-    minMs: durations[0],
-    maxMs: durations[durations.length - 1],
-    p50Ms: durations[Math.floor(durations.length * 0.5)],
-    p95Ms: durations[Math.floor(durations.length * 0.95)],
-  };
-}
-
 // ─── Stats ───────────────────────────────────────────────────────────────────
 
-export interface EventStats {
+interface EventStats {
   totalEvents: number;
   byLevel: Record<string, number>;
   byEvent: Record<string, number>;

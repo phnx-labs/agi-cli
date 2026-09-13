@@ -169,7 +169,7 @@ export interface SessionState {
   attachments?: SessionAttachment[];
 }
 
-export interface StateContext {
+interface StateContext {
   /** Session file mtime; drives running-vs-stale. */
   mtimeMs?: number;
   cwd?: string;
@@ -515,7 +515,7 @@ export function extractCreatedTicket(text?: string): string | undefined {
  * lifts `input` onto `event.args`. Returns undefined for a missing/empty plan
  * so consumers can rely on `plan?: string` truthiness.
  */
-export function extractPlanText(args?: Record<string, any>): string | undefined {
+function extractPlanText(args?: Record<string, any>): string | undefined {
   const plan = args?.plan;
   if (typeof plan !== 'string') return undefined;
   const trimmed = plan.trim();

@@ -10,7 +10,7 @@
 
 import type { AgentId } from '../types.js';
 
-export interface AcpHarnessSpec {
+interface AcpHarnessSpec {
   /** Command + args to spawn the agent in ACP server mode. */
   command: string;
   args: string[];
@@ -22,7 +22,7 @@ export interface AcpHarnessSpec {
   source: string;
 }
 
-export const ACP_HARNESSES: Partial<Record<AgentId, AcpHarnessSpec>> = {
+const ACP_HARNESSES: Partial<Record<AgentId, AcpHarnessSpec>> = {
   claude: {
     command: 'npx',
     args: ['-y', '@zed-industries/claude-agent-acp'],

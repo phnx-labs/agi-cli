@@ -43,7 +43,7 @@ export type CloudTaskStatus =
   | 'cancelled';
 
 /** Cloud backends whose wire status is normalized by `normalizeProviderStatus`. */
-export type StatusNormalizingProvider = 'rush' | 'codex' | 'antigravity' | 'cursor';
+type StatusNormalizingProvider = 'rush' | 'codex' | 'antigravity' | 'cursor';
 
 /**
  * Normalize a provider's raw wire status into the canonical `CloudTaskStatus`.

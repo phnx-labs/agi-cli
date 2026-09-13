@@ -11,14 +11,6 @@ export const VERSION_RE = /^(?:latest|(?!.*\.\.)[A-Za-z0-9._+-]{1,64})$/;
 
 /** Canonical qualifier set, in help/display order. `pinned` ≡ `default`. */
 export const AGENT_QUALIFIERS = ['latest', 'oldest', 'pinned', 'default', 'all'] as const;
-export type AgentQualifier = (typeof AGENT_QUALIFIERS)[number];
-
-/**
- * Record-filter-only qualifiers. `any` means "no version constraint" for
- * historical-record queries (sessions/teams resume) — accepted by the filter
- * path but intentionally kept out of the display vocabulary.
- */
-export const RECORD_ONLY_QUALIFIERS = ['any'] as const;
 
 /** Split a version into numeric `.`-segments (non-numeric tail → 0), e.g. `2026.2.19-2` → [2026,2,19]. */
 function numericParts(v: string): number[] {

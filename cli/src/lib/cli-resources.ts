@@ -125,7 +125,7 @@ export interface CliManifest {
 }
 
 /** A validation problem in a CLI manifest. */
-export interface CliManifestError {
+interface CliManifestError {
   /** Filename that failed to parse. */
   file: string;
   /** Human-readable reason. */
@@ -140,7 +140,7 @@ export interface CliManifestError {
  * string. String form is split on whitespace and each token is validated against
  * SAFE_CHECK_TOKEN — manifests cannot smuggle in shell metacharacters.
  */
-export function parseCheckSpec(raw: unknown, defaultName: string): CheckSpec {
+function parseCheckSpec(raw: unknown, defaultName: string): CheckSpec {
   if (raw == null) {
     assertSafeCheckToken(defaultName);
     return { kind: 'version', cmd: defaultName, args: ['--version'] };
@@ -670,7 +670,7 @@ export function installCli(
 
 // ─── Status snapshot ─────────────────────────────────────────────────────────
 
-export interface CliStatus {
+interface CliStatus {
   manifest: CliManifest;
   installed: boolean;
 }

@@ -6,13 +6,13 @@
  */
 
 /** Parsed YAML frontmatter from a Markdown command file. */
-export interface MarkdownFrontmatter {
+interface MarkdownFrontmatter {
   description?: string;
   [key: string]: unknown;
 }
 
 /** Extract YAML frontmatter and body from a Markdown string. Returns empty frontmatter if none found. */
-export function parseMarkdownFrontmatter(content: string): {
+function parseMarkdownFrontmatter(content: string): {
   frontmatter: MarkdownFrontmatter;
   body: string;
 } {
@@ -79,20 +79,4 @@ export function markdownToGooseRecipe(commandName: string, markdown: string): Re
     instructions: prompt,
     prompt,
   };
-}
-
-/** Convert a Gemini TOML command file back to Markdown format, translating {{args}} to $ARGUMENTS. */
-export function tomlToMarkdown(toml: string): string {
-  const nameMatch = toml.match(/name\s*=\s*"([^"]+)"/);
-  const descMatch = toml.match(/description\s*=\s*"([^"]+)"/);
-  const promptMatch = toml.match(/prompt\s*=\s*(?:'''|""")([\s\S]*?)(?:'''|""")/);
-
-  const description = descMatch?.[1] || '';
-  let prompt = promptMatch?.[1]?.trim() || '';
-
-  prompt = prompt.replace(/\{\{args\}\}/g, '$ARGUMENTS');
-
-  const lines = ['---', `description: ${description}`, '---', '', prompt, ''];
-
-  return lines.join('\n');
 }

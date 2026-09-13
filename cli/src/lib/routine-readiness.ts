@@ -107,13 +107,6 @@ export function evaluateActivationReadiness(
   );
 }
 
-/** One-line human summary of a blocked readiness result, with its repair. */
-export function formatReadinessBlocker(result: RoutineReadinessResult): string {
-  if (result.ready || !result.readiness) return 'ready';
-  const { code, message, repair } = result.readiness;
-  return `${code}: ${message}${repair ? `\n  repair: ${repair}` : ''}`;
-}
-
 interface RemoteProjectDefinition {
   name: string;
   root?: string;

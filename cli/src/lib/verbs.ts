@@ -20,7 +20,7 @@ export const CANONICAL_ALIASES = {
   edit: [],
 } as const;
 
-export type CanonicalVerb = keyof typeof CANONICAL_ALIASES;
+type CanonicalVerb = keyof typeof CANONICAL_ALIASES;
 
 /** Apply the standard aliases for `verb` to an already-created subcommand, returning it. */
 export function withAliases(cmd: Command, verb: CanonicalVerb): Command {

@@ -216,7 +216,7 @@ export function parseStreamingExitFrame(stderr: Buffer, taskId: string): Buffer 
  * File identity (`dev:ino`) of a path on the remote host, or null if it can't be
  * stat'd. GNU (`-c`) then BSD (`-f`) format, so it works on Linux and macOS hosts.
  */
-export function readRemoteFileId(target: string, remotePath: string, extraSshArgs?: string[]): string | null {
+function readRemoteFileId(target: string, remotePath: string, extraSshArgs?: string[]): string | null {
   const res = sshExec(
     target,
     `stat -c '%d:%i' ${remotePath} 2>/dev/null || stat -f '%d:%i' ${remotePath} 2>/dev/null`,

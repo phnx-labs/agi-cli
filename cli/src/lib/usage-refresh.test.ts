@@ -5,14 +5,11 @@ import * as path from 'path';
 
 import {
   REFRESH_INTERVAL_MS,
-  REFRESH_MIN_MS,
-  REFRESH_MAX_MS,
   REFRESH_BURN_DIVISOR,
   HOURLY_CALL_CAP,
   PROVIDER_HOURLY_BUDGET,
   PROVIDER_MIN_REFRESH_SPACING_MS,
   PROVIDER_CATCHUP_MAX,
-  STATUSLINE_FRESH_MS,
   USAGE_REFRESH_TICK_MS,
   FAILURE_QUARANTINE_MS,
   FAILURE_QUARANTINE_THRESHOLD,
@@ -64,8 +61,6 @@ const sessionSnap = (usedPercent: number, capturedAtMs: number): UsageSnapshot =
 describe('computeNextRefreshDelayMs — fixed 5-minute production cadence', () => {
   it('defaults to the 5-minute interval regardless of burn projection', () => {
     expect(REFRESH_INTERVAL_MS).toBe(5 * 60 * 1000);
-    expect(REFRESH_MIN_MS).toBe(REFRESH_INTERVAL_MS);
-    expect(REFRESH_MAX_MS).toBe(REFRESH_INTERVAL_MS);
     expect(USAGE_REFRESH_TICK_MS).toBe(60_000);
     expect(computeNextRefreshDelayMs(600)).toBe(REFRESH_INTERVAL_MS);
     expect(computeNextRefreshDelayMs(20)).toBe(REFRESH_INTERVAL_MS);
@@ -544,7 +539,7 @@ describe('provider budget — aggregate endpoint pressure does not scale with N'
     // No API call recorded (statusline is free) ⇒ no call timestamp consumed budget.
     expect(entry?.callTimestamps).toEqual([]);
     // Rescheduled one interval past the free capture.
-    expect(entry?.nextRefreshAt).toBe(NOW - 60_000 + STATUSLINE_FRESH_MS);
+    expect(entry?.nextRefreshAt).toBe(NOW - 60_000 + REFRESH_INTERVAL_MS);
   });
 
   it('DOES API-refresh an account whose cached row aged past the statusline-fresh window', async () => {
@@ -556,7 +551,7 @@ describe('provider budget — aggregate endpoint pressure does not scale with N'
       ],
       writeUsageCache: writeClaudeUsageCache,
       backoffUntil: () => null,
-      readCachedSnapshot: () => sessionSnap(10, NOW - (STATUSLINE_FRESH_MS + 60_000)),
+      readCachedSnapshot: () => sessionSnap(10, NOW - (REFRESH_INTERVAL_MS + 60_000)),
     });
     expect(fetched).toBe(true);
     expect(result.refreshed).toBe(1);

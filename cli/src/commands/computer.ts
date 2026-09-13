@@ -139,7 +139,7 @@ export function withDeviceFlag(argv: string[], device?: string): string[] {
  * is the one the engine cannot: it prints the install line and exits 1. There is
  * no fallback engine to reach for — that is the point of the extraction.
  */
-export async function forwardToComputer(opts: {
+async function forwardToComputer(opts: {
   argv: string[];
   device?: string;
   /** Skip recording — lifecycle verbs are not user actions. */
@@ -250,7 +250,7 @@ export function registerComputerCommand(program: Command): void {
   });
 }
 
-export function registerComputerSubcommands(program: Command): void {
+function registerComputerSubcommands(program: Command): void {
   registerSetupCommand(program);
   registerStartCommand(program);
   registerStopCommand(program);

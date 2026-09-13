@@ -31,7 +31,7 @@ import {
 import { formatRelativeTime } from '../lib/session/relative-time.js';
 import { sessionHeadline } from '../lib/session/title.js';
 
-export interface ComputerSessionsCommandOpts {
+interface ComputerSessionsCommandOpts {
   machine?: string;
   /** Row cap for the flat table only — the interactive picker is searchable
    *  and shows every row regardless (see `runComputerSessions`). */

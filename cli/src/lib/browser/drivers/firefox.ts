@@ -51,7 +51,7 @@ export class FirefoxCapabilityError extends Error {
 }
 
 /** A BiDi error frame carrying the protocol error + human message. */
-export class FirefoxBiDiError extends Error {
+class FirefoxBiDiError extends Error {
   constructor(public readonly bidiError: string, message: string) {
     super(`Firefox BiDi ${bidiError}: ${message}`);
     this.name = 'FirefoxBiDiError';
@@ -355,7 +355,7 @@ export function deserializeBidi(remote: unknown): unknown {
 // its CDP ones. Each takes the live client and a context (BiDi's stable tab id).
 
 /** One top-level browsing context (a tab), flattened from `browsingContext.getTree`. */
-export interface BiDiContext {
+interface BiDiContext {
   context: string;
   url: string;
 }

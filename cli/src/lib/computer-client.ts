@@ -178,7 +178,7 @@ export function parseEventLines(
   return { events, rest };
 }
 
-export interface RunComputerOptions {
+interface RunComputerOptions {
   /** argv handed to the standalone, after the program name. */
   argv: string[];
   /** The consumer context serialized onto fd 3. */
@@ -196,7 +196,7 @@ export interface RunComputerOptions {
   capture?: boolean;
 }
 
-export interface RunComputerResult {
+interface RunComputerResult {
   exitCode: number;
   /** Engine stdout, only when `capture` was set. */
   stdout: string;
@@ -290,5 +290,3 @@ function osSignalNumber(signal: NodeJS.Signals): number | undefined {
 export function _resetComputerClientForTest(): void {
   cachedBin = undefined;
 }
-
-export const COMPUTER_INSTALL_HINT = INSTALL_HINT;

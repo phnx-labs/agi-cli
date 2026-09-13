@@ -28,7 +28,7 @@ export { splitUserHost };
 
 /** A dialable peer: the ssh target, the machine id used to tag its rows, a
  * display name, and the OS family that picks the remote shell dialect. */
-export interface ResolvedSshTarget {
+interface ResolvedSshTarget {
   target: string;
   machine: string;
   name: string;
@@ -36,7 +36,7 @@ export interface ResolvedSshTarget {
   extraSshArgs?: string[];
 }
 
-export interface ResolvedExplicitTargetSet {
+interface ResolvedExplicitTargetSet {
   targets: ResolvedSshTarget[];
   unresolved: string[];
 }

@@ -147,7 +147,7 @@ export interface FleetDivergence {
   message: string;
 }
 
-export interface FleetDivergenceReport {
+interface FleetDivergenceReport {
   /** Name of the device used as the comparison baseline (the local machine). */
   baseline: string;
   divergences: FleetDivergence[];

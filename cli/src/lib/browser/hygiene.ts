@@ -31,7 +31,7 @@ import { listPidSessionEntries, sessionIdFromLivePid, type PidSessionEntry } fro
 import { parseConnectionKey, type ReapResult, type ReapedTask, type Task } from './types.js';
 
 /** Default idle window before an untouched task is reaped. */
-export const DEFAULT_IDLE_MS = 30 * 60_000;
+const DEFAULT_IDLE_MS = 30 * 60_000;
 
 /**
  * The slice of `BrowserService` the reaper needs. Structural, so a test drives
@@ -75,7 +75,7 @@ export interface ReapOptions {
   deps?: ReapDeps;
 }
 
-export interface LiveIdentities {
+interface LiveIdentities {
   sessions: Set<string>;
   launches: Set<string>;
 }

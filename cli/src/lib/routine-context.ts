@@ -139,7 +139,7 @@ function targetPath(home: string): typeof path.posix {
 }
 
 /** Expand a leading `~`/`$HOME` against the target home; pass other values through. */
-export function expandTargetHome(home: string, p: string): string {
+function expandTargetHome(home: string, p: string): string {
   if (p === '~' || p === '$HOME') return home;
   const tp = targetPath(home);
   if (p.startsWith('~/')) return tp.join(home, p.slice(2));
@@ -148,7 +148,7 @@ export function expandTargetHome(home: string, p: string): string {
 }
 
 /** Rewrite an absolute path under the target home to its portable `~/…` form; pass others through. */
-export function toTargetPortable(home: string, abs: string): string {
+function toTargetPortable(home: string, abs: string): string {
   const tp = targetPath(home);
   const rel = tp.relative(home, abs);
   if (rel === '') return '~';
@@ -338,7 +338,7 @@ export function resolveRoutineExecutionContext(input: ExecutionContextInput): Re
 // --- harness/target readiness layering ---
 
 /** Injected harness/target probes for {@link evaluateRoutineReadiness}. */
-export interface HarnessReadinessProbes {
+interface HarnessReadinessProbes {
   /** Is the resolved agent+version installed on the target? */
   agentInstalled?(): boolean;
   /** Is the absolute execution dir a trusted Codex workspace? (Codex agent only.) */

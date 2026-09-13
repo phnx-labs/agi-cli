@@ -12,14 +12,14 @@ import { runSessionTitleTick, SESSION_TITLE_MAX_PER_TICK, type SessionTitleRunne
 
 const BACKFILL_REMOTE_TIMEOUT_MS = 10 * 60_000;
 
-export interface ToolBackfillMachineResult {
+interface ToolBackfillMachineResult {
   machine: string;
   indexedFiles: number;
   indexedCalls: number;
   coverage: ToolIndexCoverage;
 }
 
-export interface ToolBackfillEnvelope {
+interface ToolBackfillEnvelope {
   schemaVersion: 1;
   kind: 'tools-backfill';
   generatedAt: string;
@@ -184,7 +184,7 @@ interface ResourceBackfillOptions {
   json?: boolean;
 }
 
-export interface ResourceBackfillEnvelope {
+interface ResourceBackfillEnvelope {
   schemaVersion: 1;
   kind: 'resources-backfill';
   generatedAt: string;
@@ -209,7 +209,7 @@ export interface ResourceBackfillEnvelope {
  * index is complete first (discoverSessions), then re-derives usage gated by the
  * resource_scan_ledger so reruns skip completed transcripts.
  */
-export async function runResourceBackfill(options: ResourceBackfillOptions): Promise<ResourceBackfillEnvelope> {
+async function runResourceBackfill(options: ResourceBackfillOptions): Promise<ResourceBackfillEnvelope> {
   const { agent, version } = parseAgent(options.agent);
   // Make sure every matching transcript is indexed before we re-derive usage.
   await discoverSessions({

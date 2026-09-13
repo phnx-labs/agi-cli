@@ -76,7 +76,7 @@ export function extractSkills(events: SessionEvent[]): SkillUse[] {
 
 // ── Slash commands ────────────────────────────────────────────────────────────
 
-export interface SlashCommandUse {
+interface SlashCommandUse {
   /** WITH the leading slash, e.g. `/recap`, `/code:commit` — matches SessionEvent.slashCommand's shape. */
   name: string;
   count: number;
@@ -102,7 +102,7 @@ export function extractSlashCommands(events: SessionEvent[]): SlashCommandUse[] 
 
 // ── Hooks ─────────────────────────────────────────────────────────────────────
 
-export interface HookUse {
+interface HookUse {
   /** Hook name as configured, e.g. `SessionStart:startup`. */
   name: string;
   /** Lifecycle event, e.g. `SessionStart`. */
@@ -142,8 +142,8 @@ export function extractHooks(events: SessionEvent[]): HookUse[] {
 
 // ── Links ─────────────────────────────────────────────────────────────────────
 
-export type LinkKind = 'linear' | 'jira' | 'github' | 'gitlab' | 'other';
-export interface SessionLink {
+type LinkKind = 'linear' | 'jira' | 'github' | 'gitlab' | 'other';
+interface SessionLink {
   kind: LinkKind;
   url: string;
   /** Short display label: `RUSH-2076`, `PR#1755`, `owner/repo#123`, host. */
@@ -384,7 +384,7 @@ export function isBackgroundShellStart(e: SessionEvent): boolean {
   return !!spec && e.tool === spec.tool && e.args?.[spec.flag] === true;
 }
 
-export interface BackgroundShell {
+interface BackgroundShell {
   /** The command line as invoked, trimmed for display. */
   command: string;
   timestamp: string;

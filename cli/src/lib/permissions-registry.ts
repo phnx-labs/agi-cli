@@ -345,7 +345,7 @@ function readCodexDenyRules(configPath: string): string[] {
 // ── the registry ─────────────────────────────────────────────────────────────
 
 /** The complete permissions contract for one agent. */
-export interface PermissionTarget {
+interface PermissionTarget {
   /** Permissions file under a HOME root (a version home, or the real HOME). */
   home(home: string): string;
   /** Permissions file for a project checkout, when the harness reads one. */
@@ -655,11 +655,6 @@ function kimiPatternToCanonical(pattern: string): string | null {
     if (arg === ':*') return 'Bash(*)';
   }
   return canonicalRule(lowerTool, arg);
-}
-
-/** The registry entry for `agent`, or undefined when it stores no permissions. */
-export function permissionTarget(agent: AgentId): PermissionTarget | undefined {
-  return PERMISSION_TARGETS[agent];
 }
 
 /**

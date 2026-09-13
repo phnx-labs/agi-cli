@@ -949,7 +949,7 @@ function diffPlugins(agent: AgentId, version: string, cwd: string): ResourceDiff
 
 // ─── public API ───────────────────────────────────────────────────────────────
 
-export interface DiffOptions {
+interface DiffOptions {
   cwd?: string;
   /** Restrict to specific kinds; undefined = all. */
   kinds?: DoctorKind[];

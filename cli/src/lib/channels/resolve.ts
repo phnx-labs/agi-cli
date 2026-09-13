@@ -16,7 +16,7 @@ import type { Meta } from '../types.js';
 import { die } from '../format.js';
 import { resolveChannelProvider, listChannelProviders, type ChannelProvider } from './registry.js';
 
-export interface TransportLookup {
+interface TransportLookup {
   /** Provider name after applying the `notify.transports` mapping. */
   providerName: string;
   /** Registered provider, or undefined when `providerName` resolves to nothing. */

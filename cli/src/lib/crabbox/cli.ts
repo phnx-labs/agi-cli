@@ -52,7 +52,7 @@ export interface CrabboxBox {
   idleTimeoutSecs: number | null;
 }
 
-export interface CrabboxOptions {
+interface CrabboxOptions {
   /**
    * Name of a secrets bundle whose env (e.g. `HCLOUD_TOKEN`) crabbox needs to
    * reach its cloud provider. Resolved via agents-cli's own keychain-backed
@@ -86,7 +86,7 @@ export function findCrabbox(): string {
  * declared key NAMES; only the matched key's VALUE is ever injected (see
  * `crabboxEnv`), so an auto-detected bundle can't leak its other secrets.
  */
-export const LEASE_PROVIDER_TOKEN_KEYS = ['HCLOUD_TOKEN', 'AWS_ACCESS_KEY_ID', 'DIGITALOCEAN_TOKEN', 'DO_TOKEN'];
+const LEASE_PROVIDER_TOKEN_KEYS = ['HCLOUD_TOKEN', 'AWS_ACCESS_KEY_ID', 'DIGITALOCEAN_TOKEN', 'DO_TOKEN'];
 
 /** The first bundle that declares a provider token key, or undefined. Pure over `bundles`. */
 export function pickLeaseBundleFromList(bundles: SecretsBundle[]): string | undefined {
@@ -101,7 +101,7 @@ export function pickLeaseBundleFromList(bundles: SecretsBundle[]): string | unde
  * `CRABBOX_TAILSCALE_AUTH_KEY` to join a leased box to the tailnet; we accept the
  * common alternate names too and rename to that canonical key on injection.
  */
-export const TAILSCALE_AUTH_KEY_NAMES = ['CRABBOX_TAILSCALE_AUTH_KEY', 'TAILSCALE_AUTH_KEY', 'TS_AUTHKEY'];
+const TAILSCALE_AUTH_KEY_NAMES = ['CRABBOX_TAILSCALE_AUTH_KEY', 'TAILSCALE_AUTH_KEY', 'TS_AUTHKEY'];
 
 /** The first bundle + key that declares a Tailscale auth key, or undefined. Pure over `bundles`. */
 export function pickTailscaleBundleFromList(bundles: SecretsBundle[]): { name: string; key: string } | undefined {
@@ -170,7 +170,7 @@ export function resetCrabboxSecretsMemosForTest(): void {
 }
 
 /** A resolved lease bundle: its name, plus (auto-detect only) the exact keys to inject. */
-export interface ResolvedLeaseBundle {
+interface ResolvedLeaseBundle {
   name: string;
   /** When set (auto-detect), inject ONLY these keys — not the whole bundle. */
   keys?: string[];
@@ -386,7 +386,7 @@ export function crabboxStatusReady(slug: string, opts: CrabboxOptions = {}): boo
   return /(^|\s)ready=true(\s|$)/m.test(r.stdout);
 }
 
-export interface PoolMatchOptions {
+interface PoolMatchOptions {
   /**
    * Lease pool label (shared default, or `.crabbox.yaml leaseProfile:` opt-in;
    * see config.ts). Both sides normalize an unset profile to
@@ -428,7 +428,7 @@ export function poolReusableBoxes(boxes: CrabboxBox[], opts: PoolMatchOptions = 
     .sort((a, b) => (b.lastTouchedAt ?? 0) - (a.lastTouchedAt ?? 0));
 }
 
-export interface WarmupOptions extends CrabboxOptions {
+interface WarmupOptions extends CrabboxOptions {
   class?: string;
   profile?: string;
   /** Provision web code-server capability on the box. */
@@ -546,37 +546,13 @@ export async function crabboxWaitReady(
   );
 }
 
-export interface CrabboxRunOptions extends CrabboxOptions {
+interface CrabboxRunOptions extends CrabboxOptions {
   /** Called with each chunk of combined stdout/stderr as it streams. */
   onData?: (chunk: string) => void;
   /** Force a full remote resync before running. */
   fullResync?: boolean;
   /** Refresh an existing lease with this idle window before running. */
   renewIdleTimeoutSecs?: number;
-}
-
-/**
- * Run `remoteCmd` on the leased box via `crabbox run` (crabbox syncs the dirty
- * checkout and owns the SSH). Streams combined output; resolves with the remote
- * exit code (or null if crabbox itself failed to dispatch).
- */
-export function crabboxRun(slug: string, remoteCmd: string, opts: CrabboxRunOptions = {}): Promise<number | null> {
-  findCrabbox();
-  const args = ['run', '--id', slug, '--reclaim'];
-  if (opts.fullResync) args.push('--full-resync');
-  args.push('--', 'bash', '-lc', remoteCmd);
-  return new Promise((resolve) => {
-    const proc = spawn('crabbox', args, { env: crabboxEnv(opts), stdio: ['ignore', 'pipe', 'pipe'] });
-    const pump = (chunk: Buffer) => {
-      const s = chunk.toString('utf-8');
-      if (opts.onData) opts.onData(s);
-      else process.stdout.write(s);
-    };
-    proc.stdout.on('data', pump);
-    proc.stderr.on('data', pump);
-    proc.on('error', () => resolve(null));
-    proc.on('close', (code) => resolve(code));
-  });
 }
 
 /**

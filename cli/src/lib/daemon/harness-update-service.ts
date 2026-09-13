@@ -46,7 +46,7 @@ const HARNESS_UPDATE_TICK_MS = 15 * 60_000;
  * probes; 10 minutes leaves headroom for a handful of harnesses in one pass
  * while staying comfortably under the 15-minute cadence above.
  */
-export const HARNESS_UPDATE_DEADLINE_MS = 10 * 60_000;
+const HARNESS_UPDATE_DEADLINE_MS = 10 * 60_000;
 /** First tick fires 60 seconds after daemon boot — long enough for shims/PATH to settle, short enough that a fresh box doesn't wait a full interval for its first check. */
 const HARNESS_UPDATE_STARTUP_DELAY_MS = 60_000;
 /**
@@ -58,9 +58,9 @@ const HARNESS_UPDATE_STARTUP_DELAY_MS = 60_000;
  * cancel prevents that stage from committing. The backstop kills the process
  * group on POSIX and the worker on Windows; the tick reports a failure.
  */
-export const HARNESS_UPDATE_CANCEL_GRACE_MS = 3 * 60_000;
+const HARNESS_UPDATE_CANCEL_GRACE_MS = 3 * 60_000;
 
-export interface HarnessUpdateOutcome {
+interface HarnessUpdateOutcome {
   ran: boolean;
   reason?: string;
   exitCode?: number | null;
@@ -85,7 +85,7 @@ export interface HarnessUpdateDeps {
   runAutoUpdatePass(signal: AbortSignal): Promise<CooperativeChildResult>;
 }
 
-export function defaultHarnessUpdateDeps(): HarnessUpdateDeps {
+function defaultHarnessUpdateDeps(): HarnessUpdateDeps {
   return {
     runAutoUpdatePass(signal) {
       const { command, args } = getCliLaunch([HARNESS_UPDATE_CHILD_CMD], getAgentsBinPath());

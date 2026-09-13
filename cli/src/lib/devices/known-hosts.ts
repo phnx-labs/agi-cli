@@ -36,7 +36,7 @@ export function ensureManagedKnownHostsDir(file = managedKnownHostsPath()): void
 }
 
 /** Read the managed store, or '' when it does not exist yet. */
-export function readManagedKnownHosts(file = managedKnownHostsPath()): string {
+function readManagedKnownHosts(file = managedKnownHostsPath()): string {
   try {
     return fs.readFileSync(file, 'utf-8');
   } catch {
@@ -116,7 +116,7 @@ export function newKnownHostsLines(existing: string, scanned: string): string[] 
   return fresh;
 }
 
-export interface PinResult {
+interface PinResult {
   /** True if the host is pinned in the managed store after this call. */
   pinned: boolean;
   /** How many new key lines were appended. */
@@ -153,7 +153,7 @@ export function recordScannedKeys(host: string, scanned: string, file = managedK
  * calls this for exactly that case so the credential copy is usable for
  * ssh-config-alias hosts (RUSH-1767).
  */
-export function pinHostKey(
+function pinHostKey(
   host: string,
   opts: { file?: string; timeoutMs?: number; port?: number } = {},
 ): PinResult {

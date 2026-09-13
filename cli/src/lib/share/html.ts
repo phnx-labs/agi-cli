@@ -16,7 +16,7 @@ import { dirname, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /** Skip inlining a sibling that would bloat the page past a reasonable PUT. */
-export const MAX_INLINE_BYTES = 4 * 1024 * 1024;
+const MAX_INLINE_BYTES = 4 * 1024 * 1024;
 
 const IMAGE_MIME: Record<string, string> = {
   '.png': 'image/png',

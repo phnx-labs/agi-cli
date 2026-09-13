@@ -12,9 +12,9 @@ import * as yaml from 'yaml';
 import type { HumansConfig, HumanOwner } from './types.js';
 import { getHumansFilePath } from './state.js';
 
-export const HUMANS_VERSION = 1 as const;
+const HUMANS_VERSION = 1 as const;
 
-export const HUMANS_HEADER = `# humans.yaml — owner identity and notification channels
+const HUMANS_HEADER = `# humans.yaml — owner identity and notification channels
 # Managed by agents-cli. See: agents humans --help
 `;
 

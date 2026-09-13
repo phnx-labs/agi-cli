@@ -43,7 +43,7 @@ const DEFAULT_AUTONOMY: DroidAutonomy = 'high';
 const VALID_AUTONOMY = new Set<DroidAutonomy>(['low', 'medium', 'high']);
 
 /** Locate the droid binary, checking agents-cli shims first then PATH. */
-export function findDroidBinary(): string | null {
+function findDroidBinary(): string | null {
   const shim = path.join(SHIMS_DIR, 'droid');
   if (fs.existsSync(shim)) return shim;
   try {

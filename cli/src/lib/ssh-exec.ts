@@ -187,7 +187,7 @@ export function sshConnectOpts(mux: string[], hostKeyOpts?: string[]): string[] 
   return [...(hostKeyOpts ?? []), ...SSH_OPTS, ...mux];
 }
 
-export interface SshExecOptions {
+interface SshExecOptions {
   /** Piped to the remote command's stdin (never interpolated into the shell). */
   input?: string;
   /** Kill the ssh process after this many ms. */
@@ -322,7 +322,7 @@ export function sshExecAsync(target: string, remoteCmd: string, opts: SshExecOpt
   });
 }
 
-export interface SshExecRawResult {
+interface SshExecRawResult {
   code: number | null;
   stdout: Buffer;
   stderr: Buffer;
@@ -359,7 +359,7 @@ export function sshExecRaw(target: string, remoteCmd: string, opts: SshExecOptio
   };
 }
 
-export interface SshExecRawStreamOptions extends SshExecOptions {
+interface SshExecRawStreamOptions extends SshExecOptions {
   onStdout: (chunk: Buffer) => void;
   onStderr?: (chunk: Buffer) => void;
   signal?: AbortSignal;
@@ -432,7 +432,7 @@ export function sshReachable(target: string, timeoutMs = 10000): boolean {
   return sshExec(target, 'true', { timeoutMs, multiplex: true }).code === 0;
 }
 
-export interface SshStreamOptions {
+interface SshStreamOptions {
   /**
    * Allocate a remote pseudo-terminal (`ssh -tt`) so an interactive remote
    * command (a picker, a prompt) renders live on the local terminal. Callers

@@ -12,9 +12,9 @@ import {
 import { localLoginUser, withDefaultUser } from './sync.js';
 import { nodeToDeviceInput, parseTailscaleStatus, tailscaleStatusJson } from './tailscale.js';
 
-export type DeviceDiscoveryStatus = 'approved' | 'ignored';
+type DeviceDiscoveryStatus = 'approved' | 'ignored';
 
-export interface DeviceDiscoveryReconcileResult {
+interface DeviceDiscoveryReconcileResult {
   approved: string[];
   ignored: string[];
   registered: string[];

@@ -47,7 +47,7 @@ import { selectSessions } from './sessions-export.js';
 export const SESSIONS_TRACE_SCHEMA_VERSION = 1;
 
 /** The `diff` block of a `layout: 'compare'` envelope — everything but the two full trajectories, which already ride `sessions`. */
-export interface SessionsTraceDiffEnvelope {
+interface SessionsTraceDiffEnvelope {
   divergence?: TrajectoryDivergence;
   added: TrajectoryStep[];
   removed: TrajectoryStep[];
@@ -58,7 +58,7 @@ export interface SessionsTraceDiffEnvelope {
 }
 
 /** The `lineage` block of a `layout: 'lineage'` envelope — the delegation graph. */
-export interface SessionsTraceLineageEnvelope {
+interface SessionsTraceLineageEnvelope {
   rootId: string;
   nodes: LineageNode[];
   edges: LineageEdge[];
@@ -67,7 +67,7 @@ export interface SessionsTraceLineageEnvelope {
 }
 
 /** The `--json` envelope: the versioned contract for the ext / triaging agents. */
-export interface SessionsTraceEnvelope {
+interface SessionsTraceEnvelope {
   schemaVersion: typeof SESSIONS_TRACE_SCHEMA_VERSION;
   kind: 'sessions-trace';
   layout: 'single' | 'compare' | 'lineage';
@@ -147,7 +147,7 @@ interface TraceOptions {
   tree?: boolean;
 }
 
-export type RenderFormat = 'html' | 'text' | 'json';
+type RenderFormat = 'html' | 'text' | 'json';
 
 /**
  * Pick the rendering by audience: explicit `--html/--text/--json` win; otherwise
@@ -269,7 +269,7 @@ export function renderSessionSteps(
 }
 
 /** Attach the trace behaviour to a command node (canonical or top-level alias). */
-export function configureTraceCommand(cmd: Command): Command {
+function configureTraceCommand(cmd: Command): Command {
   cmd
     .description('Visualize a session as a trajectory — a tool-call timeline you can read at a glance. Opens a visual for a person; prints a compact trajectory for an agent.')
     .option('--html', 'Force the HTML rendering (opens in a browser)')

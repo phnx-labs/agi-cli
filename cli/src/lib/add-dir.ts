@@ -26,7 +26,7 @@ import * as path from 'path';
 import type { AgentId } from './types.js';
 import { expandLocalHome } from './project-root.js';
 
-export type AddDirStrategy = 'native-flag' | 'codex-policy' | 'grok-sandbox' | 'none';
+type AddDirStrategy = 'native-flag' | 'codex-policy' | 'grok-sandbox' | 'none';
 
 /** How each harness consumes directory grants. Keep in lockstep with apply* below. */
 export const ADD_DIR_STRATEGY: Record<AgentId, AddDirStrategy> = {
@@ -49,13 +49,6 @@ export const ADD_DIR_STRATEGY: Record<AgentId, AddDirStrategy> = {
   warp: 'none',
 };
 
-/** Agents whose launch command is widened by applyAddDirs (excludes codex — policy path). */
-export function agentsWithNativeOrGrokAddDir(): AgentId[] {
-  return (Object.keys(ADD_DIR_STRATEGY) as AgentId[]).filter(
-    (id) => ADD_DIR_STRATEGY[id] === 'native-flag' || ADD_DIR_STRATEGY[id] === 'grok-sandbox',
-  );
-}
-
 /** Expand `~` / `$HOME` and de-dupe, preserving order. */
 export function normalizeAddDirs(dirs: string[] | undefined): string[] {
   if (!dirs?.length) return [];
@@ -74,7 +67,7 @@ export function normalizeAddDirs(dirs: string[] | undefined): string[] {
  * Append native `--add-dir` flags for harnesses that take them (Claude, Kimi, Cursor).
  * No-op for other strategies — call sites route by ADD_DIR_STRATEGY.
  */
-export function appendNativeAddDirFlags(cmd: string[], dirs: string[]): void {
+function appendNativeAddDirFlags(cmd: string[], dirs: string[]): void {
   for (const dir of dirs) {
     cmd.push('--add-dir', dir);
   }
@@ -91,7 +84,7 @@ export const GROK_PROJECT_SANDBOX_PROFILE = 'agents-project';
  * visible here (Grok does not expose it on the CLI), so those runs still get
  * the rules note but not a custom widen. Prefer env when launching sandboxed.
  */
-export function grokActiveSandboxProfile(env: NodeJS.ProcessEnv = process.env): string | null {
+function grokActiveSandboxProfile(env: NodeJS.ProcessEnv = process.env): string | null {
   const raw = (env.GROK_SANDBOX ?? '').trim();
   if (!raw) return null;
   const lower = raw.toLowerCase();

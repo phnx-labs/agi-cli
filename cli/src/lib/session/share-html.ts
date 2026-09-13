@@ -20,7 +20,7 @@
 import { marked, Renderer } from 'marked';
 import type { SessionMeta } from './types.js';
 
-export interface SessionHtmlOptions {
+interface SessionHtmlOptions {
   /** Whether the Markdown was rendered with redaction on — shown in the footer. */
   redacted?: boolean;
 }
@@ -91,7 +91,7 @@ const FOLD_BLOCK = /<details>\n<summary>Reasoning<\/summary>\n\n([\s\S]*?)\n\n<\
  * every later turn into it. Reconstructing both ends here makes the pairing
  * structural: it cannot be unbalanced by anything the transcript contains.
  */
-export function liftFoldBlocks(markdown: string): { text: string; blocks: string[] } {
+function liftFoldBlocks(markdown: string): { text: string; blocks: string[] } {
   const blocks: string[] = [];
   // A transcript that literally contains the sentinel must not be able to forge a
   // disclosure element, so break any occurrence before inserting our own.

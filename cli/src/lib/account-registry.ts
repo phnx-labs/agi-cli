@@ -49,7 +49,7 @@ export interface CredentialAccount {
 }
 
 export interface AccountRegistryDocument { version: 2; accounts: Record<string, CredentialAccount> }
-export interface ResolvedCredentialAccount { id: string; name: string; provider: string; auth: AccountAuthKind; env: Record<string, string> }
+interface ResolvedCredentialAccount { id: string; name: string; provider: string; auth: AccountAuthKind; env: Record<string, string> }
 export interface NativeAccount extends NativeAccountRecord {
   kind: 'native';
 }
@@ -62,7 +62,7 @@ const NAME = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
 const NATIVE_LABEL = /^[a-zA-Z0-9][a-zA-Z0-9@._+-]*$/;
 const AUTH_KINDS: readonly AccountAuthKind[] = ['api-key', 'setup-token', 'bearer-token'];
 
-export function accountRegistryPath(base = getUserAgentsDir()): string { return path.join(base, 'accounts.yaml'); }
+function accountRegistryPath(base = getUserAgentsDir()): string { return path.join(base, 'accounts.yaml'); }
 
 function assertName(name: string): void {
   if (!NAME.test(name)) throw new Error('Account name must start with a letter or number and contain only letters, numbers, dot, underscore, or dash.');
@@ -509,7 +509,7 @@ export function accountBindings(accountId: string, meta: Pick<Meta, 'accounts' |
   return Object.entries(merged).filter(([, id]) => id === accountId).map(([target]) => target).sort();
 }
 
-export interface AccountSelection { id: string; source: 'explicit' | 'binding' | 'default' }
+interface AccountSelection { id: string; source: 'explicit' | 'binding' | 'default' }
 
 /** Explicit selection wins over a configured per-harness default. */
 export function resolveAccountSelection(
@@ -553,7 +553,7 @@ function renameProfileConsumers(oldName: string, newName: string, base: string):
   }
 }
 
-export interface AddAccountOptions { baseUrl?: string }
+interface AddAccountOptions { baseUrl?: string }
 
 export function addAccount(name: string, provider: string, auth: AccountAuthKind, secret: string, base = getUserAgentsDir(), opts: AddAccountOptions = {}): CredentialAccount {
   assertName(name);

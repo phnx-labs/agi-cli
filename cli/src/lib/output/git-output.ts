@@ -16,13 +16,13 @@ import * as path from 'path';
 const execFileAsync = promisify(execFile);
 
 /** Commit tally for one author email. */
-export interface AuthorCommits {
+interface AuthorCommits {
   author: string;
   commits: number;
 }
 
 /** The shipped-work rollup for a window. */
-export interface GitOutputSummary {
+interface GitOutputSummary {
   reposScanned: number;
   commits: number;
   byAuthor: AuthorCommits[];
@@ -43,7 +43,7 @@ export interface GitOutputSummary {
   sinceIso: string;
 }
 
-export interface GitOutputOptions {
+interface GitOutputOptions {
   /** Root scanned for git repos (e.g. ~/src). */
   reposDir: string;
   /** Window start, epoch ms. */
@@ -200,7 +200,7 @@ async function ghSearchCount(args: string[]): Promise<number | null> {
  * prs` searches all of GitHub, so one authed gh can cover multiple accounts'
  * logins. Returns ghAvailable=false if gh can't be reached at all.
  */
-export async function collectPrs(
+async function collectPrs(
   logins: string[],
   sinceDate: string,
 ): Promise<{ opened: number; merged: number; logins: string[]; ghAvailable: boolean }> {

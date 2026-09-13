@@ -103,7 +103,7 @@ export interface ToolScanResumePoint {
   parsedOffset: number;
 }
 
-export interface PersistToolCallsOptions {
+interface PersistToolCallsOptions {
   /**
    * `replace` drops the session's stored evidence first — correct for a parse
    * that started at byte 0. `append` merges the batch into what is already

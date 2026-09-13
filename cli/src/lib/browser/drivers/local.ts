@@ -26,7 +26,7 @@ async function probeTcpBound(port: number, host = '127.0.0.1', timeoutMs = 500):
   });
 }
 
-export interface LocalConnection {
+interface LocalConnection {
   cdp: CDPClient;
   port: number;
   pid: number;

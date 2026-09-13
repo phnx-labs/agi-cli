@@ -33,7 +33,7 @@ export const MAILBOX_TTL_ENV = 'AGENTS_MAILBOX_TTL';
  * (parsed by {@link parseDuration}); falls back to 24h. A malformed env value
  * fails loud instead of silently disabling expiry.
  */
-export function resolveDefaultTtlSeconds(): number {
+function resolveDefaultTtlSeconds(): number {
   const raw = process.env[MAILBOX_TTL_ENV];
   if (raw == null || raw === '') return DEFAULT_TTL_SECONDS;
   const parsed = parseDuration(raw);

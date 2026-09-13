@@ -38,7 +38,7 @@ const KEEP_MODEL = '__keep_model__';
  * sole installed) version — the same version a bare `agents run <host>` uses.
  * Null when the host has no installed version to probe (→ free-text model).
  */
-export function catalogVersionFor(host: AgentId): string | null {
+function catalogVersionFor(host: AgentId): string | null {
   return getGlobalDefault(host) || listInstalledVersions(host)[0] || null;
 }
 

@@ -37,7 +37,7 @@ const DISABLEABLE_FEATURES: Array<{ name: string; hint: string }> = [
  * false if the user backed out. Never throws on cancel — the `agents setup` hub
  * relies on that.
  */
-export async function runMineWizard(): Promise<boolean> {
+async function runMineWizard(): Promise<boolean> {
   if (!isInteractiveTerminal()) {
     console.log(
       chalk.dim('Non-interactive shell. Create a brand directly, e.g.:\n') +

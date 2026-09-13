@@ -108,7 +108,7 @@ export interface SessionTrajectory {
   truncatedSteps: number;
 }
 
-export interface BuildTrajectoryOptions {
+interface BuildTrajectoryOptions {
   /** Redact derived labels/details (default true; `--no-redact` is local-only). */
   redact?: boolean;
   /** Known secret values to mask, from `knownSecretValuesFromEnv()`. */

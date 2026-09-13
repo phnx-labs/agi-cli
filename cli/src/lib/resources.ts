@@ -84,7 +84,7 @@ export interface ResolvedResource {
  * that doesn't support aliases. Only `skills` (SKILL.md) and `commands` carry
  * them today. `resourcePath` is the skill directory or the command file.
  */
-export function resourceAliases(kind: ResourceKind, resourcePath: string): string[] {
+function resourceAliases(kind: ResourceKind, resourcePath: string): string[] {
   if (kind === 'skills') return parseSkillMetadata(resourcePath)?.aliases ?? [];
   if (kind === 'commands') return parseCommandMetadata(resourcePath)?.aliases ?? [];
   return [];
@@ -410,14 +410,14 @@ export interface SkillResourceEntry extends ResourceEntry {
 }
 
 /** An MCP server resource entry. */
-export interface McpResourceEntry {
+interface McpResourceEntry {
   name: string;
   scope: 'user' | 'project';
   version?: string;
 }
 
 /** All resources installed for a specific agent. */
-export interface AgentResources {
+interface AgentResources {
   agentId: AgentId;
   commands: ResourceEntry[];
   skills: SkillResourceEntry[];
@@ -429,7 +429,7 @@ export interface AgentResources {
 }
 
 /** Options for resource discovery. */
-export interface GetAgentResourcesOptions {
+interface GetAgentResourcesOptions {
   cwd?: string;
   scope?: 'user' | 'project' | 'all';
   /** For MCP scanning - whether the CLI is installed */

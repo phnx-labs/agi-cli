@@ -56,7 +56,7 @@ function renderResult(result: BenchRunResult): void {
     );
 }
 
-export interface BroadcastOpts {
+interface BroadcastOpts {
   listTasks?: boolean;
   results?: string | true;
   task?: string;

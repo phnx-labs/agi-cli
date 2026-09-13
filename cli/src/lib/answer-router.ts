@@ -42,7 +42,7 @@ export interface AnswerRoute {
   enter?: boolean;
 }
 
-export interface AnswerRouterInput {
+interface AnswerRouterInput {
   /** Resolved mailbox / session id. */
   mailboxId: string;
   /** Answer text (option label or free text). */

@@ -50,7 +50,7 @@ export interface HostedReceiverConfig {
   funnel?: HostedReceiverFunnel;
 }
 
-export interface DaemonWebhooksConfig {
+interface DaemonWebhooksConfig {
   receivers: HostedReceiverConfig[];
 }
 

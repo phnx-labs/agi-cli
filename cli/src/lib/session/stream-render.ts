@@ -7,7 +7,7 @@ import type { SessionAgentId, SessionEvent } from './types.js';
 
 const LINE_MAX = 120;
 
-export type StreamLineRenderer = (line: string) => string | null;
+type StreamLineRenderer = (line: string) => string | null;
 
 function timeOf(event: SessionEvent): string {
   const d = new Date(event.timestamp);

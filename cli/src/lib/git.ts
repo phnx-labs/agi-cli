@@ -170,7 +170,7 @@ function installGithooksSymlinks(repoDir: string): void {
 }
 
 /** Parsed representation of a git source string (GitHub, generic URL, or local path). */
-export interface GitSource {
+interface GitSource {
   type: 'github' | 'url' | 'local';
   url: string;
   ref?: string;
@@ -317,7 +317,7 @@ export function parseSource(source: string): GitSource {
 }
 
 /** Clone a remote repo or pull updates if it already exists locally. */
-export async function cloneOrPull(
+async function cloneOrPull(
   source: GitSource,
   targetDir: string
 ): Promise<{ isNew: boolean; commit: string }> {
@@ -378,32 +378,6 @@ export async function cloneRepo(source: string): Promise<{
   };
 }
 
-/** Clone a package from a source string into the packages directory. */
-export async function clonePackage(source: string): Promise<{
-  localPath: string;
-  commit: string;
-  isNew: boolean;
-}> {
-  const parsed = parseSource(source);
-
-  if (parsed.type === 'local') {
-    return {
-      localPath: parsed.url,
-      commit: 'local',
-      isNew: false,
-    };
-  }
-
-  const localPath = getPackageLocalPath(source);
-  const result = await cloneOrPull(parsed, localPath);
-
-  return {
-    localPath,
-    commit: result.commit,
-    isNew: result.isNew,
-  };
-}
-
 /** Get the short commit hash (8 chars) of the latest commit in a repo. */
 export async function getRepoCommit(repoPath: string): Promise<string> {
   try {
@@ -420,7 +394,7 @@ export async function getRepoCommit(repoPath: string): Promise<string> {
  *  dirty flag — for cross-device comparison (RUSH-2027). Synchronous and
  *  best-effort: a non-repo or unreadable path yields `null` fields, never a
  *  throw, so a device's `doctor --json` payload always serializes. */
-export interface RepoStateSnapshot {
+interface RepoStateSnapshot {
   branch: string | null;
   head: string | null;
   dirty: boolean;
@@ -494,7 +468,7 @@ export function _resetSnapshotShaCacheForTest(): void {
  * Get the current GitHub username using gh CLI.
  * Returns null if gh is not installed or user is not authenticated.
  */
-export async function getGitHubUsername(): Promise<string | null> {
+async function getGitHubUsername(): Promise<string | null> {
   try {
     const { exec } = await import('child_process');
     const { promisify } = await import('util');
@@ -560,16 +534,6 @@ export async function getRemoteUrl(repoPath: string): Promise<string | null> {
   } catch {
     /* not a git repo or no remotes */
     return null;
-  }
-}
-
-/** The repo's checked-out branch, or 'main' on a detached HEAD / read failure. */
-export async function getCurrentBranch(repoPath: string): Promise<string> {
-  try {
-    const status = await simpleGit(repoPath).status();
-    return status.current || 'main';
-  } catch {
-    return 'main';
   }
 }
 
@@ -657,39 +621,8 @@ export function sameGitRemote(a: string | null | undefined, b: string | null | u
   return canonicalGitRemote(a) === canonicalGitRemote(b);
 }
 
-/**
- * Set the remote URL for origin in a git repo.
- */
-export async function setRemoteUrl(repoPath: string, url: string): Promise<void> {
-  const git = simpleGit(repoPath);
-  const remotes = await git.getRemotes(true);
-  const hasOrigin = remotes.some(r => r.name === 'origin');
-
-  if (hasOrigin) {
-    await git.remote(['set-url', 'origin', url]);
-  } else {
-    await git.remote(['add', 'origin', url]);
-  }
-}
-
-/**
- * Check if a GitHub repo exists.
- */
-export async function checkGitHubRepoExists(owner: string, repo: string): Promise<boolean> {
-  try {
-    const { execFile } = await import('child_process');
-    const { promisify } = await import('util');
-    const execFileAsync = promisify(execFile);
-    await execFileAsync('gh', ['repo', 'view', `${owner}/${repo}`, '--json', 'name']);
-    return true;
-  } catch {
-    /* repo not found or gh CLI unavailable */
-    return false;
-  }
-}
-
 /** Result of {@link commitAndPush}. */
-export type CommitAndPushResult = {
+type CommitAndPushResult = {
   success: boolean;
   error?: string;
   /** Human detail for success: "already up to date", "pushed abc..def", "committed and pushed …". */
@@ -1103,7 +1036,7 @@ export function isStaleAgentsYamlStub(local: string, committed: string): boolean
   return shorter && missingBlock;
 }
 
-export interface AdoptInPlaceResult {
+interface AdoptInPlaceResult {
   success: boolean;
   commit: string;
   /** Tracked files that were absent locally and materialized from origin/main. */
@@ -1299,20 +1232,6 @@ export async function isSystemRepoOrigin(dir: string): Promise<boolean> {
     return isSystemRepoRemote(origin?.refs?.fetch);
   } catch {
     /* not a git repo or no remotes */
-    return false;
-  }
-}
-
-/**
- * Check if repo has uncommitted changes (including untracked files).
- */
-export async function hasLocalChanges(dir: string): Promise<boolean> {
-  try {
-    const git = simpleGit(dir);
-    const status = await git.status();
-    return !status.isClean();
-  } catch {
-    /* not a git repo */
     return false;
   }
 }
@@ -1744,7 +1663,7 @@ export async function syncRepoGit(
  * Get git status for sync display.
  * Returns files categorized by their status relative to HEAD.
  */
-export interface GitSyncStatus {
+interface GitSyncStatus {
   /** Tracked and unchanged files. */
   synced: string[];
   /** Modified but not staged files. */
@@ -1850,82 +1769,11 @@ export async function getTrackedFiles(dir: string, subdir?: string): Promise<str
 }
 
 /**
- * Check if upstream remote is configured.
- */
-export async function hasUpstreamRemote(dir: string): Promise<boolean> {
-  try {
-    const git = simpleGit(dir);
-    const remotes = await git.getRemotes(true);
-    return remotes.some(r => r.name === 'upstream');
-  } catch {
-    /* not a git repo */
-    return false;
-  }
-}
-
-/**
- * Get the upstream remote fetch URL, or null if none configured.
- */
-export async function getUpstreamUrl(dir: string): Promise<string | null> {
-  try {
-    const git = simpleGit(dir);
-    const remotes = await git.getRemotes(true);
-    const upstream = remotes.find(r => r.name === 'upstream');
-    return upstream?.refs?.fetch ?? null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Add or update the upstream remote.
- */
-export async function setUpstreamRemote(dir: string, url: string): Promise<void> {
-  const git = simpleGit(dir);
-  const remotes = await git.getRemotes(true);
-  const hasUpstream = remotes.some(r => r.name === 'upstream');
-
-  if (hasUpstream) {
-    await git.remote(['set-url', 'upstream', url]);
-  } else {
-    await git.remote(['add', 'upstream', url]);
-  }
-}
-
-/**
- * Pull from upstream remote (merge updates from system repo).
- */
-export async function pullFromUpstream(dir: string): Promise<{ success: boolean; commit: string; error?: string }> {
-  try {
-    const git = simpleGit(dir);
-
-    // Check if upstream exists
-    const remotes = await git.getRemotes(true);
-    const upstream = remotes.find(r => r.name === 'upstream');
-    if (!upstream) {
-      return { success: false, commit: '', error: 'No upstream remote configured. Run `agents fork` first.' };
-    }
-
-    // Fetch and merge from upstream
-    await git.fetch('upstream');
-    await git.merge(['upstream/main']);
-
-    const log = await git.log({ maxCount: 1 });
-    return {
-      success: true,
-      commit: log.latest?.hash.slice(0, 8) || 'unknown',
-    };
-  } catch (err) {
-    return { success: false, commit: '', error: (err as Error).message };
-  }
-}
-
-/**
  * Try to auto-pull a git repo if it's clean and has a remote.
  * Uses --ff-only for safety (fails if diverged instead of creating merge commits).
  * Returns silently on success, returns error message on failure.
  */
-export async function tryAutoPull(dir: string): Promise<{ pulled: boolean; error?: string }> {
+async function tryAutoPull(dir: string): Promise<{ pulled: boolean; error?: string }> {
   // Must be a git repo
   if (!isGitRepo(dir)) {
     return { pulled: false };
@@ -1974,7 +1822,7 @@ export async function tryAutoPull(dir: string): Promise<{ pulled: boolean; error
 
 /** Result of {@link tryAutoPullSystemRepo}. `refused` is set only when the pull
  *  was blocked because origin is not the expected system remote. */
-export interface SystemRepoPullResult {
+interface SystemRepoPullResult {
   pulled: boolean;
   error?: string;
   /** True when origin is present but is NOT the expected system remote; no

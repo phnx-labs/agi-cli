@@ -55,7 +55,7 @@ const HOOK_WIRING_FIX_AGENTS: AgentId[] = ['claude', 'droid'];
 
 // ─── result shapes ─────────────────────────────────────────────────────────
 
-export interface HookRewireResult {
+interface HookRewireResult {
   agent: AgentId;
   version: string;
   /** Hooks newly wired into settings.json by this pass. */
@@ -66,7 +66,7 @@ export interface HookRewireResult {
   failure?: 'register-failed';
 }
 
-export interface RepairAfterSyncReport {
+interface RepairAfterSyncReport {
   heal: HealResult;
   hookRewire: HookRewireResult[];
   hookRuntimeRepair: HookRuntimeRepairReport;
@@ -87,7 +87,7 @@ export interface RepairAfterSyncReport {
  * hard-codes `/usr/local/lib/node_modules` et al. when `globalNodeModulesDirs` is
  * absent, so a purge is unsafe to run unscoped in a test — inject sandbox paths.
  */
-export interface PurgeInjection {
+interface PurgeInjection {
   runningRoot?: string;
   runningVersion?: string;
   pathEnv?: string;
@@ -95,7 +95,7 @@ export interface PurgeInjection {
   dryRun?: boolean;
 }
 
-export interface RepairAfterSyncOptions {
+interface RepairAfterSyncOptions {
   /** Scope the repair to one agent; omit for the umbrella sweep across all
    *  installed agents. (The purge is NOT tied to this — see `pruneClis`.) */
   agent?: AgentId;

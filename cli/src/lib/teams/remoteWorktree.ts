@@ -44,7 +44,7 @@ export function remotePathExpr(p: string): string {
  * downstream remote command (launch `cd`, worktree create, polling) works from an
  * absolute path with no tilde-expansion hazard.
  */
-export function resolveRemoteRepoRoot(target: string, repoPath: string, opts: RemoteSshOptions = {}): string | null {
+function resolveRemoteRepoRoot(target: string, repoPath: string, opts: RemoteSshOptions = {}): string | null {
   assertValidSshTarget(target);
   const cmd = `git -C ${remotePathExpr(repoPath)} rev-parse --show-toplevel 2>/dev/null`;
   const res = sshExec(target, cmd, { timeoutMs: 15000, multiplex: true, extraSshArgs: opts.extraSshArgs });
@@ -63,7 +63,7 @@ function remoteGit(target: string, repoPath: string, args: string[], timeoutMs =
 }
 
 /** True when `repoPath` is a git working tree on the host. */
-export function isRemoteGitRepo(target: string, repoPath: string, opts: RemoteSshOptions = {}): boolean {
+function isRemoteGitRepo(target: string, repoPath: string, opts: RemoteSshOptions = {}): boolean {
   assertValidSshTarget(target);
   // remotePathExpr so a `~`/`$HOME`-relative path (the canonical repos dir) expands
   // on the host — plain shellQuote would single-quote the tilde into a literal,
@@ -78,7 +78,7 @@ export function isRemoteGitRepo(target: string, repoPath: string, opts: RemoteSs
  * Falls back to `main` when origin/HEAD isn't set, matching the local recipe's
  * `remote set-head` step.
  */
-export function remoteDefaultBranch(target: string, repoPath: string, opts: RemoteSshOptions = {}): string {
+function remoteDefaultBranch(target: string, repoPath: string, opts: RemoteSshOptions = {}): string {
   assertValidSshTarget(target);
   try {
     // Refresh origin/HEAD first so a repo cloned before the default was set resolves.

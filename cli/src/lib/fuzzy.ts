@@ -50,7 +50,7 @@ export function damerauLevenshtein(a: string, b: string): number {
   return dp[m][n];
 }
 
-export interface FuzzyOptions {
+interface FuzzyOptions {
   /** Absolute max edit distance allowed. */
   maxDistance?: number;
   /** Max ratio of distance to input length. If set, effective threshold = min(maxDistance, floor(len * maxRatio)). */

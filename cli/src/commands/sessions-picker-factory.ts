@@ -10,14 +10,14 @@ import { itemPicker } from '../lib/picker.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 
 /** Flag subset both twins share for the interactive-routing gate. */
-export interface SessionsPickerGateOpts {
+interface SessionsPickerGateOpts {
   interactive?: boolean;
   json?: boolean;
   /** Present only on the browser twin; computer never sets it. */
   open?: string | boolean;
 }
 
-export interface SessionsPickerCommandSpec<TRow, TOpts extends SessionsPickerGateOpts> {
+interface SessionsPickerCommandSpec<TRow, TOpts extends SessionsPickerGateOpts> {
   /**
    * Browser requires `opts.open === undefined` so `--open` (bare or with a
    * selector) falls through to the flat printer. Computer has no `--open`.
@@ -36,12 +36,12 @@ export interface SessionsPickerCommandSpec<TRow, TOpts extends SessionsPickerGat
   onOpen: (row: TRow) => void | Promise<void>;
 }
 
-export interface SessionsPickerCommand<TOpts extends SessionsPickerGateOpts> {
+interface SessionsPickerCommand<TOpts extends SessionsPickerGateOpts> {
   shouldOpen: (opts: TOpts, isTTY: boolean) => boolean;
   run: (opts: TOpts) => Promise<void>;
 }
 
-export function shouldOpenInteractiveSessions(
+function shouldOpenInteractiveSessions(
   opts: SessionsPickerGateOpts,
   isTTY: boolean,
   requireOpenUndefined = false,
@@ -54,7 +54,7 @@ export function shouldOpenInteractiveSessions(
   );
 }
 
-export async function browseSessionsUntilQuit<TRow>(spec: {
+async function browseSessionsUntilQuit<TRow>(spec: {
   message: string;
   rows: TRow[];
   matches: (row: TRow, query: string) => boolean;

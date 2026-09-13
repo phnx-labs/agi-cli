@@ -18,7 +18,7 @@ export const MANIFEST_FILENAME = 'agents.yaml';
 const manifestLockDepth = new Map<string, number>();
 
 /** Parse a YAML string into a typed Manifest object. */
-export function parseManifest(content: string): Manifest {
+function parseManifest(content: string): Manifest {
   return yaml.parse(content) as Manifest;
 }
 
@@ -33,7 +33,7 @@ export function parseManifest(content: string): Manifest {
  * their comments stay byte-stable. Falls back to plain stringify when there
  * is no existing document yet.
  */
-export function serializeManifest(manifest: Manifest, existingContent?: string | null): string {
+function serializeManifest(manifest: Manifest, existingContent?: string | null): string {
   const entries = Object.entries(manifest as Record<string, unknown>).filter(
     ([, v]) => v !== undefined,
   );

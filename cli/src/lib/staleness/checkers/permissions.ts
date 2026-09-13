@@ -17,7 +17,7 @@ import { getActivePermissionPresetName } from '../../permissions.js';
 import type { PermEntry, FileEntry } from '../types.js';
 
 /** Walk user + system permissions/groups/. First-wins user > system on names. */
-export function collectPermissionGroupFiles(): Record<string, string> {
+function collectPermissionGroupFiles(): Record<string, string> {
   const seen = new Map<string, string>();
   for (const baseDir of [getUserPermissionsDir(), getPermissionsDir()]) {
     const groupsDir = path.join(baseDir, 'groups');

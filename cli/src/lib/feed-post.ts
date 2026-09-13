@@ -37,7 +37,7 @@ export const STATUS_POST_MAX_CHARS = 500;
 /** Title is a phone subject line - about four or five words, not a paragraph. */
 export const STATUS_TITLE_MAX_CHARS = 60;
 
-export interface FeedPostInput {
+interface FeedPostInput {
   /**
    * Short subject (required for new posts). ~4–5 words. Phone broadcasts put
    * this on the first line so a scan names the topic before the body.
@@ -87,7 +87,7 @@ export interface FeedPostInput {
   listEntries?: () => PidSessionEntry[];
 }
 
-export interface FeedPostResult {
+interface FeedPostResult {
   event: ActivityEvent;
 }
 
@@ -211,7 +211,7 @@ export function walkPidRegistry(
 }
 
 /** Best-effort parent pid of `pid` (Linux /proc, else `ps`). */
-export function parentPidOf(pid: number): number | undefined {
+function parentPidOf(pid: number): number | undefined {
   if (!Number.isInteger(pid) || pid <= 1) return undefined;
   if (process.platform === 'linux') {
     try {

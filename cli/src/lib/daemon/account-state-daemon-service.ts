@@ -67,7 +67,7 @@ interface AccountTransitionState {
   pending: Record<string, DeadAccountTransition>;
 }
 
-export interface DeadAccountTransition {
+interface DeadAccountTransition {
   agent: AuthProbeRow['agent'];
   /** Display label (email / account name) — presentation only, never a key. */
   account: string;

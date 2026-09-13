@@ -39,13 +39,13 @@ import { copySetupToBox } from './setup-copy.js';
 import { DEFAULT_CRABBOX_PROFILE } from './config.js';
 
 /** Phase signal for a lease run, so the command layer can drive a progress UI. */
-export type LeasePhase =
+type LeasePhase =
   | { kind: 'warmup'; backend?: string }
   | { kind: 'reuse'; slug: string }
   | { kind: 'ready'; box: CrabboxBox; elapsedMs: number }
   | { kind: 'teardown' };
 
-export interface LeaseRunOptions {
+interface LeaseRunOptions {
   agent: string;
   prompt: string;
   mode?: string;
@@ -111,7 +111,7 @@ export interface LeaseDispatchProfile {
   fallbackModel?: string;
 }
 
-export interface LeaseRunResult {
+interface LeaseRunResult {
   box: CrabboxBox;
   exitCode: number | null;
   toreDown: boolean;
@@ -140,7 +140,7 @@ export function leaseWorkspaceId(repoRoot: string, startedAtMs = Date.now(), pid
 }
 
 /** Isolated box-home path for one run, relative to the shared box user's home. */
-export function leaseHomeDir(workspaceId: string): string {
+function leaseHomeDir(workspaceId: string): string {
   return `lease-homes/${workspaceId}`;
 }
 
@@ -324,7 +324,7 @@ function pickReadyPoolBox(opts: LeaseRunOptions): CrabboxBox | null {
 /** Untouched-for-this-long ⇒ no active run holds the box, so an expired one is a stray. */
 export const STRAY_GRACE_SECS = 600;
 
-export interface StrayMatchOptions {
+interface StrayMatchOptions {
   /** Pool the lease belongs to (defaults to DEFAULT_CRABBOX_PROFILE). */
   profile?: string;
   /** Network mode of the lease (default 'public'); a box is partitioned by it. */

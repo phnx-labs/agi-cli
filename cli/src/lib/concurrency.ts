@@ -10,7 +10,7 @@
  * `lsof`, multi-dotfile scans) reads to behavioral EDR as recon/enumeration. A
  * bounded, spread-out spawn rate produces the same data without the burst signature.
  */
-export interface BoundedMapOptions {
+interface BoundedMapOptions {
   /** Maximum number of `fn` calls running at once. Coerced to >= 1. */
   concurrency: number;
   /** Minimum spacing (ms) between successive task starts. 0 (default) = no spacing. */

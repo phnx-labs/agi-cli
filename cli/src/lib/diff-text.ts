@@ -9,7 +9,7 @@
 import chalk from 'chalk';
 import { createPatch } from 'diff';
 
-export interface UnifiedDiffOptions {
+interface UnifiedDiffOptions {
   /** Number of context lines around each change (default: 3). */
   context?: number;
   /** Filename label shown in the patch header for the "expected" side. */

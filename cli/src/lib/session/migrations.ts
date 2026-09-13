@@ -43,7 +43,7 @@ export interface MigrationRecord {
   error?: string;
 }
 
-export function migrationsLedgerPath(): string {
+function migrationsLedgerPath(): string {
   return path.join(homeDir(), '.agents', '.history', 'migrations.jsonl');
 }
 

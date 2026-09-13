@@ -63,7 +63,7 @@ export type McpFormat =
   | 'muse-json';
 
 /** The complete MCP contract for one agent. */
-export interface McpTarget {
+interface McpTarget {
   /** MCP config file under a HOME root (a version home, or the real HOME). */
   home(home: string): string;
   /** Project-scoped MCP config file for a repo at `cwd`. */

@@ -12,7 +12,7 @@ import * as os from 'os';
 import type { DeviceProfile } from '../devices/registry.js';
 import { pushBundleToHost } from '../secrets-client.js';
 import type { RemoteBackend } from '../secrets-types.js';
-import { AUTH_BUNDLE_NAME, inspectReservedAuthBundle, isReservedBundleName } from '../secrets-policy.js';
+import { AUTH_STORE_ALIAS, inspectReservedAuthBundle, isReservedBundleName } from '../secrets-policy.js';
 import { deviceIdentityArgs, sshTargetFor } from '../devices/connect.js';
 import { readyProbe, bootstrapAgentsCli } from '../hosts/ready.js';
 import { buildRemoteAgentsInvocation } from '../hosts/remote-cmd.js';
@@ -121,13 +121,13 @@ export interface SourceAuth {
 export function fleetSecretsBundles(declared: string[] | undefined): string[] {
   const out = [...(declared ?? [])];
   const auth = inspectReservedAuthBundle();
-  if (auth.exists && auth.ok && !out.includes(AUTH_BUNDLE_NAME)) {
-    out.push(AUTH_BUNDLE_NAME);
+  if (auth.exists && auth.ok && !out.includes(AUTH_STORE_ALIAS)) {
+    out.push(AUTH_STORE_ALIAS);
   }
   return out;
 }
 
-export interface DiffContext {
+interface DiffContext {
   /** agents-cli version the source is on — the fleet target version. */
   targetCliVersion: string;
   sourceAuth: SourceAuth;
@@ -246,7 +246,7 @@ export function diffFleet(desired: DeviceDesired[], probes: Map<string, DevicePr
 }
 
 /** Why a declared bundle is or is not pushed to one device. */
-export interface SecretPushDecision {
+interface SecretPushDecision {
   push: boolean;
   /** Where it would land on the remote. Only meaningful when `push`. */
   backend: RemoteBackend;
@@ -338,7 +338,7 @@ function remoteEnv(platform: string | undefined): Record<string, string> | undef
   return platform === 'windows' ? undefined : { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' };
 }
 
-export interface ProbeOptions {
+interface ProbeOptions {
   /** Also fetch per-agent installed versions (one extra `agents view --json`
    * round-trip). Enable only when the plan has a version-pinned spec. */
   withVersions?: boolean;
@@ -453,7 +453,7 @@ export interface DeviceApplyResult {
   note?: string;
 }
 
-export interface ExecContext {
+interface ExecContext {
   targetCliVersion: string;
   source: string;
   sourceAuth: SourceAuth;
@@ -462,7 +462,7 @@ export interface ExecContext {
 }
 
 /** Execute one device's planned actions in order. Real SSH — no mocks. */
-export async function reconcileDevice(row: DeviceDiff, device: DeviceProfile, ctx: ExecContext): Promise<DeviceApplyResult> {
+async function reconcileDevice(row: DeviceDiff, device: DeviceProfile, ctx: ExecContext): Promise<DeviceApplyResult> {
   if (!row.probe.reachable) {
     return { device: row.device, ok: false, steps: [], note: row.probe.note ?? 'unreachable' };
   }

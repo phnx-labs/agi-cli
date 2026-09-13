@@ -12,7 +12,7 @@ import { readSync } from 'node:fs';
 import { emitFriction } from './feed/events.js';
 
 /** Options for {@link die} — opt into machine-readable failure output. */
-export interface DieOptions {
+interface DieOptions {
   /**
    * Emit a machine-readable `{"error", "hint"?}` object to **stdout** instead of
    * red text on stderr. Pass `isJsonMode(options)` from a `--json` command so an

@@ -88,7 +88,7 @@ export function routineStartFailedOwnerText(
 }
 
 /** One resolved owner destination to attempt, in plan order. */
-export interface OwnerDest {
+interface OwnerDest {
   channel: string;
   to: string;
 }
@@ -157,13 +157,13 @@ export function ownerFailureDeliveryPlan(meta: Meta): OwnerDest[] {
 }
 
 /** Outcome of one delivery attempt, for logging/telemetry. */
-export interface OwnerDeliveryAttempt {
+interface OwnerDeliveryAttempt {
   channel: string;
   ok: boolean;
   error?: string;
 }
 
-export interface OwnerDeliveryResult {
+interface OwnerDeliveryResult {
   /** True once any channel in the plan accepted the message. */
   delivered: boolean;
   /** The channel that delivered, when `delivered`. */

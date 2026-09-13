@@ -211,7 +211,7 @@ export function blockDeliveryFailure(
   return undefined;
 }
 
-export interface PlannedSink {
+interface PlannedSink {
   name: string;
   /** Command sink: argv to spawn (mutually exclusive with `channel`). */
   argv?: string[];
@@ -247,7 +247,7 @@ const PLACEHOLDER = /\{([a-z_]+)\}/g;
  * Short host label for a phone line — strip user@ and domain so
  * `muqsit@mac-mini.tailnet.ts.net` reads as `mac-mini`.
  */
-export function shortHost(host: string | undefined): string | undefined {
+function shortHost(host: string | undefined): string | undefined {
   if (!host?.trim()) return undefined;
   let h = host.trim();
   const at = h.lastIndexOf('@');
@@ -258,7 +258,7 @@ export function shortHost(host: string | undefined): string | undefined {
 }
 
 /** First 8 hex chars of a session id for the footer (readable, not a full uuid). */
-export function shortSessionChunk(session: string | undefined): string | undefined {
+function shortSessionChunk(session: string | undefined): string | undefined {
   if (!session?.trim()) return undefined;
   const hex = session.replace(/-/g, '').toLowerCase();
   const chunk = hex.replace(/[^a-f0-9]/g, '').slice(0, 8);
@@ -280,7 +280,7 @@ export function shortSessionChunk(session: string | undefined): string | undefin
  * one with a path separator (URL-unsafe, via {@link isValidMailboxId}) or the bare
  * 8-char footer crumb (a truncated id that would 404).
  */
-export function sessionConsoleUrl(session: string | undefined): string | undefined {
+function sessionConsoleUrl(session: string | undefined): string | undefined {
   const id = session?.trim();
   if (!id || !isValidMailboxId(id) || /^[0-9a-f]{8}$/i.test(id)) return undefined;
   return `https://prix.dev/console/sessions/${id}`;
@@ -290,7 +290,7 @@ export function sessionConsoleUrl(session: string | undefined): string | undefin
  * Scrub em/en dashes from outbound phone copy (house rule + iMessage readability).
  * Collapses whitespace; does not invent meaning.
  */
-export function scrubOutboundDashes(text: string): string {
+function scrubOutboundDashes(text: string): string {
   return text
     .replace(/\u2014/g, ' - ')
     .replace(/\u2013/g, ' - ')
@@ -347,7 +347,7 @@ function linkifyKeys(text: string, format: SinkMessageFormat): string {
  * crumb turns blue and taps through (PHNX-3698). `plain` keeps the bare sentence
  * — it can't render a labeled link and must not dump the URL.
  */
-export function composeBroadcastFooter(
+function composeBroadcastFooter(
   ctx: FeedBroadcastContext,
   format: SinkMessageFormat = 'plain',
 ): string | undefined {
@@ -404,7 +404,7 @@ export function composeBroadcastFooter(
 const PHONE_BODY_MAX_CHARS = 500;
 const PHONE_BODY_MAX_LINES = 8;
 
-export function truncateBroadcastBody(body: string): string {
+function truncateBroadcastBody(body: string): string {
   if (!body) return body;
   let out = body;
   let cut = false;

@@ -3,16 +3,13 @@
  */
 
 import { spawnSync } from 'child_process';
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
 
-export interface OpVault {
+interface OpVault {
   id: string;
   name: string;
 }
 
-export interface OpItemSummary {
+interface OpItemSummary {
   id: string;
   title: string;
   category: string;
@@ -31,7 +28,7 @@ export interface OpItem extends OpItemSummary {
   fields: OpField[];
 }
 
-export interface ImportableSecret {
+interface ImportableSecret {
   envKey: string;
   itemTitle: string;
   fieldLabel: string;
@@ -44,7 +41,7 @@ export interface ImportableSecret {
   description?: string;
 }
 
-export interface SkippedField {
+interface SkippedField {
   itemTitle: string;
   fieldLabel: string;
   reason: string;
@@ -77,35 +74,6 @@ function runOp(
   }
 
   return { ok: true, stdout: result.stdout };
-}
-
-export function assertOpAvailable(): void {
-  // `op account list` works with both CLI session tokens and the 1Password
-  // desktop biometric integration; `op whoami` fails on the latter.
-  const result = runOp(['account', 'list', '--format=json']);
-  if (!result.ok) {
-    throw new Error(result.error);
-  }
-}
-
-export function listVaults(): OpVault[] {
-  const result = runOp(['vault', 'list', '--format=json']);
-  if (!result.ok) throw new Error(result.error);
-  return JSON.parse(result.stdout) as OpVault[];
-}
-
-export function listItems(vaultName: string): OpItemSummary[] {
-  const result = runOp(['item', 'list', '--vault', vaultName, '--format=json']);
-  if (!result.ok) {
-    if (result.error.includes('vault') && result.error.includes('not found')) {
-      const vaults = listVaults();
-      const available = vaults.map((v) => v.name).join(', ');
-      throw new Error(`Vault '${vaultName}' not found. Available: ${available || '(none)'}`);
-    }
-    throw new Error(result.error);
-  }
-  const items = JSON.parse(result.stdout) as OpItemSummary[];
-  return items || [];
 }
 
 export function getItem(itemId: string, vaultName: string): OpItem {
@@ -246,7 +214,7 @@ export function extractSecrets(
   return { secrets, skipped };
 }
 
-export interface PasswordItemTemplate {
+interface PasswordItemTemplate {
   title: string;
   category: 'PASSWORD';
   tags: string[];
@@ -268,35 +236,4 @@ export function buildPasswordItemTemplate(title: string, value: string): Passwor
       { id: 'password', type: 'CONCEALED', purpose: 'PASSWORD', label: 'password', value },
     ],
   };
-}
-
-export function itemExistsByTitle(title: string, vaultName: string): boolean {
-  const result = runOp(['item', 'get', title, '--vault', vaultName, '--format=json']);
-  if (result.ok) return true;
-  if (/isn't an item|not found|no item found/i.test(result.error)) return false;
-  throw new Error(result.error);
-}
-
-export function deleteItemByTitle(title: string, vaultName: string): void {
-  const result = runOp(['item', 'delete', title, '--vault', vaultName]);
-  if (!result.ok) throw new Error(result.error);
-}
-
-export function createPasswordItem(title: string, value: string, vaultName: string): void {
-  // op item create reads stdin templates only from a real pipe; spawnSync's
-  // input plumbing is detected as empty and op silently ignores the template.
-  // The supported alternative is --template <file>, which works reliably.
-  const template = JSON.stringify(buildPasswordItemTemplate(title, value));
-  const tmpFile = path.join(os.tmpdir(), `agents-op-tpl-${process.pid}-${Date.now()}.json`);
-  fs.writeFileSync(tmpFile, template, { mode: 0o600 });
-  try {
-    const result = runOp(['item', 'create', '--template', tmpFile, '--vault', vaultName]);
-    if (!result.ok) throw new Error(result.error);
-  } finally {
-    try {
-      fs.unlinkSync(tmpFile);
-    } catch {
-      // best-effort cleanup
-    }
-  }
 }

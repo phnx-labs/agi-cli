@@ -27,7 +27,7 @@ export type WatchdogAgentDecider = (candidates: WatchdogCandidate[]) => Promise<
  * `runTarget` is the resolved `agents run` target (a `watchdog` workflow or the
  * bare agent id).
  */
-export type WatchdogAgentRunner = (runTarget: string, prompt: string) => Promise<string>;
+type WatchdogAgentRunner = (runTarget: string, prompt: string) => Promise<string>;
 
 /** The real runner: one `agents run <target> --mode plan <prompt>` subprocess. */
 async function defaultAgentRunner(runTarget: string, prompt: string): Promise<string> {

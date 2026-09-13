@@ -21,8 +21,8 @@ export function installationLockTarget(agent: AgentId, label: string): string {
   return target;
 }
 
-export const INSTALLATION_LOCK_STALE_MS = 10 * 60_000;
-export const INSTALLATION_LOCK_ACQUIRE_TIMEOUT_MS = 5 * 60_000;
+const INSTALLATION_LOCK_STALE_MS = 10 * 60_000;
+const INSTALLATION_LOCK_ACQUIRE_TIMEOUT_MS = 5 * 60_000;
 
 export const INSTALLATION_LOCK_OPTIONS: Required<FileLockOptions> = {
   staleMs: INSTALLATION_LOCK_STALE_MS,

@@ -35,7 +35,7 @@ import chalk from 'chalk';
 import { stripVTControlCharacters } from 'node:util';
 
 /** Configuration for the interactive picker prompt. */
-export interface PickerConfig<T> {
+interface PickerConfig<T> {
   message: string;
   /** Optional dim hint line rendered directly under the header (above the rows). */
   subtitle?: string;
@@ -75,12 +75,12 @@ export interface PickerConfig<T> {
 }
 
 /** The result returned when the user selects an item. */
-export interface PickedItem<T> {
+interface PickedItem<T> {
   item: T;
 }
 
 /** Configuration for the multi-select picker prompt. */
-export interface MultiPickerConfig<T> {
+interface MultiPickerConfig<T> {
   message: string;
   items: T[];
   filter: (query: string) => T[];
@@ -567,7 +567,7 @@ export function multiItemPicker<T>(config: MultiPickerConfig<T>): Promise<T[] | 
 }
 
 /** Configuration for the dynamic (async-refetch) picker prompt. */
-export interface DynamicPickerConfig<T, F, A = never> {
+interface DynamicPickerConfig<T, F, A = never> {
   message: string;
   /** The initial filter state. Changing it (via a keybinding) re-runs {@link load}. */
   initialFilter: F;
@@ -640,7 +640,7 @@ export function hotkeyToken(key: { name?: string; sequence?: string; ctrl?: bool
 }
 
 /** The result returned when the user selects a row: the item plus the live filter. */
-export interface DynamicPicked<T, F, A = never> {
+interface DynamicPicked<T, F, A = never> {
   item: T;
   filter: F;
   action?: A;

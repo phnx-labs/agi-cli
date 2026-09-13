@@ -30,7 +30,7 @@ export interface RollupItem extends StatusCheck {
 }
 
 /** PR head identity — the SHA every check query must anchor to. */
-export interface PrHead {
+interface PrHead {
   number: number;
   sha: string;
 }

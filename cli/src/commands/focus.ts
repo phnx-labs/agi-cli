@@ -56,7 +56,7 @@ import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { setHelpSections } from '../lib/help.js';
 
 /** Options for `sessions focus` — device scope + the `--active` live-state filters. */
-export interface FocusOptions {
+interface FocusOptions {
   /**
    * Resolve the target from the launcher's AGENT_LAUNCH_ID instead of a session
    * id (RUSH-3125).
@@ -719,7 +719,7 @@ function describeScope(statuses: LiveStatusFilter[], hosts: string[]): string {
  *    running); never a silent drop.
  *  - `skip` — not resumable AND no rail: reported, not dropped.
  */
-export type FocusSurfacePlan =
+type FocusSurfacePlan =
   | { kind: 'attach'; command: string[]; note: string }
   | { kind: 'resume'; command: string[]; note: string }
   | { kind: 'skip'; note: string };
@@ -790,10 +790,10 @@ export function planFocusSurface(
 }
 
 /** The engine seam — real `openSurfaces`, overridable in tests to assert the tab requests. */
-export type OpenSurfacesFn = typeof openSurfaces;
+type OpenSurfacesFn = typeof openSurfaces;
 
 /** Test seams for `openFocusTabs`: inject the engine boundary + force a backend. */
-export interface OpenFocusTabsDeps {
+interface OpenFocusTabsDeps {
   open?: OpenSurfacesFn;
   /** Skip `resolveBackend` (which needs a live terminal) when set — tests pass 'tmux'. */
   backend?: Backend | 'inplace';

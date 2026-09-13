@@ -37,10 +37,10 @@ import {
 } from './goose-commands.js';
 
 /** Scope of a command: user-global or project-local. */
-export type CommandScope = 'user' | 'project';
+type CommandScope = 'user' | 'project';
 
 /** Parsed metadata from a command file's YAML frontmatter. */
-export interface CommandMetadata {
+interface CommandMetadata {
   name: string;
   description: string;
   /** When set, sync only to these agents (aliases resolved at parse time). */
@@ -53,9 +53,9 @@ export interface CommandMetadata {
   aliases?: string[];
 }
 
-export type CommandApplyFailReason = 'unsupported' | 'agent_excluded' | 'too_old' | 'too_new';
+type CommandApplyFailReason = 'unsupported' | 'agent_excluded' | 'too_old' | 'too_new';
 
-export type CommandApplyResult =
+type CommandApplyResult =
   | { ok: true }
   | { ok: false; reason: CommandApplyFailReason; need?: string };
 
@@ -105,7 +105,7 @@ export function commandAppliesTo(
   return { ok: true };
 }
 
-export function explainCommandSkip(
+function explainCommandSkip(
   agent: AgentId,
   version: string,
   commandName: string,
@@ -135,7 +135,7 @@ export interface ValidationResult {
 }
 
 /** A command discovered in a repository's commands/ directory. */
-export interface DiscoveredCommand {
+interface DiscoveredCommand {
   name: string;
   description: string;
   sourcePath: string;
@@ -144,7 +144,7 @@ export interface DiscoveredCommand {
 }
 
 /** A command installed in an agent's config directory. */
-export interface InstalledCommand {
+interface InstalledCommand {
   name: string;
   scope: CommandScope;
   path: string;

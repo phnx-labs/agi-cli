@@ -55,7 +55,7 @@ export type { ResourceDetector, DetectArgs } from './detectors/types.js';
 export type { RulesSelection } from './writers/rules.js';
 
 /** Per-kind selection payload. Most kinds are string[]; rules is special. */
-export type SelectionFor<K extends ResourceKind> =
+type SelectionFor<K extends ResourceKind> =
   K extends 'rules' ? RulesSelection : string[];
 
 /* eslint-disable @typescript-eslint/no-explicit-any */

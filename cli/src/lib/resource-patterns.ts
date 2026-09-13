@@ -12,7 +12,7 @@
  * Evaluation rule: union all inclusions, then subtract all exclusions.
  */
 
-export interface ParsedPattern {
+interface ParsedPattern {
   negate: boolean;
   source: string;
   name: string; // '*' = wildcard

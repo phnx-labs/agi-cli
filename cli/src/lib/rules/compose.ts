@@ -40,16 +40,16 @@ export interface RulesLayer {
   alias?: string;
 }
 
-export interface PresetDef {
+interface PresetDef {
   /** Subrule names (without `.md`), in concatenation order. */
   subrules: string[];
 }
 
-export interface RulesYaml {
+interface RulesYaml {
   presets?: Record<string, PresetDef>;
 }
 
-export interface ComposeOptions {
+interface ComposeOptions {
   /** Defaults to `"default"`. */
   preset?: string;
   /** Layers in precedence order, highest first. */
@@ -65,7 +65,7 @@ export interface ComposedSubrule {
   subruleDir?: string;
 }
 
-export interface ComposeResult {
+interface ComposeResult {
   /** Fully concatenated, no @-imports. */
   content: string;
   /** The preset name that was applied. */

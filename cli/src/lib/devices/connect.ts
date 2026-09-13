@@ -194,7 +194,7 @@ export function buildInteractiveShellCommand(
 }
 
 /** Host-key posture for {@link buildSshInvocation}. */
-export interface SshHostKeyOptions {
+interface SshHostKeyOptions {
   /**
    * True when the device's host key is already pinned in the managed
    * known_hosts store — connections then verify with `StrictHostKeyChecking=yes`

@@ -8,21 +8,21 @@ import type { NetworkRequest } from './types.js';
  *
  * Spec: http://www.softwareishard.com/blog/har-12-spec/
  */
-export interface HarLog {
+interface HarLog {
   version: '1.2';
   creator: { name: string; version: string };
   pages: HarPage[];
   entries: HarEntry[];
 }
 
-export interface HarPage {
+interface HarPage {
   startedDateTime: string;
   id: string;
   title: string;
   pageTimings: { onContentLoad: number; onLoad: number };
 }
 
-export interface HarEntry {
+interface HarEntry {
   startedDateTime: string;
   time: number;
   request: HarRequest;
@@ -31,7 +31,7 @@ export interface HarEntry {
   timings: HarTimings;
 }
 
-export interface HarRequest {
+interface HarRequest {
   method: string;
   url: string;
   httpVersion: string;
@@ -42,7 +42,7 @@ export interface HarRequest {
   bodySize: number;
 }
 
-export interface HarResponse {
+interface HarResponse {
   status: number;
   statusText: string;
   httpVersion: string;
@@ -54,13 +54,13 @@ export interface HarResponse {
   bodySize: number;
 }
 
-export interface HarTimings {
+interface HarTimings {
   send: number;
   wait: number;
   receive: number;
 }
 
-export interface BuildHarOptions {
+interface BuildHarOptions {
   creatorName?: string;
   creatorVersion?: string;
 }

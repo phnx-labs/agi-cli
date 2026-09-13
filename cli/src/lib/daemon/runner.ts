@@ -191,7 +191,7 @@ export function launcherClaimPid(): number | null {
 }
 
 /** How a routine attempt was triggered, plus the schedule slot it belongs to. */
-export interface RoutineTrigger {
+interface RoutineTrigger {
   kind: NonNullable<RunMeta['triggerKind']>;
   /** UTC fire time for a schedule/catchup attempt; keys the single-fire slot claim. */
   scheduledFor?: Date | string;
@@ -981,7 +981,7 @@ function readCommandExitCode(runDir: string): number | null {
 }
 
 /** Pre-flight version/account selection for a routine job. */
-export interface RoutineLaunchPlan {
+interface RoutineLaunchPlan {
   /** Ordered attempts: primary first, then same-agent failover accounts. */
   chain: FallbackEntry[];
   /** Full rotation result when strategy selected among healthy accounts; null when pinned. */
@@ -2134,7 +2134,7 @@ async function executeCommandJobForeground(config: JobConfig, attempt: RoutineAt
  * observes the live running→terminal transition (the monitor tick would already
  * see a finalized record and skip it). Never let a hook throw into finalization.
  */
-export interface RoutineHooks {
+interface RoutineHooks {
   /** Called once with the finalized meta when the run reaches a terminal state. */
   onFinish?: (meta: RunMeta) => void;
 }

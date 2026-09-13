@@ -40,7 +40,7 @@ export type DaemonServiceId =
   | 'harness-update';
 
 /** Human-readable metadata for each service. */
-export interface DaemonServiceDef {
+interface DaemonServiceDef {
   id: DaemonServiceId;
   title: string;
   description: string;

@@ -92,7 +92,7 @@ export function parseRemoteMonitors(stdout: string, machine: string): RemoteMoni
   return out;
 }
 
-export interface FleetMonitorsResult {
+interface FleetMonitorsResult {
   monitors: RemoteMonitor[];
   /** Target discovery failed before any peer was dialed — the fleet was not
    *  consulted at all, which must not read as "no duplicate anywhere". */
@@ -102,7 +102,7 @@ export interface FleetMonitorsResult {
   skipped: string[];
 }
 
-export interface GatherFleetMonitorsOptions {
+interface GatherFleetMonitorsOptions {
   /** When supplied, the fan-out aborts as soon as any peer returns a monitor with
    *  this behavioral fingerprint. The miss path still waits for every peer so the
    *  guard can prove absence fleet-wide. */

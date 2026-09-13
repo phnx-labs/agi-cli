@@ -14,11 +14,6 @@ export interface ArtifactAction {
   input?: Record<string, string>;
 }
 
-/** Agent-level configuration block containing artifact action definitions. */
-export interface AgentArtifactConfig {
-  artifact_actions?: ArtifactAction[];
-}
-
 /**
  * Validate artifact actions configuration.
  * @param actions - List of artifact actions to validate

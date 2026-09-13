@@ -20,7 +20,7 @@ export interface TeamRow {
   spawnedBy?: string;
 }
 
-export interface PickedTeam {
+interface PickedTeam {
   team: string;
 }
 
@@ -144,7 +144,7 @@ function workCell(agents: AgentStatusDetail[]): string {
 }
 
 /** Format a single team as a one-line row for the list table or picker label. */
-export function formatTeamRow(row: TeamRow, nameWidth: number, compositionWidth: number): string {
+function formatTeamRow(row: TeamRow, nameWidth: number, compositionWidth: number): string {
   const t = row.team;
   const name = chalk.cyan(t.task_name.padEnd(nameWidth));
   const composition = chalk.white(formatComposition(row.agents).padEnd(compositionWidth));
@@ -172,7 +172,7 @@ function displayHandle(a: AgentStatusDetail): string {
 }
 
 /** Build a multi-line preview string for the picker's detail pane. */
-export function buildTeamPreview(row: TeamRow): string {
+function buildTeamPreview(row: TeamRow): string {
   const t = row.team;
   const lines: string[] = [];
 

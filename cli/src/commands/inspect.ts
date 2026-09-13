@@ -236,7 +236,7 @@ export function registerInspectCommand(program: Command): void {
 
 // ─── Main dispatcher ─────────────────────────────────────────────────────────
 
-export async function inspectAction(target: string, options: InspectOptions): Promise<void> {
+async function inspectAction(target: string, options: InspectOptions): Promise<void> {
   const agentKey = target.split('@')[0].toLowerCase();
   if (!(agentKey in AGENTS)) {
     const repo = resolveRepoTarget(target);
@@ -867,7 +867,7 @@ function itemsSize(items: ResourceItem[]): { bytes: number; files: number } {
 }
 
 /** Human byte size: "84 KB", "3.1 MB". */
-export interface ManifestSummary {
+interface ManifestSummary {
   /** `run.<agent>.strategy` pairs from agents.yaml. */
   strategies: Array<{ agent: string; strategy: string }>;
   /** `agents.<agent>` version pins from agents.yaml, when present. */
@@ -1059,7 +1059,7 @@ function renderRepoSummary(repo: RepoTarget, options: InspectOptions): void {
   console.log('');
 }
 
-export interface RepoGitInfo {
+interface RepoGitInfo {
   branch: string;
   dirty: number;
   dirtyFiles: string[];

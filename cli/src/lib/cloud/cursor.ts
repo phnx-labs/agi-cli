@@ -11,7 +11,7 @@ import type {
 import { normalizeProviderStatus, resolveDispatchRepos } from './types.js';
 import { readAndResolveBundleEnv } from '../secrets-client.js';
 
-export const CURSOR_API_BASE_URL = 'https://api.cursor.com/v1';
+const CURSOR_API_BASE_URL = 'https://api.cursor.com/v1';
 const KEY_NAME = 'CURSOR_API_KEY';
 
 interface CursorAgent {
@@ -38,7 +38,7 @@ interface CursorErrorBody {
   error?: { code?: string; message?: string; helpUrl?: string } | string;
 }
 
-export interface CursorCreateBody {
+interface CursorCreateBody {
   prompt: { text: string; images?: Array<{ data: string; mimeType: string }> };
   model?: { id: string };
   repos?: Array<{ url: string; startingRef?: string }>;

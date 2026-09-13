@@ -53,7 +53,7 @@ export interface ProjectPullResult {
 }
 
 /** The wire format this machine emits for the fleet fan-out. Fail-closed on parse. */
-export interface ProjectPullEnvelope {
+interface ProjectPullEnvelope {
   schemaVersion: 1;
   kind: 'project-pull';
   /** The emitting machine's {@link machineId} — verified by the caller. */

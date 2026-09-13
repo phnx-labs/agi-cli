@@ -33,7 +33,7 @@ const IV_LEN = 12; // GCM standard nonce
 const TAG_LEN = 16;
 
 /** Serialized envelope stored as the R2 object body when encryption is on. */
-export interface TranscriptEnvelope {
+interface TranscriptEnvelope {
   /** Envelope format version. */
   v: 1;
   alg: 'aes-256-gcm';

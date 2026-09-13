@@ -59,7 +59,7 @@ export function parseProducedItems(stdout: string): string[] {
     .filter((s) => s.length > 0);
 }
 
-export interface ProduceItemsOptions {
+interface ProduceItemsOptions {
   /** Working directory for the producer command. */
   cwd?: string | null;
   /** Environment for the producer command (defaults to the current process env). */
@@ -146,7 +146,7 @@ export function evaluateKeepIf(
 }
 
 /** Per-item verdict after tallying its verify panel. */
-export interface ForEachItemVerdict {
+interface ForEachItemVerdict {
   /** The produced item this verdict is for. */
   item: string;
   /** Zero-based index in the (capped) produced list. */

@@ -654,7 +654,7 @@ function toolExecutionKind(tool: string): keyof typeof TOOL_KINDS | 'generic' {
   return 'generic';
 }
 
-export interface BuildDetailV2Options {
+interface BuildDetailV2Options {
   redact?: boolean;
   knownSecrets?: readonly string[];
 }

@@ -144,7 +144,7 @@ phone-worthy successful update. Use --blocked only when work cannot continue.
 The owner destination comes from humans.yaml; do not duplicate it in agents.yaml.
 `;
 
-export const FEED_NO_FANOUT_ENV = 'AGENTS_FEED_LOCAL';
+const FEED_NO_FANOUT_ENV = 'AGENTS_FEED_LOCAL';
 
 /** Right-hand masthead summary: `N blocks · M agents`. */
 export function formatFeedMastheadRight(blocks: OpenBlock[]): string {
@@ -189,7 +189,7 @@ export function mergeFeedBlocks(...groups: OpenBlock[][]): OpenBlock[] {
   return [...byIdentity.values()].sort((a, b) => Date.parse(b.ts) - Date.parse(a.ts));
 }
 
-export type FeedControlAction = 'pause' | 'kill';
+type FeedControlAction = 'pause' | 'kill';
 
 function matchesControlTarget(signal: FeedSessionSignal, target: string): boolean {
   return [
@@ -915,7 +915,7 @@ function reportBroadcast(outcomes: SinkOutcome[]): void {
 }
 
 /** Feed view selector (RUSH-2015): decisions, progress, or both. */
-export type FeedFilter = 'needs' | 'updates' | 'all';
+type FeedFilter = 'needs' | 'updates' | 'all';
 
 /** Normalize a raw --filter value; unknown/empty falls back to the default. */
 export function resolveFeedFilter(raw: string | undefined): FeedFilter {

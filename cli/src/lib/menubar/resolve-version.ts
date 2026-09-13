@@ -28,10 +28,10 @@ import { getCliVersion } from '../version.js';
 import { MENUBAR_HELPER_ASSET } from './download-menubar.js';
 
 /** The repo whose releases carry `menubar/v*` tags (same as the download URL). */
-export const MENUBAR_RELEASES_API = 'https://api.github.com/repos/phnx-labs/agi-cli/releases?per_page=100';
+const MENUBAR_RELEASES_API = 'https://api.github.com/repos/phnx-labs/agi-cli/releases?per_page=100';
 
 /** How long a resolved answer is trusted before the release list is re-read. */
-export const MENUBAR_RESOLVE_TTL_MS = 24 * 60 * 60 * 1000;
+const MENUBAR_RESOLVE_TTL_MS = 24 * 60 * 60 * 1000;
 
 /** One release as the resolver sees it — the subset of the GitHub shape it reads. */
 export interface ReleaseCandidate {
@@ -41,7 +41,7 @@ export interface ReleaseCandidate {
   prerelease?: boolean;
 }
 
-export interface MenubarResolveCache {
+interface MenubarResolveCache {
   /** Epoch ms of the release-list read this answer came from. */
   checkedAt: number;
   /** The newest published helper version at that time (never below the floor then). */
@@ -68,7 +68,7 @@ export function pickNewestMenubarVersion(candidates: ReleaseCandidate[], floor: 
 }
 
 /** Where the resolved answer lives: beside the helper's own download cache. */
-export function menubarResolveCachePath(): string {
+function menubarResolveCachePath(): string {
   return path.join(getCacheDir(), 'menubar', 'latest.json');
 }
 
@@ -107,7 +107,7 @@ type FetchLike = (input: string, init?: { headers?: Record<string, string>; sign
 }>;
 
 /** Read the release list. Unauthenticated: release metadata is public and this runs at most once a day per machine. */
-export async function fetchMenubarReleaseCandidates(fetchImpl: FetchLike = fetch as unknown as FetchLike): Promise<ReleaseCandidate[]> {
+async function fetchMenubarReleaseCandidates(fetchImpl: FetchLike = fetch as unknown as FetchLike): Promise<ReleaseCandidate[]> {
   const res = await fetchImpl(MENUBAR_RELEASES_API, {
     headers: {
       Accept: 'application/vnd.github+json',

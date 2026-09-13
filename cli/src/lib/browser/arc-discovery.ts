@@ -3,14 +3,14 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-export interface ArcSpace {
+interface ArcSpace {
   /** Stable UUID used for every native operation. */
   id: string;
   /** Display-only title; empty when the Space is untitled. Never part of identity. */
   title: string;
 }
 
-export interface ArcProfile {
+interface ArcProfile {
   /** Arc's profile directory basename: the stable profile identity. */
   profileId: string;
   /** Display-only profile name from Local State. */
@@ -18,7 +18,7 @@ export interface ArcProfile {
   spaces: ArcSpace[];
 }
 
-export type ArcDiscoveryResult =
+type ArcDiscoveryResult =
   | { ok: true; profiles: ArcProfile[]; userDataDir: string }
   | { ok: false; kind: 'unsupported' | 'not-installed' | 'invalid'; reason: string };
 
@@ -39,7 +39,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * so discovery is rooted here rather than at the Chromium user-data dir.
  * `AGENTS_ARC_DIR` points tests and non-default installs at another root.
  */
-export function arcSupportDir(): string | undefined {
+function arcSupportDir(): string | undefined {
   const override = process.env.AGENTS_ARC_DIR;
   if (override) return path.resolve(override);
   if (process.platform !== 'darwin') return undefined;
@@ -193,7 +193,7 @@ export function discoverArcProfiles(): ArcDiscoveryResult {
 }
 
 /** One Arc Space, flattened with the Arc profile it belongs to. */
-export interface ArcSpaceProfile {
+interface ArcSpaceProfile {
   /** The agents-cli profile name: `arc-<space-title-slug>`. */
   name: string;
   profileId: string;

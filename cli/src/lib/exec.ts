@@ -726,7 +726,7 @@ function ensureVendorHomeForSpawn(options: ExecOptions): void {
  * with AGENTS[agent].capabilities.modes — resolveMode() routes a request to a
  * supported mode (or throws), then buildExecCommand looks up the flags here.
  */
-export interface AgentCommandTemplate {
+interface AgentCommandTemplate {
   base: string[];
   promptFlag: 'positional' | string;
   modeFlags: Partial<Record<Mode, string[]>>;
@@ -1635,7 +1635,7 @@ export interface TmuxWrapContext {
  * "spawn bare" — it is a launch that should not happen, because a bare remote
  * spawn looks fine right up until the link blinks and the agent dies with it.
  */
-export type TmuxWrapDecision =
+type TmuxWrapDecision =
   /** Run the agent in a detached tmux session and attach this TTY. */
   | { kind: 'wrap' }
   /** Spawn directly — nothing about this run needs a pane. */
@@ -2096,7 +2096,7 @@ function emitResolvedSessionId(options: ExecOptions, launchId: string, childPid:
  * unbuffered.
  */
 /** Inputs the pre-launch `run.launch` payload is built from. */
-export interface RunLaunchInput {
+interface RunLaunchInput {
   agent: AgentId;
   harnessName?: string;
   /** The version being launched, or undefined when none could be resolved. */
@@ -2734,7 +2734,7 @@ export function detectOutOfCredits(text: string): boolean {
  * clock), then a clock-less billing exhaustion, then a clean success clears any
  * stale marker; anything else leaves the marker untouched.
  */
-export type ClaudeRefusalAction =
+type ClaudeRefusalAction =
   | { action: 'note_session'; resetsAt: Date }
   | { action: 'note_out_of_credits' }
   | { action: 'note_model_limit'; model: string; family: string }
@@ -2845,7 +2845,7 @@ export function classifyCodexRunRefusal(
  * appear in legitimate output (an HTTP-status table, a log line), so it only
  * counts when it co-occurs with OAuth/authentication/credentials/Unauthorized.
  */
-export const AUTH_FAILURE_PATTERNS: RegExp[] = [
+const AUTH_FAILURE_PATTERNS: RegExp[] = [
   /OAuth (?:access token has been revoked|session expired)/i,
   /(?:Please run|run) \/login/i,
   /Please run 'agent login' first/i,
@@ -2955,7 +2955,7 @@ export interface FallbackEntry {
 }
 
 /** ExecOptions extended with a fallback chain for rate-limit cascading. */
-export interface FallbackOptions extends ExecOptions {
+interface FallbackOptions extends ExecOptions {
   /** Ordered list of agents to try if the primary (options.agent) hits a rate limit. */
   fallback: FallbackEntry[];
   /** Fallback requires a prompt -- chain handoff doesn't apply to interactive sessions. */

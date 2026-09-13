@@ -9,10 +9,10 @@
  */
 
 /** Agents whose transcript formats report per-turn output-token usage. */
-export type ThroughputAgent = 'claude' | 'codex' | 'gemini';
+type ThroughputAgent = 'claude' | 'codex' | 'gemini';
 
 /** Rolling window (seconds) the throughput average is computed over. */
-export const DEFAULT_THROUGHPUT_WINDOW_SEC = 60;
+const DEFAULT_THROUGHPUT_WINDOW_SEC = 60;
 
 /**
  * Output-token throughput (tokens/sec) over the last `windowSec` seconds.

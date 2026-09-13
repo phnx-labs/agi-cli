@@ -20,7 +20,7 @@
 import { execFileSync } from 'child_process';
 import * as path from 'path';
 
-export interface WinPathResult {
+interface WinPathResult {
   success: boolean;
   /** True when `dir` was already the first PATH entry (no write performed). */
   alreadyPresent?: boolean;

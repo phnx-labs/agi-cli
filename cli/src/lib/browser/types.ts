@@ -620,19 +620,6 @@ export interface PageOpenResult {
   message?: string;
 }
 
-/** Subset of IPCResponse describing a recording start result. */
-export interface RecordStartFields {
-  fps?: number;
-  durationCapSec?: number;
-  maxMb?: number;
-}
-
-/** Subset of IPCResponse describing a recording stop result. */
-export interface RecordStopFields {
-  durationMs?: number;
-  stopReason?: 'manual' | 'duration-cap' | 'size-cap';
-}
-
 export interface IPCResponse {
   ok: boolean;
   error?: string;
@@ -766,7 +753,7 @@ export interface DeviceDescriptor {
   mobile: boolean;
 }
 
-export const TASK_ID_REGEX = /^[a-z0-9][a-z0-9-]*$/;
+const TASK_ID_REGEX = /^[a-z0-9][a-z0-9-]*$/;
 
 export function isValidTaskId(id: string): boolean {
   return TASK_ID_REGEX.test(id) && id.length <= 64;
@@ -778,41 +765,4 @@ export function generateTaskId(): string {
 
 export function generateShortId(): string {
   return crypto.randomUUID().split('-')[0]; // 8 chars
-}
-
-const ADJECTIVES = [
-  'swift', 'cosmic', 'jolly', 'quiet', 'bold', 'bright', 'calm', 'eager',
-  'golden', 'happy', 'keen', 'lucky', 'noble', 'proud', 'quick', 'royal',
-  'silver', 'amber', 'crimson', 'misty', 'sunny', 'gentle', 'wild', 'brave',
-  'merry', 'sleek', 'wise', 'fierce', 'curious', 'humble', 'spry', 'witty',
-];
-
-const NOUNS = [
-  'falcon', 'comet', 'tiger', 'nebula', 'phoenix', 'river', 'summit', 'wave',
-  'aurora', 'breeze', 'crystal', 'dragon', 'ember', 'forest', 'glacier', 'harbor',
-  'crab', 'otter', 'hawk', 'fox', 'wolf', 'panda', 'lynx', 'raven',
-  'meadow', 'canyon', 'valley', 'orchid', 'cedar', 'thistle', 'lotus', 'briar',
-];
-
-export function generateFunName(): string {
-  const adj = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)];
-  const noun = NOUNS[Math.floor(Math.random() * NOUNS.length)];
-  return `${adj}-${noun}`;
-}
-
-/**
- * Auto-generated task name: `<adjective>-<noun>-<noun>-<hex8>`, e.g.
- * `swift-crab-falcon-a3f92b1c`. Three English words make it memorable and
- * easy to read; 32 bits of hex give every spawned task enough entropy that
- * parallel agents never collide on the daemon side.
- */
-export function generateTaskName(): string {
-  const adj = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)];
-  const noun1 = NOUNS[Math.floor(Math.random() * NOUNS.length)];
-  let noun2 = NOUNS[Math.floor(Math.random() * NOUNS.length)];
-  while (noun2 === noun1) {
-    noun2 = NOUNS[Math.floor(Math.random() * NOUNS.length)];
-  }
-  const hex8 = crypto.randomUUID().replace(/-/g, '').slice(0, 8);
-  return `${adj}-${noun1}-${noun2}-${hex8}`;
 }

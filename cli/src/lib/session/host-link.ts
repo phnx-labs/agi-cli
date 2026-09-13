@@ -58,7 +58,7 @@ export type HostLink =
  */
 export const HOST_HEARTBEAT_STALE_MS = 10 * 60_000;
 
-export interface HostLinkInput {
+interface HostLinkInput {
   /** The agent process is still alive (already pid-reuse-checked by the caller). */
   pidAlive: boolean;
   /**

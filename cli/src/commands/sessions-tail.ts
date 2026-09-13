@@ -23,7 +23,7 @@ export function isTailable(agent: SessionAgentId): boolean {
   return TAIL_SUPPORTED.includes(agent);
 }
 
-export interface TailFileOptions {
+interface TailFileOptions {
   /** If true, emit every line from byte 0 first, then follow. Default false (EOF). */
   fromStart?: boolean;
 }

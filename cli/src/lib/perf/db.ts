@@ -8,7 +8,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import Database from '../sqlite.js';
-import { getPerfDbPath, getPerfDir } from '../state.js';
+import { getPerfDbPath } from '../state.js';
 import { localMachineId } from '../origin-machine.js';
 import { resolveProjectKey } from '../project-key.js';
 import { percentile } from '../percentile.js';
@@ -37,7 +37,7 @@ function parsePhases(metaJson: string | null): Record<string, number> | undefine
 export { recordSample, shortSessionId, resolveSpoolPath } from './spool.js';
 export { percentile } from '../percentile.js';
 
-export const PERF_SCHEMA_VERSION = 1;
+const PERF_SCHEMA_VERSION = 1;
 export const DEFAULT_RETENTION_DAYS = 30;
 
 const SCHEMA = `
@@ -377,11 +377,5 @@ export function perfDbPath(): string {
 
 export function perfSpoolPath(): string {
   return resolveSpoolPath();
-}
-
-export function ensurePerfDir(): string {
-  const dir = process.env.AGENTS_PERF_DIR || (_dbPath ? path.dirname(_dbPath) : getPerfDir());
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  return dir;
 }
 

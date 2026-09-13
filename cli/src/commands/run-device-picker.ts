@@ -45,7 +45,7 @@ export interface RunDeviceRow {
   hasAccount?: boolean;            // undefined = unknown; true/false when an account label was given and the catalog knows
 }
 
-export interface RunDeviceChoice {
+interface RunDeviceChoice {
   name: string;                    // rendered line: name · platform · this machine|online|offline · headroom · NN% load · NN% mem · role · ✓ acct|– acct
   value: string;                   // device name
   disabled?: boolean | string;     // offline rows: 'offline since HH:MM' (string is what @inquirer shows)

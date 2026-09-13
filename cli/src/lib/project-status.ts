@@ -174,7 +174,7 @@ export function isDeadStatus(status: string): boolean {
  */
 
 /** Live vs finished sessions on a project. */
-export interface LiveDeadSplit {
+interface LiveDeadSplit {
   live: number;
   dead: number;
   /** Dead broken out by status, for the card's parenthetical. */
@@ -244,13 +244,13 @@ export function sortProjectMembers(members: ProjectMember[]): ProjectMember[] {
 export const MEMBERS_LINE_LIMIT = 6;
 
 /** Cap for host groups on the multi-line agents roster. */
-export const MEMBERS_HOST_LIMIT = 8;
+const MEMBERS_HOST_LIMIT = 8;
 
 /**
  * Collapse members into distinct state cells (`agent · status · ticket[@host]`),
  * counting duplicates as `×N`. Pure.
  */
-export function collapseMemberCells(
+function collapseMemberCells(
   members: ProjectMember[],
   opts: { includeHostOnCell?: boolean } = {},
 ): Array<{ cell: string; n: number; members: number }> {
@@ -379,7 +379,7 @@ export function warningEmoji(severity: ProjectWarningSeverity): string {
 }
 
 /** Stable sort: critical first, then continue; stable within a tier. */
-export function sortProjectWarnings(warnings: ProjectWarning[]): ProjectWarning[] {
+function sortProjectWarnings(warnings: ProjectWarning[]): ProjectWarning[] {
   const rank = { critical: 0, continue: 1 };
   return [...warnings].sort((a, b) => rank[a.severity] - rank[b.severity] || a.text.localeCompare(b.text));
 }

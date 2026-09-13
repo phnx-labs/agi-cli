@@ -23,7 +23,7 @@ import {
   parseWorkflowRef,
 } from '../workflows.js';
 
-export interface WorkflowItem {
+interface WorkflowItem {
   name: string;
   description: string;
   model?: string;

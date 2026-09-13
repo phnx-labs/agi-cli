@@ -29,9 +29,9 @@ export interface SSHConnection {
  * Server with cmd.exe as the default shell, so the launch/teardown command
  * strings differ (no `&` backgrounding, no `lsof`, `.exe` instead of `.app`).
  */
-export type RemoteOs = 'windows' | 'posix';
+type RemoteOs = 'windows' | 'posix';
 
-export interface SSHConnectOptions {
+interface SSHConnectOptions {
   /**
    * Attach to a browser another device already declared (identity-bearing or
    * a fungible name we don't declare here). Do not launch a fresh remote
@@ -462,21 +462,6 @@ export async function ensureRemoteBrowser(
       reject(err);
     });
   });
-}
-
-export async function restartRemoteBrowser(
-  user: string,
-  host: string,
-  browserType: string,
-  port: number,
-  remoteOs: RemoteOs,
-  customBinary?: string
-): Promise<void> {
-  // Kill any process using the remote debugging port
-  await runSSHCommand(user, host, buildKillCmd(remoteOs, port));
-  await sleep(500);
-  await ensureRemoteBrowser(user, host, browserType, port, remoteOs, customBinary);
-  await sleep(1500);
 }
 
 /**

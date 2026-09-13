@@ -199,11 +199,6 @@ export function listLocalTranscripts(spec: SyncAgentSpec): LocalTranscript[] {
   return out;
 }
 
-/** Session ids this machine holds locally (live home), used to skip mirror writes. */
-export function localSessionIds(spec: SyncAgentSpec): Set<string> {
-  return new Set(listLocalTranscripts(spec).map(t => t.sessionId));
-}
-
 /**
  * Absolute mirror path for a remote machine's transcript — lands in a scan root.
  *
@@ -236,11 +231,6 @@ export function mirrorPath(spec: SyncAgentSpec, machine: string, relKey: string)
 export function objectKey(machine: string, agentId: string, sessionId: string, relKey?: string): string {
   if (relKey) return `sessions/${machine}/${agentId}/${sessionId}/${relKey}`;
   return `sessions/${machine}/${agentId}/${sessionId}.jsonl`;
-}
-
-/** R2 object key for a machine's manifest. */
-export function manifestKey(machine: string): string {
-  return `sessions/${machine}/manifest.json`;
 }
 
 /** Prefix under which all machine manifests live (for discovery). */

@@ -612,7 +612,7 @@ export function listSubagentsForAgent(
   return listInstalledSubagentsRich(agentId, home);
 }
 
-export interface VersionSubagentDiff {
+interface VersionSubagentDiff {
   agent: AgentId;
   version: string;
   orphans: string[];

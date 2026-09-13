@@ -24,7 +24,7 @@ import { getDevice, type DeviceProfile } from './devices/registry.js';
 import { deviceIdentityArgs, sshTargetFor } from './devices/connect.js';
 import { hostNameFor } from './devices/ssh-config.js';
 
-export interface StartTunnelOptions {
+interface StartTunnelOptions {
   extraSshArgs?: string[];
 }
 
@@ -101,7 +101,7 @@ export function startSSHTunnel(
 }
 
 /** One registered device, resolved to everything an ssh invocation needs. */
-export interface ResolvedRemoteDevice {
+interface ResolvedRemoteDevice {
   device: DeviceProfile;
   target: string;
   user: string;

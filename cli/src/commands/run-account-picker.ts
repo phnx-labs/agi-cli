@@ -16,7 +16,7 @@ import { isInteractiveTerminal, isPromptCancelled, requireInteractiveSelection }
 
 const CANCEL_SELECTION = '__agents_cancel_account_selection__';
 
-export interface RunAccountChoice {
+interface RunAccountChoice {
   name: string;
   value: string;
   disabled?: string;

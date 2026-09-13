@@ -14,7 +14,7 @@
 import { getVersionHomePath, isVersionInstalled, resolveVersion } from '../installations/versions.js';
 import type { AgentId } from '../types.js';
 
-export interface ResolvedConfigVersion {
+interface ResolvedConfigVersion {
   /** The version to pin, or null when unresolved / not installed. */
   version: string | null;
   /** The version home for that version, or null. */

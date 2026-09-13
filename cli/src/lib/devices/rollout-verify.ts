@@ -70,7 +70,7 @@ export function rolloutVerifyCommand(): string[] {
   return ['sh', '-c', `'${script}'`];
 }
 
-export interface RolloutProbe {
+interface RolloutProbe {
   /** Path the box's own `agents` resolves to, symlinks followed. */
   resolvedPath?: string;
   /** Version that resolved copy reports. */
@@ -194,7 +194,7 @@ export function classifyRolloutVerification(
 /** Probe deadline. The probe is two shell builtins plus `agents --version`. */
 const VERIFY_TIMEOUT_MS = 60_000;
 
-export interface VerifyFleetRolloutOptions {
+interface VerifyFleetRolloutOptions {
   /** Name of THIS machine; its target is probed locally, mirroring `runFleet`. */
   self?: string;
   /** Injectable ssh runner (tests). */

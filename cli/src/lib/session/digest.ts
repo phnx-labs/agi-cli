@@ -19,7 +19,7 @@ export interface FileChange {
 
 // Tool vocab mirrors parse.ts / render.ts so classification matches what those
 // modules already recognize across Claude/Codex/others.
-export const READ_TOOLS = new Set(['Read', 'read_file', 'view_file', 'cat_file', 'get_file']);
+const READ_TOOLS = new Set(['Read', 'read_file', 'view_file', 'cat_file', 'get_file']);
 export const WRITE_TOOLS = new Set(['Write', 'write_file', 'create_file', 'Create']);
 export const EDIT_TOOLS = new Set(['Edit', 'edit_file', 'replace', 'patch', 'MultiEdit', 'apply_patch']);
 
@@ -139,7 +139,7 @@ export function bashToolCounts(events: SessionEvent[]): Record<string, number> {
   return counts;
 }
 
-export interface TestResult {
+interface TestResult {
   runner: string;
   passed?: number;
   failed?: number;

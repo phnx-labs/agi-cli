@@ -20,7 +20,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 /** OS metadata / local tooling that is never synced into a version home. */
-export const RESOURCE_CONTENT_IGNORE = new Set([
+const RESOURCE_CONTENT_IGNORE = new Set([
   '.DS_Store',
   '.git',
   '.gitignore',

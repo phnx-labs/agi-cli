@@ -71,7 +71,7 @@ export function getAllProviders(): HostProvider[] {
  * doesn't hold, and lets dispatch callers apply the device-only refusal
  * (password auth) without re-reading the registry.
  */
-export interface ResolvedHost extends Host {
+interface ResolvedHost extends Host {
   device?: DeviceProfile;
   /** True when the host is a synthesized ad-hoc `user@host` / IP / FQDN literal
    * (never registered) rather than a device or overlay/ssh-config match. Lets the

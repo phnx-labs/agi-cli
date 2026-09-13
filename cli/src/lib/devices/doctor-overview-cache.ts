@@ -60,7 +60,7 @@ interface CacheFile {
 }
 
 /** Injectable IO + clock so tests exercise the real fs at a temp dir, no mocks. */
-export interface DoctorOverviewCacheDeps {
+interface DoctorOverviewCacheDeps {
   /** Cache directory (default: the real `~/.agents/.cache`). */
   dir?: string;
   /** Clock (default: {@link Date.now}). */
@@ -125,7 +125,7 @@ export function invalidateDoctorOverviewCache(deps: DoctorOverviewCacheDeps = {}
  *    the way out. Call `release()` in a `finally` so a compute that throws still
  *    frees the lock promptly (idempotent).
  */
-export interface OverviewGate {
+interface OverviewGate {
   cached: string | null;
   release?: () => void;
 }

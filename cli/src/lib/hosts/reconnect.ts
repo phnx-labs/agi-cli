@@ -60,7 +60,7 @@ export interface ReconnectOutcome {
   heldMs: number;
 }
 
-export type ReconnectDecision =
+type ReconnectDecision =
   | { action: 'stop'; code: number }
   | { action: 'retry'; waitMs: number; state: ReconnectState; remainingMs: number };
 
@@ -155,7 +155,7 @@ export type ReconnectTarget =
   | { kind: 'launch'; id: string };
 
 /** The short form shown to a human. Both kinds are uuid-shaped, so 8 chars reads the same. */
-export function targetLabel(target: ReconnectTarget): string {
+function targetLabel(target: ReconnectTarget): string {
   return target.id.slice(0, 8);
 }
 
@@ -229,7 +229,7 @@ export function afterInteractiveRemoteExit(opts: {
 }
 
 /** Inputs the launcher has once its interactive stream has returned. */
-export interface ReconnectTargetInputs {
+interface ReconnectTargetInputs {
   agent: string;
   sessionId?: string;
   resolvedId?: string;
@@ -270,7 +270,7 @@ export function reattachRemoteCommand(target: ReconnectTarget): string {
  * A fast preflight probe decides reachability; only then do we run the
  * interactive attach/resume. Returns the exit code, connected bit, and hold time.
  */
-export function reattachRemoteSession(host: Host, target: ReconnectTarget): ReconnectOutcome {
+function reattachRemoteSession(host: Host, target: ReconnectTarget): ReconnectOutcome {
   const sshTarget = sshTargetFor(host);
   const extraSshArgs = hostIdentityArgs(host);
   // Fresh (non-multiplexed) reachability probe: only a completed handshake is
@@ -305,7 +305,7 @@ async function waitOrInterrupt(ms: number): Promise<'elapsed' | 'interrupted'> {
   });
 }
 
-export interface ReconnectLoopOpts {
+interface ReconnectLoopOpts {
   host: Host;
   target: ReconnectTarget;
   /** Exit code from the initial interactive run (treated as connected). */

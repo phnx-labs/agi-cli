@@ -3,7 +3,7 @@
 // the watchdog runtime hands us tailLines + agentType and we read no files.
 // Ported from Swarmify (extension/src/core/watchdogTail.ts) — behavior verbatim.
 
-export interface TailSummary {
+interface TailSummary {
   lastUserMessage?: string;
   lastAssistantMessage?: string;
 }

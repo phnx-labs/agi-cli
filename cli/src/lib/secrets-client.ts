@@ -119,7 +119,7 @@ type ProtocolResponse =
   | { v: 1; id: string; ok: false; error: { code: string; message: string } };
 
 /** Serialize `Map`s the way the server's `decodeWire` expects to receive them. */
-export function encodeWire(value: unknown): unknown {
+function encodeWire(value: unknown): unknown {
   if (value instanceof Map) {
     return { $map: [...value.entries()].map(([key, item]) => [key, encodeWire(item)]) };
   }
@@ -131,7 +131,7 @@ export function encodeWire(value: unknown): unknown {
 }
 
 /** Reconstruct `Map`s from the server's `encodeWire`'d reply. */
-export function decodeWire(value: unknown): unknown {
+function decodeWire(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(decodeWire);
   if (value !== null && typeof value === 'object') {
     const object = value as Record<string, unknown>;
@@ -208,7 +208,7 @@ export function isSecretsTransportError(error: unknown): error is SecretsClientE
 // bundle), so they are declared once here beside the protocol schema rather
 // than re-derived per consumer.
 const SERVICE_PREFIX = 'agents-cli';
-export const SECRETS_ITEM_PREFIX = `${SERVICE_PREFIX}.secrets.`;
+const SECRETS_ITEM_PREFIX = `${SERVICE_PREFIX}.secrets.`;
 
 /** The raw item holding one bundle key's value. */
 export function secretsKeychainItem(bundle: string, key: string): string {
@@ -663,10 +663,6 @@ export function writeBundleWithItemsSync(
 ): void {
   secretsRequestSync('bundles.writeBundleWithItems', [bundle, items, opts ?? {}], context);
 }
-
-export function deleteBundle(name: string, context?: SecretsContext): Promise<boolean> {
-  return secretsRequest('bundles.deleteBundle', [name], context);
-}
 export function deleteBundleSync(name: string, context?: SecretsContext): boolean {
   return secretsRequestSync('bundles.deleteBundle', [name], context);
 }
@@ -711,20 +707,9 @@ export function rotateBundleSecretSync(
 export function agentPing(): Promise<{ reachable: boolean; cliVersion?: string }> {
   return secretsRequest('agent.agentPing', []);
 }
-export function agentPingSync(): { reachable: boolean; cliVersion?: string } {
-  return secretsRequestSync('agent.agentPing', []);
-}
 
 export function agentStatus(): Promise<AgentStatusEntry[]> {
   return secretsRequest('agent.agentStatus', []);
-}
-
-export function agentLock(name?: string): Promise<number> {
-  return secretsRequest('agent.agentLock', name === undefined ? [] : [name]);
-}
-
-export function ensureAgentRunning(timeoutMs?: number): Promise<boolean> {
-  return secretsRequest('agent.ensureAgentRunning', timeoutMs === undefined ? [] : [timeoutMs]);
 }
 
 // index.* (keychain items)
@@ -768,17 +753,8 @@ export function listKeychainItems(prefix: string): Promise<string[]> {
 export function keychainUsesFileFallback(): Promise<boolean> {
   return secretsRequest('index.keychainUsesFileFallback', []);
 }
-
-// store.* (explicit-backend raw item CRUD)
-export function storeGet(backend: SecretsBackend, item: string): Promise<string> {
-  return secretsRequest('store.get', [backend, item]);
-}
 export function storeGetSync(backend: SecretsBackend, item: string): string {
   return secretsRequestSync('store.get', [backend, item]);
-}
-
-export function storeHas(backend: SecretsBackend, item: string): Promise<boolean> {
-  return secretsRequest('store.has', [backend, item]);
 }
 export function storeHasSync(backend: SecretsBackend, item: string): boolean {
   return secretsRequestSync('store.has', [backend, item]);
@@ -789,10 +765,6 @@ export function storeSet(backend: SecretsBackend, item: string, value: string): 
 }
 export function storeSetSync(backend: SecretsBackend, item: string, value: string): void {
   secretsRequestSync('store.set', [backend, item, value]);
-}
-
-export function storeDelete(backend: SecretsBackend, item: string): Promise<boolean> {
-  return secretsRequest('store.delete', [backend, item]);
 }
 
 // remote.* / push.*
@@ -873,7 +845,7 @@ export function masterPassphraseInEnvSync(context?: SecretsContext): boolean {
 // an agent's process.
 
 /** True for a dynamic-loader or language-interpreter override env var. */
-export function isLoaderOrInterpreterEnv(name: string): boolean {
+function isLoaderOrInterpreterEnv(name: string): boolean {
   const upper = name.toUpperCase();
   return (
     upper.startsWith('LD_') ||

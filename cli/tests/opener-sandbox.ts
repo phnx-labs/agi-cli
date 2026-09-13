@@ -88,7 +88,7 @@ function writeStub(stubDir: string, name: string): void {
   );
 }
 
-export interface InstallOpenerSandboxOpts {
+interface InstallOpenerSandboxOpts {
   /** Fork-private temp dir from tests/setup.ts. Stubs + tripwire live under it. */
   tmp: string;
 }

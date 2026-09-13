@@ -31,12 +31,12 @@ import { getUserAgentsDir } from '../state.js';
 import { crabboxEnv, crabboxSshArgv } from './cli.js';
 
 /** Remote path (relative to the box user's home) the tracked config lands in. */
-export const REMOTE_AGENTS_DIR = '.agents/';
+const REMOTE_AGENTS_DIR = '.agents/';
 
 /** Top-level paths that must never be pushed, even if somehow tracked. */
 const NEVER_COPY = new Set(['.claude', '.claude.json']);
 
-export interface CopySetupOptions {
+interface CopySetupOptions {
   /** crabbox box slug to push to — its per-lease ssh key does the auth. */
   slug: string;
   /** Secrets bundle whose env the ssh/rsync children inherit (crabbox parity). */

@@ -43,7 +43,7 @@ import { detectConfigDrift, type ConfigDrift } from './config-drift.js';
  *  - `missing` — source exists, nothing installed in the version home ('missing').
  *  - `orphan`  — installed in the home with no source ('extra'); prune's job, not sync's.
  */
-export type ResourceSyncStatus = 'synced' | 'drifted' | 'missing' | 'orphan';
+type ResourceSyncStatus = 'synced' | 'drifted' | 'missing' | 'orphan';
 
 export interface ResourceStatusRow {
   agent: AgentId;
@@ -193,7 +193,7 @@ function rowsFromReport(
   return out;
 }
 
-export interface SyncStatusOptions {
+interface SyncStatusOptions {
   cwd?: string;
   /** Restrict to specific agent ids; undefined = every supported agent. */
   agents?: AgentId[];
@@ -207,7 +207,7 @@ export interface SyncStatusOptions {
  * auto-pull worker keeps warm via periodic `git fetch`. This is the same number
  * the menu-bar surfaces; we read it once, here, so every surface agrees.
  */
-export async function getSystemRepoStatus(): Promise<SystemRepoStatus> {
+async function getSystemRepoStatus(): Promise<SystemRepoStatus> {
   const dir = getSystemAgentsDir();
   const base: SystemRepoStatus = { dir, behind: 0, ahead: 0, branch: null, unknown: true };
   if (!isGitRepo(dir)) return base;
@@ -232,7 +232,7 @@ export async function getSystemRepoStatus(): Promise<SystemRepoStatus> {
  * drift state that `agents repo sync user` heals by adopting in place (PHNX-3301),
  * surfaced separately from per-version resource gaps. Purely local; no network.
  */
-export async function getUserRepoStatus(): Promise<UserRepoStatus> {
+async function getUserRepoStatus(): Promise<UserRepoStatus> {
   const dir = getUserAgentsDir();
   if (!fs.existsSync(dir)) return { dir, notGitRepo: false };
   if (!isGitRepo(dir)) return { dir, notGitRepo: true };

@@ -21,9 +21,9 @@ import {
   type ActiveSessionsJournalRecord,
 } from '../session-cache.js';
 
-export const SESSION_WATCH_VERSION = 1 as const;
+const SESSION_WATCH_VERSION = 1 as const;
 export const SESSION_WATCH_HEARTBEAT_MS = 15_000;
-export const SESSION_WATCH_PREVIOUS_LIMIT = 50;
+const SESSION_WATCH_PREVIOUS_LIMIT = 50;
 
 export type SessionWatchScopeStatus = 'available' | 'unavailable';
 
@@ -96,7 +96,7 @@ function epochMs(value: string | undefined): number {
 /** Stable identity for a durable Previous row. It is deliberately distinct
  * from the live row key for the same session id: both may coexist on the one
  * stream, and the presentation layer lets the live row win while it exists. */
-export function previousSessionWatchRowKey(scope: string, sessionId: string): string {
+function previousSessionWatchRowKey(scope: string, sessionId: string): string {
   return createHash('sha256').update(`${scope}\0previous\0${sessionId}`).digest('base64url').slice(0, 22);
 }
 
@@ -450,7 +450,7 @@ export async function watchLocalSessions(options: WatchLocalOptions): Promise<vo
   });
 }
 
-export interface WatchFleetOptions {
+interface WatchFleetOptions {
   signal: AbortSignal;
   emit: (event: SessionWatchEnvelope) => void;
   reconnectMs?: number;

@@ -306,7 +306,7 @@ function registryScopedDuplicates(processes: DaemonProcess[], ownerPid: number |
 }
 
 /** Parse a `ps -o etime=` value (`[[dd-]hh:]mm:ss`) into elapsed seconds. */
-export function parseEtimeToSeconds(raw: string): number | null {
+function parseEtimeToSeconds(raw: string): number | null {
   const m = raw.match(/^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/);
   if (!m) return null;
   const days = m[1] ? parseInt(m[1], 10) : 0;
@@ -584,7 +584,7 @@ async function runStatus(opts: { json?: boolean }): Promise<void> {
 // ─── Full service roster (RUSH-3193 P4) ──────────────────────────────────────
 
 /** One row of the roster every registered daemon service — supervisor-managed or legacy — renders in `agents daemon services`. */
-export interface DaemonServiceRow {
+interface DaemonServiceRow {
   id: DaemonServiceId;
   title: string;
   description: string;

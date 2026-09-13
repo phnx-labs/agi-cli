@@ -8,7 +8,7 @@
  */
 import type { EventRecord } from './feed/events.js';
 
-export interface RepeatedGuardBlockFinding {
+interface RepeatedGuardBlockFinding {
   /** Session id the repeated blocks happened in, or 'unknown' when the
    *  friction event carried no session (e.g. a guard fired outside any
    *  tracked agent session). */

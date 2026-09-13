@@ -15,16 +15,16 @@ import { getResolvedRulesDir, getUserRulesDir, getProjectAgentsDir } from '../st
 import { getEffectiveHome } from '../installations/store.js';
 import type { AgentId } from '../types.js';
 
-export type InstructionsScope = 'user' | 'project';
+type InstructionsScope = 'user' | 'project';
 
-export interface InstalledInstructions {
+interface InstalledInstructions {
   agentId: AgentId;
   scope: InstructionsScope;
   path: string;
   exists: boolean;
 }
 
-export interface DiscoveredInstructions {
+interface DiscoveredInstructions {
   agentId: AgentId;
   sourcePath: string;
   filename: string;
@@ -34,7 +34,7 @@ export interface DiscoveredInstructions {
  * Central rules filename constant.
  * All agents map to this file in ~/.agents/rules/, renamed per-agent when synced.
  */
-export const CENTRAL_RULES_FILENAME = 'AGENTS.md';
+const CENTRAL_RULES_FILENAME = 'AGENTS.md';
 const RULES_DOC_FILENAME = 'README.md';
 
 function isSyncableRuleMarkdown(filename: string): boolean {
@@ -83,10 +83,6 @@ export function getCentralRulesFileName(agentId: AgentId): string {
     return CENTRAL_RULES_FILENAME;
   }
   return filename;
-}
-
-function normalizeContent(content: string): string {
-  return content.replace(/\r\n/g, '\n').trim();
 }
 
 /**
@@ -161,29 +157,6 @@ export function discoverInstructionsFromRepo(repoPath: string): DiscoveredInstru
   return instructions;
 }
 
-export function resolveInstructionsSource(repoPath: string, agentId: AgentId): string | null {
-  const agent = AGENTS[agentId];
-  const rulesDir = path.join(repoPath, 'rules');
-
-  if (!fs.existsSync(rulesDir)) {
-    return null;
-  }
-
-  const possibleNames = [
-    `${agentId}.md`,
-    agent.instructionsFile,
-  ].filter(name => name !== 'AGENTS.md');
-
-  for (const filename of possibleNames) {
-    const sourcePath = path.join(rulesDir, filename);
-    if (fs.existsSync(sourcePath)) {
-      return sourcePath;
-    }
-  }
-
-  return null;
-}
-
 export function discoverRuleFilesFromRepo(repoPath: string): string[] {
   const rulesDir = path.join(repoPath, 'rules');
   if (!fs.existsSync(rulesDir)) {
@@ -197,41 +170,6 @@ export function discoverRuleFilesFromRepo(repoPath: string): string[] {
   }
 }
 
-export function installInstructions(
-  sourcePath: string,
-  agentId: AgentId,
-  method: 'symlink' | 'copy' = 'copy'
-): { path: string; method: 'symlink' | 'copy'; error?: string } {
-  const agent = AGENTS[agentId];
-  const configDir = getUserConfigDir(agentId);
-  const targetPath = path.join(configDir, agent.instructionsFile);
-
-  if (!fs.existsSync(configDir)) {
-    fs.mkdirSync(configDir, { recursive: true });
-  }
-
-  if (fs.existsSync(targetPath)) {
-    const stat = fs.lstatSync(targetPath);
-    if (stat.isSymbolicLink()) {
-      fs.unlinkSync(targetPath);
-    } else {
-      fs.unlinkSync(targetPath);
-    }
-  }
-
-  try {
-    if (method === 'symlink') {
-      fs.symlinkSync(sourcePath, targetPath);
-      return { path: targetPath, method: 'symlink' };
-    }
-
-    fs.copyFileSync(sourcePath, targetPath);
-    return { path: targetPath, method: 'copy' };
-  } catch (err) {
-    return { path: '', method: 'copy', error: (err as Error).message };
-  }
-}
-
 export function uninstallInstructions(agentId: AgentId): boolean {
   const agent = AGENTS[agentId];
   const configDir = getUserConfigDir(agentId);
@@ -242,27 +180,6 @@ export function uninstallInstructions(agentId: AgentId): boolean {
     return true;
   }
   return false;
-}
-
-export function instructionsContentMatches(
-  agentId: AgentId,
-  sourcePath: string,
-  scope: InstructionsScope = 'user',
-  cwd: string = process.cwd()
-): boolean {
-  const installedPath = getInstructionsPath(agentId, scope, cwd);
-
-  if (!fs.existsSync(installedPath) || !fs.existsSync(sourcePath)) {
-    return false;
-  }
-
-  try {
-    const installedContent = fs.readFileSync(installedPath, 'utf-8');
-    const sourceContent = fs.readFileSync(sourcePath, 'utf-8');
-    return normalizeContent(installedContent) === normalizeContent(sourceContent);
-  } catch {
-    return false;
-  }
 }
 
 export function listInstalledInstructionsWithScope(

@@ -94,7 +94,7 @@ export async function withLaunchGate<T>(agent: AgentId, label: string, fn: () =>
  * around the spawn itself instead, since here the process already exists by
  * the time the lock is acquired.
  */
-export async function acquireLaunchGate(agent: AgentId, label: string, pid: number): Promise<() => void> {
+async function acquireLaunchGate(agent: AgentId, label: string, pid: number): Promise<() => void> {
   return withLaunchGate(agent, label, () => recordLaunchLease(agent, label, pid));
 }
 

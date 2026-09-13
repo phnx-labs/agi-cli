@@ -19,7 +19,7 @@ export type EventFamily = (typeof EVENT_FAMILIES)[number];
 
 const FAMILY_SET: ReadonlySet<string> = new Set(EVENT_FAMILIES);
 
-export function isEventFamily(value: string): value is EventFamily {
+function isEventFamily(value: string): value is EventFamily {
   return FAMILY_SET.has(value);
 }
 
@@ -43,10 +43,10 @@ export function parseFamilyList(raw: string, flagName: string): EventFamily[] {
 }
 
 /** Command-churn event kinds. */
-export const COMMAND_EVENT_TYPES: readonly EventType[] = ['command.start', 'command.end'];
+const COMMAND_EVENT_TYPES: readonly EventType[] = ['command.start', 'command.end'];
 
 /** Run-dispatch outcome kinds (replaces the separate audit/log.jsonl product). */
-export const RUN_EVENT_TYPES: readonly EventType[] = ['run.dispatched', 'run.launch', 'agent.run.end'];
+const RUN_EVENT_TYPES: readonly EventType[] = ['run.dispatched', 'run.launch', 'agent.run.end'];
 
 /**
  * Fold family include/exclude into a UnifiedQuery.

@@ -109,7 +109,7 @@ export function shareTemplateStatus(cfg: ShareConfig): 'current' | 'outdated' | 
 }
 
 /** One published object as reported by the Worker's `?format=json` listing route. */
-export interface ShareListItem {
+interface ShareListItem {
   slug: string;
   url: string;
   /** Object size in bytes. */
@@ -143,7 +143,7 @@ export interface ShareListItem {
   meta: Record<string, string>;
 }
 
-export interface ShareListResult {
+interface ShareListResult {
   /** The namespace listed. */
   user: string;
   count: number;
@@ -152,12 +152,12 @@ export interface ShareListResult {
 
 /** DI seam for tests — override the real HTTP GET of the JSON listing route.
  * The optional `headers` carry the owner bearer for hidden-visibility listings. */
-export type ListingFetchFn = (
+type ListingFetchFn = (
   url: string,
   headers?: Record<string, string>,
 ) => Promise<{ status: number; contentType: string; body: string }>;
 
-export interface ShareEditResult {
+interface ShareEditResult {
   ok: true;
   url: string;
   label: string | null;
@@ -501,7 +501,7 @@ export function formatShareList(result: ShareListResult, json = false): string {
 
 /** One retained prior version of a slug, as reported by the Worker's
  * `?revisions=json` route. */
-export interface ShareRevisionItem {
+interface ShareRevisionItem {
   /** R2 object key, `<user>/<slug>/rev-<ts>-<rand>`. */
   key: string;
   url: string;
@@ -521,7 +521,7 @@ export interface ShareRevisionItem {
   meta: Record<string, string>;
 }
 
-export interface ShareRevisionsResult {
+interface ShareRevisionsResult {
   /** The canonical `<user>/<slug>` key these are revisions of. */
   key: string;
   count: number;
@@ -618,7 +618,7 @@ export async function runShareRevisions(
 /** The resolved page URL plus a signed-in-owner URL that carries a one-time
  * login ticket, so opening it activates the shared page's inline visibility
  * control (PHNX-3370). */
-export interface ShareOpenResult {
+interface ShareOpenResult {
   /** `<user>/<slug>` key of the target page. */
   key: string;
   /** The plain page URL (no ticket). */
@@ -1624,7 +1624,7 @@ export async function runShareProvision(opts: {
   }
 }
 
-export interface ShareUpdateResult {
+interface ShareUpdateResult {
   updated: boolean;
   templateHash: string;
   baseUrl: string;

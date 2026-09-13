@@ -7,14 +7,11 @@ import {
   type AnalyticsWindow,
 } from './recipes.js';
 
-export interface MixDashboard {
+interface MixDashboard {
   window: AnalyticsWindow;
   durationMs: number;
   sections: RecipeSection[];
 }
-
-/** @deprecated Use MixDashboard. */
-export type TrendsDashboard = MixDashboard;
 
 const DEFAULT_ORDER: RecipeId[] = [
   'harness-mix',
@@ -44,9 +41,6 @@ export function buildMixDashboard(opts: { days?: number; ids?: RecipeId[] } = {}
     sections,
   };
 }
-
-/** @deprecated Use buildMixDashboard. */
-export const buildTrendsDashboard = buildMixDashboard;
 
 export {
   analyticsWindow,

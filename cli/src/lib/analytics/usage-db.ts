@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import Database from '../sqlite.js';
-import { getUsageDbPath, getSecretsDbPath, getAnalyticsDir } from '../state.js';
+import { getUsageDbPath, getSecretsDbPath } from '../state.js';
 import { localMachineId } from '../session/origin-machine.js';
 
 export type UsageKind = 'secret' | 'agent' | 'skill' | 'plugin' | 'browser' | 'computer';
@@ -17,7 +17,7 @@ export const USAGE_KINDS: readonly UsageKind[] = [
 
 const EVENT_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
 
-export interface RecordUsageParams {
+interface RecordUsageParams {
   kind: UsageKind;
   name: string;
   event: string;
@@ -31,7 +31,7 @@ export interface RecordUsageParams {
   ts?: string;
 }
 
-export interface UsageEventRow {
+interface UsageEventRow {
   ts: string;
   kind: UsageKind;
   name: string;
@@ -180,10 +180,6 @@ export function usageDbPath(): string {
   return getUsageDbPath();
 }
 
-export function analyticsDir(): string {
-  return getAnalyticsDir();
-}
-
 export function listUsageKindsWithData(sinceIso: string): UsageKind[] {
   const db = open();
   if (!db) return [];
@@ -241,7 +237,7 @@ export function queryUsage(opts: {
   }
 }
 
-export interface NameCountRow {
+interface NameCountRow {
   name: string;
   n: number;
   last: string | null;
@@ -261,7 +257,7 @@ export function topNamesByKind(kind: UsageKind, sinceIso: string, limit = 20): N
   }
 }
 
-export interface KindCountRow {
+interface KindCountRow {
   kind: string;
   n: number;
 }
@@ -273,90 +269,6 @@ export function kindMix(sinceIso: string): KindCountRow[] {
     return db.prepare(
       `SELECT kind, COUNT(*) AS n FROM usage_events WHERE ts >= ? GROUP BY kind ORDER BY n DESC`,
     ).all(sinceIso) as KindCountRow[];
-  } catch {
-    return [];
-  }
-}
-
-export function getSecretBundleRollup(bundle: string): Array<{ event: string; n: number; last: string | null; first: string | null }> {
-  const db = open();
-  if (!db) return [];
-  try {
-    return db.prepare(
-      `SELECT event, COUNT(*) AS n, MAX(ts) AS last, MIN(ts) AS first
-         FROM usage_events WHERE kind = 'secret' AND name = ? GROUP BY event`,
-    ).all(bundle) as Array<{ event: string; n: number; last: string | null; first: string | null }>;
-  } catch {
-    return [];
-  }
-}
-
-export function getSecretBundleAgents(bundle: string): Array<{ agent: string; n: number }> {
-  const db = open();
-  if (!db) return [];
-  try {
-    return db.prepare(
-      `SELECT agent, COUNT(*) AS n FROM usage_events
-         WHERE kind = 'secret' AND name = ? AND agent IS NOT NULL
-         GROUP BY agent ORDER BY n DESC`,
-    ).all(bundle) as Array<{ agent: string; n: number }>;
-  } catch {
-    return [];
-  }
-}
-
-export function getAllSecretBundleRollups(): Array<{ name: string; event: string; n: number; last: string | null; first: string | null }> {
-  const db = open();
-  if (!db) return [];
-  try {
-    return db.prepare(
-      `SELECT name, event, COUNT(*) AS n, MAX(ts) AS last, MIN(ts) AS first
-         FROM usage_events WHERE kind = 'secret' GROUP BY name, event`,
-    ).all() as Array<{ name: string; event: string; n: number; last: string | null; first: string | null }>;
-  } catch {
-    return [];
-  }
-}
-
-export function getSecretHistory(bundle: string | undefined, limit = 20): Array<{
-  ts: string;
-  bundle: string;
-  event: string;
-  agent: string | null;
-  host: string | null;
-  source: string | null;
-  status: string | null;
-  keyCount: number | null;
-}> {
-  const db = open();
-  if (!db) return [];
-  try {
-    const sql = bundle
-      ? `SELECT ts, name AS bundle, event, agent, source, status, meta_json
-           FROM usage_events WHERE kind = 'secret' AND name = ? ORDER BY ts DESC, id DESC LIMIT ?`
-      : `SELECT ts, name AS bundle, event, agent, source, status, meta_json
-           FROM usage_events WHERE kind = 'secret' ORDER BY ts DESC, id DESC LIMIT ?`;
-    const rows = (bundle ? db.prepare(sql).all(bundle, limit) : db.prepare(sql).all(limit)) as Array<{
-      ts: string;
-      bundle: string;
-      event: string;
-      agent: string | null;
-      source: string | null;
-      status: string | null;
-      meta_json: string | null;
-    }>;
-    return rows.map((r) => {
-      let host: string | null = null;
-      let keyCount: number | null = null;
-      if (r.meta_json) {
-        try {
-          const m = JSON.parse(r.meta_json) as { host?: string; keyCount?: number };
-          host = m.host ?? null;
-          keyCount = typeof m.keyCount === 'number' ? m.keyCount : null;
-        } catch { /* ignore */ }
-      }
-      return { ts: r.ts, bundle: r.bundle, event: r.event, agent: r.agent, host, source: r.source, status: r.status, keyCount };
-    });
   } catch {
     return [];
   }

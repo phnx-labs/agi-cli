@@ -141,7 +141,7 @@ async function findInstallation(token: string, owner: string, repo: string): Pro
 }
 
 /** One version's entry in the account manifest sent on every dispatch. */
-export interface AccountManifestEntry {
+interface AccountManifestEntry {
   version: string;
   email: string;
 }
@@ -157,7 +157,7 @@ export interface AccountManifestEntry {
  * cloud. Dispatch fails loud and steers to a portable provider account instead
  * (see the 401 handler in `dispatch()`).
  */
-export interface AccountManifest {
+interface AccountManifest {
   fp: string;
   versions: AccountManifestEntry[];
 }
@@ -209,7 +209,7 @@ function parsePromptCode(body: string): string | null {
  * Returns null when no Claude versions are signed in (the dispatch falls back
  * to the platform-wide key, current behavior).
  */
-export async function buildAccountManifest(strategy?: string): Promise<AccountManifest | null> {
+async function buildAccountManifest(strategy?: string): Promise<AccountManifest | null> {
   let candidateVersions: Array<{ version: string; email: string }>;
 
   if (strategy === 'balanced') {

@@ -114,7 +114,7 @@ export const DEFAULT_THRESHOLDS: WatchdogThresholds = {
 };
 
 /** The default nudge text — a short imperative, configurable via opts.nudgeText. */
-export const DEFAULT_NUDGE_TEXT = 'Continue.';
+const DEFAULT_NUDGE_TEXT = 'Continue.';
 
 export interface WatchdogTickOptions {
   /** Actually inject when a nudge is decided. Default false (dry status). */
@@ -307,7 +307,7 @@ function readNudgeLedger(dir: string): Record<string, number> {
  * On-disk per-session policy sentinel: `<stateDir>/policy/<sessionId>` whose
  * contents are `off` | `keep` | `handsoff`. Absent / unreadable / unknown → keep.
  */
-export function readPolicySentinel(dir: string, sessionId: string): WatchdogPolicy {
+function readPolicySentinel(dir: string, sessionId: string): WatchdogPolicy {
   if (!sessionId) return 'keep';
   let raw: string;
   try {

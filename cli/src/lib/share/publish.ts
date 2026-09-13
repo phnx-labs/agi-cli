@@ -31,7 +31,7 @@ import { prepareShareHtml } from './html.js';
  * response so a failed publish can surface WHY (the Worker returns
  * `{"error":"…"}` + a `Retry-After` on a 429); they are read only on `!ok`
  * paths, and only ever fed through the bounded {@link extractShareHttpError}. */
-export type PutResult = {
+type PutResult = {
   ok: boolean;
   status: number;
   url?: string;
@@ -47,7 +47,7 @@ export type PutFn = (
   headers: Record<string, string>,
 ) => Promise<PutResult>;
 
-export interface PublishEndpoint {
+interface PublishEndpoint {
   baseUrl: string;
   token: string;
 }
@@ -220,7 +220,7 @@ const VIEWER_TOKEN_BYTES = 16;
 /** Mint a fresh random viewer token for a `private` (token-gated) publish. The
  * raw token rides ONLY in the returned URL's `?k=`; the Worker stores just its
  * SHA-256 hash, so the object metadata never carries the secret. */
-export function generateViewerToken(): string {
+function generateViewerToken(): string {
   return randomBytes(VIEWER_TOKEN_BYTES).toString('base64url');
 }
 
@@ -234,7 +234,7 @@ export function hashViewerToken(token: string): string {
  * publish, so the slug can never be derived/guessed from the title (PHNX-3654).
  * `unlisted` leans on this for obscurity; `private` uses it as defense-in-depth
  * behind the viewer token. */
-export function randomSlugTail(): string {
+function randomSlugTail(): string {
   return randomBytes(8).toString('hex');
 }
 
@@ -529,9 +529,9 @@ export function resolveExpire(spec: string | undefined): string | undefined {
   return parseExpire(spec);
 }
 
-export type SensitiveHitKind = 'email' | 'credential';
+type SensitiveHitKind = 'email' | 'credential';
 
-export interface SensitiveHit {
+interface SensitiveHit {
   kind: SensitiveHitKind;
   /** Short redacted sample so the error names *what* was found without dumping it. */
   sample: string;

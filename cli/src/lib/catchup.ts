@@ -133,7 +133,7 @@ export function claimMissedFire(job: JobConfig, expectedAt: Date): RunMeta | nul
   return meta;
 }
 
-export interface CatchupOptions {
+interface CatchupOptions {
   /** Record misses but start no late runs. Powers `catchup --dry-run`. */
   dryRun?: boolean;
   /** Clock injection seam for tests. */

@@ -1,6 +1,6 @@
 import type { WatchdogEvent, WatchdogEventKind } from './log.js';
 
-export interface WatchdogHistoryEntry {
+interface WatchdogHistoryEntry {
   ts: number;
   kind: WatchdogEventKind | 'inspection';
   sessionId?: string;
@@ -11,7 +11,7 @@ export interface WatchdogHistoryEntry {
   nudgeText?: string;
 }
 
-export interface WatchdogHistoryOptions {
+interface WatchdogHistoryOptions {
   limit?: number;
   sinceMs?: number;
   sessionId?: string;

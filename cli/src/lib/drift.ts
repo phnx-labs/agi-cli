@@ -48,7 +48,7 @@ export interface OrphanRow {
 // invalid manifest, or the bundled skills/commands missing from the mirror —
 // the system-repo plugin content that matters most). Other kinds collapse to
 // compact counts so the readout stays scannable.
-export function divergenceLines(report: VersionResourceReport): string[] {
+function divergenceLines(report: VersionResourceReport): string[] {
   const lines: string[] = [];
   for (const p of report.kinds.plugins) {
     if (p.status === 'missing') lines.push(`plugin ${p.name} — not installed`);
@@ -172,7 +172,7 @@ export function computeSourceBehind(): SourceLayerBehind[] {
   return out;
 }
 
-export interface DriftSummary {
+interface DriftSummary {
   syncRows: SyncStatusRow[];
   orphanRows: OrphanRow[];
   /** Versions whose sources changed since last sync. */

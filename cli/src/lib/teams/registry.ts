@@ -108,7 +108,7 @@ async function saveTeams(reg: TeamRegistry): Promise<void> {
   atomicWriteJsonSync(p, reg);
 }
 
-export interface CreateTeamOptions {
+interface CreateTeamOptions {
   description?: string;
   enableWorktrees?: boolean;
   /** Path to an existing worktree for all teammates to share. */
@@ -204,7 +204,7 @@ export async function markTeamDisbanded(name: string): Promise<void> {
 }
 
 /** Clear a disband tombstone — called when the name is re-created. */
-export async function clearTeamDisbanded(name: string): Promise<void> {
+async function clearTeamDisbanded(name: string): Promise<void> {
   try {
     await fs.unlink(disbandedPath(name));
   } catch (err: unknown) {

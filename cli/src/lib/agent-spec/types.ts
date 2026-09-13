@@ -20,7 +20,7 @@ export interface AgentTarget {
   source: VersionSource;
 }
 
-export type AgentSpecErrorCode =
+type AgentSpecErrorCode =
   | 'empty'
   | 'unknown-agent'
   | 'missing-version'

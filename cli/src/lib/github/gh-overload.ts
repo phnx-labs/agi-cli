@@ -193,7 +193,7 @@ export function isSettled(rollup: RollupItem[], pendingSuites: number): boolean 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Eager REST watch: poll to a terminal state, re-anchored to the live head SHA. */
-export async function watchChecks(target: Target, json: boolean, realGh: string): Promise<number> {
+async function watchChecks(target: Target, json: boolean, realGh: string): Promise<number> {
   const gh = restExec(realGh);
   const deadline = Date.now() + 30 * 60_000; // 30-min guard against a hung matrix
   let last = '';
@@ -217,7 +217,7 @@ export async function watchChecks(target: Target, json: boolean, realGh: string)
 }
 
 /** Lazy one-shot: real gh first; translate to REST only on the exact rate-limit signal. */
-export async function checksOnce(
+async function checksOnce(
   target: Target | null,
   json: boolean,
   realGh: string,

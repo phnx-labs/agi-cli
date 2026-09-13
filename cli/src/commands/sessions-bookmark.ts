@@ -24,7 +24,7 @@ interface BookmarkOptions {
  * a full session id. Ambiguity is an ERROR, not a silent first-match: bookmarking
  * the wrong session is invisible until the user wonders where their bookmark went.
  */
-export function resolveBookmarkTarget(idQuery: string): { id: string } | { error: string } {
+function resolveBookmarkTarget(idQuery: string): { id: string } | { error: string } {
   const matches = findSessionsById(idQuery);
   // A COMPLETE id needs no index entry: the id is the key the store is built on,
   // and requiring a transcript row would refuse exactly the newest sessions — a

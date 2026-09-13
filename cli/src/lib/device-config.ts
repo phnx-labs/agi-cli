@@ -59,7 +59,7 @@ export type ConfigScope = 'user' | 'device';
 export type ConfigVisibility = 'shared' | 'machine';
 
 /** Value type of a config key — drives validation and `--json` rendering. */
-export type ConfigType = 'string' | 'int' | 'bool' | 'string-list';
+type ConfigType = 'string' | 'int' | 'bool' | 'string-list';
 
 /** Fields every key carries, regardless of scope. */
 interface ConfigKeySpecBase {
@@ -97,7 +97,7 @@ export interface ConfigEntry {
 }
 
 /** Options scoping a read/write: a specific device (default: this machine), or the fleet-defaults layer. */
-export interface ConfigTarget {
+interface ConfigTarget {
   device?: string;
   /** Write/read the fleet-wide defaults layer (central fleet.defaults.config). */
   fleet?: boolean;
@@ -502,7 +502,7 @@ let migrationDone = false;
  * same gate bootstrap's runMigration uses (tests pin it so a fork never folds
  * the developer's real ~/.agents as a side effect).
  */
-export function ensureDeviceConfigMigrated(): void {
+function ensureDeviceConfigMigrated(): void {
   if (migrationDone || process.env.AGENTS_SKIP_MIGRATION === '1') return;
   try {
     migrateDeviceConfigStores();
@@ -587,7 +587,7 @@ function writeDeviceDoc(device: string, doc: Record<string, unknown>): void {
 }
 
 /** The fleet-defaults config layer (central `fleet.defaults.config`; {} when unset). */
-export function readFleetConfigDefaults(): Record<string, unknown> {
+function readFleetConfigDefaults(): Record<string, unknown> {
   const config = readMeta().fleet?.defaults?.config;
   return config && typeof config === 'object' && !Array.isArray(config) ? config : {};
 }
@@ -699,12 +699,6 @@ export function listConfig(opts?: ConfigTarget): ConfigEntry[] {
     ? CONFIG_KEYS.filter((spec) => spec.scope !== 'device' || spec.visibility !== 'machine')
     : CONFIG_KEYS;
   return visible.map((spec) => getConfigValue(spec.name, opts));
-}
-
-/** List user-scope config keys with their values. Used to show inherited settings
- * in per-device views without implying those keys are device-local. */
-export function listUserConfig(): ConfigEntry[] {
-  return CONFIG_KEYS.filter((spec) => spec.scope === 'user').map((spec) => getConfigValue(spec.name));
 }
 
 

@@ -38,7 +38,7 @@ import { buildExecEnv, type ExecMode } from '../exec.js';
 
 const PROTOCOL_VERSION = 1;
 
-export interface AcpRunOptions {
+interface AcpRunOptions {
   agent: AgentId;
   prompt: string;
   cwd: string;
@@ -47,7 +47,7 @@ export interface AcpRunOptions {
   onUpdate?: (n: SessionNotification) => void;
 }
 
-export interface AcpRunResult {
+interface AcpRunResult {
   stopReason: string;
   sessionId: string;
 }

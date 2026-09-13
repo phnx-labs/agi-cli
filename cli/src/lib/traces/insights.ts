@@ -67,7 +67,7 @@ export interface FailurePattern {
   drift: 'up' | 'flat' | 'down';
 }
 
-export interface ComputedInsights {
+interface ComputedInsights {
   /** Top-K patterns ranked by wastedMs (impact) — a rare 1-occurrence/8h loop still surfaces. */
   failurePatterns: FailurePattern[];
   /** Sum of wastedMs across every cluster found this sync, not just the top-K rows above. */

@@ -52,7 +52,7 @@ import {
 // ---------------------------------------------------------------------------
 
 /** A verification URL + user code scraped from a device-code login screen. */
-export interface ScrapedLogin {
+interface ScrapedLogin {
   url?: string;
   code?: string;
 }
@@ -79,7 +79,7 @@ export function scrapeLogin(screenText: string, flow: LoginFlow): ScrapedLogin {
 }
 
 /** Why a logged-out (agent, device) pair can or cannot be driven remotely. */
-export interface FlowClassification {
+interface FlowClassification {
   flow: LoginFlow | null;
   remotable: boolean;
   reason?: string;
@@ -135,7 +135,7 @@ function worstCachedVerdict(cache: Record<string, AuthHealth>, host: string, age
 }
 
 /** A logged-out (agent, device) pair `fleet login` will target or explain. */
-export interface PendingLogin {
+interface PendingLogin {
   device: string;
   agent: AgentId | string;
   platform?: string;
@@ -149,7 +149,7 @@ export interface PendingLogin {
   reason?: string;
 }
 
-export interface SelectLoginOptions {
+interface SelectLoginOptions {
   /** Include pairs already logged-in (verdict live/unverified) — for a forced re-login. */
   includeLoggedIn?: boolean;
 }
@@ -225,7 +225,7 @@ export function buildRemoteLoginSshCommand(target: string, flow: LoginFlow, extr
 // Dashboard HTML (pure) — self-contained, dark+light, terminal-coded
 // ---------------------------------------------------------------------------
 
-export type LoginMode = 'bulk' | 'interactive';
+type LoginMode = 'bulk' | 'interactive';
 
 /** Per-pair status shape shared between the driver, the status endpoint, and the page. */
 export type LoginStatusState = 'pending' | 'driving' | 'ready' | 'authorized' | 'error' | 'skipped';
@@ -459,7 +459,7 @@ export interface DriveOptions {
   timeoutMs?: number;
 }
 
-export interface DriveResult extends ScrapedLogin {
+interface DriveResult extends ScrapedLogin {
   /** True when the underlying ssh session already exited (login finished or failed). */
   exited: boolean;
   /** The pty session id, so the caller can keep polling / stop it. */
@@ -520,7 +520,7 @@ export async function driveRemoteLogin(
 // detect / verify (real I/O)
 // ---------------------------------------------------------------------------
 
-export interface DetectOptions {
+interface DetectOptions {
   agents?: (AgentId | string)[];
   devices?: string[];
   includeLoggedIn?: boolean;
@@ -532,7 +532,7 @@ export interface DetectOptions {
  * over the pure {@link selectLoginTargets}. Devices/agents can be narrowed by the
  * caller's flags; the default agent set is every agent with a defined flow.
  */
-export async function detectPending(opts: DetectOptions = {}): Promise<PendingLogin[]> {
+async function detectPending(opts: DetectOptions = {}): Promise<PendingLogin[]> {
   const reg = await loadDevices();
   const self = machineId();
   const online = planFleetTargets(reg)
@@ -556,7 +556,7 @@ export async function detectPending(opts: DetectOptions = {}): Promise<PendingLo
  * bumping after the human completes the browser step. POSIX `stat` only (the
  * device-code agents are all POSIX-fleet).
  */
-export async function remoteFileMtime(target: string, homeRel: string, extraSshArgs: string[] = []): Promise<number> {
+async function remoteFileMtime(target: string, homeRel: string, extraSshArgs: string[] = []): Promise<number> {
   const cmd = `stat -c %Y "$HOME/${homeRel}" 2>/dev/null || stat -f %m "$HOME/${homeRel}" 2>/dev/null || echo 0`;
   const res = await sshExecAsync(target, cmd, { timeoutMs: 15000, multiplex: true, extraSshArgs }).catch(() => null);
   if (!res || res.code !== 0) return 0;
@@ -568,7 +568,7 @@ export async function remoteFileMtime(target: string, homeRel: string, extraSshA
 // Orchestration entry
 // ---------------------------------------------------------------------------
 
-export interface RunFleetLoginOptions {
+interface RunFleetLoginOptions {
   agents?: (AgentId | string)[];
   devices?: string[];
   interactive?: boolean;

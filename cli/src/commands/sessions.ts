@@ -788,7 +788,7 @@ function modelLabel(model?: string): string {
  * without re-implementing the tmux client lookup.
  */
 
-export interface SessionPickerJsonRow extends SessionMeta {
+interface SessionPickerJsonRow extends SessionMeta {
   state: ActiveSession['status'] | 'inactive';
   resumable: boolean;
   unwatched: boolean;
@@ -1036,7 +1036,7 @@ function shortWindowLabel(windowId: string): string {
 }
 
 /** Grouped + sorted view of active sessions for the --active renderer. */
-export interface ActiveSessionsLayout {
+interface ActiveSessionsLayout {
   workspaces: Array<{
     /** Internal grouping key — `__cloud__`, `__unknown__`, or the cwd. */
     key: string;
@@ -1103,7 +1103,7 @@ export function groupActiveSessions(sessions: ActiveSession[]): ActiveSessionsLa
 }
 
 /** One machine's active sessions, keeping the within-machine workspace layout. */
-export interface MachineGroup {
+interface MachineGroup {
   /** Normalized device id (machineId() form). */
   machine: string;
   /** The machine this command is running on — pinned first and marked. */
@@ -1113,7 +1113,7 @@ export interface MachineGroup {
 }
 
 /** Active sessions grouped by the machine they run on. */
-export interface MachineGroupedLayout {
+interface MachineGroupedLayout {
   machines: MachineGroup[];
 }
 
@@ -1259,7 +1259,7 @@ export function mergeLocalFirst(sessions: SessionMeta[], localMachine: string): 
 /** The intentionally small metadata contract emitted by `sessions --resolve`.
  * It includes only launch identity needed to route/resume. Transcript paths,
  * extracted plans, costs, and content stay on the machine that owns them. */
-export function serializeResolvedSessionsJson(sessions: SessionMeta[]): string {
+function serializeResolvedSessionsJson(sessions: SessionMeta[]): string {
   const safe = sessions.map((session) => ({
     id: session.id,
     shortId: session.shortId,
@@ -1321,7 +1321,7 @@ export function parseRemoteComputerSessionRows(
 /** Collect computer history from named peers, or every automatic peer when
  * hosts is omitted. Every peer is forced to JSON and receives the recursion
  * guard through the shared fleet transport. */
-export async function gatherRemoteComputerSessionRows(hosts?: string[]): Promise<ComputerRunRow[]> {
+async function gatherRemoteComputerSessionRows(hosts?: string[]): Promise<ComputerRunRow[]> {
   const hostSet = new Set(hosts ?? []);
   const forwarded = buildForwardedArgs(process.argv, hostSet);
   if (!forwarded.includes('--json')) forwarded.push('--json');
@@ -1823,7 +1823,7 @@ function useInteractiveBrowser(options: SessionsOptions): boolean {
  * when this holds, an explicit `--device` scope is folded into the
  * browser (preview-rich, selectable) instead of the legacy per-host raw stream.
  */
-export function isBareBrowserListing(options: SessionsOptions, query: string | undefined): boolean {
+function isBareBrowserListing(options: SessionsOptions, query: string | undefined): boolean {
   return (
     useInteractiveBrowser(options) &&
     // A peer answering a fan-out must never open a TUI. It has no TTY either, so
@@ -1895,7 +1895,7 @@ export interface RoutineRunGroup {
   sessions: SessionMeta[];
 }
 
-export interface RoutineChoice {
+interface RoutineChoice {
   name: string;
   lastRunAt: string;
   runCount: number;
@@ -1996,7 +1996,7 @@ function safeListJobsWithRuns(): string[] {
  * run record (`safeListJobsWithRuns`), so a command-only or never-ran routine —
  * which produces no `SessionMeta` — still resolves and drills down.
  */
-export async function selectRoutineTarget(
+async function selectRoutineTarget(
   sessions: SessionMeta[],
   routine: boolean | string,
   interactive: boolean,
@@ -2045,7 +2045,7 @@ export async function filterSessionsByRoutine(
 // session row for an attempt that produced none.
 
 /** How a run executed — decides whether an agent session is even expected. */
-export type RoutineExecutionKind = 'agent' | 'command' | 'workflow';
+type RoutineExecutionKind = 'agent' | 'command' | 'workflow';
 
 export function executionKind(meta: RunMeta): RoutineExecutionKind {
   if (meta.workflow) return 'workflow';
@@ -2080,7 +2080,7 @@ export interface RoutineDrilldown {
  * Reconcile a routine's canonical run records (`listRuns`, local disk) with the
  * indexed sessions for that routine (fleet-wide, keyed by `routineRunId`).
  */
-export function buildRoutineDrilldown(name: string, sessions: SessionMeta[]): RoutineDrilldown {
+function buildRoutineDrilldown(name: string, sessions: SessionMeta[]): RoutineDrilldown {
   const runs = listRuns(name);
   const forRoutine = sessions.filter((s) => s.routineName === name);
   const byRun = new Map<string, SessionMeta[]>();
@@ -2527,7 +2527,7 @@ export function toolOriginSessions(
     : sessions;
 }
 
-export function printToolProgramCount(envelope: ToolProgramCountEnvelope): void {
+function printToolProgramCount(envelope: ToolProgramCountEnvelope): void {
   const { totals } = envelope;
   const qualifier = envelope.coverage.complete ? '' : 'at least ';
   console.log(
@@ -2549,7 +2549,7 @@ export function toolSearchFleetSortError(sort: string | undefined, spansDevices:
 }
 
 /** Compact grouped evidence for humans; JSON retains every bounded field. */
-export function printToolSearch(envelope: ToolSearchEnvelope): void {
+function printToolSearch(envelope: ToolSearchEnvelope): void {
   for (const session of envelope.sessions) {
     const machineName = session.machine
       ? truncate(sanitizeForTerminal(session.machine).replace(/\s+/g, ' '), 80)
@@ -3645,7 +3645,7 @@ export function overviewProjectKey(s: Pick<SessionMeta, 'project' | 'cwd'>, defs
   return '(no project)';
 }
 
-export interface OverviewGroup {
+interface OverviewGroup {
   key: string;
   total: number; // total sessions for this project in the fetched pool
   shown: SessionMeta[]; // the recent slice that fell within the display budget
@@ -4456,7 +4456,7 @@ function warnNoPeerTarget(machine: string, session: SessionMeta): void {
  */
 export const LIVE_ROW_PREFIX = 'live:';
 
-export function isIdlessLiveRow(s: SessionMeta): boolean {
+function isIdlessLiveRow(s: SessionMeta): boolean {
   return s.id.startsWith(LIVE_ROW_PREFIX);
 }
 
@@ -4498,7 +4498,7 @@ export async function handlePickedSession(picked: PickedSession): Promise<void> 
  * `agents sessions` picker and by `sessions resume`'s no-tab-backend path, which
  * would otherwise reach `resumeSessionInPlace` and be refused (RUSH-2022).
  */
-export async function resumeOnOwnerIfRemote(session: SessionMeta): Promise<boolean> {
+async function resumeOnOwnerIfRemote(session: SessionMeta): Promise<boolean> {
   const owner = sessionOwnerDevice(session);
   if (!owner) return false;
   console.log(chalk.gray(`Resuming ${session.shortId} on ${owner} over SSH...`));
@@ -4814,7 +4814,7 @@ function formatSearchMessage(options: SessionFilterOptions): string {
  * listing pool (cwd-scoped, default-capped) that PHNX-2767 hydrates past:
  * these flags MUST still exclude FTS hits after that union.
  */
-export type SessionSearchScope = {
+type SessionSearchScope = {
   agent?: string;
   project?: string;
   routine?: boolean | string;
@@ -4828,7 +4828,7 @@ export type SessionSearchScope = {
  * the query was a whole session id: it is unique by construction, so a miss is
  * final and must NOT widen into a text/content search.
  */
-export interface SessionQueryResolution {
+interface SessionQueryResolution {
   matches: SessionMeta[];
   byId: boolean;
   completeId: boolean;
@@ -5322,7 +5322,7 @@ async function renderOneSession(
  *
  * Pure + exported so the gate is unit-tested without driving discovery / SSH.
  */
-export function shouldFanOutForId(query: string, local: boolean | undefined): boolean {
+function shouldFanOutForId(query: string, local: boolean | undefined): boolean {
   if (local === true) return false;
   if (process.env[NO_FANOUT_ENV] === '1') return false;
   return looksLikeSessionId(query);
@@ -5339,7 +5339,7 @@ function modeFlag(mode: ViewMode): string | undefined {
 
 /** Injectable SSH/peer boundary so the fleet-resolve logic is unit-testable
  * without a live tailnet. Production wires these to the real remote-list infra. */
-export interface FleetResolveDeps {
+interface FleetResolveDeps {
   gatherRemoteList: typeof gatherRemoteList;
   runOnPeer: typeof runOnPeer;
 }
@@ -5351,12 +5351,12 @@ interface FleetHit {
 }
 
 /** One logical session returned by the fleet, including every machine holding a copy. */
-export interface FleetSessionCandidate {
+interface FleetSessionCandidate {
   id: string;
   hits: FleetHit[];
 }
 
-export type MetadataResolveOutcome =
+type MetadataResolveOutcome =
   | { kind: 'resolved'; session: SessionMeta }
   | { kind: 'not-found' }
   | { kind: 'ambiguous'; candidates: FleetSessionCandidate[] }
@@ -5623,7 +5623,7 @@ export function preferOwnerAttribution(
 
 /** Injectable dependencies for the live-registry cold-miss fallback (RUSH-2682)
  * and the fleet-attribution reconciliation (PHNX-3890). */
-export type LiveMetadataDeps = {
+type LiveMetadataDeps = {
   loadActive?: typeof loadLocalActiveSessions;
   /** The fleet-active snapshot rows used to attribute a self-defaulted launcher
    * shim to its true execution host. Defaults to the cached fleet snapshot; the
@@ -5857,12 +5857,12 @@ export async function resolveSessionMetadata(
  * No fuzzy/content fallback: the sweep forwards the id selector and every result
  * is resolved through `resolveSessionQuery`, the same id-only resolver used locally.
  */
-export type FleetResolveResult =
+type FleetResolveResult =
   | { kind: 'rendered' }
   | { kind: 'conflict' }
   | { kind: 'not-found'; deviceCount: number; unreachable: string[] };
 
-export async function resolveSessionAcrossFleet(
+async function resolveSessionAcrossFleet(
   query: string,
   mode: ViewMode,
   hosts?: string[],

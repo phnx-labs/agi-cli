@@ -21,7 +21,7 @@ const execFileAsyncDefault = promisify(execFile);
  * Snapshot of the current branch's open PR (if any), for the headless-exit
  * fail-loud path. Returns null when there is no open PR or `gh` cannot answer.
  */
-export interface BranchOpenPr {
+interface BranchOpenPr {
   number: number;
   url: string;
   state: string;

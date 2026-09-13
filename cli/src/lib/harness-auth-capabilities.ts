@@ -14,7 +14,7 @@
  */
 import type { AgentId } from './types.js';
 
-export type HarnessIdentityKind = 'strong' | 'email' | 'opaque';
+type HarnessIdentityKind = 'strong' | 'email' | 'opaque';
 
 /**
  * Durable worker credential, or `none` when the harness must log in per box.
@@ -22,15 +22,15 @@ export type HarnessIdentityKind = 'strong' | 'email' | 'opaque';
  * ChatGPT-plan device-auth login (the plan seat; never stored in the reserved
  * store because it is a rotating session).
  */
-export type HarnessWorkerKind =
+type HarnessWorkerKind =
   | 'setup-token'
   | 'none'
   | `api-key:${string}`
   | `per-device${'' | `:${string}`}`;
 
-export type HarnessWorker = HarnessWorkerKind | HarnessWorkerKind[];
+type HarnessWorker = HarnessWorkerKind | HarnessWorkerKind[];
 
-export interface HarnessAuthCapability {
+interface HarnessAuthCapability {
   /** argv after the harness binary to start native login, or null when there is no finite login command. */
   login: string[] | null;
   /** argv to probe login status, or null when the CLI has no status command. */

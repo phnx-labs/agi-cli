@@ -54,7 +54,7 @@ export interface TrajectoryComparison {
   truncatedB: number;
 }
 
-export interface DiffTrajectoriesOptions {
+interface DiffTrajectoriesOptions {
   /** Cap on tool steps considered per side (the LCS table is O(n*m)). Default 1000. */
   maxDiffSteps?: number;
 }

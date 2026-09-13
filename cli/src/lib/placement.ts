@@ -16,7 +16,7 @@
  */
 
 /** Where a job body executes. */
-export type PlacementKind = 'local' | 'device' | 'fleet' | 'cloud' | 'lease';
+type PlacementKind = 'local' | 'device' | 'fleet' | 'cloud' | 'lease';
 
 /**
  * Canonical placement object.
@@ -36,7 +36,7 @@ export interface Placement {
 }
 
 /** Run-flag bag the placement parser understands. */
-export interface RunPlacementFlags {
+interface RunPlacementFlags {
   where?: string;
   host?: string;
   device?: string;
@@ -221,21 +221,3 @@ export function formatPlacement(p: Placement): string {
   if (p.target) return `${p.kind}:${p.target}`;
   return p.kind;
 }
-
-/**
- * Short matrix for help footers and docs. Keep in sync with concepts.md.
- */
-export const PLACEMENT_MATRIX = `
-  Intent                         Flag / path
-  ─────────────────────────────  ──────────────────────────────────────────
-  This machine                   (default)  or  --where local
-  Named fleet box                --where device:<name>   (= --device)
-  Affinity pick (14d usage)      --where auto            (= --device auto)
-  Disposable cloud box           --where lease           (= --lease)
-  Reuse warm crabbox             --box <slug>
-  Vendor cloud task              --cloud   (= --where cloud[:provider])
-  Routines: body on one box      --run-on <name> / --placement host
-  Routines: pick any online      --placement fleet
-  Monitors: who evaluates        --device <owner>   (NOT body placement)
-  Monitors: where action runs    --run-on <host>
-`.trim();

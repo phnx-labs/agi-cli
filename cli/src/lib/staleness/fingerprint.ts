@@ -119,7 +119,7 @@ export function isDirStale(storedDirPath: string, storedFiles: Fingerprint[], cu
  * `fingerprintDir` so both produce the same path set (required for the
  * dir-stale path comparison to work).
  */
-export function walkDirPaths(dirPath: string): string[] {
+function walkDirPaths(dirPath: string): string[] {
   const results: string[] = [];
   function walk(dir: string): void {
     let entries: fs.Dirent[];

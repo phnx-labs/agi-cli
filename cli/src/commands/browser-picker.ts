@@ -14,7 +14,7 @@ export interface BrowserTask {
   profile: ProfileStatus;
 }
 
-export interface PickedBrowserTask {
+interface PickedBrowserTask {
   task: BrowserTask;
   action: 'view' | 'stop';
 }
@@ -26,7 +26,7 @@ function formatAge(ms: number): string {
 }
 
 /** Build the preview pane for a browser task. */
-export function buildBrowserPreview(item: BrowserTask): string {
+function buildBrowserPreview(item: BrowserTask): string {
   const { task, profile } = item;
   const lines: string[] = [];
 
@@ -67,7 +67,7 @@ export function buildBrowserPreview(item: BrowserTask): string {
 }
 
 /** Build the list label for a browser task. */
-export function buildBrowserLabel(item: BrowserTask, query: string): string {
+function buildBrowserLabel(item: BrowserTask, query: string): string {
   const { task, profile } = item;
   const termWidth = process.stdout.columns || 80;
 
@@ -95,7 +95,7 @@ export function buildBrowserLabel(item: BrowserTask, query: string): string {
   return label;
 }
 
-export interface BrowserPickerConfig {
+interface BrowserPickerConfig {
   message: string;
   tasks: BrowserTask[];
   pageSize?: number;

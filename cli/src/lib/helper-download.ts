@@ -112,7 +112,7 @@ export function parseTeamId(codesignInfo: string): string | null {
 /** Read the bundle's designated requirement string (`codesign -d --requirements -`).
  *  codesign writes it to stdout, but capture both streams so a diagnostic on
  *  stderr can never make the pin-check read empty and falsely pass. */
-export function readDesignatedRequirement(appPath: string): string {
+function readDesignatedRequirement(appPath: string): string {
   const r = spawnSync('/usr/bin/codesign', ['-d', '--requirements', '-', appPath], { encoding: 'utf8' });
   return `${r.stdout ?? ''}${r.stderr ?? ''}`;
 }
@@ -150,7 +150,7 @@ export function checkDesignatedRequirement(req: string, bundleId: string, teamId
  * bundle whose DR drops either pin would silently revoke that grant on the next
  * paste, so refuse it.
  */
-export function verifyDesignatedRequirement(appPath: string, bundleId: string, teamId: string): void {
+function verifyDesignatedRequirement(appPath: string, bundleId: string, teamId: string): void {
   const err = checkDesignatedRequirement(readDesignatedRequirement(appPath), bundleId, teamId);
   if (err) throw new Error(err);
 }

@@ -19,11 +19,11 @@
 export const TASK_TYPES = ['bugfix', 'feature', 'refactor', 'test', 'chore', 'other'] as const;
 export type TaskType = (typeof TASK_TYPES)[number];
 
-export const FAILURE_TIMINGS = ['early', 'mid', 'late'] as const;
-export type FailureTiming = (typeof FAILURE_TIMINGS)[number];
+const FAILURE_TIMINGS = ['early', 'mid', 'late'] as const;
+type FailureTiming = (typeof FAILURE_TIMINGS)[number];
 
 /** The #1 group-by axis: compare the pair, never the model alone. */
-export interface SegmentAgent {
+interface SegmentAgent {
   model: string;
   harness: string;
 }
@@ -83,7 +83,7 @@ export interface LatencyInsight {
   firstToolMs: Percentiles;
 }
 
-export interface SegmentDimensions {
+interface SegmentDimensions {
   agent: SegmentAgent;
   taskType: TaskType;
   failureTiming: FailureTiming | null;
@@ -97,7 +97,7 @@ export interface SegmentDimensions {
  * Tool name → file action. Lowercased. Write-family is a new file; Edit-family
  * is a patch. Anything else is ignored for diff-shape.
  */
-export const FILE_ACTION_TOOLS: ReadonlyArray<{
+const FILE_ACTION_TOOLS: ReadonlyArray<{
   action: SegmentFile['action'];
   tools: readonly string[];
 }> = [
@@ -220,7 +220,7 @@ export const TASK_TYPE_RULES: ReadonlyArray<{
  * Normalized position of the first failing step inside the session span.
  * Early failures cascade — highest-signal bucket. Exclusive upper bound.
  */
-export const FAILURE_TIMING_BUCKETS: ReadonlyArray<{
+const FAILURE_TIMING_BUCKETS: ReadonlyArray<{
   timing: FailureTiming;
   maxExclusive: number;
 }> = [

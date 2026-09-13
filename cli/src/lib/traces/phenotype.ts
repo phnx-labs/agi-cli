@@ -36,7 +36,7 @@ export type FailurePhenotype =
  * - `human-takeover`: the final substantive action was a human-facing ask/wait.
  * - `invalid-env`  : environment/setup failures dominated the session.
  */
-export type TraceOutcome =
+type TraceOutcome =
   | 'merged'
   | 'tests-green'
   | 'partial'
@@ -44,12 +44,12 @@ export type TraceOutcome =
   | 'human-takeover'
   | 'invalid-env';
 
-export interface PhenotypeResult {
+interface PhenotypeResult {
   phenotype: FailurePhenotype | null;
   reason: string;
 }
 
-export interface OutcomeResult {
+interface OutcomeResult {
   outcome: TraceOutcome;
   confidence: 'high' | 'medium' | 'low';
   reason: string;

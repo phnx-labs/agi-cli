@@ -49,7 +49,7 @@ import { normalizeHost } from '../machine-id.js';
  */
 const NEVER_AUTO: ReadonlySet<ConfiguredDeviceRole> = new Set<ConfiguredDeviceRole>(['personal', 'desktop']);
 
-export interface AutoPoolOptions {
+interface AutoPoolOptions {
   /** Pool mode; defaults to the configured `auto.pool`. */
   mode?: AutoPoolMode;
   /** Configured roles by device name; defaults to the fleet-shared block. */

@@ -51,7 +51,7 @@ import { sessionHeadline } from '../lib/session/title.js';
 /** Opening more than this many live sessions at once asks for confirmation first. */
 export const CONFIRM_THRESHOLD = 5;
 
-export interface ResumeOptions extends StrictResumeOptions {
+interface ResumeOptions extends StrictResumeOptions {
   agent?: string;
   all?: boolean;
   teams?: boolean;
@@ -440,12 +440,6 @@ export function buildSelectedResumeArgs(id: string, prompt: string | undefined, 
 export function isDirectResumeSelector(query: string): boolean {
   const selector = query.trim();
   return looksLikeSessionId(selector) || isAgentTmuxAlias(selector);
-}
-
-/** Re-enter through sessions resume so fleet routing and harness policy
- * stay centralized. The child inherits this terminal for a real interactive resume. */
-export async function resumeSelectorInPlace(selector: string): Promise<void> {
-  await spawnCliInPlace(['sessions', 'resume', selector]);
 }
 
 /**

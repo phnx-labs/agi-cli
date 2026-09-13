@@ -67,7 +67,7 @@ export function parseRemoteActive(stdout: string, machine: string): ActiveSessio
   return out;
 }
 
-export interface RemoteActiveResult {
+interface RemoteActiveResult {
   sessions: ActiveSession[];
   /** How many peer machines we attempted to reach (drives the empty-fleet tip). */
   deviceCount: number;

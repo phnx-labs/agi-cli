@@ -17,7 +17,7 @@ import type { DeviceStats } from './health.js';
 export type FleetSkipReason = 'offline' | 'no-address';
 
 /** npm dist-tags / semver pins only — rejects shell metacharacters. */
-export const FLEET_VERSION_RE = /^[A-Za-z0-9._-]+$/;
+const FLEET_VERSION_RE = /^[A-Za-z0-9._-]+$/;
 
 export interface FleetTarget {
   device: DeviceProfile;
@@ -209,7 +209,7 @@ export function upgradeCommand(version?: string): string[] {
   return ['agents', 'upgrade', '--yes'];
 }
 
-export interface RunFleetOptions {
+interface RunFleetOptions {
   /**
    * Name of THIS machine. Its target runs the command **locally** (no ssh) — a
    * box can't reliably ssh to itself and doesn't need to. Omit to ssh every
@@ -270,7 +270,7 @@ export function runFleet(
   return results;
 }
 
-export interface FanOutDeviceOptions {
+interface FanOutDeviceOptions {
   /**
    * Per-device deadline in milliseconds. When set, any probe that does not
    * settle within this window is abandoned via `Promise.race` against a

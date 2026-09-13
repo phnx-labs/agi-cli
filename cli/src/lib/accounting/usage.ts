@@ -137,7 +137,7 @@ export function usageNoClaudeUsageCredentialError(): string {
 }
 
 /** True when an error string is the Claude no-usage-credential state (#2987). */
-export function isUsageNoUsageCredentialError(error: string | null | undefined): boolean {
+function isUsageNoUsageCredentialError(error: string | null | undefined): boolean {
   return typeof error === 'string' && error.includes(USAGE_NO_USAGE_CREDENTIAL_MARKER);
 }
 
@@ -188,7 +188,7 @@ export function usageUnreachableError(agent: string, cause?: unknown): string {
  * read because the account has not run here, which is expected for a fresh
  * install and should render as a benign state, not an error (RUSH-3040).
  */
-export const USAGE_NO_RECENT_USAGE_MARKER = 'no usage recorded yet';
+const USAGE_NO_RECENT_USAGE_MARKER = 'no usage recorded yet';
 export const USAGE_BENIGN_STATE: unique symbol = Symbol('usageBenignState');
 export type UsageBenignState = 'no-recent-usage';
 
@@ -425,7 +425,7 @@ export interface UsageInfo {
 }
 
 /** Construct the benign no-local-log result without overloading `error`. */
-export function usageNoRecentUsageInfo(): UsageInfo {
+function usageNoRecentUsageInfo(): UsageInfo {
   return { snapshot: null, error: null, [USAGE_BENIGN_STATE]: 'no-recent-usage' };
 }
 
@@ -487,7 +487,7 @@ interface UsageOptions {
 }
 
 /** Canonical input for a single usage fetch operation. */
-export interface UsageFetchInput {
+interface UsageFetchInput {
   agentId: AgentId;
   home?: string;
   cliVersion: string | null;
@@ -716,7 +716,7 @@ export const USAGE_FETCH_CONCURRENCY = 3;
  * JSON export). Deduplicates by usage identity and reads the shared snapshot.
  * Only an explicit `forceRefresh` call may collect provider or local-log state.
  */
-export interface UsageLookupOptions {
+interface UsageLookupOptions {
   forceRefresh?: boolean;
   fileOnly?: boolean;
   /** Daemon tick deadline signal, combined with each provider fetch's own timeout (PHNX-3608). */
@@ -1198,7 +1198,7 @@ export function deriveUsageStatusFromSnapshot(
 }
 
 /** A prior sample of one window's utilization, for burn-rate projection. */
-export interface UsagePriorSample {
+interface UsagePriorSample {
   /** Epoch ms the prior snapshot was captured. */
   capturedAt: number;
   /** The session window's `usedPercent` in that prior snapshot. */
@@ -2302,7 +2302,7 @@ export async function loadClaudeOauth(
  * Reads the existing payload, merges the new OAuth fields, and writes back.
  * Exported for regression tests; not part of the public command surface.
  */
-export async function saveClaudeOauth(
+async function saveClaudeOauth(
   home: string | undefined,
   credentials: ClaudeOauthCredentials
 ): Promise<boolean> {
@@ -3786,7 +3786,7 @@ interface CursorUsageModel {
 }
 
 /** Response shape from Cursor's dashboard usage endpoint. */
-export interface CursorUsageResponse {
+interface CursorUsageResponse {
   /** The premium ("fast request") bucket the plan meters. */
   'gpt-4'?: CursorUsageModel | null;
   /** ISO timestamp the monthly request window resets from. */
@@ -3844,14 +3844,14 @@ interface CursorPlanUsage {
 }
 
 /** Response shape from Cursor's dashboard current-period-usage endpoint (subset we render). */
-export interface CursorPeriodUsageResponse {
+interface CursorPeriodUsageResponse {
   planUsage?: CursorPlanUsage | null;
   /** ISO timestamp, or a unix-ms string, marking the end of the current billing cycle. */
   billingCycleEnd?: string | number | null;
 }
 
 /** Response shape from Cursor's usage-summary endpoint (subset we render). */
-export interface CursorUsageSummaryResponse {
+interface CursorUsageSummaryResponse {
   /** True on a plan with no consumption cap; only tiered self-serve plans populate the percent fields. */
   isUnlimited?: boolean | null;
   individualUsage?: {
@@ -4131,7 +4131,7 @@ interface AntigravityOauthToken {
 }
 
 /** One per-model quota bucket from the :retrieveUserQuota response. */
-export interface AntigravityQuotaBucket {
+interface AntigravityQuotaBucket {
   modelId?: string | null;
   tokenType?: string | null;
   remainingFraction?: number | null;
@@ -4139,7 +4139,7 @@ export interface AntigravityQuotaBucket {
 }
 
 /** Response shape from the Code Assist :retrieveUserQuota endpoint. */
-export interface AntigravityQuotaResponse {
+interface AntigravityQuotaResponse {
   buckets?: AntigravityQuotaBucket[] | null;
 }
 

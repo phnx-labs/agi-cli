@@ -95,7 +95,7 @@ export interface SessionLineage {
   unresolvedParentIds: string[];
 }
 
-export interface BuildLineageOptions {
+interface BuildLineageOptions {
   /**
    * Which session the graph is about. The graph is always rooted at that
    * session's TOPMOST ancestor in the pool, so passing a child still renders its

@@ -26,13 +26,8 @@ export function readFleetStatus(): Record<string, FleetStatusRow> {
 }
 export type { FleetStatusRow };
 
-/** The last cached usage snapshot for an account, or null. Cache-only. */
-export function readAccountUsage(usageKey: string): UsageSnapshot | null {
-  return readClaudeUsageCache(usageKey);
-}
-
 /** An account's projected headroom, as published by the daemon refresher. */
-export interface AccountHeadroom {
+interface AccountHeadroom {
   status: 'available' | 'rate_limited' | null;
   /** Projected minutes until the session window caps; null = unknown/idle. */
   minutesToLimit: number | null;

@@ -95,7 +95,7 @@ export function identityLoopbackMismatch(
  * The one-value-per-file fields are kept for backward compat with older
  * builds; `meta.json` is additive and consulted preferentially.
  */
-export interface ProfileRuntime {
+interface ProfileRuntime {
   pid: number;
   port?: number;
   command?: string;
@@ -263,7 +263,7 @@ export function isProcessAlive(pid: number, expectedCommand?: string): boolean {
  * Combines the on-disk meta record with live-process probes so callers can
  * tell at a glance which entries are alive, stale, or have outright leaked.
  */
-export interface ProfileSnapshot {
+interface ProfileSnapshot {
   /** Composite name as the cache dir is keyed: `<profile>` or `<profile>@<endpoint>`. */
   name: string;
   /** Absolute path of the cache dir. */
@@ -391,7 +391,7 @@ export function isProfileInUse(profileName: string): boolean {
 }
 
 /** Why a profile is considered dead. */
-export type PruneReason = 'binary-missing' | 'never-used';
+type PruneReason = 'binary-missing' | 'never-used';
 
 export interface PruneCandidate {
   name: string;
@@ -401,7 +401,7 @@ export interface PruneCandidate {
   cacheDirs: string[];
 }
 
-export interface PrunePlan {
+interface PrunePlan {
   /** Profiles that would be (or were) removed. */
   candidates: PruneCandidate[];
   /** Profiles deliberately left alone, with the guard that kept them. */

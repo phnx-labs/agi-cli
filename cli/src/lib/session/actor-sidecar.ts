@@ -19,7 +19,7 @@ import path from 'path';
 import { getHistoryDir } from '../state.js';
 import { isAgentTmuxAlias, type SessionRunMode } from './types.js';
 
-export interface SessionActorRecord {
+interface SessionActorRecord {
   sessionId: string;
   /** Resolved actor id (`resolveActor().id`) — the responsible human/agent. */
   actor?: string;
@@ -136,7 +136,7 @@ export function writeSessionAliasRecord(sessionId: string, alias: string): void 
   }
 }
 
-export type SessionAliasResolution =
+type SessionAliasResolution =
   | { kind: 'resolved'; sessionId: string }
   | { kind: 'ambiguous'; sessionIds: string[] }
   | { kind: 'not-found' };

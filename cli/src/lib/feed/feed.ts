@@ -294,7 +294,7 @@ export function deriveBlockState(block: OpenBlock): AttentionState {
  * answer / continue / clear paths BEFORE the open-block view is removed, so the
  * reconciler always has the tombstone by the time the block file is gone.
  */
-export function recordResolution(resolution: AttentionResolution, root?: string): void {
+function recordResolution(resolution: AttentionResolution, root?: string): void {
   const dir = resolutionDir(root ?? getFeedDir());
   ensureDir(dir);
   atomicWriteJsonSync(path.join(dir, `${resolution.blockId}.json`), resolution);
@@ -303,23 +303,6 @@ export function recordResolution(resolution: AttentionResolution, root?: string)
 /** Read the latest resolution tombstone for a block, if one exists. */
 export function readResolution(blockId: string, root?: string): AttentionResolution | undefined {
   return safeReadJson<AttentionResolution>(path.join(resolutionDir(root ?? getFeedDir()), `${blockId}.json`));
-}
-
-/** Read every resolution tombstone. Returns them sorted by stable block filename. */
-export function listResolutions(root?: string): AttentionResolution[] {
-  const dir = resolutionDir(root ?? getFeedDir());
-  let names: string[];
-  try {
-    names = fs.readdirSync(dir);
-  } catch {
-    return [];
-  }
-  const out: AttentionResolution[] = [];
-  for (const name of names.filter(n => n.endsWith('.json')).sort()) {
-    const parsed = safeReadJson<Partial<AttentionResolution>>(path.join(dir, name));
-    if (parsed?.blockId && parsed.generation && parsed.reason) out.push(parsed as AttentionResolution);
-  }
-  return out;
 }
 
 /**
@@ -361,7 +344,7 @@ export function readBlock(blockId: string, root?: string): OpenBlock | undefined
   return parsed as OpenBlock;
 }
 
-export type RecordAnswerResult =
+type RecordAnswerResult =
   | { ok: true }
   | { ok: false; existing: AnswerRecord }
   | { ok: false; unauthorized: true; reason: string };
@@ -588,13 +571,8 @@ export function recordNotified(blockId: string, root?: string): void {
   publishBlock(block, dir);
 }
 
-/** Convenience: record that a terminal answer closed the block. */
-export function recordTerminalAnswer(blockId: string, root?: string): void {
-  recordAnswer(blockId, { answeredFrom: 'terminal' }, root);
-}
-
 /** Remove answered marker and receipts for a block (used by block removal/GC). */
-export function clearBlockLifecycle(blockId: string, root?: string): void {
+function clearBlockLifecycle(blockId: string, root?: string): void {
   const dir = root ?? getFeedDir();
   for (const sub of [answeredDir(dir), receiptDir(dir)]) {
     try {
@@ -614,7 +592,7 @@ export interface DeclaringAgent {
   cwd?: string;
 }
 
-export interface DeclareBlockInput {
+interface DeclareBlockInput {
   /** What the agent needs from the user, front-loaded. */
   text: string;
   /** Answerable choices, if the ask is a pick-one. */
@@ -1180,48 +1158,6 @@ if __name__ == "__main__":
     except Exception:
         pass  # fail open
 `;
-
-/** Manifest entry for the feed-publish hook, matching the ManifestHook shape. */
-export const FEED_PUBLISH_HOOK_MANIFEST = {
-  name: 'feed-publish',
-  events: ['PreToolUse'],
-  matcher: 'AskUserQuestion',
-  script: '10-feed-publish.py',
-  timeout: 5,
-};
-
-export const FEED_NOTIFICATION_HOOK_MANIFEST = {
-  name: 'feed-publish-notification',
-  events: ['Notification'],
-  matcher: 'permission_prompt|elicitation_dialog',
-  script: '10-feed-publish.py',
-  timeout: 5,
-};
-
-// Codex fires PermissionRequest (not Claude's Notification) when it blocks on an
-// approval prompt. The same script handles it, publishing a high-cost approval
-// block so the feed dispatch pages the phone. PermissionRequest has no matcher.
-export const FEED_PERMISSION_HOOK_MANIFEST = {
-  name: 'feed-publish-permission',
-  events: ['PermissionRequest'],
-  script: '10-feed-publish.py',
-  timeout: 5,
-};
-
-export const FEED_ANSWERED_HOOK_MANIFEST = {
-  name: 'feed-clear-answered',
-  events: ['PostToolUse'],
-  matcher: 'AskUserQuestion',
-  script: '10-feed-publish.py',
-  timeout: 5,
-};
-
-export const FEED_LIFECYCLE_HOOK_MANIFEST = {
-  name: 'feed-clear-lifecycle',
-  events: ['Stop', 'UserPromptSubmit', 'SessionEnd'],
-  script: '10-feed-publish.py',
-  timeout: 5,
-};
 
 /**
  * Install the feed-publish hook script into the user hooks dir and add its

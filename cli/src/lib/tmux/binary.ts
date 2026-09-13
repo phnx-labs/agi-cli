@@ -119,7 +119,7 @@ export class TmuxCommandError extends Error {
   }
 }
 
-export interface RunTmuxOptions {
+interface RunTmuxOptions {
   /** Socket path (default: shared server socket). */
   socket?: string;
   /** Args after `tmux -S <socket>` — e.g. `['has-session', '-t', 'foo']`. */

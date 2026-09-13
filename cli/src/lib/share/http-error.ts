@@ -17,7 +17,7 @@
 
 /** The raw pieces a caller's fetch wrapper hands in — status plus the (optional)
  * response body text and `Retry-After` header value. */
-export interface ShareHttpResponse {
+interface ShareHttpResponse {
   status: number;
   /** The response body text, when the caller read it (only on `!ok` paths). */
   body?: string;
@@ -27,7 +27,7 @@ export interface ShareHttpResponse {
 
 /** The extracted, bounded error facts. `serverMessage` is present only when the
  * body parsed as JSON carrying a non-empty string `error`. */
-export interface ShareHttpError {
+interface ShareHttpError {
   status: number;
   serverMessage?: string;
   retryAfter?: string;

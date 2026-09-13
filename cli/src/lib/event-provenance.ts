@@ -3,7 +3,7 @@ import { resolveActor, type ActorKind } from './actor.js';
 import { machineId } from './machine-id.js';
 import { parseSshConnection } from './session/provenance.js';
 
-export interface EventProvenance {
+interface EventProvenance {
   osUser: string;
   transport: 'local' | 'ssh';
   sshClientIp?: string;

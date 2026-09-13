@@ -6,20 +6,14 @@ export interface ArcNativeTabRef {
   spaceId: string;
   tabId: string;
 }
-export interface ArcNativeTab extends ArcNativeTabRef { url: string; title: string }
-export interface ArcEnumeratedSpace {
+interface ArcNativeTab extends ArcNativeTabRef { url: string; title: string }
+interface ArcEnumeratedSpace {
   windowId: string;
   spaceId: string;
   spaceTitle: string;
   activeTabId?: string;
   tabs: ArcNativeTab[];
 }
-
-export const ARC_NATIVE_CAPABILITIES = Object.freeze({
-  createTab: true, navigate: true, evaluateSync: true, closeTab: true, enumerate: true,
-  screenshot: false, asyncEvaluate: false, networkCapture: false, consoleCapture: false,
-  upload: false, pdf: false, background: false,
-} as const);
 
 export class ArcNativeCapabilityError extends Error {
   constructor(public readonly capability: string, message?: string) {
@@ -41,7 +35,7 @@ function serialized<T>(operation: () => Promise<T>): Promise<T> {
 }
 
 /** AppleScript strings do not implement JSON's \uXXXX escape syntax. */
-export function escapeAppleScriptString(value: string): string {
+function escapeAppleScriptString(value: string): string {
   const parts = value.split(/([\u0000-\u001f])/u).filter(Boolean);
   if (parts.length === 0) return '""';
   return '(' + parts.map(part => part.length === 1 && part.charCodeAt(0) < 32
@@ -50,7 +44,7 @@ export function escapeAppleScriptString(value: string): string {
 }
 
 /** No shell, bounded output and lifetime, and no blocking of the shared daemon. */
-export function execAppleScript(source: string, timeoutMs = TIMEOUT_MS): Promise<string> {
+function execAppleScript(source: string, timeoutMs = TIMEOUT_MS): Promise<string> {
   if (process.platform !== 'darwin') return Promise.reject(new Error('Native Arc requires macOS.'));
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return Promise.reject(new Error('Invalid Apple Events timeout.'));
   return new Promise((resolve, reject) => {

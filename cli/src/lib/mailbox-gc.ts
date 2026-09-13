@@ -27,7 +27,7 @@ export interface GcResult {
   blocksRemoved: number;
 }
 
-export interface GcOptions {
+interface GcOptions {
   root?: string;
   /** Feed store root. Defaults to getFeedDir(). */
   feedRoot?: string;

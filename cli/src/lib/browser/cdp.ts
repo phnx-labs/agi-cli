@@ -9,7 +9,7 @@ import type { Readable, Writable } from 'stream';
 // failed on every Page.captureScreenshot.)
 import WSWebSocket from 'ws';
 
-export interface CDPPipeTransport {
+interface CDPPipeTransport {
   read: Readable;
   write: Writable;
 }

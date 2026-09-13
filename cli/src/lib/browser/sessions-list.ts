@@ -73,7 +73,7 @@ function walkFiles(dir: string): string[] {
 }
 
 /** Every capture for one profile, newest first. */
-export function listProfileArtifacts(profile: string): BrowserArtifact[] {
+function listProfileArtifacts(profile: string): BrowserArtifact[] {
   const root = getProfileRuntimeDir(profile);
   const artifacts: BrowserArtifact[] = [];
 
@@ -105,7 +105,7 @@ export function listProfileArtifacts(profile: string): BrowserArtifact[] {
  * Captures grouped by profile. With `only` set, returns just that profile (even
  * when empty); otherwise every profile dir on disk that has at least one capture.
  */
-export function listBrowserSessions(only?: string): ProfileArtifacts[] {
+function listBrowserSessions(only?: string): ProfileArtifacts[] {
   let profiles: string[];
   if (only) {
     // A profile's live tasks/captures may live under a composite runtime dir
@@ -134,7 +134,7 @@ export function listBrowserSessions(only?: string): ProfileArtifacts[] {
 
 /** Per-kind counts over a flat artifact list — shared by the printed table and
  *  the interactive row labels. */
-export function countByKind(artifacts: BrowserArtifact[]): Record<ArtifactKind, number> {
+function countByKind(artifacts: BrowserArtifact[]): Record<ArtifactKind, number> {
   const counts = { screenshot: 0, pdf: 0, recording: 0, download: 0 } as Record<ArtifactKind, number>;
   for (const a of artifacts) counts[a.kind]++;
   return counts;

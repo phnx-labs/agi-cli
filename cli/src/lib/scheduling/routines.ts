@@ -156,7 +156,7 @@ export function buildRoutineListJson(): Record<string, unknown>[] {
 }
 
 /** One routine's live scheduler-status row for `agents routines status --json`. */
-export interface RoutineStatusRow {
+interface RoutineStatusRow {
   name: string;
   /** The single device this routine is pinned to fire on, or null when unpinned. */
   ownerDevice: string | null;
@@ -291,7 +291,7 @@ export const GITHUB_TRIGGER_EVENTS: readonly GithubTriggerEvent[] = [
 export type LinearTriggerEvent = 'Issue' | 'IssueLabel' | 'Comment' | 'Project' | 'Cycle';
 
 /** Canonical set of accepted Linear trigger events — single source for validation. */
-export const LINEAR_TRIGGER_EVENTS: readonly LinearTriggerEvent[] = [
+const LINEAR_TRIGGER_EVENTS: readonly LinearTriggerEvent[] = [
   'Issue',
   'IssueLabel',
   'Comment',
@@ -604,7 +604,7 @@ export function normalizeProjects(projects: string[] | undefined): string[] | un
  * "Cross-project" is `{ kind: 'named', name }` and can never collide with the
  * `operations` / `cross` special buckets that happen to share those titles.
  */
-export type ProjectGroup =
+type ProjectGroup =
   | { kind: 'named'; name: string }
   | { kind: 'all' }
   | { kind: 'cross' }
@@ -690,7 +690,7 @@ export function computeProjectGroup(
 }
 
 /** A real-filesystem {@link ContextFsProbe} for readiness checks on this machine. */
-export function realFsProbe(): ContextFsProbe {
+function realFsProbe(): ContextFsProbe {
   return {
     exists: (p) => fs.existsSync(p),
     isDirectory: (p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } },
@@ -699,7 +699,7 @@ export function realFsProbe(): ContextFsProbe {
 }
 
 /** Classify a routine by its body kind — governs the execution-context fallback rules. */
-export function jobRoutineKind(config: Pick<JobConfig, 'agent' | 'workflow' | 'command'>): RoutineKind {
+function jobRoutineKind(config: Pick<JobConfig, 'agent' | 'workflow' | 'command'>): RoutineKind {
   if (config.command) return 'command';
   if (config.workflow) return 'workflow';
   return 'agent';
@@ -924,7 +924,7 @@ export function hasAmbiguousDevicePin(config: Pick<JobConfig, 'devices'>): boole
 }
 
 /** One routine whose `devices` names more than one machine, with its resolved owner. */
-export interface AmbiguousDevicePin {
+interface AmbiguousDevicePin {
   name: string;
   devices: string[];
   /** The device that now fires it — the rest are inert. */
@@ -982,7 +982,7 @@ export function placementRequiresFiringPin(strategy: HostStrategy): boolean {
 }
 
 /** Human presentation of a device-affinity mismatch for commands and runner. */
-export interface JobEligibilityResult {
+interface JobEligibilityResult {
   /** Full human message, e.g. "Job 'NAME' can only run on: a, b". */
   message: string;
   /** One-line copy-paste suggestion, e.g. "agents routines run NAME --device a". */
@@ -1126,7 +1126,7 @@ function readJobFromDir(dir: string, name: string): JobConfig | null {
  * The outcome of reading one routine file: a config, or the reason it is inert.
  * Every `problem` here means the daemon will not run the routine.
  */
-export type RoutineReadResult =
+type RoutineReadResult =
   | { config: JobConfig; problem: null }
   | { config: null; problem: string };
 
@@ -1648,7 +1648,7 @@ export function isPastEndAt(config: Pick<JobConfig, 'endAt'>, now: Date = new Da
   return now.getTime() >= end;
 }
 
-export interface OneShotScheduleParts {
+interface OneShotScheduleParts {
   minute: number;
   hour: number;
   day: number;
@@ -1982,7 +1982,7 @@ export function getLatestCompletedRun(jobName: string): RunMeta | null {
 }
 
 /** Duration + outcome rollup for a job's run history. */
-export interface RoutineStats {
+interface RoutineStats {
   /** Total run records (any status, including `missed`). */
   count: number;
   failed: number;
@@ -2272,51 +2272,6 @@ export function parseAtTime(atTime: string): { schedule: string; runOnce: boolea
   }
 
   return null;
-}
-
-/** Check if an installed job's normalized YAML matches the source file. */
-export function jobContentMatches(name: string, sourcePath: string): boolean {
-  const existing = readJob(name);
-  if (!existing) return false;
-
-  try {
-    const sourceContent = fs.readFileSync(sourcePath, 'utf-8');
-    const sourceJob = yaml.parse(sourceContent);
-    if (!sourceJob) return false;
-
-    const existingNormalized = yaml.stringify(existing);
-    const fullSource = { ...JOB_DEFAULTS, ...sourceJob, name: sourceJob.name || name };
-    const sourceNormalized = yaml.stringify(fullSource);
-    return existingNormalized === sourceNormalized;
-  } catch {
-    return false;
-  }
-}
-
-/** Install a job by reading and validating a YAML source file. */
-export function installJobFromSource(sourcePath: string, name: string): { success: boolean; error?: string } {
-  try {
-    const content = fs.readFileSync(sourcePath, 'utf-8');
-    const parsed = yaml.parse(content);
-    if (!parsed) return { success: false, error: 'Invalid YAML' };
-
-    const config: JobConfig = {
-      ...JOB_DEFAULTS,
-      ...parsed,
-      name: parsed.name || name,
-    } as JobConfig;
-
-    const errors = validateJob(config);
-    if (errors.length > 0) {
-      return { success: false, error: errors.join(', ') };
-    }
-
-    writeJob(config);
-    setJobEnabled(config.name, config.enabled);
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: (err as Error).message };
-  }
 }
 
 /** List all job names that have run directories. */

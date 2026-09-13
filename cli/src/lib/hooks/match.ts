@@ -19,7 +19,7 @@ import { execSync } from 'child_process';
 import type { HookMatches } from '../types.js';
 
 /** Runtime context passed to a hook by the agent CLI. */
-export interface HookInput {
+interface HookInput {
   hook_event_name?: string;
   prompt?: string;
   tool_name?: string;

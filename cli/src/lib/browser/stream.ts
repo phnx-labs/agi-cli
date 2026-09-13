@@ -4,7 +4,7 @@ import { connectBrowserIPC } from './ipc.js';
 import { assertRemoteControlAllowed } from './remote-control.js';
 import type { IPCRequest, IPCResponse } from './types.js';
 
-export interface BrowserIPCStreamOptions {
+interface BrowserIPCStreamOptions {
   input: Readable;
   output: Writable;
   task?: string;

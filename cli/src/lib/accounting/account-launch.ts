@@ -22,10 +22,10 @@ import { readMeta } from '../state.js';
 import type { AgentId, Meta } from '../types.js';
 import { candidateAccountKey, type RotateCandidate } from './rotate.js';
 
-export type ResolvedLaunchAccountKind = 'native' | 'provider' | 'legacy-native';
+type ResolvedLaunchAccountKind = 'native' | 'provider' | 'legacy-native';
 
 /** Safe account identity that may be passed between launch consumers. */
-export interface ResolvedLaunchAccount {
+interface ResolvedLaunchAccount {
   kind: ResolvedLaunchAccountKind;
   /** Stable registry id, or the durable identity key for an unmigrated login. */
   id: string;
@@ -54,7 +54,7 @@ export interface ResolvedLocalAccountLaunch {
   email: string | null;
 }
 
-export interface ResolveLocalAccountLaunchOptions {
+interface ResolveLocalAccountLaunchOptions {
   agent: AgentId;
   /** Selects the executable only. It never chooses account state. */
   executableVersion: string;

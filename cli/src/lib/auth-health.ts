@@ -346,7 +346,7 @@ export function slotAuthVersionKey(accountId: string): string {
 }
 
 /** One account slot on this device that the auth probe must cover. */
-export interface SlotAuthInstall extends FleetAuthInstall {
+interface SlotAuthInstall extends FleetAuthInstall {
   home: string;
   accountId: string;
 }
@@ -375,7 +375,7 @@ export function enumerateSlotInstalls(
 }
 
 /** One probe target on this device: an installed version home, or an account slot. */
-export interface LocalAuthInstall extends FleetAuthInstall {
+interface LocalAuthInstall extends FleetAuthInstall {
   home: string;
   accountId?: string;
 }
@@ -386,7 +386,7 @@ export interface LocalAuthInstall extends FleetAuthInstall {
  * exactly this set, so it is also the answer to "which cached rows are still
  * backed by something on disk" (PHNX-4051).
  */
-export function enumerateLocalAuthInstalls(
+function enumerateLocalAuthInstalls(
   meta: Pick<Meta, 'accounts' | 'deviceAccounts'>,
   agentIds: readonly AgentId[],
 ): LocalAuthInstall[] {
@@ -440,7 +440,7 @@ export function readAuthHealth(host: string, agent: AgentId | string, version: s
  * for a key that belongs to another host or does not name a known agent — the
  * one place the `host:agent:version` join is undone.
  */
-export function parseAuthCacheKey(key: string, host: string): { agent: AgentId; version: string } | null {
+function parseAuthCacheKey(key: string, host: string): { agent: AgentId; version: string } | null {
   const prefix = `${host}:`;
   if (!key.startsWith(prefix)) return null;
   const identity = key.slice(prefix.length);
@@ -653,7 +653,7 @@ export interface FleetAuthInstall {
  * The live probe runs against `probe` (the representative home); every entry in
  * `members` — the representative included — then receives that one verdict.
  */
-export interface FleetAuthProbeGroup<T extends FleetAuthInstall> {
+interface FleetAuthProbeGroup<T extends FleetAuthInstall> {
   probe: T;
   members: T[];
 }
@@ -680,7 +680,7 @@ export interface FleetAuthProbeGroup<T extends FleetAuthInstall> {
  * fs, no network, so the dedup decision is unit-tested directly.
  */
 /** Small fixed delay between live probes so one box no longer fires 16 requests in 4s (PHNX-4051). */
-export const AUTH_PROBE_SPACING_MS = 150;
+const AUTH_PROBE_SPACING_MS = 150;
 
 export function groupFleetAuthInstalls<T extends FleetAuthInstall>(
   installs: readonly T[],

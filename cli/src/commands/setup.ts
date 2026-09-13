@@ -315,9 +315,9 @@ export async function ensureInitialized(program: Command): Promise<void> {
  * wizard. Never throws — a cancel or an optional wizard's error just skips the
  * rest and lets core setup complete.
  */
-export type SetupPhase = 'browser' | 'computer' | 'share' | 'secrets' | 'accounts' | 'fleet' | 'watchdog' | 'preferences';
-export type SetupStatusState = 'ready' | 'missing' | 'n/a';
-export interface SetupStatusRow {
+type SetupPhase = 'browser' | 'computer' | 'share' | 'secrets' | 'accounts' | 'fleet' | 'watchdog' | 'preferences';
+type SetupStatusState = 'ready' | 'missing' | 'n/a';
+interface SetupStatusRow {
   phase: 'core' | SetupPhase;
   state: SetupStatusState;
   detail: string;
@@ -352,7 +352,7 @@ export async function getSetupStatus(): Promise<SetupStatusRow[]> {
   ];
 }
 
-export function renderSetupStatus(rows: SetupStatusRow[]): void {
+function renderSetupStatus(rows: SetupStatusRow[]): void {
   console.log(chalk.bold('\nagents setup — onboarding\n'));
   for (const row of rows) {
     const marker = row.state === 'ready' ? chalk.green('[x]') : row.state === 'n/a' ? chalk.gray('[-]') : chalk.yellow('[ ]');

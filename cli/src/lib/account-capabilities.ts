@@ -15,7 +15,7 @@ import type { AgentId } from './types.js';
  *   when the weaker (email) identity is present; `discovery-only` = shown in the
  *   list but not nameable; `unsupported` = neither.
  */
-export interface NativeAccountCapability {
+interface NativeAccountCapability {
   inspection: 'strong' | 'email' | 'opaque' | 'none';
   scope: 'version' | 'device' | 'unsupported';
   status: 'supported' | 'conditional' | 'discovery-only' | 'unsupported';

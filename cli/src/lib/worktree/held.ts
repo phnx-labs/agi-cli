@@ -122,7 +122,7 @@ export async function resolveDefaultRef(repoRoot: string): Promise<string | null
  * It also subsumes the unpushed check — an unpushed commit has no upstream
  * equivalent, so it surfaces as unmerged rather than needing a separate probe.
  */
-export async function countUnmergedCommits(
+async function countUnmergedCommits(
   worktreePath: string,
   defaultRef: string | null,
 ): Promise<number> {
@@ -143,7 +143,7 @@ interface PorcelainEntry {
   detached: boolean;
 }
 
-export function parseWorktreePorcelain(out: string): PorcelainEntry[] {
+function parseWorktreePorcelain(out: string): PorcelainEntry[] {
   const entries: PorcelainEntry[] = [];
   let cur: PorcelainEntry | null = null;
   for (const line of out.split('\n')) {
@@ -173,7 +173,7 @@ export function isInside(child: string, parent: string): boolean {
 }
 
 /** Everything the bucket decision depends on, gathered once. */
-export interface HeldFacts {
+interface HeldFacts {
   /** null for detached HEAD. */
   branch: string | null;
   /** `git status --porcelain` line count; -1 = could not read. */
@@ -310,7 +310,7 @@ export async function collectHeldWorktrees(repoRoot: string): Promise<HeldWorktr
  * `searchHome`. Mirrors the sweep's discovery: match directory SHAPE, prune the
  * heavy dirs so a large home stays fast. Read-only.
  */
-export async function discoverWorktreeRepos(searchHome: string, maxDepth = 7): Promise<string[]> {
+async function discoverWorktreeRepos(searchHome: string, maxDepth = 7): Promise<string[]> {
   const PRUNE = new Set([
     'node_modules', '.cache', '.npm', '.bun', 'Library', '.venv', 'dist', 'target', '.git',
   ]);
@@ -357,7 +357,7 @@ export async function collectHeldWorktreesUnder(searchHome: string): Promise<Hel
 }
 
 /** A held set grouped by bucket, with the itemised entries kept. */
-export interface HeldSummary {
+interface HeldSummary {
   total: number;
   buckets: Record<HeldBucket, HeldWorktree[]>;
 }
@@ -382,7 +382,7 @@ export interface DeviceHeld {
 }
 
 /** A fleet-wide roll-up: every device's held worktrees, still bucketed. Pure. */
-export interface FleetHeldSummary extends HeldSummary {
+interface FleetHeldSummary extends HeldSummary {
   devices: { device: string; total: number }[];
 }
 
@@ -405,7 +405,7 @@ export function aggregateHeld(perDevice: DeviceHeld[]): FleetHeldSummary {
 }
 
 /** Outcome of the safe recovery action on one stranded worktree. */
-export interface PushResult {
+interface PushResult {
   name: string;
   branch: string | null;
   pushed: boolean;

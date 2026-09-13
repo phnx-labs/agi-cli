@@ -37,20 +37,20 @@ const ENVELOPE_KEYS = [
 
 const ENVELOPE_KEY_SET: ReadonlySet<string> = new Set<string>(ENVELOPE_KEYS);
 
-export interface IngestReject {
+interface IngestReject {
   /** 1-based index of the offending line within the batch. */
   line: number;
   reason: string;
 }
 
-export interface IngestResult {
+interface IngestResult {
   written: number;
   rejected: IngestReject[];
   /** Per-store counts, so a caller/test can assert routing without reading files. */
   routed: { operational: number; activity: number };
 }
 
-export interface IngestOptions {
+interface IngestOptions {
   /**
    * Producer name, stamped as `module` on operational records so
    * `agents events --module <source>` filters to this producer. Required: an

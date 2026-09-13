@@ -64,7 +64,7 @@ export function resolveProjectRoot(cwd: string = process.cwd()): string | null {
 }
 
 /** Git provenance for a project root (best-effort; never throws). */
-export function readProjectGitSource(projectRoot: string): Pick<JobSource, 'repo' | 'branch' | 'commit'> {
+function readProjectGitSource(projectRoot: string): Pick<JobSource, 'repo' | 'branch' | 'commit'> {
   const abs = expandProjectPath(projectRoot);
   const out: Pick<JobSource, 'repo' | 'branch' | 'commit'> = {};
   try {
@@ -126,7 +126,7 @@ function readProjectJobFile(filePath: string): JobConfig | null {
   }
 }
 
-export interface SyncProjectResult {
+interface SyncProjectResult {
   projectRoot: string;
   synced: string[];
   skipped: Array<{ name: string; reason: string }>;

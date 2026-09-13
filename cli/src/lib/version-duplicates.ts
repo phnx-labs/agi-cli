@@ -1,22 +1,15 @@
 import chalk from 'chalk';
-import { getAccountInfo, agentLabel, type AccountInfo } from './agents.js';
+import { agentLabel, type AccountInfo } from './agents.js';
 import type { AgentId } from './types.js';
-import {
-  compareVersions,
-  getVersionHomePath,
-  listInstalledVersions,
-} from './installations/versions.js';
-import {
-  buildCanonicalUsageContext,
-  getUsageLookupKey,
-} from './accounting/usage.js';
+import { compareVersions } from './installations/versions.js';
+import { getUsageLookupKey } from './accounting/usage.js';
 
 export interface VersionAccountEntry {
   version: string;
   info: AccountInfo;
 }
 
-export interface NewerDuplicateVersion {
+interface NewerDuplicateVersion {
   version: string;
   email: string | null;
   plan: string | null;
@@ -54,47 +47,6 @@ export function findNewerDuplicateVersions(
       email: entry.info.email,
       plan: entry.info.plan,
     }));
-}
-
-/** Collect account info for an agent and find newer duplicates of selectedVersion. */
-export async function getNewerDuplicateVersions(
-  agentId: AgentId,
-  selectedVersion: string,
-): Promise<NewerDuplicateVersion[]> {
-  const rows = await Promise.all(
-    listInstalledVersions(agentId).map(async (version) => {
-      const home = getVersionHomePath(agentId, version);
-      const info = await getAccountInfo(agentId, home);
-      return { version, home, info };
-    })
-  );
-
-  const { canonicalByUsageKey } = buildCanonicalUsageContext(
-    rows.map(({ version, home, info }) => ({
-      agentId,
-      home,
-      cliVersion: version,
-      info,
-    }))
-  );
-
-  const entries = rows.map(({ version, info }) => {
-    const key = getUsageLookupKey(info);
-    const canon = key ? canonicalByUsageKey.get(key) : undefined;
-    return {
-      version,
-      info: canon
-        ? {
-            ...info,
-            plan: canon.plan,
-            usageStatus: canon.usageStatus,
-            overageCredits: canon.overageCredits,
-          }
-        : info,
-    };
-  });
-
-  return findNewerDuplicateVersions(entries, selectedVersion);
 }
 
 /** Format the non-interactive guidance shown by view/run when duplicates exist. */

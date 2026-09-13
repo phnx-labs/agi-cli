@@ -28,12 +28,10 @@ import { selectStorageBackendKind } from '../../storage/selection.js';
 import { loadR2Config, type R2Config } from './config.js';
 import { managedSessionsBaseUrl } from './managed-config.js';
 
-export type SessionsBackendKind = 'managed' | 'byo';
-
 /** Env var that forces the BYO path. Value must be exactly `byo`. */
 export const SESSIONS_BACKEND_ENV = 'AGENTS_SESSIONS_BACKEND';
 
-export interface ManagedSessionsBackend {
+interface ManagedSessionsBackend {
   kind: 'managed';
   /** Public base URL of the managed sessions Worker, no trailing slash. */
   baseUrl: string;
@@ -43,15 +41,15 @@ export interface ManagedSessionsBackend {
   userId: string;
 }
 
-export interface ByoSessionsBackend {
+interface ByoSessionsBackend {
   kind: 'byo';
   /** The resolved r2.backups credentials for the S3-compatible client. */
   r2: R2Config;
 }
 
-export type SessionsBackend = ManagedSessionsBackend | ByoSessionsBackend;
+type SessionsBackend = ManagedSessionsBackend | ByoSessionsBackend;
 
-export interface ResolveSessionsBackendOpts {
+interface ResolveSessionsBackendOpts {
   /** Force the BYO r2.backups path even when signed in. */
   byo?: boolean;
   /** DI seam — a static write token selects BYO (tests / self-host). */

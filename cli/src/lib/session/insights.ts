@@ -66,7 +66,7 @@ const GAP_CEILING_SECONDS = 3600;
  * 5 minutes is long enough to exclude "user typing the next instruction" and
  * short enough to catch "went silent mid-task until I said continue."
  */
-export const SILENT_STALL_SECONDS = 300;
+const SILENT_STALL_SECONDS = 300;
 
 /** Response-gap buckets, in ascending order. Upper bound is exclusive. */
 const GAP_BUCKETS: ReadonlyArray<readonly [string, number]> = [
@@ -412,7 +412,7 @@ const RESUME_NUDGE_PATTERN =
  * Classify a long quiet gap after the assistant's last event as an agent silent stall.
  * Optionally also marks an explicit resume nudge ("continue", …) after that silence.
  */
-export function classifySilentStall(
+function classifySilentStall(
   gapSeconds: number,
   userText: string,
   friction: Record<string, number>,
@@ -493,7 +493,7 @@ export interface SessionSpan {
 }
 
 /** How much work ran concurrently, and how much of it straddled two accounts. */
-export interface OverlapReport {
+interface OverlapReport {
   /** Pairs of sessions whose spans intersect. */
   overlappingPairs: number;
   /** Of those, pairs belonging to DIFFERENT accounts. */
@@ -599,7 +599,7 @@ export interface InsightAction {
   sampleSessionIds: string[];
 }
 
-export interface SessionFacetEvidence {
+interface SessionFacetEvidence {
   id: string;
   facets: InsightFacets;
 }

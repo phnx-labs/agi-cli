@@ -19,7 +19,7 @@ import { captureProcessStartTime } from '../pty-server.js';
 /** A session's foreground/background presence. */
 export type Presence = 'attached' | 'background' | 'parked';
 
-export interface DetachRecord {
+interface DetachRecord {
   sessionId: string;
   agent: string;
   cwd?: string;

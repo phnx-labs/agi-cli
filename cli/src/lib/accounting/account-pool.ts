@@ -33,7 +33,7 @@ export interface RegistryAccountRecord {
 }
 
 /** A registry account eligible to run one harness, ready to map to a candidate. */
-export interface RegistryAccountInput {
+interface RegistryAccountInput {
   id?: string;
   /** Agent-scoped key so `(claude, X)` and `(codex, X)` stay distinct. */
   accountKey: string;

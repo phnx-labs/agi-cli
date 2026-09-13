@@ -27,7 +27,7 @@ import { projectProbeTargets, type ProjectDef } from './projects.js';
 const GIT_TIMEOUT_MS = 3_000;
 
 /** The on-disk state of one workspace repo on one machine. */
-export interface RepoWorkspaceStatus {
+interface RepoWorkspaceStatus {
   /** The probed path, echoed home-relative (re-roots per machine). */
   path: string;
   /** `.git` exists (a directory, or a FILE for a linked worktree). */
@@ -224,9 +224,9 @@ export function formatFleetSummary(statuses: HostWorkspaceStatus[]): string {
 }
 
 /** Severity for a workspace/repo warning on the project card. */
-export type WorkspaceWarningSeverity = 'critical' | 'continue';
+type WorkspaceWarningSeverity = 'critical' | 'continue';
 
-export interface WorkspaceWarning {
+interface WorkspaceWarning {
   severity: WorkspaceWarningSeverity;
   text: string;
   remediation?: string;

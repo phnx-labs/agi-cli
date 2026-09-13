@@ -13,7 +13,7 @@ export interface CellExecutionRequest extends BenchCell {
   prompt: string;
   cwd: string;
 }
-export type CellExecutor = (
+type CellExecutor = (
   request: CellExecutionRequest,
 ) => Promise<Omit<BenchCellResult, keyof BenchCell | "wall_ms" | "status">>;
 export function extractTokenCount(
@@ -30,7 +30,7 @@ export function extractTokenCount(
   const tokens = Number(raw.replaceAll(",", ""));
   return Number.isSafeInteger(tokens) && tokens >= 0 ? tokens : undefined;
 }
-export async function executeCellViaAgentsRun(
+async function executeCellViaAgentsRun(
   request: CellExecutionRequest,
 ): ReturnType<CellExecutor> {
   const args = [

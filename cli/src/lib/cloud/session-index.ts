@@ -27,7 +27,7 @@ import type { CloudTask } from './types.js';
 const EXECUTION_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$/;
 
 /** Context a cloud task needs to become a session row — the LOCAL dir it was launched from. */
-export interface CloudSessionContext {
+interface CloudSessionContext {
   /** Local directory `agents cloud run` was invoked from. Defaults to process.cwd(). */
   cwd?: string;
 }

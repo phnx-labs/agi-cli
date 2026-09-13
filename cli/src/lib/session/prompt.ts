@@ -217,7 +217,7 @@ export function cleanSessionPrompt(raw: string): string {
  */
 export type UserPromptKind = 'text' | 'image' | 'command' | 'skill';
 
-export interface ClassifiedPrompt {
+interface ClassifiedPrompt {
   /**
    * The one-line, display-ready form of the prompt — never a bare path. NOT
    * length-capped: the recap card shows it in full; row consumers cap it
@@ -348,7 +348,7 @@ export function extractSessionTopic(raw: string): string | undefined {
  * dropped in, or an `@path` directory reference. `name` is the basename (or the
  * `@ref` verbatim) — the sidebar renders these as chips beside the request text.
  */
-export interface RequestAttachmentRef {
+interface RequestAttachmentRef {
   kind: 'image' | 'file' | 'dir';
   name: string;
 }

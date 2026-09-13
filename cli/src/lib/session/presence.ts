@@ -103,7 +103,7 @@ export function savePresence(map: Record<string, PresenceRecord>, dir?: string):
 
 /** The subset of an `ActiveSession` the presence adapter reads (structural, so
  *  this module doesn't import the heavy active-session graph). */
-export interface ActiveSessionLike {
+interface ActiveSessionLike {
   sessionId?: string;
   kind: string;
   /** 'terminal' (interactive) | 'headless' | 'teams' | 'cloud' | ... */

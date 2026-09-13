@@ -17,7 +17,7 @@
  *   agents://session/<id>?host=<name>  — the same, with a routing hint
  */
 
-export interface AgentsSessionLink {
+interface AgentsSessionLink {
   kind: 'session';
   /** The session id (or short-id/alias) to resume. */
   id: string;
@@ -25,7 +25,7 @@ export interface AgentsSessionLink {
   host?: string;
 }
 
-export interface AgentsUrlError {
+interface AgentsUrlError {
   error: string;
 }
 

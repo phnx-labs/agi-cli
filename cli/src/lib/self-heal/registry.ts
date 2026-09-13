@@ -39,7 +39,7 @@ export const HEAL_CHECKS: HealCheck[] = [
   menubarHelperCheck,
 ];
 
-export interface SelfHealOptions {
+interface SelfHealOptions {
   /** Restrict to these check ids; omit to run every registered check. */
   checks?: HealCheckId[];
   /** Only run checks whose cadence is in this set (daemon scheduling). */
