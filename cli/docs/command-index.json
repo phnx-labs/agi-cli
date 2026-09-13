@@ -8602,6 +8602,24 @@
               "negate": false
             },
             {
+              "flags": "--check",
+              "description": "Read-only: report this item's delivery state without claiming, routing or resending",
+              "long": "--check",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--attempt <at>",
+              "description": "With --check: the attempt timestamp being checked, so a newer one is reported as such",
+              "long": "--attempt",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
               "flags": "--json",
               "description": "Emit the delivery result as JSON",
               "long": "--json",

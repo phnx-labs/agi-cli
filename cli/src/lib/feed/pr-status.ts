@@ -27,9 +27,17 @@ function needsHuman(value: Omit<PullRequestStatus, 'needsHuman'>): boolean {
 }
 
 /** CLI-owned bounded-TTL source shared by feed attention and PR-board consumers. */
+export const PR_STATUS_DEFAULT_TIMEOUT_MS = 15_000;
+
+/**
+ * @param options.timeoutMs bound for the underlying `gh` call. An operator-facing
+ *   caller working against a deadline (the feed answer path) passes its remaining
+ *   budget so one unreachable PR cannot consume the whole operation; a timed-out
+ *   read is negative-cached for the TTL like any other failure.
+ */
 export async function readPullRequestStatus(
   session: ActiveSession,
-  options: { nowMs?: number; ttlMs?: number; gh?: GhExec } = {},
+  options: { nowMs?: number; ttlMs?: number; timeoutMs?: number; gh?: GhExec } = {},
 ): Promise<PullRequestStatus | undefined> {
   const ref = session.pr?.url ?? session.pr?.number;
   if (!ref || !session.cwd) return undefined;
@@ -38,8 +46,9 @@ export async function readPullRequestStatus(
   const hit = cache.get(key);
   if (hit && hit.expiresAt > now) return hit.value;
   const cwd = session.cwd;
+  const timeout = options.timeoutMs ?? PR_STATUS_DEFAULT_TIMEOUT_MS;
   const gh: GhExec = options.gh ?? (async (args) =>
-    (await execFileAsync('gh', args, { cwd, timeout: 15_000, maxBuffer: 1024 * 1024 })).stdout);
+    (await execFileAsync('gh', args, { cwd, timeout, maxBuffer: 1024 * 1024 })).stdout);
   try {
     const stdout = await gh(['pr', 'view', String(ref), '--json', PR_STATUS_FIELDS]);
     const raw = JSON.parse(stdout) as Omit<PullRequestStatus, 'needsHuman'>;

@@ -368,6 +368,7 @@ export function recordAnswer(
   blockId: string,
   answer: { answeredBy?: string; answeredFrom: string; operatorId?: string; verified?: boolean },
   root?: string,
+  options: { pending?: boolean } = {},
 ): RecordAnswerResult {
   const dir = root ?? getFeedDir();
   const block = readBlock(blockId, dir);
@@ -428,23 +429,74 @@ export function recordAnswer(
     throw err;
   }
 
-  // Marker created successfully -- mirror the answer into the block file and
-  // advance the lifecycle to `answered`. The resolution tombstone is written
-  // first, so if a stale lifecycle re-read races the block-file update the
-  // reconciler already refuses to resurrect this generation.
+  // Marker created successfully -- mirror the answer into the block file.
+  //
+  // A `pending` claim stops there: the claim is recorded so no second surface
+  // can take it, but the generation is NOT resolved and the lifecycle stays
+  // `open`, so the card remains in the operator's feed until a rail reports a
+  // real receipt (`confirmAnswerResolution`). A claim is not a delivery, and a
+  // claim whose delivery is never confirmed must not silently remove the item
+  // (PHNX-3999). `state` wins over `answer` in `deriveBlockState`, so the
+  // explicit `open` is what keeps the claimed block visible.
+  //
+  // The default one-phase path advances straight to `answered` for surfaces
+  // that resolve atomically (a policy default, a synchronous enqueue). The
+  // resolution tombstone is written first, so if a stale lifecycle re-read races
+  // the block-file update the reconciler already refuses to resurrect this
+  // generation.
   if (block) {
-    recordResolution({
-      blockId,
-      generation: blockGeneration(block),
-      resolvedAt: record.answeredAt,
-      sourceCursor: block.sourceCursor,
-      reason: 'answered',
-    }, dir);
+    if (!options.pending) {
+      recordResolution({
+        blockId,
+        generation: blockGeneration(block),
+        resolvedAt: record.answeredAt,
+        sourceCursor: block.sourceCursor,
+        reason: 'answered',
+      }, dir);
+    }
     block.answer = record;
-    block.state = 'answered';
+    block.state = options.pending ? 'open' : 'answered';
     publishBlock(block, dir);
   }
   return { ok: true };
+}
+
+/**
+ * Promote a pending claim to a resolved answer — the second half of the
+ * two-phase answer protocol (see `recordAnswer`'s `pending` option).
+ *
+ * Called only once a rail has reported a real {@link MessageReceipt}: that is
+ * the point the item stops needing a human, so that is the point the tombstone
+ * is written and the card may leave the feed. An unconfirmed delivery never
+ * reaches here, so its card stays up.
+ */
+export function confirmAnswerResolution(
+  blockId: string,
+  root?: string,
+  expected?: { generation: string; answeredAt: string },
+): boolean {
+  const dir = root ?? getFeedDir();
+  const block = readBlock(blockId, dir);
+  const record = getAnswerRecord(blockId, dir);
+  if (!block || !record) return false;
+  // One block id serves every generation of a session's asks, so a slow
+  // delivery for the PREVIOUS question must not resolve the one the agent has
+  // moved on to. A caller that knows which ask and which attempt it is
+  // confirming says so, and a mismatch is a no-op rather than a wrong tombstone.
+  if (expected && (blockGeneration(block) !== expected.generation || record.answeredAt !== expected.answeredAt)) {
+    return false;
+  }
+  recordResolution({
+    blockId,
+    generation: blockGeneration(block),
+    resolvedAt: record.answeredAt,
+    sourceCursor: block.sourceCursor,
+    reason: 'answered',
+  }, dir);
+  block.answer = record;
+  block.state = 'answered';
+  publishBlock(block, dir);
+  return true;
 }
 
 /** Read the answer record for a block, if one exists. */
@@ -525,11 +577,41 @@ export function recordMessageReceipt(
   }
   block.receipts = receipts;
   publishBlock(block, dir);
+
+  // The AGENT's own acknowledgement is what resolves a pending claim: `queued`
+  // only says a rail took the answer, so it must never remove the card
+  // (PHNX-3999). `block.answer` is the guard that keeps this bound to the
+  // generation that was claimed — a new question publishes a fresh block with
+  // no answer record, so a late `consumed` for the previous ask cannot resolve it.
+  if ((receipt.status === 'consumed' || receipt.status === 'continued') && block.answer) {
+    confirmAnswerResolution(blockId, dir, {
+      generation: blockGeneration(block),
+      answeredAt: block.answer.answeredAt,
+    });
+  }
 }
 
 /** Read the receipt list for a block. */
 export function getBlockReceipts(blockId: string, root?: string): MessageReceipt[] {
   return readBlock(blockId, root)?.receipts ?? [];
+}
+
+/**
+ * The furthest-along receipt recorded for a block, or undefined when no rail
+ * ever reported one. This is the ONLY truthful evidence that an answer reached
+ * a delivery rail: an answer marker alone proves a claim was taken, not that
+ * anything was delivered, so a caller reporting on a block it did not deliver
+ * must read this rather than synthesize a receipt (PHNX-3999).
+ */
+export function latestMessageReceipt(blockId: string, root?: string): MessageReceipt | undefined {
+  const receipts = getBlockReceipts(blockId, root);
+  let best: MessageReceipt | undefined;
+  for (const receipt of receipts) {
+    if (!best) { best = receipt; continue; }
+    const rank = RECEIPT_STATUS_RANK[receipt.status] - RECEIPT_STATUS_RANK[best.status];
+    if (rank > 0 || (rank === 0 && receipt.at >= best.at)) best = receipt;
+  }
+  return best;
 }
 
 /** Mark a block as "continued" -- the agent consumed the answer and moved on. */
