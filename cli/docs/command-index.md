@@ -101,7 +101,7 @@ agents browser sessions                       Browse a profile's captured screen
 agents browser set                            Set browser emulation options
 agents browser set device <device-name>       Emulate a device (iPhone 14, iPad, MacBook Pro)
 agents browser set viewport <width> <height>  Set viewport size
-agents browser show <url>                     Open a URL for a human to read: goes to browser.viewer (default: browser.profile), and binds no task
+agents browser show <url>                     Open a URL or local file for a human to read: goes to browser.viewer (default: browser.profile), and binds no task
 agents browser start                          Start a browser task. Pass --profile <name>; omit to use your configured default (set it with `agents browser use <name>` or `agents setup`). Page verbs (navigate/screenshot/…) create a task implicitly when none exists — start is for --profile/--url/--record/--title.
 agents browser status                         Show browser service state and running browser tasks
 agents browser stop                           Stop a browser task and close its tabs; with --profile, detach the whole profile; with --service, stop only browser IPC while the shared daemon stays up
