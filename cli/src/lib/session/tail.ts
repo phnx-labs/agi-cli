@@ -11,6 +11,7 @@
 import * as fs from 'fs';
 import type { SessionAgentId, SessionEvent } from './types.js';
 import { parseClaudeContent, parseCodexContent, sanitizeEvents } from './parse.js';
+import { firstUserMessageFromEvents } from './prompt.js';
 
 const DEFAULT_MAX_BYTES = 128 * 1024;
 const DEFAULT_MAX_EVENTS = 60;
@@ -179,8 +180,8 @@ const HEAD_ELISION_MAX_MS = 200;
 const HEAD_ELISION_TIME_CHECK_MASK = 0x3ffff; // every ~262k chars
 
 /**
- * A single-pass, JSON-string-aware elision scan: copies `input` verbatim
- * except inside a string literal whose content exceeds
+ * A single-pass, JSON-string-and-escape-aware elision scan: copies `input`
+ * verbatim except inside a string literal whose content exceeds
  * {@link HEAD_ELISION_STRING_KEEP_UNITS}, where it keeps a short prefix and
  * splices in a `…[elided N chars]` marker for the rest — but still tracks
  * escape/quote state through to that string's real closing quote, so
@@ -188,6 +189,21 @@ const HEAD_ELISION_TIME_CHECK_MASK = 0x3ffff; // every ~262k chars
  * block in the same content array) stays syntactically valid. This is a
  * generic JSON-string eliser, not an image-specific one: it does not care
  * WHAT is inside the oversized string, only that it is too large to keep.
+ *
+ * The threshold check and the flush point are both evaluated only at the END
+ * of a complete ATOMIC escape unit — a lone ordinary char, a two-char escape
+ * (`\\`, `\"`, `\n`, …), or a six-char `\uXXXX` escape — never in the middle
+ * of one. Two real bugs this fixes: (1) checking a raw character INDEX for
+ * exact equality against the threshold can be permanently skipped when a
+ * `\`/escaped-char pair straddles that exact index, since both of those
+ * characters `continue` past the check — after which the index never equals
+ * the threshold again, so the whole string rides through unbounded; using
+ * "unit end index `>=` threshold" instead of "raw index `===` threshold" is
+ * immune to this regardless of how many escapes precede it. (2) flushing the
+ * kept prefix mid-`\uXXXX` (e.g. right after the `\u`, before its 4 hex
+ * digits) produces an invalid, truncated escape sequence in the OUTPUT, which
+ * fails `JSON.parse` even though the scan itself "succeeded" — flushing only
+ * at a unit boundary means the kept prefix is always valid on its own.
  *
  * `deadlineMs` is an absolute `Date.now()` value. `truncatedByBudget: true`
  * means the scan did not finish (ran out of time) — critically, the output
@@ -200,72 +216,108 @@ function elideOversizedJsonStrings(input: string, deadlineMs: number): { text: s
   const outParts: string[] = [];
   let spanStart = 0;
   let inString = false;
-  let escaped = false;
   let stringStart = 0;
   let skipping = false; // current string already crossed the keep threshold
+  let inEscape = false; // previous char was an unconsumed '\' awaiting its escape-type char
+  let hexRemaining = 0; // >0: consuming the N remaining hex digits of a \uXXXX escape
   const n = input.length;
+
+  // Called once at the END of each atomic in-string unit (index `i` is the
+  // unit's LAST character). Decides whether the elision threshold has just
+  // been reached and, if so, flushes the kept prefix up to and including this
+  // whole unit — never a partial one.
+  const onUnitEnd = (i: number): void => {
+    if (skipping) return;
+    if (i + 1 - stringStart >= HEAD_ELISION_STRING_KEEP_UNITS) {
+      outParts.push(input.slice(spanStart, i + 1));
+      skipping = true;
+    }
+  };
+
   for (let i = 0; i < n; i++) {
     if ((i & HEAD_ELISION_TIME_CHECK_MASK) === 0 && Date.now() > deadlineMs) {
       if (!skipping) outParts.push(input.slice(spanStart, i));
       return { text: outParts.join(''), truncatedByBudget: true };
     }
     const ch = input.charCodeAt(i);
+
     if (!inString) {
-      if (ch === 0x22 /* '"' */) { inString = true; stringStart = i + 1; skipping = false; }
+      if (ch === 0x22 /* '"' */) {
+        inString = true; stringStart = i + 1; skipping = false; inEscape = false; hexRemaining = 0;
+      }
       continue;
     }
-    if (escaped) { escaped = false; continue; }
-    if (ch === 0x5c /* '\\' */) { escaped = true; continue; }
+
+    if (hexRemaining > 0) {
+      hexRemaining--;
+      if (hexRemaining === 0) onUnitEnd(i);
+      continue;
+    }
+    if (inEscape) {
+      inEscape = false;
+      if (ch === 0x75 /* 'u' */) { hexRemaining = 4; continue; }
+      onUnitEnd(i); // two-char escape (\\, \", \/, \b, \f, \n, \r, \t) complete
+      continue;
+    }
+    if (ch === 0x5c /* '\\' */) { inEscape = true; continue; }
     if (ch === 0x22 /* '"' */) {
       inString = false;
       if (skipping) {
         const elidedUnits = i - stringStart - HEAD_ELISION_STRING_KEEP_UNITS;
         outParts.push(`…[elided ${elidedUnits} chars]`);
         spanStart = i; // resume normal copying AT the closing quote
+        skipping = false; // back to normal copying -- NOT still "skipping" past this string's own close
       }
       continue;
     }
-    if (!skipping && (i - stringStart) === HEAD_ELISION_STRING_KEEP_UNITS) {
-      outParts.push(input.slice(spanStart, i)); // flush the kept prefix now
-      skipping = true;
-    }
+    onUnitEnd(i); // ordinary content char, a one-char unit
   }
   if (!skipping) outParts.push(input.slice(spanStart, n));
   return { text: outParts.join(''), truncatedByBudget: false };
 }
 
 /**
- * Recover the transcript's opening JSONL record even when it doesn't fit the
- * plain {@link DEFAULT_HEAD_MAX_BYTES} chunk — the case a first turn carrying
- * a multi-megabyte inline image produces, where the record's own closing
- * newline sits past whatever small chunk was read, so the old bare head
- * reader dropped the WHOLE record (and with it, the real original request)
- * rather than the oversized value inside it.
+ * Recover as many COMPLETE opening JSONL records as fit within budget, even
+ * when the plain {@link DEFAULT_HEAD_MAX_BYTES} chunk doesn't reach a single
+ * complete line — the case a first turn carrying a multi-megabyte inline
+ * image produces, where that record's own closing newline sits past whatever
+ * small chunk was read, so the old bare head reader dropped the WHOLE record
+ * (and with it, the real original request) rather than just the oversized
+ * value inside it.
  *
- * Only invoked when the cheap path already failed to find a complete line
- * (bounded — see {@link readSessionHeadChunk}'s `sawEof`), so an ordinary
- * transcript never pays this cost. Reads up to {@link HEAD_ELISION_MAX_READ_BYTES}
+ * Returns every complete elided line the scan reached — NOT just the first —
+ * because the oversized record is not always record #1: a Codex session
+ * commonly opens with a small `session_meta`/header record before the
+ * (possibly huge) real opening user turn, and the caller needs to see past
+ * that header to reach it. Reads up to {@link HEAD_ELISION_MAX_READ_BYTES}
  * from byte 0, runs it through {@link elideOversizedJsonStrings} (bounded by
- * {@link HEAD_ELISION_MAX_MS}), and returns the first complete elided line —
- * text before and after the oversized value is preserved verbatim (only the
- * oversized value itself is shortened), UTF-8 decoding and escape handling
- * both go through the exact same path an unelided record would. Returns ''
- * (a partial result, not a guess) when the scan is cut off by either budget
- * before a complete line was ever produced — never a followup/tail turn
- * substituted for it.
+ * {@link HEAD_ELISION_MAX_MS}) — text before and after any oversized value is
+ * preserved verbatim, UTF-8 decoding and escape handling both go through the
+ * exact same path an unelided record would. Returns '' (a partial result, not
+ * a guess) when the scan is cut off by either budget before even ONE complete
+ * line was produced — never a followup/tail turn substituted for it.
  */
 export function readSessionHeadContentBounded(filePath: string, maxReadBytes = HEAD_ELISION_MAX_READ_BYTES): string {
   const chunk = readSessionHeadChunk(filePath, maxReadBytes);
   if (!chunk || !chunk.content) return '';
   const { text, truncatedByBudget } = elideOversizedJsonStrings(chunk.content, Date.now() + HEAD_ELISION_MAX_MS);
-  const firstNl = text.indexOf('\n');
-  if (firstNl >= 0) return text.slice(0, firstNl);
+  const lastNl = text.lastIndexOf('\n');
+  if (lastNl >= 0) return text.slice(0, lastNl); // every complete elided line found, not just the first
   // No line terminator found anywhere in the elided text: either the record
   // (minus its oversized values) is STILL bigger than the read budget, or the
   // elision scan itself hit its time budget first, or we reached real EOF
   // with no trailing newline at all (a truncated/interrupted write).
   if (truncatedByBudget) return '';
   return chunk.sawEof ? text : '';
+}
+
+/** True when `events` contains at least one genuine (non-synthetic) user
+ * turn — the signal that a head read has actually reached the session's real
+ * opening request, as opposed to only metadata/header records that happen to
+ * parse cleanly (a Codex `session_meta` line, for instance). Reuses the exact
+ * same rejection rules `SessionMeta.firstUserMessage` itself is built with. */
+function hasGenuineUserTurn(events: SessionEvent[]): boolean {
+  return firstUserMessageFromEvents(events) !== undefined;
 }
 
 /**
@@ -275,17 +327,25 @@ export function readSessionHeadContentBounded(filePath: string, maxReadBytes = H
  * uses, zero duplicated parse logic). Only Claude and Codex are supported,
  * matching {@link readSessionTailWithRaw}; other agents return no events.
  *
- * When the plain bounded chunk holds no complete first line at all — an
- * opening user turn embedding a multi-megabyte inline image is the real case
- * this covers — falls back to {@link readSessionHeadContentBounded}'s
- * JSON-aware elision scan rather than returning nothing: the same content
- * parsers then see a syntactically valid record with the oversized value
- * shortened, so a text block before or after an elided image block is
- * recovered exactly as if the image had never been oversized (the parser's
- * own image-handling path, e.g. Claude's `normalizedAttachmentEvent`, still
- * runs — it just sees a short placeholder `source.data` instead of the real
- * payload, so an attachment's derived byte size is not meaningful when this
- * fallback fired, only the surrounding TEXT is trustworthy).
+ * The plain bounded chunk is tried first and is enough for the overwhelming
+ * majority of transcripts. It escalates to
+ * {@link readSessionHeadContentBounded}'s JSON-aware elision scan whenever
+ * that cheap chunk does NOT yield a genuine user turn — not merely when it's
+ * empty. Two real cases need that distinction: an opening turn embedding a
+ * multi-megabyte inline image (the cheap chunk holds no complete line at all,
+ * so it's empty), AND a Codex transcript whose small `session_meta` header
+ * record precedes a large opening user turn (the cheap chunk is non-empty and
+ * parses fine, but has no user message in it yet, so checking for empty
+ * content alone would never trigger the fallback and the real request would
+ * never be recovered). Once escalated, the elided text carries every complete
+ * record the scan reached, header included, so the SAME parsers see the
+ * header AND the (now-shortened) user turn together.
+ *
+ * When this fallback fires, the parser's own image-handling path (e.g.
+ * Claude's `normalizedAttachmentEvent`) still runs on the elided data — it
+ * just sees a short placeholder `source.data` instead of the real payload, so
+ * an attachment's derived byte size is not meaningful here, only the
+ * surrounding TEXT is trustworthy.
  */
 export function readSessionHead(
   filePath: string,
@@ -294,10 +354,35 @@ export function readSessionHead(
   maxEvents = DEFAULT_MAX_EVENTS,
 ): SessionEvent[] {
   if (agent !== 'claude' && agent !== 'codex') return [];
-  let content = readSessionHeadContent(filePath, maxBytes);
-  if (!content.trim()) content = readSessionHeadContentBounded(filePath);
-  if (!content.trim()) return [];
-  const events = agent === 'codex' ? parseCodexContent(content) : parseClaudeContent(content);
-  sanitizeEvents(events);
+
+  const parse = (content: string): SessionEvent[] => {
+    const events = agent === 'codex' ? parseCodexContent(content) : parseClaudeContent(content);
+    sanitizeEvents(events);
+    return events;
+  };
+
+  const cheapContent = readSessionHeadContent(filePath, maxBytes);
+  if (cheapContent.trim()) {
+    const cheapEvents = parse(cheapContent);
+    if (hasGenuineUserTurn(cheapEvents)) return cheapEvents.slice(0, maxEvents);
+  }
+
+  const boundedContent = readSessionHeadContentBounded(filePath);
+  if (!boundedContent.trim()) return [];
+
+  // readSessionHeadContentBounded may carry several trailing records within
+  // its byte budget (a header plus everything the elision scan reached after
+  // it) — this IS still a HEAD read, so records are added one at a time and
+  // parsing stops the moment a genuine user turn appears, rather than handing
+  // the parser everything the scan happened to capture and letting a later,
+  // unrelated turn leak into the result.
+  let events: SessionEvent[] = [];
+  let accumulated = '';
+  for (const line of boundedContent.split('\n')) {
+    if (!line.trim()) continue;
+    accumulated += (accumulated ? '\n' : '') + line;
+    events = parse(accumulated);
+    if (hasGenuineUserTurn(events)) break;
+  }
   return events.length > maxEvents ? events.slice(0, maxEvents) : events;
 }

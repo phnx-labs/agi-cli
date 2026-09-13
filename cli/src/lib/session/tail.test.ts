@@ -194,3 +194,150 @@ describe('readSessionHead recovers the original request past an oversized inline
     }
   });
 });
+
+/**
+ * PHNX-3999 review (58301aa3c) found two escape-boundary bugs in the elision
+ * scanner's original strict-equality-on-raw-index threshold check, plus a
+ * fallback trigger that missed Codex's session_meta-header-then-giant-user
+ * shape. These fixtures reproduce each exactly, on real files through the
+ * real reader, not a unit test of the (unexported) scanner in isolation.
+ */
+describe('readSessionHead escape-boundary and Codex-metadata-header fixes (PHNX-3999 review)', () => {
+  it('elides correctly when a 2-char escape sits immediately at the keep threshold (reported: 1002079 bytes, unelided)', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-head-escape-boundary-'));
+    try {
+      const filePath = path.join(dir, 'session.jsonl');
+      const before = 'Please look at this:';
+      const after = 'Thanks.';
+      // 2048 ordinary 'a' units reach the keep threshold exactly, immediately
+      // followed by a 2-char \n escape (one atomic unit) and then a run of
+      // 'b' large enough to force real elision. A raw-index `=== 2048` check
+      // can be permanently skipped by an escape landing right at the
+      // boundary, letting the whole oversized run ride through unchanged.
+      const rawJsonStringValue = `${'a'.repeat(2048)}\\n${'b'.repeat(1_000_000)}`;
+      const record =
+        '{"type":"user","timestamp":"2026-08-01T14:00:00.000Z","message":{"role":"user","content":[' +
+        JSON.stringify({ type: 'text', text: before }) +
+        ',{"type":"image","source":{"type":"base64","media_type":"image/png","data":"' +
+        rawJsonStringValue +
+        '"}},' +
+        JSON.stringify({ type: 'text', text: after }) +
+        ']}}';
+      fs.writeFileSync(filePath, record + '\n');
+
+      const bounded = readSessionHeadContentBounded(filePath);
+      // Genuine elision happened -- nowhere near the ~1,000,050-byte
+      // "unchanged" output the bug produced.
+      expect(bounded.length).toBeLessThan(10_000);
+      expect(() => JSON.parse(bounded)).not.toThrow();
+
+      const events = readSessionHead(filePath, 'claude');
+      const userTexts = events.filter(e => e.type === 'message' && e.role === 'user').map(e => e.content);
+      expect(userTexts).toContain(before);
+      expect(userTexts).toContain(after);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('elides correctly when an escaped quote sits immediately at the keep threshold', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-head-escaped-quote-boundary-'));
+    try {
+      const filePath = path.join(dir, 'session.jsonl');
+      const before = 'See the quoted error below:';
+      const after = 'That is the whole message.';
+      // 2047 ordinary units, then a 2-char \" escape as the 2048th unit,
+      // then a run of 'b' -- the escaped quote itself must never be read as
+      // a real string terminator, and the threshold must still fire on it.
+      const rawJsonStringValue = `${'a'.repeat(2047)}\\"${'b'.repeat(1_000_000)}`;
+      const record =
+        '{"type":"user","timestamp":"2026-08-01T14:00:00.000Z","message":{"role":"user","content":[' +
+        JSON.stringify({ type: 'text', text: before }) +
+        ',{"type":"image","source":{"type":"base64","media_type":"image/png","data":"' +
+        rawJsonStringValue +
+        '"}},' +
+        JSON.stringify({ type: 'text', text: after }) +
+        ']}}';
+      fs.writeFileSync(filePath, record + '\n');
+
+      const bounded = readSessionHeadContentBounded(filePath);
+      expect(bounded.length).toBeLessThan(10_000);
+      expect(() => JSON.parse(bounded)).not.toThrow();
+
+      const events = readSessionHead(filePath, 'claude');
+      const userTexts = events.filter(e => e.type === 'message' && e.role === 'user').map(e => e.content);
+      expect(userTexts).toContain(before);
+      expect(userTexts).toContain(after);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('never truncates mid \\uXXXX escape when the escape straddles the keep threshold (reported: invalid JSON)', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-head-unicode-boundary-'));
+    try {
+      const filePath = path.join(dir, 'session.jsonl');
+      const before = 'Unicode payload follows:';
+      const after = 'End of message.';
+      // The exact review repro: 2046 'a', then a literal ሴ escape (6
+      // raw chars, one atomic unit) straddling the 2048-unit threshold, then
+      // a run of 'b'. Flushing mid-escape produces invalid JSON.
+      const rawJsonStringValue = `${'a'.repeat(2046)}\\u1234${'b'.repeat(10_000)}`;
+      const record =
+        '{"type":"user","timestamp":"2026-08-01T14:00:00.000Z","message":{"role":"user","content":[' +
+        JSON.stringify({ type: 'text', text: before }) +
+        ',{"type":"image","source":{"type":"base64","media_type":"image/png","data":"' +
+        rawJsonStringValue +
+        '"}},' +
+        JSON.stringify({ type: 'text', text: after }) +
+        ']}}';
+      fs.writeFileSync(filePath, record + '\n');
+
+      const bounded = readSessionHeadContentBounded(filePath);
+      expect(bounded.length).toBeLessThan(10_000);
+      // The output must be valid, parseable JSON -- never a truncated escape.
+      expect(() => JSON.parse(bounded)).not.toThrow();
+
+      const events = readSessionHead(filePath, 'claude');
+      const userTexts = events.filter(e => e.type === 'message' && e.role === 'user').map(e => e.content);
+      expect(userTexts).toContain(before);
+      expect(userTexts).toContain(after);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('escalates past a Codex session_meta header to recover the real opening user turn', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-head-codex-metadata-header-'));
+    try {
+      const filePath = path.join(dir, 'session.jsonl');
+      const ask = 'Investigate the flaky auth test';
+      // A small session_meta header record -- present, non-empty, and cleanly
+      // parseable on its own (it yields an 'init' event, never a user
+      // message) -- precedes a giant opening user record. Checking "cheap
+      // content is non-empty" alone would never escalate here, since the
+      // header alone already satisfies that check.
+      const header = JSON.stringify({
+        type: 'session_meta',
+        timestamp: '2026-08-01T14:00:00.000Z',
+        payload: { cli_version: '1.0.0', cwd: '/home/u/repo' },
+      });
+      const hugeJunk = 'Z'.repeat(2 * 1024 * 1024);
+      const userRecord =
+        '{"type":"response_item","timestamp":"2026-08-01T14:00:01.000Z","payload":{"type":"message","role":"user","content":[' +
+        JSON.stringify({ type: 'input_text', text: ask }) +
+        ',{"type":"unused_attachment","data":"' +
+        hugeJunk +
+        '"}]}}';
+      fs.writeFileSync(filePath, [header, userRecord].join('\n') + '\n');
+
+      // The plain cheap chunk DOES see complete content (the header line) --
+      // "non-empty" alone must not be mistaken for "found the real request".
+      const cheap = readSessionHeadContent(filePath, 32 * 1024);
+      expect(cheap.trim()).not.toBe('');
+      expect(firstUserMessageFromEvents(readSessionHead(filePath, 'codex'))).toBe(ask);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
