@@ -648,11 +648,15 @@ export async function runWorkflowForEach(
  * (and always injects a rules note). Other harnesses have no multi-root surface
  * and ignore the grants (cwd only).
  */
-async function resolveRunCwd(
+export async function resolveRunCwd(
   options: Pick<ExecCommandActionOptions, 'cwd' | 'project' | 'remoteCwd' | 'addDir'>,
   opts: { forRemote: boolean },
 ): Promise<string | undefined> {
-  if (!options.project) return options.cwd;
+  if (!options.project) {
+    if (!options.cwd || opts.forRemote) return options.cwd;
+    const { expandLocalHome } = await import('../lib/project-root.js');
+    return expandLocalHome(options.cwd);
+  }
   if (options.cwd || options.remoteCwd) {
     console.error(chalk.red('Pass --project alone — not with --cwd or --remote-cwd.'));
     process.exit(1);
@@ -1966,13 +1970,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         armRunFinishTraceSync({ disabled: options.traceSync === false });
       }
 
-      // --project <slug>[@worktree]: resolve the projects-root shorthand into a
-      // cwd. On a host run it resolves home-relative (`~/…`, so the host expands
-      // it); locally it becomes an absolute path. It owns the working directory,
-      // so it is mutually exclusive with both --cwd and --remote-cwd.
-      if (options.project) {
-        options.cwd = await resolveRunCwd(options, { forRemote: hostGiven.length > 0 });
-      }
+      // Home anchors belong to the executing host; preserve them until a remote
+      // invocation reaches its local execution path.
+      options.cwd = await resolveRunCwd(options, { forRemote: hostGiven.length > 0 });
 
       if (hostGiven.length > 0) {
         if (new Set(hostGiven).size > 1) {

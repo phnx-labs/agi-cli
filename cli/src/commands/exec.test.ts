@@ -12,6 +12,7 @@ import {
   addAlwaysFreshRepo,
   bareInteractiveRunDefaultsToDeviceAuto,
   computeNetMode,
+  resolveRunCwd,
   gitToplevel,
   hostTargetGiven,
   isAlwaysFreshRepo,
@@ -25,6 +26,25 @@ import {
   RUN_AUTO_KEYWORD,
 } from './exec.js';
 import { ALL_AGENT_IDS } from '../lib/agents.js';
+
+describe('run working directory across a device boundary', () => {
+  it.each(['$HOME', '~', '$HOME/project with spaces', '~/project with spaces'])(
+    'preserves %s remotely and expands it only on the executing host', async (cwd) => {
+      const remote = await resolveRunCwd({ cwd, addDir: [] }, { forRemote: true });
+      expect(remote).toBe(cwd);
+      const local = await resolveRunCwd({ cwd: remote, addDir: [] }, { forRemote: false });
+      const expected = cwd.includes('/')
+        ? path.join(process.env.HOME ?? os.homedir(), 'project with spaces')
+        : process.env.HOME ?? os.homedir();
+      expect(local).toBe(expected);
+    },
+  );
+  it('leaves absent, relative, and absolute directories unchanged', async () => {
+    for (const cwd of [undefined, 'relative/project', '/srv/project']) {
+      expect(await resolveRunCwd({ cwd, addDir: [] }, { forRemote: false })).toBe(cwd);
+    }
+  });
+});
 
 describe.skipIf(process.platform === 'win32')('native account launch selects a stable home', () => {
   it('uses the account installation unless an explicit binary installation was requested', () => {
@@ -45,7 +65,7 @@ describe.skipIf(process.platform === 'win32')('native account launch selects a s
       fs.writeFileSync(path.join(dir, 'node_modules', '.bin', 'codex'),
         '#!/usr/bin/env node\n' +
         `if (process.argv.includes('--version')) { console.log('codex-cli ${label}'); process.exit(0); }\n` +
-        `require('fs').writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify({label:${JSON.stringify(label)}, codexHome:process.env.CODEX_HOME}));\n` +
+        `require('fs').writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify({label:${JSON.stringify(label)}, codexHome:process.env.CODEX_HOME,cwd:process.cwd()}));\n` +
         'console.log(JSON.stringify({type:"item.completed",item:{type:"agent_message",text:"OK"}}));\n' +
         'console.log(JSON.stringify({type:"turn.completed",usage:{input_tokens:0,output_tokens:0}}));\n',
         { mode: 0o755 });
@@ -63,17 +83,17 @@ describe.skipIf(process.platform === 'win32')('native account launch selects a s
     }));
     try {
       const tsxImport = pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href;
-      for (const [spec, expectedBinary] of [['codex#work', accountLabel], [`codex@${binaryDefault}#work`, binaryDefault]]) {
+      for (const [spec, expectedBinary, cwd] of [['codex#work', accountLabel, '$HOME'], [`codex@${binaryDefault}#work`, binaryDefault, '~']]) {
         const result = spawnSync('node', ['--import', tsxImport,
           path.resolve(import.meta.dirname, '..', 'index.ts'), 'run', spec, 'Reply OK',
-          '--mode', 'skip', '--quiet', '--no-auto-secrets', '--cwd', root], {
+          '--mode', 'skip', '--quiet', '--no-auto-secrets', '--cwd', cwd], {
           cwd: path.resolve(import.meta.dirname, '..', '..'),
           env: { ...process.env, HOME: root, AGENTS_EVENTS_PATH: path.join(root, 'events.jsonl') },
           encoding: 'utf8', timeout: 60_000,
         });
         expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
         expect(JSON.parse(fs.readFileSync(capturePath, 'utf8'))).toEqual({
-          label: expectedBinary, codexHome: path.join(authHome, '.codex'),
+          label: expectedBinary, codexHome: path.join(authHome, '.codex'), cwd: fs.realpathSync(root),
         });
         expect(fs.readFileSync(path.join(authHome, '.codex', 'auth.json'), 'utf8')).toBe(credential);
       }
