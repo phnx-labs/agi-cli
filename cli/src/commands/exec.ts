@@ -2410,7 +2410,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         { readAndResolveBundleEnv, describeBundle, remoteResolveEnv },
         { assertRemoteBundleFlagsUnsupported, splitBundleRef, resolveSecretsContextForRun },
         { resolveHostSshTarget },
-        { getConfiguredRunStrategy, normalizeRunStrategy, resolveRunVersion, rotationFailoverChain, shouldArmRotationFailover, RUN_STRATEGIES, collectHarnessCandidates, pickHarnessWeighted, classifyHarnessCandidates, formatHarnessPickBanner, formatNoHealthyHarnessError, formatNoHealthyAccountError, formatNoVerifiedUsageError, signInRecoverableCandidates },
+        { getConfiguredRunStrategy, normalizeRunStrategy, resolveRunVersion, rotationFailoverChain, DEFAULT_ROTATION_FAILOVER_LIMIT, shouldArmRotationFailover, preflightFallbackHandoff, RUN_STRATEGIES, collectHarnessCandidates, pickHarnessWeighted, classifyHarnessCandidates, formatHarnessPickBanner, formatNoHealthyHarnessError, formatNoHealthyAccountError, formatNoVerifiedUsageError, signInRecoverableCandidates },
         { getGlobalDefault, getVersionHomePath, resolveVersion, resolveVersionAlias, ensureAgentRunnable },
         { buildDiscoveredPlugin, loadPluginManifest, syncPluginToVersion },
         { parseWorkflowFrontmatter, resolveWorkflowRef, resolveAllowedSubagents, pruneStaleWorkflowSubagents, ensureSubagentDispatchTool },
@@ -3010,6 +3010,11 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
       // account and account rotation silently stops (the gh-monitor heal bug).
       // `pinned` still resolves so a logged-out default can yield to a signed-in
       // sibling on this device (PHNX-2685); an explicit @version pin is unchanged.
+      // Bounded handoff loop: each iteration resolves an account for `agent`, and
+      // the only `continue` is the preflight exhaustion handoff below, which
+      // consumes one entry of the `--fallback` spec before retrying as that
+      // alternate. The spec is finite, so this terminates (PHNX-3999 F19).
+      preflight: for (;;) {
       if (!accountPickerRequested && !configuredAccount && (!version || strategy !== 'pinned' || options.balanced || explicitStrategy)) {
         if (version) {
           process.stderr.write(chalk.yellow(`[agents] strategy ${strategy} ignored: version ${version} is pinned\n`));
@@ -3062,6 +3067,34 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
                 // would print a second, near-identical "looks logged out" warning.
                 signInLaunch = true;
               } else {
+                // Every account of this harness is throttled. A configured
+                // alternate exists for exactly this case, so hand off to it here
+                // rather than exiting — `runWithFallback` would only reach it
+                // after a run that can no longer start (PHNX-3999 F19). The
+                // alternate becomes the primary and is dropped from the spec, so
+                // the chain that remains never lists the agent now running.
+                //
+                // Only for the run shapes a handoff is actually valid for. A
+                // prompt is what `--fallback` itself requires (it is rejected
+                // without one below); a resume is bound to the session's OWN
+                // harness; and a workflow's tool/MCP scoping is claude-only, so
+                // switching harness would silently drop the declared sandbox —
+                // the same fail-open `runWithFallback` warns about.
+                const handoff = prompt !== undefined && !options.resume && !workflowToolsRestrict && !workflowMcpConfigPath
+                  ? preflightFallbackHandoff(options.fallback, agent, resolved.exhausted)
+                  : null;
+                if (handoff) {
+                  process.stderr.write(chalk.yellow(
+                    `[agents] every ${agent} account is exhausted — handing off to ${handoff.agent}${handoff.version ? `@${handoff.version}` : ''}\n`,
+                  ));
+                  agent = handoff.agent;
+                  // Alias-resolve against the NEW harness's installs, exactly as
+                  // the canonical --fallback parse does for its own entries.
+                  version = resolveVersionAlias(agent, handoff.version);
+                  options.fallback = handoff.remainingSpec;
+                  rotationResult = null;
+                  continue preflight;
+                }
                 console.error(chalk.red(formatNoHealthyAccountError(agent, strategy, resolved.exhausted)));
                 if (recoverable.length > 0) {
                   // Off a TTY nobody can complete a login, so we still exit — but
@@ -3153,6 +3186,8 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
             }
           }
         }
+      }
+      break;
       }
 
       // Self-heal the launch target. A gutted install (JS wrapper present,
@@ -3607,7 +3642,16 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           resumeCheckpoint: !!options.resumeCheckpoint,
         })
       ) {
-        const failover = rotationFailoverChain(rotationResult!, version!);
+        // With an explicit alternate harness configured, "use the alternate once
+        // the primary's accounts are exhausted" is the policy — so EVERY healthy
+        // same-agent account has to be tried first, not the default cap of three
+        // (PHNX-3999 F19). Without one, the cap stands: it bounds how long a
+        // rate-limited run keeps retrying itself.
+        const failover = rotationFailoverChain(
+          rotationResult!,
+          version!,
+          fallback.length > 0 ? (rotationResult!.healthy.length || DEFAULT_ROTATION_FAILOVER_LIMIT) : undefined,
+        );
         if (failover.length > 0) {
           fallback.unshift(...failover);
           if (!options.quiet) {

@@ -360,7 +360,32 @@ consumer. `agents sessions trace <id> --steps` prints the same fold as text.
 `extractSessionTopic` and `cleanFirstUserMessage` now consult **one** skip list,
 which is what stops a `/model` echo (`<local-command-stdout>`) or a skill body
 ("Base directory for this skill:") from becoming a session's topic and then its
-title. `SessionMeta.lastUserMessage` (schema v48) carries the latest genuine turn
+title. `cleanGeneratedSessionLabel` closes the same hole on the OTHER title rung
+(PHNX-3999 F26/F27): a harness auto-title is derived from the first turn, so a `!`
+shell echo became a row titled `<bash-input>…` and a `/clear` became a row titled
+`/clear`. That cleaner — the one place Claude's `ai-title` and Cursor's
+`chatMeta.title` both pass through (`session/discover.ts`) — now **rejects**
+scaffolding and a bare control token outright rather than stripping the tags off
+(which would promote the shell command itself to the headline), so the row falls to
+the daemon-generated title and then the user's own first prompt. A user `/rename`
+(`customTitle`) is still kept verbatim, and the original turn stays on the row as
+`firstUserMessage`/`request`, so nothing is lost from the details view. The fix is
+paired with a `CONTENT_INDEX_VERSION` bump, since the label is written at index
+time and already-indexed rows would otherwise keep the junk title.
+
+**Every session row also carries `confirmedProject` (PHNX-3999 F08/F09).** It is the
+registered project definition whose root contains the session's cwd
+(`confirmedProjectForCwd`, [`src/lib/projects.ts`](src/lib/projects.ts)), or `null`
+when the association is not confirmed. That is what a UI groups by; the older
+`project` field stays exactly as it was — a bucket KEY derived from the path, which
+always answers something, and grouping by it is what filed loose and unrelated
+directories as projects of their own. Being inside *some* git repository is
+deliberately **not** an association: a repo nobody registered would still invent a
+project out of a folder name. `null` means Uncategorized — the row is still listed,
+it is just not filed under a project nobody bound it to. It is resolved on the
+device that owns the path (a definition root is a local path), and rides the live
+row, the history row, and `sessions --active --json`, so every consumer reads the
+same verdict. `SessionMeta.lastUserMessage` (schema v48) carries the latest genuine turn
 beside `firstUserMessage`, and `deriveSessionRecap` classifies that raw turn —
 with the row's attachments in hand — rather than the already-collapsed `topic`.
 
@@ -1318,7 +1343,13 @@ neither engine has a fleet registry of its own — while `agents view --device
 `hideCompletedMilestones`, `bannerWhenNeedsYou`, `includeOtherDeviceRequests`,
 `groupBy` (none/project/agent/device), `thenBy` (none/project/agent/device),
 `projectScope` (cycle/all), `projectSort` (updated/priority/name),
-`ticketSort` (priority/updated/title), and `showPullRequests`. They are registered
+`ticketSort` (priority/updated/title), `showPullRequests`, `sessionUpdates` (the
+Home session-updates section), `deviceSort` (name/role/load/memory/disk), and the
+**Headless runs** defaults — `headlessAgent` and `headlessFallbackAgent` (each a
+registered agent id, validated at write time, unset = the menu's own default and no
+`--fallback`) plus `headlessPlacement` (`auto` | `local` | `interactive` | a device
+name; `auto` is `agents run --device auto`, which already refuses a `personal` or
+`desktop` box). They are registered
 `agents config` keys, so the native menu reads them via `agents config list --json`
 (`{key,value,hint}` rows) and writes one per action; an **unset** key is omitted from
 the list so the menu falls back to its own baked-in default (the defaults in
@@ -1338,6 +1369,19 @@ factual hardware fact — `laptop`/`desktop`/`server`/`unknown` — the menu bar
 as an icon. Set it explicitly per device (`agents devices config <name> formFactor
 laptop`); it is **never** inferred from the OS platform, and unset reads as
 `unknown`. It rides `agents menubar snapshot --json` in each `devices[]` row.
+
+Each `devices[]` row also carries the **role and spec facts** Settings shows
+(PHNX-3999 F25): `role` (`worker`/`personal`/`desktop`, else `unknown`),
+`autoEligible` (the verdict of the one canonical `filterAutoPool`, so the menu shows
+the fact that actually governs `--device auto`), and `stats` — `reachable`,
+`observedAt`, `stale`, `cpus`, `memTotalBytes`, `memFreeBytes`, `memPercent`,
+`diskTotalBytes`, `diskFreeBytes`, `diskUsedPercent`, `loadPercent`,
+`specsObservedAt`. `stats` is read from the existing fleet-stats CACHE
+(`readStatsCache`, `~/.agents/.cache/.fleet-stats.json`) — **never a probe**, so
+opening Settings costs nothing — and is `null` for a device never measured. Every
+number is `null` when unobserved rather than `0`, which would render as a real
+reading of an idle box with an empty disk; `stale` carries the CLI's own
+`STATS_STALE_MS` verdict so an old reading is labelled instead of shown as live.
 
 `devices.<name>.tmux` (stored as `tmux.enabled`) defaults off, so a LOCAL
 interactive `agents run` launch spawns the agent directly. Turn it on for a

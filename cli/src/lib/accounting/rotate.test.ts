@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import {
   rotationFailoverChain,
+  preflightFallbackHandoff,
   shouldArmRotationFailover,
   DEFAULT_ROTATION_FAILOVER_LIMIT,
   pickBalancedCandidate,
@@ -271,6 +272,49 @@ describe('matchAccountVersion (RUSH-1957 — pin a routine to an account by iden
   });
 });
 
+describe('preflightFallbackHandoff (PHNX-3999 F19 — the alternate harness after the primary is exhausted)', () => {
+  const throttled = [
+    candidate({ version: '1.0.0', usageStatus: 'rate_limited' }),
+    candidate({ version: '2.0.0', usageStatus: 'out_of_credits' }),
+  ];
+
+  it('hands off to the first alternate and returns the rest of the chain', () => {
+    expect(preflightFallbackHandoff('codex,grok', 'claude', throttled)).toEqual({
+      agent: 'codex',
+      version: undefined,
+      remainingSpec: 'grok',
+    });
+  });
+
+  it('carries an @version pin on the alternate and drops remainingSpec when it was the only entry', () => {
+    expect(preflightFallbackHandoff('codex@0.116.0', 'claude', throttled)).toEqual({
+      agent: 'codex',
+      version: '0.116.0',
+      remainingSpec: undefined,
+    });
+  });
+
+  it('defers the WHOLE spec when any entry is not an exact agent id — never silently drops a typo', () => {
+    // The regression this guards: `--fallback typoo,codex` must not launch codex
+    // and swallow `typoo`. The canonical --fallback parse owns that message.
+    expect(preflightFallbackHandoff('typoo,codex', 'claude', throttled)).toBeNull();
+  });
+
+  it('defers when an entry names the primary (the canonical parse rejects that)', () => {
+    expect(preflightFallbackHandoff('claude,codex', 'claude', throttled)).toBeNull();
+  });
+
+  it('does not hand off for a signed-out primary — logging in is the fix, not another harness', () => {
+    const signedOut = [candidate({ version: '1.0.0', usageStatus: 'signed_out', signedIn: false })];
+    expect(preflightFallbackHandoff('codex', 'claude', signedOut)).toBeNull();
+  });
+
+  it('returns null with no spec, and null when nothing is exhausted', () => {
+    expect(preflightFallbackHandoff(undefined, 'claude', throttled)).toBeNull();
+    expect(preflightFallbackHandoff('codex', 'claude', [])).toBeNull();
+  });
+});
+
 describe('rotationFailoverChain (#348 — synthesize a same-agent failover chain)', () => {
   it('turns the other healthy accounts into fallback entries, skipping the picked one', () => {
     const a = candidate({ version: '1.0.0' });
@@ -302,6 +346,14 @@ describe('rotationFailoverChain (#348 — synthesize a same-agent failover chain
     expect(chain.length).toBe(DEFAULT_ROTATION_FAILOVER_LIMIT);
     const custom = rotationFailoverChain(rotation(healthy, 0), '0.0.0', 2);
     expect(custom.length).toBe(2);
+  });
+
+  it('can cover EVERY other healthy account, which is what an explicit alternate harness requires (F19)', () => {
+    // `agents run … --fallback codex` means "codex only after claude is out", so
+    // the run raises the limit to the healthy count and the chain lists them all.
+    const healthy = Array.from({ length: 6 }, (_, i) => candidate({ version: `${i}.0.0` }));
+    const chain = rotationFailoverChain(rotation(healthy, 0), '0.0.0', healthy.length);
+    expect(chain.map(e => e.version)).toEqual(['1.0.0', '2.0.0', '3.0.0', '4.0.0', '5.0.0']);
   });
 
   it('returns [] for a non-rotation run (pinned strategy => null rotation) — behavior unchanged', () => {

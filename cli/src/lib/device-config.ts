@@ -591,6 +591,72 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     defaultValue: true,
     description: 'AGI Menu: show the open pull requests section for each project.',
   },
+  {
+    name: 'menubar.menu.sessionUpdates',
+    yamlKey: 'menubarMenuSessionUpdates',
+    scope: 'user',
+    type: 'bool',
+    defaultValue: true,
+    description:
+      'AGI Menu: show the session-updates section on Home. Off leaves Home to requests and progress ' +
+      'only; the full list stays on the Sessions tab either way.',
+  },
+  {
+    name: 'menubar.menu.deviceSort',
+    yamlKey: 'menubarMenuDeviceSort',
+    scope: 'user',
+    type: 'string',
+    defaultValue: 'name',
+    description:
+      'AGI Menu: how the device list is ordered — name, role, load, memory, or disk. The spec orders read ' +
+      'the same cached fleet stats the rows render, so a device with no observation sorts last rather than ' +
+      'as zero.',
+    validate: oneOf('menubar.menu.deviceSort', ['name', 'role', 'load', 'memory', 'disk']),
+  },
+  {
+    name: 'menubar.menu.headlessAgent',
+    yamlKey: 'menubarMenuHeadlessAgent',
+    scope: 'user',
+    type: 'string',
+    description:
+      'AGI Menu: the harness a Headless run dispatches to by default (an agent id, e.g. claude). Unset ' +
+      'leaves the choice to the menu\'s own default — this key never invents a primary harness.',
+    validate: (v) =>
+      isAgentId(v as string) ? null : `menubar.menu.headlessAgent must be an agent id (e.g. claude, codex), got ${JSON.stringify(v)}.`,
+  },
+  {
+    name: 'menubar.menu.headlessFallbackAgent',
+    yamlKey: 'menubarMenuHeadlessFallbackAgent',
+    scope: 'user',
+    type: 'string',
+    description:
+      'AGI Menu: the permitted alternate harness for a Headless run, dispatched as `agents run --fallback ' +
+      '<agent>`. It is reached only after every usable account of the primary harness is exhausted (the ' +
+      'run\'s own same-agent account failover runs first). Unset sends no --fallback.',
+    validate: (v) =>
+      isAgentId(v as string) ? null : `menubar.menu.headlessFallbackAgent must be an agent id (e.g. codex, grok), got ${JSON.stringify(v)}.`,
+  },
+  {
+    name: 'menubar.menu.headlessPlacement',
+    yamlKey: 'menubarMenuHeadlessPlacement',
+    scope: 'user',
+    type: 'string',
+    defaultValue: 'auto',
+    description:
+      'AGI Menu: where a Headless run executes — `auto` (the CLI picks an eligible worker; `agents run ' +
+      '--device auto` never picks a personal or desktop box), `local` (this machine, no --device), ' +
+      '`interactive` (the box pinned as interactive.host), or a device name to pin one explicitly.',
+    validate: (v) => {
+      const value = v as string;
+      if (value === 'auto' || value === 'local' || value === 'interactive') return null;
+      try {
+        assertValidDeviceName(value);
+        return null;
+      } catch {
+        return 'menubar.menu.headlessPlacement must be auto | local | interactive | a device name.';
+      }
+    },
+  },
 ];
 
 /** Look up a key spec by CLI dotted name, or throw listing the known keys. */

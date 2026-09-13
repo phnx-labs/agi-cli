@@ -27,6 +27,9 @@ at which address, and what each side must not change.
 | Signer | Developer ID, Team `2HTP252L87`, notarized + stapled | `EXPECTED_TEAM_ID` in `src/lib/helper-download.ts` |
 | Designated requirement | `identifier "com.phnx-labs.agents-menubar" … certificate leaf[subject.OU] = "2HTP252L87"` | `verifyDesignatedRequirement`; `scripts/verify-menubar-helper.sh` |
 | Snapshot feed | `agents menubar snapshot --json` (read-only; same rows and status words as `agents sessions --active --local --json`) | `src/lib/menubar/snapshot.ts`, `src/commands/menubar.ts` |
+| Preferences | `snapshot.menuPreferences` — every `menubar.menu.*` key's effective value; written one at a time with `agents config set/unset`. A key with no registered default (`defaultProject`, `headlessAgent`, `headlessFallbackAgent`) is OMITTED when unset, so the menu keeps its own default | `MENUBAR_MENU_PROPERTIES` in `src/lib/config-keys.ts`; the specs in `src/lib/device-config.ts` |
+| Device facts | each `snapshot.devices[]` row: `name`, `platform`, `formFactor`, `interactive`, `isLocal`, `preferred`, `role`, `autoEligible`, and `stats` (`null` when never measured) | `src/lib/menubar/snapshot.ts` |
+| Project grouping | `confirmedProject` on every session row (`feed watch --json`, `sessions watch --json`, `sessions --active --json`): the registered project, or `null` for Uncategorized | `confirmedProjectForCwd` in `src/lib/projects.ts` |
 
 The **designated requirement is load-bearing**: macOS keys the helper's
 Accessibility (TCC) grant to it and re-validates every new version against it.
@@ -117,6 +120,24 @@ runs the stage on the release home base and pulls the result back.
   colour a resolved generation as needing you from its own phase fallback, and
   must not treat a dismissed banner as an answer — the record clears when the
   transcript moves past it.
+
+- **Settings reads facts, it never probes the fleet (PHNX-3999 F25).** Device
+  specs come from the fleet-stats cache the CLI already keeps
+  (`readStatsCache`), so a Settings render costs no ssh. Every number is `null`
+  when it was not observed and the row carries `stale` plus `observedAt` —
+  render "unavailable" and an age, never `0` and never a stale number as live.
+  `autoEligible` is the CLI's own placement verdict; the menu must not re-derive
+  it from `role`.
+- **Grouping is the CLI's verdict too (PHNX-3999 F08/F09).** Group by
+  `confirmedProject`; `null` means Uncategorized, and the row must stay reachable
+  in the full Sessions list. Do not fall back to the `project` field or to the
+  cwd's basename — that is precisely the wrong grouping this replaced. An older
+  peer that omits the field is reporting unknown capability, not "no project".
+- **A title the CLI rejected must not be revived (PHNX-3999 F26/F27).** The CLI
+  drops a harness label that is scaffolding (`<bash-input>`, `<command-name>`, a
+  bare `/clear`) so the row falls to the generated title and then the user's own
+  first prompt. The menu must not reconstruct a title from control text, and must
+  accept a better authoritative title that arrives after the first render.
 
 ## Commands
 

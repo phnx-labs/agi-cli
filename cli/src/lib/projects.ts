@@ -576,6 +576,87 @@ export function projectNameForCwd(cwd: string | undefined, defs: ProjectDef[]): 
 }
 
 /**
+ * Definition list, memoized against a stamp over the definition FILES, for the
+ * per-tick readers (PHNX-3999).
+ *
+ * {@link listProjectDefs} parses every `<name>.yaml`, which is the right cost for
+ * a command but not for a row builder on the `feed watch` / `sessions watch`
+ * stream — that runs twice a second for as long as an editor window is open (see
+ * `AGENTS.md`, every tick is budgeted). One `readdir` plus one `stat` per
+ * definition replaces N YAML parses.
+ *
+ * The stamp is each file's name + mtime + size, NOT the directory's mtime: editing
+ * a definition in place — retargeting a project's `root`, which is exactly what
+ * changes which sessions belong to it — moves the FILE's mtime and leaves the
+ * directory's untouched, so a directory stamp would serve a stale association for
+ * the life of the process. An unreadable directory is not cached: the next call
+ * retries.
+ */
+let projectDefsMemo: { stamp: string; defs: ProjectDef[] } | null = null;
+
+function projectDefsStamp(): string | null {
+  try {
+    const dir = getProjectsDir();
+    const files = fs.readdirSync(dir).filter((f) => f.endsWith('.yaml')).sort();
+    return files
+      .map((f) => {
+        try {
+          const st = fs.statSync(path.join(dir, f));
+          return `${f}:${st.mtimeMs}:${st.size}`;
+        } catch {
+          // Removed between readdir and stat — its absence is part of the stamp.
+          return `${f}:gone`;
+        }
+      })
+      .join('\n');
+  } catch {
+    return null;
+  }
+}
+
+export function listProjectDefsCached(): ProjectDef[] {
+  const stamp = projectDefsStamp();
+  // No projects dir (or unreadable): nothing is confirmed, and nothing to cache.
+  if (stamp === null) return [];
+  if (projectDefsMemo && projectDefsMemo.stamp === stamp) return projectDefsMemo.defs;
+  const defs = listProjectDefs();
+  projectDefsMemo = { stamp, defs };
+  return defs;
+}
+
+/** Drop the {@link listProjectDefsCached} memo — for tests that rewrite the dir within one mtime tick. */
+export function resetProjectDefsCache(): void {
+  projectDefsMemo = null;
+}
+
+/**
+ * The **confirmed** project for a working directory, or `undefined` when the
+ * association is not confirmed (PHNX-3999 F08/F09).
+ *
+ * Confirmed means exactly one thing: a registered project definition
+ * ({@link projectNameForCwd}) whose root contains this path. Being inside *some*
+ * git repository is NOT a project association — a repo nobody registered, a
+ * checkout of someone else's code, or a loose directory that merely has a
+ * `.git` in it would each invent a project name out of a folder, which is the
+ * wrong-grouping the owner's recording shows at 01:30–01:56. So is a bare
+ * directory basename ({@link resolveProjectKey}, which always answers).
+ *
+ * A consumer renders `undefined` as Uncategorized and keeps the session
+ * reachable in its full list — nothing is hidden by not being grouped.
+ *
+ * Use {@link resolveProjectNameForCwd} instead when you want a best-effort
+ * bucket KEY for joining rows; use this when the answer is shown to a person as
+ * "this work belongs to that project".
+ */
+export function confirmedProjectForCwd(
+  cwd: string | undefined | null,
+  defs: ProjectDef[] = listProjectDefsCached(),
+): string | undefined {
+  if (!cwd) return undefined;
+  return projectNameForCwd(cwd, defs);
+}
+
+/**
  * The canonical project label for a cwd, for every surface that buckets work by
  * project (the activity timeline, feed posts, the sessions overview): the
  * DEFINED project whose root contains the cwd (longest root wins, so a

@@ -58,8 +58,13 @@ export const SCHEMA_VERSION = 50;
  * v4 (PHNX-3621 leftover) invalidates Grok rows stamped before the bounded
  * chat_history.jsonl prefix read filled firstUserMessage.
  * v5 (PHNX-3939) restores first-meta Codex fork ownership, including cold files.
+ * v6 (PHNX-3999) invalidates rows whose stored `label` is harness scaffolding — a
+ * `<bash-input>` shell echo, a `<command-name>` wrapper, a bare `/clear` — which
+ * `cleanGeneratedSessionLabel` now rejects. The label is written at index time, so
+ * without this bump every already-indexed session keeps showing the junk title
+ * until its transcript happens to change.
  */
-export const CONTENT_INDEX_VERSION = 5;
+export const CONTENT_INDEX_VERSION = 6;
 
 /**
  * Bump to force `agents sessions backfill resources` to re-derive every

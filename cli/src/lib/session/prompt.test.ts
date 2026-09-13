@@ -90,6 +90,48 @@ describe('cleanGeneratedSessionLabel (harness auto-title → SessionMeta.label)'
     expect(cleanGeneratedSessionLabel('')).toBeUndefined();
     expect(cleanGeneratedSessionLabel('   ')).toBeUndefined();
   });
+
+  // PHNX-3999 F26/F27 — the owner's recording at 07:51–08:03: one row titled with
+  // shell-command XML wrappers, others reading `/clear`. A rejected label falls
+  // through to the generated title and then the user's own first prompt.
+  it('rejects a shell-echo wrapper instead of promoting the command inside it', () => {
+    expect(cleanGeneratedSessionLabel('<bash-input>rg TODO src</bash-input>')).toBeUndefined();
+    // Stripping the tags would leave "rg TODO src" — a shell command is not a
+    // headline either, so the whole label is refused.
+    expect(cleanGeneratedSessionLabel('<bash-stdout>142 matches</bash-stdout>')).toBeUndefined();
+  });
+
+  it('rejects the other harness scaffolding wrappers a first turn can carry', () => {
+    for (const scaffold of [
+      '<command-name>/clear</command-name>',
+      '<local-command-stdout>Set model to opus</local-command-stdout>',
+      '<system-reminder>Remember to run tests</system-reminder>',
+      '<persisted-output>Output too large</persisted-output>',
+      '[Request interrupted by user]',
+    ]) {
+      expect(cleanGeneratedSessionLabel(scaffold)).toBeUndefined();
+    }
+  });
+
+  it('rejects a bare control command, and keeps a command that carries a real task', () => {
+    for (const control of ['/clear', '/compact', '/model', '/exit', '/status']) {
+      expect(cleanGeneratedSessionLabel(control)).toBeUndefined();
+    }
+    expect(cleanGeneratedSessionLabel('/continue fix the retry parser'))
+      .toBe('/continue fix the retry parser');
+  });
+
+  it('still collapses a skill invocation to its /<skill> form (not swallowed by the control rule)', () => {
+    expect(cleanGeneratedSessionLabel(
+      'Base directory for this skill: /home/u/.agents/skills/recap',
+    )).toBe('/recap');
+  });
+
+  it('keeps a meaningful title that merely mentions a tag-like token', () => {
+    // `1 < 2 > 0` is prose to stripXmlLikeTags, and the label is real work.
+    expect(cleanGeneratedSessionLabel('Assert 1 < 2 > 0 in the parser'))
+      .toBe('Assert 1 < 2 > 0 in the parser');
+  });
 });
 
 describe('isSyntheticUserMessage', () => {

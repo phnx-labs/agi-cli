@@ -46,6 +46,7 @@ import { computeTokPerSec } from './throughput.js';
 import { inferSessionState, type SessionState, type SessionActivity, type AwaitingReason, type StructuredQuestion, type TodoProgress, type DetectedPr, type DetectedWorktree, type DetectedTicket } from './state.js';
 import { isSessionTrackedAgent, SESSION_AGENTS, AG_TMUX_NAME_RE, type SessionAgentId, type SessionAttachment, type SessionEvent, type SessionFiles, type SessionMeta, type SessionRequest, type SessionTimeline } from './types.js';
 import { AGENTS } from '../agents.js';
+import { confirmedProjectForCwd, listProjectDefsCached } from '../projects.js';
 import { detectProvenance, type SessionProvenance } from './provenance.js';
 import { loadDevices, type DeviceRegistry } from '../devices/registry.js';
 import { machineId, normalizeHost } from '../machine-id.js';
@@ -251,13 +252,21 @@ export function serializeActiveSessionsForJson(
 ): Array<Omit<ActiveSession, 'viewingIn'> & {
   ticketId: string | null;
   project: string;
+  confirmedProject: string | null;
   prLink: string | null;
   viewingIn: string | null;
 }> {
+  // One definition read for the whole batch, not per row (PHNX-3999 F08/F09).
+  const defs = listProjectDefsCached();
   return sessions.map((s) => ({
     ...s,
     ticketId: s.ticket?.id ?? null,
     project: activeSessionProjectKey(s),
+    // The project a person is shown this row under, or null for Uncategorized.
+    // `project` above is the always-present join KEY (basename of the cwd, or the
+    // explicit cloud/other bucket) and stays exactly as it was — grouping by it is
+    // what filed unbound directories as projects of their own.
+    confirmedProject: confirmedProjectForCwd(s.cwd, defs) ?? null,
     prLink: s.pr?.url ?? null,
     viewingIn: viewingInLabel(s) ?? null,
   }));

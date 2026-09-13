@@ -1,4 +1,5 @@
 import { SessionProjection } from '../projection.js';
+import { confirmedProjectForCwd } from '../../projects.js';
 import { createHash, randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -42,6 +43,18 @@ export interface SessionWatchRow extends Omit<ActiveSession, 'viewingIn' | 'cont
   branch?: string;
   rowKey: string;
   sourceDevice: string;
+  /**
+   * The registered project this session's working directory belongs to, or
+   * `null` when the association is not confirmed (PHNX-3999 F08/F09).
+   *
+   * This is what a UI groups by. It is deliberately not `project`: that field is
+   * a bucket KEY derived from the path (the basename of the cwd, so it always
+   * answers something), which is how a loose or unrelated directory became its
+   * own project group. `null` means Uncategorized — the row is still listed, it
+   * just is not filed under a project nobody bound it to. Resolved on the device
+   * that owns the path, since a definition's root is a local path.
+   */
+  confirmedProject: string | null;
   /** Durable index rows are kept on the stream under a distinct identity so a
    * live row can replace/disappear without erasing its recoverable history. */
   previous: boolean;
@@ -76,6 +89,11 @@ export function toSessionWatchRow(scope: string, row: ActiveSession): SessionWat
     // no computed summary reads `pending` when the summarizer is on, `skipped`
     // when it is off (PHNX-3939). goal/checkpoints/summaryChecklist rode `...row`.
     summaryState: resolveStreamSummaryState(row.summaryState),
+    // The CONFIRMED project this work belongs to, or null for Uncategorized
+    // (PHNX-3999 F08/F09). Only a registered project definition counts — a
+    // consumer must never group by a directory basename, which is how unrelated
+    // and unbound directories became their own "projects".
+    confirmedProject: confirmedProjectForCwd(row.cwd) ?? null,
     rowKey,
     sourceDevice: scope,
     previous,
@@ -144,7 +162,10 @@ export function toPreviousSessionWatchRow(scope: string, session: SessionMeta): 
     ...(session.harness ? { harness: session.harness } : {}),
     sessionId: session.id,
     ...(session.cwd ? { cwd: session.cwd } : {}),
+    // `project` stays the historical bucket KEY rows are joined on; the grouping a
+    // person sees comes from the confirmed association (PHNX-3999 F08/F09).
     ...(session.project ? { project: session.project } : {}),
+    confirmedProject: confirmedProjectForCwd(session.cwd) ?? null,
     // Same headline ladder as a live row (`deriveSessionRecap`, PHNX-3797):
     // `/rename` label → the daemon-generated title → `request.headline` (the
     // user's own sentence with attachment noise pulled out, PHNX-3939) →

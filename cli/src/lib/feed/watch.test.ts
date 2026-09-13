@@ -84,6 +84,41 @@ describe('feed watch operator projection', () => {
 });
 
 
+/**
+ * PHNX-3999 F08/F09 — a session is grouped under a project only when the
+ * association is CONFIRMED (a registered project definition contains its cwd).
+ *
+ * The field has to survive the whole `agents feed watch --json` path, not just the
+ * row builder: session envelope -> feed projection -> the serialized agent rows the
+ * menu decodes. This pins both envelope kinds, because the reset and upsert paths
+ * re-project rows separately.
+ */
+describe('confirmedProject rides the serialized feed stream (PHNX-3999 F08/F09)', () => {
+  it('carries explicit null for an unbound directory through reset and upsert', async () => {
+    // No project definitions exist under this test HOME, so nothing is confirmed —
+    // and an unbound cwd must read as null (Uncategorized), never as `tmp`.
+    const live = session('unbound', { cwd: '/tmp/some-loose-dir' });
+    const sessions = new SessionWatchState('peer-stream');
+    const feed = new FeedWatchState('coordinator-stream');
+
+    const [reset] = await projectSessionEnvelope(sessions.reset('worker-a', [live], []), feed);
+    const resetRow = JSON.parse(JSON.stringify(reset)).agents[0];
+    expect(resetRow.sessionId).toBe('unbound');
+    expect(resetRow.confirmedProject).toBeNull();
+    // The historical join key is untouched — it is a bucket key, not a claim of
+    // project membership, and consumers join rows on it.
+    expect('confirmedProject' in resetRow).toBe(true);
+
+    const [upsert] = await projectSessionEnvelope(
+      sessions.update('worker-a', [session('unbound', { cwd: '/tmp/some-loose-dir', status: 'idle' })])[0],
+      feed,
+    );
+    const upsertRow = JSON.parse(JSON.stringify(upsert)).agent
+      ?? JSON.parse(JSON.stringify(upsert)).agents?.[0];
+    expect(upsertRow.confirmedProject).toBeNull();
+  });
+});
+
 describe('fleet feed shares canonical session ownership', () => {
   it('clears live attention when a raw removal leaves canonical history', async () => {
     const projection = new FeedSessionProjection();
