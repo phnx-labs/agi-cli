@@ -101,7 +101,7 @@ export function collectToolRows(scope: string, sources: ToolSources = {}): ToolS
     const live = liveTasks.get(task);
     rows.push(projectBrowserToolRow(scope, boundBrowserRow(task, live ?? binding ?? {}), binding, live));
   }
-  const computerRows = read(sources.computerRows ?? (() => buildComputerSessionRows({ limit: TOOL_COMPUTER_LIMIT })), [] as ComputerRunRow[]);
+  const computerRows = read(sources.computerRows ?? (() => buildComputerSessionRows({ limit: TOOL_COMPUTER_LIMIT, observer: scope })), [] as ComputerRunRow[]);
   for (const row of computerRows) rows.push(projectComputerToolRow(scope, row));
   return { rows: sortToolRows(rows), complete };
 }
@@ -171,12 +171,36 @@ export function toolWatchRoots(): string[] {
   return [getBrowserRuntimeDir(), getEventsDir(), standaloneComputerActionsDir()];
 }
 
-/** One profile's live task records, with the tabs each task addresses. */
+/**
+ * One profile's live task records, with the tabs each task addresses.
+ *
+ * THROWS on a read it cannot trust. An absent `tasks.json` is the ordinary "no
+ * live browser on this profile" case and returns nothing — but EACCES, EMFILE, a
+ * truncated file or malformed JSON are failures, and swallowing them returned an
+ * empty list that is indistinguishable from "every task closed". The caller then
+ * published a remove for every live row. Failing loud here is what lets
+ * `collectToolRows` mark the projection incomplete and PRESERVE the rows it has.
+ */
 function readLiveTasksFor(profileDir: string): LiveBrowserTask[] {
+  const file = path.join(profileDir, 'tasks.json');
+  let raw: string;
+  try { raw = fs.readFileSync(file, 'utf8'); }
+  catch (error) {
+    // Only "it isn't there" is benign. Anything else is a read we cannot trust.
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
+  }
   let parsed: unknown;
-  try { parsed = JSON.parse(fs.readFileSync(path.join(profileDir, 'tasks.json'), 'utf8')); }
-  catch { return []; /* no live browser on this profile */ }
-  if (!parsed || typeof parsed !== 'object') return [];
+  try { parsed = JSON.parse(raw); }
+  catch (error) {
+    // A JSON error is NOT benign: the browser rewrites this file in place, so a
+    // parse failure usually means we caught a write in progress — and the tasks
+    // are still very much alive.
+    throw new Error(`unreadable live task state at ${file}: ${(error as Error).message}`);
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`unexpected live task state at ${file}: expected an object of tasks`);
+  }
   const out: LiveBrowserTask[] = [];
   for (const [name, value] of Object.entries(parsed as Record<string, unknown>)) {
     if (!value || typeof value !== 'object') continue;
@@ -196,19 +220,40 @@ function readLiveTasksFor(profileDir: string): LiveBrowserTask[] {
       ...(typeof record.profile === 'string' ? { profile: record.profile } : {}),
       ...(typeof record.label === 'string' ? { label: record.label } : {}),
       tabs,
-      ...(typeof record.startedAt === 'number' ? { startedAtMs: record.startedAt } : {}),
+      // The real persisted schema is `createdAt` + `lastActionAt` (`browser/types.ts`
+      // `Task`). An earlier revision read `startedAt`, which the DTO at
+      // `service.ts` uses but `tasks.json` never carries — so every zero-capture
+      // task reported no start time at all and sorted to the bottom.
+      ...(typeof record.createdAt === 'number' ? { startedAtMs: record.createdAt } : {}),
+      // `lastActionAt` is refreshed by every task-scoped action, which makes it
+      // the honest freshness key for a task that has produced no capture yet.
+      // Tasks written before RUSH-2622 carry none; `createdAt` is the fallback the
+      // browser's own reader normalizes them to.
+      ...(typeof record.lastActionAt === 'number' ? { lastActionAtMs: record.lastActionAt }
+        : typeof record.createdAt === 'number' ? { lastActionAtMs: record.createdAt } : {}),
       ...(typeof record.sessionId === 'string' ? { sessionId: record.sessionId } : {}),
       ...(typeof record.launchId === 'string' ? { launchId: record.launchId } : {}),
+      ...(typeof record.actor === 'string' ? { actor: record.actor } : {}),
     });
   }
   return out;
 }
 
-/** Every live browser task on this machine, across every profile runtime dir. */
+/**
+ * Every live browser task on this machine, across every profile runtime dir.
+ *
+ * THROWS for the same reason {@link readLiveTasksFor} does. A runtime dir that
+ * does not exist means no browser has ever run here — genuinely no tasks. A
+ * readdir that fails for any other reason (EACCES, EMFILE) is a failure, and
+ * returning `[]` for it would tell the differ every task had closed.
+ */
 export function readLiveBrowserTasks(root = getBrowserRuntimeDir()): LiveBrowserTask[] {
   let entries: fs.Dirent[];
   try { entries = fs.readdirSync(root, { withFileTypes: true }); }
-  catch { return []; }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
+  }
   const out: LiveBrowserTask[] = [];
   for (const entry of entries) {
     if (!entry.isDirectory() || entry.name === 'sessions') continue;

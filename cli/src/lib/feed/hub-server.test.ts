@@ -193,21 +193,109 @@ describe('local and fleet readers share their own collectors', () => {
     await server.stop();
   });
 
-  it('defaults a reader that sends no scope line to the fleet collector', async () => {
+  it('REJECTS a reader that sends no scope line instead of defaulting to fleet', async () => {
+    // Defaulting to fleet started ssh children to every peer on behalf of a
+    // client that never asked for them, and handed peer data to a client that may
+    // have wanted only this box.
     const endpoint = socketPath();
     const fleet = hubWithControllableFanOut();
     const local = hubWithControllableFanOut();
     const server = new FeedHubServer(fleet.hub, endpoint, local.hub);
     await server.start();
-    // A pre-handshake client: connect, send nothing, expect the fleet stream.
+    const lines: string[] = [];
     const socket = net.createConnection(endpoint);
+    socket.setEncoding('utf-8');
+    socket.on('data', (chunk: string) => lines.push(chunk));
     await new Promise((resolve) => socket.once('connect', resolve));
-    await until('the silent reader to be attached to the fleet hub', () => fleet.hub.readerCount === 1);
-    expect(local.hub.readerCount).toBe(0);
+    await until('the silent reader to be rejected', () => server.rejectedHandshakes > 0);
+    expect(lines.join('')).toContain('no scope line');
+    // Critically: no collector was started for it.
+    expect(fleet.starts).toHaveLength(0);
+    expect(local.starts).toHaveLength(0);
+    expect(fleet.hub.readerCount).toBe(0);
+    socket.destroy();
+    await server.stop();
+  });
+
+  it('rejects an unparseable or unknown scope rather than guessing', async () => {
+    const endpoint = socketPath();
+    const fleet = hubWithControllableFanOut();
+    const server = new FeedHubServer(fleet.hub, endpoint, hubWithControllableFanOut().hub);
+    await server.start();
+    const reject = async (payload: string, expected: RegExp) => {
+      const lines: string[] = [];
+      const socket = net.createConnection(endpoint);
+      socket.setEncoding('utf-8');
+      socket.on('data', (chunk: string) => lines.push(chunk));
+      await new Promise((resolve) => socket.once('connect', resolve));
+      socket.write(payload);
+      await until(`rejection of ${payload.trim()}`, () => expected.test(lines.join('')));
+      socket.destroy();
+    };
+    await reject('not json at all\n', /not valid JSON/);
+    await reject(`${JSON.stringify({ v: 1, scope: 'everything' })}\n`, /unknown scope/);
+    await reject(`${JSON.stringify({ v: 1 })}\n`, /unknown scope/);
+    await reject(`${JSON.stringify({ v: 1, scope: 7 })}\n`, /unknown scope/);
+    expect(fleet.starts).toHaveLength(0);
+    await server.stop();
+  });
+
+  it('rejects a scope line that arrives after the stream is already open', async () => {
+    const endpoint = socketPath();
+    const fleet = hubWithControllableFanOut();
+    const server = new FeedHubServer(fleet.hub, endpoint, hubWithControllableFanOut().hub);
+    await server.start();
+    const lines: string[] = [];
+    const socket = net.createConnection(endpoint);
+    socket.setEncoding('utf-8');
+    socket.on('data', (chunk: string) => lines.push(chunk));
+    await new Promise((resolve) => socket.once('connect', resolve));
+    socket.write(`${JSON.stringify({ v: 1, scope: 'fleet' })}\n`);
+    await until('the reader to attach', () => server.clientCount === 1);
+    // A second scope cannot retroactively change a settled subscription.
+    socket.write(`${JSON.stringify({ v: 1, scope: 'local' })}\n`);
+    await until('the late scope to be rejected', () => lines.join('').includes('already open'));
+    socket.destroy();
+    await server.stop();
+  });
+
+  it('refuses a local reader when the server has no local collector', async () => {
+    // Serving the fleet hub instead would dial peers a local-only reader never
+    // asked for.
+    const endpoint = socketPath();
+    const fleet = hubWithControllableFanOut();
+    const server = new FeedHubServer(fleet.hub, endpoint);
+    await server.start();
+    const lines: string[] = [];
+    const socket = net.createConnection(endpoint);
+    socket.setEncoding('utf-8');
+    socket.on('data', (chunk: string) => lines.push(chunk));
+    await new Promise((resolve) => socket.once('connect', resolve));
+    socket.write(`${JSON.stringify({ v: 1, scope: 'local' })}\n`);
+    await until('the local reader to be refused', () => lines.join('').includes('no local collector'));
+    expect(fleet.starts).toHaveLength(0);
+    socket.destroy();
+    await server.stop();
+  });
+
+  it('rejects a peer that floods the handshake without ever sending a newline', async () => {
+    const endpoint = socketPath();
+    const fleet = hubWithControllableFanOut();
+    const server = new FeedHubServer(fleet.hub, endpoint);
+    await server.start();
+    const lines: string[] = [];
+    const socket = net.createConnection(endpoint);
+    socket.setEncoding('utf-8');
+    socket.on('data', (chunk: string) => lines.push(chunk));
+    await new Promise((resolve) => socket.once('connect', resolve));
+    socket.write('x'.repeat(4096));
+    await until('the flood to be rejected', () => lines.join('').includes('handshake budget'));
+    expect(fleet.starts).toHaveLength(0);
     socket.destroy();
     await server.stop();
   });
 });
+
 
 describe('a stalled reader cannot grow the daemon without bound', () => {
   it('drops a reader whose backlog exceeds the budget', async () => {

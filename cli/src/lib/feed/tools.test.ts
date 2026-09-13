@@ -227,3 +227,57 @@ describe('computer captures come only from real producer records', () => {
     expect(row.device).toBe('win-mini');
   });
 });
+
+describe('device and owner resolve from effective identity', () => {
+  it('never publishes the `unknown` machine sentinel as a device', () => {
+    // `groupIntoComputerRuns` writes 'unknown' when no record identified a
+    // machine. It is a not-identified sentinel, not a device name, and publishing
+    // it made a local action unaddressable and invisible under a device filter.
+    const row = projectComputerToolRow('zion', computerRow({ machine: 'unknown' }));
+    expect(row.device).toBe('zion');
+  });
+
+  it('prefers a real machine, and a driven remote host over both', () => {
+    expect(projectComputerToolRow('zion', computerRow({ machine: 'mark-1' })).device).toBe('mark-1');
+    expect(projectComputerToolRow('zion', computerRow({ machine: 'unknown', remoteHost: 'win-mini' })).device).toBe('win-mini');
+  });
+
+  it('links the owner from the live record when the capture history has none', () => {
+    // A live task's session is in tasks.json; a task that never wrote a durable
+    // browser_sessions row has it nowhere else. Resolving the effective identity
+    // before the owner projection is what makes the link appear on both paths.
+    const live = { task: 'post', sessionId: 'sess-live', launchId: 'launch-live' };
+    const row = projectBrowserToolRow('m1', boundBrowserRow('post', live), undefined, live);
+    expect(row.sessionId).toBe('sess-live');
+    expect(row.launchId).toBe('launch-live');
+    expect(row.owner).toEqual({ sessionId: 'sess-live', device: 'm1' });
+  });
+
+  it('links the owner from the device binding when that is the only source', () => {
+    const row = projectBrowserToolRow('m1', boundBrowserRow('post', {}), { device: 'm1', sessionId: 'sess-bind' });
+    expect(row.sessionId).toBe('sess-bind');
+    expect(row.owner?.sessionId).toBe('sess-bind');
+  });
+
+  it('lets durable capture history win the identity over the live record', () => {
+    const live = { task: 'post', sessionId: 'sess-live' };
+    const row = projectBrowserToolRow('m1', browserRow({ task: 'post', sessionId: 'sess-durable' }), undefined, live);
+    expect(row.sessionId).toBe('sess-durable');
+    expect(row.owner?.sessionId).toBe('sess-durable');
+  });
+
+  it('invents no owner when nothing recorded one', () => {
+    // recordBrowserSession/emit are pre-existing no-ops on some paths, so closed
+    // history genuinely lacks an owner. A fabricated link is worse than none.
+    const row = projectBrowserToolRow('m1', browserRow({ sessionId: undefined, launchId: undefined, linkedSession: undefined, linkStatus: 'unlinked' }));
+    expect(row.owner).toBeUndefined();
+    expect(row.sessionId).toBeUndefined();
+  });
+
+  it('sorts a zero-capture task by its last action, not its creation', () => {
+    const live = { task: 'post', startedAtMs: 1_000, lastActionAtMs: 8_000 };
+    const row = projectBrowserToolRow('m1', boundBrowserRow('post', live), undefined, live);
+    expect(row.startedAtMs).toBe(1_000);
+    expect(row.updatedAtMs).toBe(8_000);
+  });
+});

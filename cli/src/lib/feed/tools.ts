@@ -185,9 +185,14 @@ export interface LiveBrowserTask {
   profile?: string;
   label?: string;
   tabs?: ToolTab[];
+  /** `Task.createdAt` — when the task was opened. */
   startedAtMs?: number;
+  /** `Task.lastActionAt` — refreshed by every task-scoped action. */
+  lastActionAtMs?: number;
   sessionId?: string;
   launchId?: string;
+  /** `Task.actor` — who launched it, when the record carries one. */
+  actor?: string;
 }
 
 /** Stable identity for one tool row within one device scope. */
@@ -219,20 +224,39 @@ export function redactToolUrl(raw: string | undefined): string | undefined {
   return url.toString();
 }
 
-function ownerOf(row: { sessionId?: string; linkedSession?: SessionMeta | null }, scope: string): ToolOwner | undefined {
-  if (!row.sessionId) return undefined;
-  const session = row.linkedSession ?? undefined;
+/**
+ * The owning agent session, or nothing.
+ *
+ * `sessionId` is passed in as the EFFECTIVE identity rather than read off the
+ * capture row: a task's session is recorded in the live task record and in the
+ * device binding as well as in the durable capture history, and a row assembled
+ * from only one of those had an owner on some paths and not others. Resolving the
+ * effective id first is what makes the owner link consistent for one task however
+ * its row was assembled.
+ *
+ * Returns undefined when no id is known. `recordBrowserSession`/`emit` are
+ * pre-existing no-ops for some paths, so closed history genuinely lacks an owner
+ * sometimes — and an invented link would be worse than an absent one.
+ */
+function ownerOf(sessionId: string | undefined, linkedSession: SessionMeta | null | undefined, scope: string): ToolOwner | undefined {
+  if (!sessionId) return undefined;
+  const session = linkedSession ?? undefined;
   // One headline ladder for the whole CLI (SES-14c): a row's own `label`, then the
   // daemon-generated title, then the first-prompt topic. Re-deriving it here would
   // silently drop the generated-title rung and show a different name for the same
   // session than `agents sessions` does.
   const label = session ? sessionHeadline(session) : undefined;
   return {
-    sessionId: row.sessionId,
+    sessionId,
     device: normalizeHost(session?.machine ?? scope),
     ...(label ? { label } : {}),
     ...(session?.agent ? { agent: session.agent } : {}),
   };
+}
+
+/** A machine name, or undefined for the `unknown` not-identified sentinel. */
+function knownMachine(machine: string | undefined): string | undefined {
+  return machine && machine !== 'unknown' ? machine : undefined;
 }
 
 function countBy<T>(items: T[], key: (item: T) => string): Record<string, number> {
@@ -281,7 +305,12 @@ export function projectBrowserToolRow(
   }));
   const oldest = row.artifacts.length > 0 ? row.artifacts[row.artifacts.length - 1]!.mtimeMs : row.latestMtimeMs;
   const url = redactToolUrl(binding?.url);
-  const owner = ownerOf(row, host);
+  // One effective identity for the row AND its owner link, resolved before either
+  // is built: durable capture history first (it survives the task), then the live
+  // record, then the device binding.
+  const sessionId = row.sessionId ?? live?.sessionId ?? binding?.sessionId;
+  const launchId = row.launchId ?? live?.launchId ?? binding?.launchId;
+  const owner = ownerOf(sessionId, row.linkedSession, host);
   // Tabs are only knowable from a LIVE task record on THIS host; a row projected
   // from captures alone, or from a binding pointing at another device, genuinely
   // does not know them and says so by omitting the field.
@@ -289,10 +318,11 @@ export function projectBrowserToolRow(
   const showTab = tabs?.find((tab) => tab.current && !tab.borrowed)?.id
     ?? tabs?.find((tab) => !tab.borrowed)?.id;
   const startedAtMs = live?.startedAtMs ?? binding?.createdAt ?? oldest;
-  // A task with no captures has no capture mtime to sort by; its own start is
-  // the only honest age it has. Reporting 0 would sort a brand-new live task to
-  // the very bottom of a newest-first list.
-  const updatedAtMs = row.latestMtimeMs || startedAtMs;
+  // A task with no captures has no capture mtime to sort by. `lastActionAt` is
+  // refreshed by every task-scoped action, so it is the honest freshness key;
+  // its own start is the fallback. Reporting 0 would sort a brand-new live task
+  // to the very bottom of a newest-first list.
+  const updatedAtMs = Math.max(row.latestMtimeMs, live?.lastActionAtMs ?? 0) || startedAtMs;
   return {
     kind: 'browser',
     // Keyed on the TASK, never on the profile. A task with no captures yet is
@@ -307,8 +337,8 @@ export function projectBrowserToolRow(
     device: normalizeHost(binding?.device ?? host),
     live: isLive,
     ...(row.task ? { task: row.task } : {}),
-    ...(row.sessionId ?? live?.sessionId ?? binding?.sessionId ? { sessionId: row.sessionId ?? live?.sessionId ?? binding?.sessionId } : {}),
-    ...(row.launchId ?? live?.launchId ?? binding?.launchId ? { launchId: row.launchId ?? live?.launchId ?? binding?.launchId } : {}),
+    ...(sessionId ? { sessionId } : {}),
+    ...(launchId ? { launchId } : {}),
     ...(row.linkedSession?.agent ? { agent: row.linkedSession.agent } : {}),
     ...(owner ? { owner } : {}),
     linkStatus: row.linkStatus,
@@ -333,7 +363,7 @@ export function projectBrowserToolRow(
  */
 export function projectComputerToolRow(scope: string, row: ComputerRunRow): ComputerToolRow {
   const host = normalizeHost(scope);
-  const owner = ownerOf(row, host);
+  const owner = ownerOf(row.sessionId, row.linkedSession, host);
   const agent = row.agent ?? row.linkedSession?.agent;
   // Captures come ONLY from a `capture` the producer recorded after the file was
   // written. A screenshot action from before the producer carried that field has
@@ -367,7 +397,12 @@ export function projectComputerToolRow(scope: string, row: ComputerRunRow): Comp
     kind: 'computer',
     rowKey: toolRowKey(host, 'computer', row.invocationId ?? `${row.machine}\0${row.pid ?? ''}\0${row.startMs}`),
     scope: host,
-    device: normalizeHost(row.remoteHost ?? row.machine ?? host),
+    // `groupIntoComputerRuns` writes the literal 'unknown' when no record in the
+    // run identified a machine, which is a sentinel for "not identified" and not a
+    // device name. Publishing it made a locally-run action unaddressable and made
+    // it disappear under a device filter, so it resolves to the observing host —
+    // which is the machine whose ledger the run was read from.
+    device: normalizeHost(row.remoteHost ?? knownMachine(row.machine) ?? host),
     live: false,
     ...(row.task ? { task: row.task } : {}),
     ...(row.sessionId ? { sessionId: row.sessionId } : {}),
