@@ -9,6 +9,7 @@ import {
   parseSubagentFrontmatter,
   getSubagentBody,
   transformSubagentForClaude,
+  transformSubagentForCodex,
   transformSubagentForAntigravity,
   transformSubagentForCopilot,
   transformSubagentForCursor,
@@ -73,6 +74,16 @@ describe('transformSubagentForCopilot', () => {
     const output = transformSubagentForCopilot(dir);
     expect(output).toContain('## Notes');
     expect(output).toContain('Extra notes.');
+  });
+});
+
+describe('transformSubagentForCodex', () => {
+  it('escapes backslashes in the multi-line TOML body, not only the closing quotes (CodeQL js/incomplete-sanitization)', () => {
+    const dir = path.join(makeTempDir(), 'winpath');
+    writeAgentMd(dir, '---\nname: winpath\ndescription: Paths\n---\n\nOpen C:\\Users\\me and match /a\\.b/ then say """done"""\n');
+    const toml = transformSubagentForCodex(dir);
+    expect(toml).toContain('Open C:\\\\Users\\\\me and match /a\\\\.b/ then say \\"""done\\"""');
+    expect(toml).toContain('name = "winpath"');
   });
 });
 

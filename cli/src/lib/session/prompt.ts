@@ -199,7 +199,12 @@ export function cleanSessionPrompt(raw: string): string {
   let text = stripTeamWrappers(raw).replace(/\r/g, '').trim();
   if (!text) return '';
 
-  text = text.replace(/<\/?[a-z_][a-z0-9_-]*>/gi, '');
+  // Repeat until stable: one pass would turn `<sys<b>tem>` into `<system>`.
+  const TAG = /<\/?[a-z_][a-z0-9_-]*>/gi;
+  for (let prev = ''; prev !== text; ) {
+    prev = text;
+    text = text.replace(TAG, '');
+  }
 
   const meaningful = text
     .split('\n')

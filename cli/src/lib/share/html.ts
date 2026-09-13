@@ -40,17 +40,11 @@ export function rewriteFileAnchors(html: string): string {
   );
 }
 
+/** Only a bare relative path or a `file:` URL can name a local asset; every other scheme is left alone. */
 function isRemoteOrSpecial(url: string): boolean {
-  return (
-    url.startsWith('data:') ||
-    url.startsWith('http://') ||
-    url.startsWith('https://') ||
-    url.startsWith('//') ||
-    url.startsWith('#') ||
-    url.startsWith('mailto:') ||
-    url.startsWith('javascript:') ||
-    url.startsWith('agents:')
-  );
+  if (url.startsWith('//') || url.startsWith('#')) return true;
+  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(url)?.[1];
+  return scheme !== undefined && scheme.toLowerCase() !== 'file';
 }
 
 function localImagePath(url: string, htmlDir: string): { path: string; mime: string } | null {
