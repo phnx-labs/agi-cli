@@ -180,12 +180,18 @@ function watchAttentionStores(onChange: () => void): () => void {
   const watchers: fs.FSWatcher[] = [];
   for (const dir of [feedDir, path.join(feedDir, 'resolutions')]) {
     try {
+      // `resolutions` is created lazily by the first `recordResolution` call, so
+      // a fresh feed dir has no directory to watch yet. Create it up front —
+      // otherwise fs.watch throws ENOENT here, is swallowed, and never retried,
+      // silently downgrading every resolution to the 45 s PR-status fallback
+      // instead of the event-driven reconcile this function exists to provide.
+      fs.mkdirSync(dir, { recursive: true });
       const watcher = fs.watch(dir, () => onChange());
       // A directory that disappears must not take the watcher process down; the
       // PR-status cadence below still reconciles on its own timer.
       watcher.on('error', () => watcher.close());
       watchers.push(watcher);
-    } catch { /* the dir appears with the first block; the timed pass covers it */ }
+    } catch { /* best-effort: the timed pass still reconciles on its own cadence */ }
   }
   return () => { for (const watcher of watchers) watcher.close(); };
 }
