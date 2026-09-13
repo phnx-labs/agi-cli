@@ -182,19 +182,23 @@ describe('live browser tasks read from real tasks.json files', () => {
     const root = tempRoot();
     const profile = path.join(root, 'work@zion');
     fs.mkdirSync(profile, { recursive: true });
+    // The REAL persisted schema: createdAt + lastActionAt, per browser/types.ts
+    // `Task`. `startedAt` is a service DTO field that tasks.json never carries.
     fs.writeFileSync(path.join(profile, 'tasks.json'), JSON.stringify({
       post: {
         id: 'p1', name: 'post', profile: 'work@zion', label: 'x.com',
         tabs: { a: 'TARGET-AAAA', b: 'TARGET-BBBB' },
         currentTabId: 'b', borrowedTabs: ['a'],
-        startedAt: 1_700, sessionId: 'sess-9',
+        createdAt: 1_700, lastActionAt: 4_200, sessionId: 'sess-9', actor: 'claude:abc',
       },
     }));
     // A second profile dir, plus the `sessions` dir that is never a profile.
     fs.mkdirSync(path.join(root, 'sessions'), { recursive: true });
     const other = path.join(root, 'dev');
     fs.mkdirSync(other, { recursive: true });
-    fs.writeFileSync(path.join(other, 'tasks.json'), JSON.stringify({ review: { name: 'review', tabs: {} } }));
+    // A pre-RUSH-2622 task carries no lastActionAt; createdAt is the fallback the
+    // browser's own reader normalizes it to.
+    fs.writeFileSync(path.join(other, 'tasks.json'), JSON.stringify({ review: { name: 'review', tabs: {}, createdAt: 900 } }));
 
     const tasks = readLiveBrowserTasks(root);
     expect(tasks.map((task) => task.task).sort()).toEqual(['post', 'review']);
@@ -203,19 +207,71 @@ describe('live browser tasks read from real tasks.json files', () => {
     expect(post.tabs).toEqual([{ id: 'a', borrowed: true }, { id: 'b', current: true }]);
     expect(JSON.stringify(post)).not.toContain('TARGET-AAAA');
     expect(post.startedAtMs).toBe(1_700);
+    expect(post.lastActionAtMs).toBe(4_200);
     expect(post.sessionId).toBe('sess-9');
+    expect(post.actor).toBe('claude:abc');
     // A profile whose task map is empty is still a live task with no tabs.
     expect(tasks.find((task) => task.task === 'review')!.tabs).toEqual([]);
+    expect(tasks.find((task) => task.task === 'review')!.lastActionAtMs).toBe(900);
   });
 
-  it('ignores an unreadable or non-object tasks.json instead of throwing', () => {
+  it('treats an absent tasks.json or runtime dir as genuinely no tasks', () => {
+    const root = tempRoot();
+    // A profile dir with no tasks.json: no live browser on it.
+    fs.mkdirSync(path.join(root, 'idle'), { recursive: true });
+    expect(readLiveBrowserTasks(root)).toEqual([]);
+    // No runtime dir at all: no browser has ever run here.
+    expect(readLiveBrowserTasks(path.join(root, 'absent'))).toEqual([]);
+  });
+
+  it('THROWS on a tasks.json it cannot trust, so stale rows survive', () => {
+    // Returning [] here is indistinguishable from "every task closed", which is
+    // what made live rows flicker out on a mid-write read.
     const root = tempRoot();
     fs.mkdirSync(path.join(root, 'broken'), { recursive: true });
     fs.writeFileSync(path.join(root, 'broken', 'tasks.json'), '{not json');
-    fs.mkdirSync(path.join(root, 'listy'), { recursive: true });
-    fs.writeFileSync(path.join(root, 'listy', 'tasks.json'), '[]');
-    expect(readLiveBrowserTasks(root)).toEqual([]);
-    expect(readLiveBrowserTasks(path.join(root, 'absent'))).toEqual([]);
+    expect(() => readLiveBrowserTasks(root)).toThrow(/unreadable live task state/);
+
+    const listy = tempRoot();
+    fs.mkdirSync(path.join(listy, 'listy'), { recursive: true });
+    fs.writeFileSync(path.join(listy, 'listy', 'tasks.json'), '[]');
+    expect(() => readLiveBrowserTasks(listy)).toThrow(/unexpected live task state/);
+  });
+
+  it('THROWS rather than reporting no tasks when the file cannot be read', () => {
+    const root = tempRoot();
+    const profile = path.join(root, 'locked');
+    fs.mkdirSync(profile, { recursive: true });
+    const file = path.join(profile, 'tasks.json');
+    fs.writeFileSync(file, JSON.stringify({ post: { name: 'post', createdAt: 1 } }));
+    fs.chmodSync(file, 0o000);
+    try {
+      // Running as root defeats the mode bits, so only assert when it really is
+      // unreadable — the ENOENT-vs-other split is what the test is about.
+      let readable = true;
+      try { fs.readFileSync(file, 'utf8'); } catch { readable = false; }
+      if (!readable) expect(() => readLiveBrowserTasks(root)).toThrow();
+      else expect(readLiveBrowserTasks(root)).toHaveLength(1);
+    } finally { fs.chmodSync(file, 0o600); }
+  });
+
+  it('a failed live-task read marks the projection incomplete and keeps rows', () => {
+    const set = new ToolRowSet();
+    const good = collectToolRows('m1', {
+      browserRows: () => [], computerRows: () => [], bindings: () => [],
+      liveTasks: () => [{ task: 'post', tabs: [] }],
+    });
+    expect(good.complete).toBe(true);
+    expect(set.diff(good.rows).upserts).toHaveLength(1);
+
+    const failed = collectToolRows('m1', {
+      browserRows: () => [], computerRows: () => [], bindings: () => [],
+      liveTasks: () => { throw new Error('EACCES'); },
+    });
+    expect(failed.complete).toBe(false);
+    // The differ must never be handed this snapshot; if it were, it would remove
+    // the live row. The watcher's own guard is covered in the stale-rows test.
+    expect(failed.rows).toEqual([]);
   });
 
   it('surfaces a live task that has produced no capture at all', () => {
