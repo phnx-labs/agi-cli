@@ -104,14 +104,25 @@ describe('argv mode delivers exact tokens through a real shell', () => {
 });
 
 describe('argv mode on a PowerShell device', () => {
-  it('base64-encodes a pwsh script whose tokens are single-quoted', () => {
+  it('dispatches on the peer\'s command type instead of assuming a native exe', () => {
     const wrapped = wrapRemoteCommand(dev({ shell: 'powershell' }), ['Write-Output', 'two words', "it's"], { argv: true })!;
     expect(wrapped.startsWith('powershell -NoProfile -EncodedCommand ')).toBe(true);
-    const encoded = wrapped.split(' ').pop()!;
-    const script = Buffer.from(encoded, 'base64').toString('utf16le');
-    // The PROGRAM is pwsh-quoted (PowerShell resolves it), then `--%` stops
-    // parsing and the ARGUMENTS are Win32-quoted for the callee's own split.
-    expect(script).toBe(`& 'Write-Output' --% ${quoteWin32ExecArg('two words')} ${quoteWin32ExecArg("it's")}`);
+    const script = Buffer.from(wrapped.split(' ').pop()!, 'base64').toString('utf16le');
+    // `agents` on Windows is `agents.ps1`, so the target kind cannot be assumed.
+    expect(script).toContain("$__c = Get-Command -Name 'Write-Output' -ErrorAction Stop");
+    expect(script).toContain("if ($__c.CommandType -eq 'Application') {");
+    // Native branch: .NET Process with a CommandLineToArgvW-escaped string.
+    expect(script).toContain('System.Diagnostics.ProcessStartInfo');
+    expect(script).toContain('$__psi.UseShellExecute = $false');
+    expect(script).toContain(`$__psi.Arguments = ${pwshQuote([quoteWin32ExecArg('two words'), quoteWin32ExecArg("it's")].join(' '))}`);
+    // Script branch: a SPLATTED array, which never touches the native serializer.
+    expect(script).toContain(`$__a = @('two words', 'it''s')`);
+    expect(script).toContain('& $__c @__a');
+    // Exit codes propagate from both branches.
+    expect(script).toContain('exit $__p.ExitCode');
+    expect(script).toContain('if ($null -ne $LASTEXITCODE) { exit $LASTEXITCODE }');
+    // The stop-parsing token is deliberately NOT used — see the module docblock.
+    expect(script).not.toContain('--%');
   });
 
   it('quotes every byte that would otherwise be pwsh syntax', () => {
@@ -230,10 +241,12 @@ describe('the FULL buildSshInvocation pipeline, not just the quoter', () => {
     // The prelude must be live pwsh STATEMENTS, not quoted strings.
     expect(script).toContain("$env:AGENTS_FLEET_REMOTE='1';");
     expect(script).not.toContain("'$env:AGENTS_FLEET_REMOTE=");
-    // `&` is what makes the quoted program run instead of being echoed.
-    expect(script).toMatch(/; & 'agents' --% browser navigate /);
-    // The URL carries `&`; Win32 quoting wraps it rather than losing it.
+    // The prelude ends, then the dispatching script begins.
+    expect(script).toContain("$__c = Get-Command -Name 'agents' -ErrorAction Stop");
+    // The URL carries `&`: Win32-escaped for the native branch, pwsh-quoted for
+    // the script branch. Both must carry it whole.
     expect(script).toContain(quoteWin32ExecArg('https://x.test/?a=1&b=2'));
+    expect(script).toContain(pwshQuote('https://x.test/?a=1&b=2'));
   });
 
   it('escapes a quote in a PowerShell provenance value without breaking the statement', () => {
@@ -243,8 +256,11 @@ describe('the FULL buildSshInvocation pipeline, not just the quoter', () => {
     // pwsh doubles an embedded single quote; the statement stays terminated.
     expect(script).toContain("$env:AGENTS_ACTOR_ID='o''brien';");
     expect(script).toContain("$env:AGENTS_ACTOR='Some Name';");
-    // A lone program has no arguments, so no `--%` is emitted for it.
-    expect(script.endsWith("& 'prog'")).toBe(true);
+    // The prelude sits ABOVE the dispatching script, as live statements.
+    expect(script.indexOf("$env:AGENTS_ACTOR=")).toBeLessThan(script.indexOf('$__c = Get-Command'));
+    // A lone program still runs, with empty arguments in both branches.
+    expect(script).toContain("$__psi.Arguments = ''");
+    expect(script).toContain('$__a = @()');
   });
 
   it('leaves a NON-argv powershell drive as an unquoted command, as before', () => {
@@ -259,60 +275,76 @@ describe('the FULL buildSshInvocation pipeline, not just the quoter', () => {
   });
 });
 
-describe('PowerShell 5.1 loses arguments unless they are Win32-quoted after --%', () => {
+describe('PowerShell 5.1 loses arguments, so neither branch uses its serializer', () => {
   /**
    * Measured on a real Windows peer (win-mini, PowerShell 5.1), NOT inferred:
-   * PowerShell re-serializes arguments when invoking a NATIVE program, and its
-   * serializer drops an empty argument entirely and discards embedded double
-   * quotes. Before this, `['a','','b']` arrived on the peer as two arguments and
-   * `say "hi"` arrived as `say hi` — the callee's argv silently shifted.
+   * PowerShell re-serializes arguments when invoking a NATIVE program, dropping an
+   * empty argument entirely and discarding embedded double quotes. `--%` does not
+   * rescue it — it applies only to native commands, a newline argument ends the
+   * directive, and it expands `%VAR%`. Hence the two-branch script.
    */
   function pwshScript(cmd: string[]): string {
     const wrapped = wrapRemoteCommand(dev({ shell: 'powershell' }), cmd, { argv: true })!;
     return Buffer.from(wrapped.split(' ').pop()!, 'base64').toString('utf16le');
   }
+  /** The `Arguments` string the native branch hands to CreateProcess. */
+  function nativeArgs(cmd: string[]): string {
+    const line = pwshScript(cmd).split('\n').find((l) => l.includes('$__psi.Arguments = '))!;
+    const quoted = line.slice(line.indexOf('= ') + 2);
+    // Undo the pwsh single-quoting to read the literal string.
+    return quoted.slice(1, -1).replace(/''/g, "'");
+  }
+  /** The splatted array literal the script branch builds. */
+  function splat(cmd: string[]): string {
+    return pwshScript(cmd).split('\n').find((l) => l.startsWith('$__a = '))!.slice('$__a = '.length);
+  }
 
-  it('emits the stop-parsing token so PowerShell cannot rebuild the line', () => {
-    expect(pwshScript(['prog', 'a'])).toBe(`& 'prog' --% a`);
+  it('never emits the stop-parsing token', () => {
+    // It breaks on a .ps1 target, on a newline argument, and expands %VAR%.
+    expect(pwshScript(['prog', 'a', 'line1\nline2', '%PATH%'])).not.toContain('--%');
   });
 
-  it('represents an EMPTY argument, which PowerShell 5.1 otherwise drops', () => {
-    const script = pwshScript(['prog', 'before', '', 'after']);
-    expect(script).toBe(`& 'prog' --% before "" after`);
-    // The empty token must occupy a position, not vanish.
-    expect(script.split(' ').slice(3)).toHaveLength(3);
+  it('represents an EMPTY argument in both branches', () => {
+    // PowerShell 5.1 drops it; the callee's argv would silently shift.
+    expect(nativeArgs(['prog', 'before', '', 'after'])).toBe('before "" after');
+    expect(splat(['prog', 'before', '', 'after'])).toBe("@('before', '', 'after')");
   });
 
-  it('preserves an embedded double quote, which PowerShell 5.1 otherwise eats', () => {
-    expect(pwshScript(['prog', 'say "hi"'])).toBe(`& 'prog' --% "say \\"hi\\""`);
+  it('preserves an embedded double quote in both branches', () => {
+    expect(nativeArgs(['prog', 'say "hi"'])).toBe('"say \\"hi\\""');
+    expect(splat(['prog', 'say "hi"'])).toBe(`@('say "hi"')`);
   });
 
-  it('doubles backslashes only where a closing quote follows them', () => {
-    // A trailing backslash in an UNQUOTED token needs no doubling — nothing
-    // follows it to escape. This is the canonical quoter's rule, not a shortcut.
-    expect(pwshScript(['prog', 'C:\\dir\\'])).toBe(`& 'prog' --% C:\\dir\\`);
-    // Once the token must be quoted, the trailing run doubles before the close.
-    expect(pwshScript(['prog', 'C:\\my dir\\'])).toBe(`& 'prog' --% ${quoteWin32ExecArg('C:\\my dir\\')}`);
-    // A backslash directly before an embedded quote doubles plus escapes it.
-    expect(pwshScript(['prog', 'a\\"b'])).toBe(`& 'prog' --% ${quoteWin32ExecArg('a\\"b')}`);
+  it('keeps a literal %PATH% unexpanded, which --% would have substituted', () => {
+    expect(nativeArgs(['prog', '%PATH%'])).toBe('%PATH%');
+    expect(splat(['prog', '%PATH%'])).toBe(`@('%PATH%')`);
   });
 
-  it('leaves a plain token unquoted and quotes one with a metacharacter', () => {
-    expect(pwshScript(['prog', 'simple'])).toBe(`& 'prog' --% simple`);
-    expect(pwshScript(['prog', 'a & b'])).toBe(`& 'prog' --% "a & b"`);
+  it('carries an embedded newline, which would have ended a --% directive', () => {
+    // The script is line-joined, so a newline-bearing token spans lines; read the
+    // whole emitted script rather than one line for this case.
+    const script = pwshScript(['prog', 'line1\nline2']);
+    expect(script).toContain(`$__psi.Arguments = ${pwshQuote(quoteWin32ExecArg('line1\nline2'))}`);
+    expect(script).toContain(`$__a = @(${pwshQuote('line1\nline2')})`);
   });
 
-  it('reuses the canonical Win32 quoter rather than a second implementation', () => {
+  it('reuses the canonical Win32 quoter for the native branch', () => {
     // Same algorithm as the `.cmd` shim path; a divergent copy would drift.
-    for (const token of ['', 'a b', 'say "hi"', 'C:\\dir\\', 'a\\"b', 'plain', 'a|b']) {
-      expect(pwshScript(['prog', token])).toBe(`& 'prog' --% ${quoteWin32ExecArg(token)}`);
+    for (const token of ['', 'a b', 'say "hi"', 'C:\\dir\\', 'a\\"b', 'plain', 'a|b', '%X%']) {
+      expect(nativeArgs(['prog', token])).toBe(quoteWin32ExecArg(token));
     }
   });
 
-  it('still quotes the PROGRAM for PowerShell, which resolves it', () => {
-    // The program is not Win32-quoted: PowerShell itself looks it up.
-    expect(pwshScript(['C:\\Program Files\\x\\p.exe', 'arg'])).toBe(
-      `& 'C:\\Program Files\\x\\p.exe' --% arg`,
-    );
+  it('splats with @__a, because @(…) on a literal passes ONE array argument', () => {
+    // A real peer reported every token collapsed into one before this.
+    const script = pwshScript(['prog', 'a', 'b']);
+    expect(script).toContain('& $__c @__a');
+    expect(script).not.toMatch(/& \$__c @\(/);
+  });
+
+  it('handles a program with no arguments in both branches', () => {
+    const script = pwshScript(['prog']);
+    expect(script).toContain("$__psi.Arguments = ''");
+    expect(script).toContain('$__a = @()');
   });
 });

@@ -46,11 +46,14 @@
   arrived as two arguments and `a & b` arrived as a backgrounded command. Pass
   `--argv '["prog","two words","a & b"]'` to deliver each element as exactly one
   token. The positional form is unchanged and still parsed by the remote shell, so
-  the two are mutually exclusive. On a PowerShell host the script is led by the call
-  operator, without which pwsh echoes a quoted program name instead of running it,
-  and the fleet-provenance prefix is composed around the quoted argv rather than
-  inside it — quoting it twice broke any actor value with a space or a quote.
-  Source: `cli/src/lib/devices/connect.ts`.
+  the two are mutually exclusive. On Windows, where a process receives one string
+  and splits it itself, a native target is launched through `System.Diagnostics.Process`
+  with a `CommandLineToArgvW`-escaped argument string and a script or `.cmd`
+  launcher is invoked with a splatted array — PowerShell 5.1's own native
+  serializer drops an empty argument and eats embedded quotes. The fleet-provenance
+  prefix is composed around the quoted argv rather than inside it; quoting it twice
+  broke any actor value containing a space or a quote. Source:
+  `cli/src/lib/devices/connect.ts`.
 - **`agents browser show <path> --device <host>` views a capture held on another
   machine (PHNX-3999).** The file is fetched into a private local path (0600 inside a
   0700 dir), bounded as it streams so an oversized file is refused rather than
