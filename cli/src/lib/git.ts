@@ -465,64 +465,6 @@ export function _resetSnapshotShaCacheForTest(): void {
 }
 
 /**
- * Get the current GitHub username using gh CLI.
- * Returns null if gh is not installed or user is not authenticated.
- */
-async function getGitHubUsername(): Promise<string | null> {
-  try {
-    const { exec } = await import('child_process');
-    const { promisify } = await import('util');
-    const execAsync = promisify(exec);
-    const { stdout } = await execAsync('gh api user --jq ".login"');
-    return stdout.trim() || null;
-  } catch {
-    /* gh CLI not installed or not authenticated */
-    return null;
-  }
-}
-
-const GITHUB_USER_ENV = 'AGENTS_SHARE_GITHUB_USER';
-
-/** Best-effort sync read of `github.user` from git config. */
-function readGitConfigUser(): string | null {
-  try {
-    return execFileSync('git', ['config', '--global', 'github.user'], { stdio: ['ignore', 'pipe', 'ignore'] })
-      .toString()
-      .trim() || null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Resolve the GitHub username synchronously for `agents artifacts share`. Order:
- *   1. `AGENTS_SHARE_GITHUB_USER` env override
- *   2. `git config --global github.user`
- * Falls back to null so callers can decide whether to require auth or proceed
- * without a namespace.
- */
-export function resolveGitHubUsernameSync(): string | null {
-  const env = process.env[GITHUB_USER_ENV]?.trim();
-  if (env) return env;
-  return readGitConfigUser();
-}
-
-/**
- * Resolve the GitHub username asynchronously. Order:
- *   1. `AGENTS_SHARE_GITHUB_USER` env override
- *   2. `gh api user --jq ".login"`
- *   3. `git config --global github.user`
- * Returns null if none succeed.
- */
-export async function resolveGitHubUsername(): Promise<string | null> {
-  const env = process.env[GITHUB_USER_ENV]?.trim();
-  if (env) return env;
-  const gh = await getGitHubUsername();
-  if (gh) return gh;
-  return readGitConfigUser();
-}
-
-/**
  * Get the remote URL for origin in a git repo.
  */
 export async function getRemoteUrl(repoPath: string): Promise<string | null> {

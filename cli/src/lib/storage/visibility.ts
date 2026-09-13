@@ -17,9 +17,10 @@
  * Worker refuses them for a bare WRITE_TOKEN (BYO) publish, which is why the BYO
  * default stays `public`.
  *
- * The names match the Worker's own metadata vocabulary (`lib/share/worker-template.ts`),
- * so this module is the single client-side source of truth for the level set and
- * the DEFAULT, reusable by any surface.
+ * The names match the managed share Worker's own metadata vocabulary (the Worker
+ * now lives in the standalone `artifacts` CLI, PHNX-3992), so this module is the
+ * single client-side source of truth for the level set and the DEFAULT, reusable
+ * by any surface.
  */
 
 /** Every visibility level the Worker understands. `me`/`org` are the

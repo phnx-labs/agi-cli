@@ -789,7 +789,7 @@ SSH access (§7); rendering sessions that no harness produced.
   an `r2.backups` bundle MUST NOT be treated as a BYO override; only `--byo`,
   `AGENTS_SESSIONS_BACKEND=byo`, or a DI write token flips to BYO. The decision
   MUST go through the ONE shared policy (`selectStorageBackendKind`) that
-  `agents artifacts share` and `agents traces sync` also use, resolved once so a
+  `agents traces sync` also uses, resolved once so a
   logout cannot flip the principal mid-preflight
   (`lib/session/sync/backend.ts:resolveSessionsBackend`;
   `lib/session/sync/backend.test.ts`).
@@ -2260,8 +2260,8 @@ schema (`--json` passes through each agent's native stream format).
   profile YAML itself never carries a secret (`lib/profiles.ts:380-393`).
 - **EXEC-8 (MUST).** The "auto share token" (`shareRuntimeEnv`) MUST be
   best-effort: it MUST NOT throw or block an unrelated run when the share
-  bundle is missing or locked (`lib/share/config.ts:117-136`, wrapped in
-  `try/catch`, doc comment: *"Never throws."*).
+  bundle is missing or locked (`lib/share-runtime.ts` `shareRuntimeEnv`, wrapped
+  in `try/catch`, doc comment: *"Never throws AND never prompts."*).
 - **EXEC-9 (MUST).** `--secrets <bundle>` resolution MUST go through
   `readAndResolveBundleEnv`, which MUST fail atomically before spawn on any
   resolution error — no partial env is ever returned to the caller

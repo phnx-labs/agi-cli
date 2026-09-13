@@ -6,9 +6,9 @@
  *
  * Consume the SELECTION + VISIBILITY POLICY from here; keep each surface's typed,
  * `kind`-tagged backend adapter (endpoint, namespace, covers) in that surface's
- * own module. `agents artifacts share` (`lib/share/`) and `agents traces`
- * (`lib/traces/`) are the two current adapters; the `sessions` sync adapter is
- * the next consumer.
+ * own module. `agents traces` (`lib/traces/`) and the `sessions` backup sync are
+ * the current adapters. (Artifact sharing was an adapter too, until it moved to
+ * the standalone `artifacts` CLI, PHNX-3992.)
  */
 
 export {
