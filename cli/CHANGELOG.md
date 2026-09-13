@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.22.110
+
+- **Session rows are named by what YOU asked for, not by the agent's latest
+  message (PHNX-3797).** Every headline in `agents sessions`, the picker, and the
+  AGI EXT Sessions/Fleet list used to be the agent's last transcript line
+  ("Both seams verified on the real shipped artifacts…") — verbose, rolling, and
+  unrecognizable. The headline ladder is now `/rename` label → a
+  daemon-generated title → your own first message; the agent's live line stays in
+  the separate preview slot where a rolling status belongs. The new
+  `session-title` daemon service generates a short, descriptive **action + object
+  headline** ("Triage the AGI board", not just "Triage") with a cheap model
+  through a swappable `SessionTitleProvider` (cloud default; a local ollama-style
+  backend can be dropped in later without touching the tick), read-only plan mode,
+  **once** per session and
+  persists it in the session index against a hash of the message it came from, so
+  a titled session costs no further model calls and only re-titles when that first
+  message changes. Nothing generates per client or per tick: the value rides the
+  existing `sessions watch --json` stream and the fleet session mirror, so a
+  remote box's rows show the same title with no per-row SSH. Until the titler
+  reaches a session it shows your own words — never an agent line.
+  `agents sessions backfill titles [--session <id>] [--refresh]` runs it on
+  demand; `agents daemon services` can turn the service off.
+- **Session rows carry a ranked secondary line (PHNX-3797).** Beside the bold
+  headline, every live row now folds on `importantMessage` — the single most
+  important recent agent message, ranked so a pending **question** or a
+  **needs-you** block (plan review, permission, input-required) beats generic
+  current activity. It rides the same `sessions watch --json` / mirror feed as the
+  title (via the row spread), so AGI EXT renders a bold title over a dim secondary
+  line with no extra query; `agents sessions --active` prints the question /
+  needs-you line dim beneath the row.
+  Source: `src/lib/session/title.ts`, `src/lib/daemon/session-title-service.ts`,
+  `src/lib/session/active.ts`, `src/lib/session/db.ts`, `src/lib/session/mirror.ts`,
+  `src/commands/sessions.ts`, `src/commands/sessions-backfill.ts`.
+
+- Codex account sessions record their originating account after hook sync, including macOS homes relocated for Unix socket limits. Registration refreshes trust for the runtime home and removes the obsolete builtin tracker that could overwrite account metadata; unrelated hooks and explicit disabled states are preserved.
+
+- **Session resume preserves device and picker filters (PHNX-3940).** `sessions resume --device <host> <id>` and the equivalent device-after-ID form now open on the selected origin device. Agent, account, directory, time, and limit filters reach the shared picker; an unspecified limit remains 200. Repeated different devices produce an error.
+
+- **Usage snapshots stay fresh enough for balanced to auto-pick (PHNX-3940 W3).** A headed box polls only the accounts it holds native logins for; a setup-token-only worker never hits the usage endpoint. A changed snapshot is published immediately (statusline ingest or poll) instead of waiting for the 15-minute tick. `isUsageVerified` trusts a row that arrived via sync from the account's poller for that 15-minute cadence, and keeps the 5-minute bar for a local capture. `auth-sync` and `usage-sync` take the shared-repo lock on different offsets so they no longer starve each other. Source: `cli/src/lib/usage-refresh.ts`, `cli/src/lib/accounting/rotate.ts`, `cli/src/lib/accounting/usage-sync.ts`.
+
 ## 1.22.109
 
 - **`agents sessions backup-setup` provisions the managed session-backup endpoint (PHNX-3726).** The operator command that deploys `sessions.agents-cli.sh` — the Cloudflare Worker + R2 bucket a signed-in user's `agents sessions export --to-r2` backs up to with no `r2.backups` bucket of their own. Mirrors `agents traces setup`: reads Cloudflare credentials from the `cloudflare` secrets bundle (`agents secrets exec cloudflare -- agents sessions backup-setup`), idempotent (re-running redeploys the current Worker template in place). It is NOT a per-user step — signing in with `agents auth login` is all a user does; this is how the first-party endpoint itself is deployed. The Worker it deploys is Phoenix-only with no static token (PHNX-3726). Source: `cli/src/commands/sessions-backup-setup.ts`, `cli/src/lib/session/sync/provision.ts` (+ `provision.test.ts`), `cli/docs/sessions.md`.

@@ -1,1 +1,0 @@
-- Codex account sessions record their originating account after hook sync, including macOS homes relocated for Unix socket limits. Registration refreshes trust for the runtime home and removes the obsolete builtin tracker that could overwrite account metadata; unrelated hooks and explicit disabled states are preserved.
