@@ -23,6 +23,7 @@ import {
   listBlocks,
   recordNotified,
   buildDeclaredBlock,
+  deriveBlockState,
   publishBlock,
   type OpenBlock,
 } from '../lib/feed/feed.js';
@@ -269,7 +270,10 @@ function renderBlock(b: OpenBlock, localHost: string, indent = ''): void {
   const cost = b.costOfDelay ? chalk.gray(`cost:${b.costOfDelay}`) : '';
   const rank = b.delayRank ? chalk.gray(`rank:${Math.round(b.delayRank.score)}`) : '';
   // Shared fleet-comms glyphs: ▲ open ask, ✓ answered (see comms-render GLYPH).
-  const marker = b.answer
+  // A PENDING claim carries an answer record while the block is still open, so
+  // the delivered glyph is driven by the canonical state, not by `b.answer`
+  // being set — a claimed-but-undelivered ask must keep reading as needs-you.
+  const marker = deriveBlockState(b) !== 'open'
     ? chalk.green(GLYPH.delivered)
     : b.kind === 'control'
       ? chalk.red('!')
@@ -296,7 +300,9 @@ function renderBlock(b: OpenBlock, localHost: string, indent = ''): void {
   if (b.answer) {
     const verified = b.answer.verified ? chalk.green(GLYPH.delivered) : chalk.yellow('?');
     const who = b.answer.answeredFrom + (b.answer.answeredBy ? ` (${b.answer.answeredBy})` : '');
-    console.log(`${indent}  ${chalk.green('answered')} by ${who} ${verified}`);
+    const pending = deriveBlockState(b) === 'open';
+    const label = pending ? chalk.yellow('claimed (delivery unconfirmed)') : chalk.green('answered');
+    console.log(`${indent}  ${label} by ${who} ${verified}`);
   }
   if (b.parkedAt) {
     console.log(`${indent}  ${chalk.red('hard-parked')} ${relTime(b.parkedAt)}`);

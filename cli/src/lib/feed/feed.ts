@@ -57,6 +57,33 @@ export interface MessageReceipt {
   at: string;
   /** Optional sender label for the message. */
   from?: string;
+  /**
+   * The ask this receipt is ABOUT — the block generation live when the answer
+   * was sent. A block id is per SESSION, so it is reused by every generation of
+   * that session's questions; without this a late acknowledgement for question N
+   * is indistinguishable from one for question N+1 and would resolve the wrong
+   * ask (PHNX-3999). Carried durably on the queued message so it survives the
+   * process that sent it.
+   */
+  generation?: string;
+  /** The claim (attempt) this receipt is about — `AnswerRecord.answeredAt`. */
+  attempt?: string;
+}
+
+/** The ask + attempt a receipt or queued message belongs to. */
+export interface ReceiptOrigin {
+  generation: string;
+  attempt: string;
+}
+
+/**
+ * Whether a receipt describes exactly this ask and attempt. An UNBOUND receipt
+ * (one written before the origin fields existed) is accepted, so older queued
+ * messages still resolve rather than being silently ignored.
+ */
+export function receiptMatchesOrigin(receipt: MessageReceipt, origin: ReceiptOrigin): boolean {
+  if (receipt.generation === undefined && receipt.attempt === undefined) return true;
+  return receipt.generation === origin.generation && receipt.attempt === origin.attempt;
 }
 
 export interface AnswerRecord {
@@ -521,6 +548,30 @@ export function rollbackAnswerClaim(
   const marker = path.join(answeredDir(dir), `${blockId}.json`);
   const current = safeReadJson<AnswerRecord>(marker);
   if (!current || current.answeredAt !== answeredAt) return false;
+
+  // Read-compare-then-unlink is NOT atomic, and two callers releasing the SAME
+  // claim is a real interleaving: both pass the compare, the first unlinks and
+  // re-claims, then the second unlinks the FIRST'S fresh marker and both end up
+  // holding a claim. The release is therefore gated on an O_EXCL token keyed by
+  // the exact claim being released -- the same primitive `recordAnswer` uses, so
+  // exactly one caller can ever release a given `answeredAt` (PHNX-3999).
+  const release = path.join(answeredDir(dir), `${blockId}.${answeredAt.replace(/[^0-9A-Za-z]/g, '')}.release`);
+  try {
+    fs.closeSync(fs.openSync(release, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o644));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false; // another caller owns this release
+    throw error;
+  }
+  const dropToken = (): void => {
+    try { fs.unlinkSync(release); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  };
+  // Re-read INSIDE the token: a racer that released-and-re-claimed between our
+  // first read and the token acquisition would otherwise be clobbered.
+  const held = safeReadJson<AnswerRecord>(marker);
+  if (!held || held.answeredAt !== answeredAt) { dropToken(); return false; }
+
   // Restore while the O_EXCL marker still excludes every other claimant. The
   // marker is removed LAST; once another writer can win recordAnswer, this
   // rollback has no state left to overwrite.
@@ -532,7 +583,13 @@ export function rollbackAnswerClaim(
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
   }
-  fs.unlinkSync(marker);
+  try { fs.unlinkSync(marker); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  // The token has done its job: this exact claim can never be released again,
+  // because the claim it names no longer exists. Leaving it would accumulate one
+  // dead file per released claim forever.
+  dropToken();
   return true;
 }
 
@@ -580,14 +637,23 @@ export function recordMessageReceipt(
 
   // The AGENT's own acknowledgement is what resolves a pending claim: `queued`
   // only says a rail took the answer, so it must never remove the card
-  // (PHNX-3999). `block.answer` is the guard that keeps this bound to the
-  // generation that was claimed — a new question publishes a fresh block with
-  // no answer record, so a late `consumed` for the previous ask cannot resolve it.
-  if ((receipt.status === 'consumed' || receipt.status === 'continued') && block.answer) {
-    confirmAnswerResolution(blockId, dir, {
-      generation: blockGeneration(block),
-      answeredAt: block.answer.answeredAt,
-    });
+  // (PHNX-3999).
+  //
+  // The promotion is bound to the RECEIPT's own origin, not to whatever the
+  // block happens to hold now. Checking `block.answer` alone was not enough: if
+  // the agent moved to question N+1 AND that ask was itself claimed, a late
+  // acknowledgement for question N found a live claim and resolved the wrong
+  // question. `confirmAnswerResolution`'s own compare is what rejects it.
+  if (receipt.status === 'consumed' || receipt.status === 'continued') {
+    if (receipt.generation !== undefined && receipt.attempt !== undefined) {
+      confirmAnswerResolution(blockId, dir, { generation: receipt.generation, answeredAt: receipt.attempt });
+    } else if (block.answer) {
+      // An unbound receipt (queued before the origin fields existed) can only be
+      // read against the current claim, which is the pre-existing behaviour.
+      confirmAnswerResolution(blockId, dir, {
+        generation: blockGeneration(block), answeredAt: block.answer.answeredAt,
+      });
+    }
   }
 }
 
@@ -603,8 +669,15 @@ export function getBlockReceipts(blockId: string, root?: string): MessageReceipt
  * anything was delivered, so a caller reporting on a block it did not deliver
  * must read this rather than synthesize a receipt (PHNX-3999).
  */
-export function latestMessageReceipt(blockId: string, root?: string): MessageReceipt | undefined {
-  const receipts = getBlockReceipts(blockId, root);
+export function latestMessageReceipt(
+  blockId: string, root?: string, origin?: ReceiptOrigin,
+): MessageReceipt | undefined {
+  const all = getBlockReceipts(blockId, root);
+  // A block id is per SESSION, so its receipt list accumulates across every
+  // generation of that session's asks. Reading it unfiltered lets question N's
+  // receipt answer for question N+1 -- so a caller that knows which ask it is
+  // asking about passes the origin and sees only that ask's evidence.
+  const receipts = origin ? all.filter((receipt) => receiptMatchesOrigin(receipt, origin)) : all;
   let best: MessageReceipt | undefined;
   for (const receipt of receipts) {
     if (!best) { best = receipt; continue; }

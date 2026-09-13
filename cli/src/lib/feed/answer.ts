@@ -53,6 +53,7 @@ import {
   recordAnswer,
   recordMessageReceipt,
   rollbackAnswerClaim,
+  type ReceiptOrigin,
   type AnswerRecord,
   type AttentionResolution,
   type MessageReceipt,
@@ -412,11 +413,11 @@ function adoptStrandedClaim(
  * the block's own receipt list and never claims, routes or resends.
  */
 async function awaitHolderReceipt(
-  blockId: string, waitMs: number, root?: string,
+  blockId: string, waitMs: number, origin: ReceiptOrigin, root?: string,
 ): Promise<MessageReceipt | undefined> {
   const until = Date.now() + waitMs;
   for (;;) {
-    const receipt = latestMessageReceipt(blockId, root);
+    const receipt = latestMessageReceipt(blockId, root, origin);
     if (receipt || Date.now() >= until) return receipt;
     await new Promise((resolve) => { const t = setTimeout(resolve, HOLDER_RECEIPT_POLL_MS); t.unref?.(); });
   }
@@ -458,6 +459,7 @@ async function claimOrReconcile(
   operator: VerifiedOperator,
   verified: boolean,
   replayable: boolean,
+  generation: string,
   nowMs: number,
   deadline: Deadline,
   root?: string,
@@ -476,6 +478,9 @@ async function claimOrReconcile(
   if ('unauthorized' in claim) throw new AnswerError(claim.reason, 'unauthorized');
 
   const existing = getAnswerRecord(block.blockId, root) ?? claim.existing;
+  // Scope every receipt read to THIS ask and THIS attempt, so a leftover receipt
+  // from an earlier question on the same session cannot answer for this one.
+  const origin: ReceiptOrigin = { generation, attempt: existing.answeredAt };
   const claimedAtMs = Date.parse(existing.answeredAt);
   const stranded = Number.isFinite(claimedAtMs) && nowMs - claimedAtMs >= STRANDED_CLAIM_MS;
 
@@ -483,8 +488,8 @@ async function claimOrReconcile(
   // answer), so give the holder a moment to record it rather than reporting a
   // scary unknown for what is about to be a receipt.
   const receipt = stranded
-    ? latestMessageReceipt(block.blockId, root)
-    : await awaitHolderReceipt(block.blockId, Math.max(0, Math.min(HOLDER_RECEIPT_WAIT_MS, remainingMs(deadline))), root);
+    ? latestMessageReceipt(block.blockId, root, origin)
+    : await awaitHolderReceipt(block.blockId, Math.max(0, Math.min(HOLDER_RECEIPT_WAIT_MS, remainingMs(deadline))), origin, root);
   if (receipt) return { adopted: false, lost: heldClaimResult(block, attentionKey, host, existing, receipt) };
 
   // No receipt and the claim predates any possible live delivery: a kill cut it
@@ -506,18 +511,28 @@ function isMultilineFreeText(route: AnswerRoute, answer: string): boolean {
 }
 
 async function deliverMailbox(
-  block: OpenBlock, answer: string, operator: VerifiedOperator, adopted: boolean, mailboxRoot?: string,
+  block: OpenBlock, answer: string, operator: VerifiedOperator, adopted: boolean,
+  origin: ReceiptOrigin, mailboxRoot?: string,
 ): Promise<DeliveryOutcome> {
   const dir = mailboxDir(block.mailboxId, mailboxRoot);
   // An adopted claim may already have enqueued before it was killed. The whole
   // spool is scanned — inbox, processing AND consumed (`readBox`, not `peek`) —
   // because a kill AFTER the agent drained the message would otherwise look
   // like nothing was ever sent and enqueue the answer a second time.
-  const existing = adopted ? readBox(dir).find((msg) => msg.blockId === block.blockId) : undefined;
-  const msgId = existing?.msgId
-    ?? enqueue(dir, { to: block.mailboxId, text: answer, from: operator.label, blockId: block.blockId });
+  //
+  // The match is on the ASK and the ATTEMPT, not just the block id: a block id
+  // is per SESSION, so an already-consumed message answering question N would
+  // otherwise suppress a genuine delivery for question N+1.
+  const existing = adopted
+    ? readBox(dir).find((msg) => msg.blockId === block.blockId
+      && msg.generation === origin.generation && msg.attempt === origin.attempt)
+    : undefined;
+  const msgId = existing?.msgId ?? enqueue(dir, {
+    to: block.mailboxId, text: answer, from: operator.label, blockId: block.blockId,
+    generation: origin.generation, attempt: origin.attempt,
+  });
   return {
-    receipt: { msgId, status: 'queued', at: new Date().toISOString(), from: operator.label },
+    receipt: { msgId, status: 'queued', at: new Date().toISOString(), from: operator.label, ...origin },
     ...(existing ? { reason: 'Re-used the message a stranded claim had already enqueued.' } : {}),
   };
 }
@@ -535,7 +550,7 @@ async function deliverMailbox(
  */
 async function deliverResume(
   route: AnswerRoute, block: OpenBlock, claimedAt: string, operator: VerifiedOperator,
-  attentionKey: string, deadline: Deadline,
+  attentionKey: string, deadline: Deadline, origin: ReceiptOrigin,
 ): Promise<DeliveryOutcome> {
   const invocation = getAgentsInvocation(resumeArgv(route));
   const settleMs = Math.max(0, Math.min(RESUME_SETTLE_MS, remainingMs(deadline)));
@@ -564,7 +579,7 @@ async function deliverResume(
       `Resume for '${attentionKey}' is still running after ${settleMs}ms; it has the answer but has not acknowledged it.`,
     );
   }
-  return { receipt: { msgId: `resume-${block.blockId}-${claimedAt}`, status: 'queued', at: new Date().toISOString(), from: operator.label } };
+  return { receipt: { msgId: `resume-${block.blockId}-${claimedAt}`, status: 'queued', at: new Date().toISOString(), from: operator.label, ...origin } };
 }
 
 /**
@@ -578,13 +593,26 @@ async function deliverResume(
  */
 async function deliverInject(
   route: AnswerRoute, block: OpenBlock, answer: string, claimedAt: string, operator: VerifiedOperator,
+  origin: ReceiptOrigin, deadline: Deadline,
 ): Promise<DeliveryOutcome> {
+  // The rail gets the remaining budget, so it cancels its own process group and
+  // never starts a write the deadline can no longer cover.
   const delivered = await injectIntoTerminal(route.inject as NonNullable<AnswerRoute['inject']>, route.payload as string, {
-    enter: route.enter ?? true, combined: false, ...(isMultilineFreeText(route, answer) ? { paste: true } : {}),
+    enter: route.enter ?? true, combined: false, deadlineMs: Math.max(0, remainingMs(deadline)),
+    ...(isMultilineFreeText(route, answer) ? { paste: true } : {}),
   });
   if (!delivered.ok) {
+    // `writes === 0` means no write was even issued, so nothing landed and the
+    // item is cleanly retryable. Anything past the first write is ambiguous: the
+    // text may sit in the composer with only its submit missing.
+    if (delivered.writes === 0) {
+      throw new AnswerError(
+        `${delivered.error ?? `Failed to deliver over ${route.kind}`} — no keystroke was sent.`,
+        'rail_failed',
+      );
+    }
     throw new AnswerUnknownError(
-      `${delivered.error ?? `Failed to deliver over ${route.kind}`} — part of the keystroke sequence may already have landed; open the session before resending.`,
+      `${delivered.error ?? `Failed to deliver over ${route.kind}`} — ${delivered.writes} of the keystroke sequence already landed; open the session before resending.`,
     );
   }
   if (!delivered.confirmed) {
@@ -592,7 +620,7 @@ async function deliverInject(
       `${delivered.backend} accepted the hand-off but cannot confirm the agent received it.`,
     );
   }
-  return { receipt: { msgId: `inject-${block.blockId}-${claimedAt}`, status: 'queued', at: new Date().toISOString(), from: operator.label } };
+  return { receipt: { msgId: `inject-${block.blockId}-${claimedAt}`, status: 'queued', at: new Date().toISOString(), from: operator.label, ...origin } };
 }
 
 /**
@@ -627,7 +655,13 @@ export function checkAnswerDelivery(
   const blockId = blockIdForSession(key.sessionId);
   const base = { attentionKey, blockId, host: key.host };
   const claim = getAnswerRecord(blockId, feedRoot);
-  const receipt = latestMessageReceipt(blockId, feedRoot);
+  // Scoped to the requested ask AND the attempt being checked, so a receipt left
+  // by a different question or a superseded attempt is never read as this one's.
+  const receipt = claim
+    ? latestMessageReceipt(blockId, feedRoot, {
+      generation: key.generation, attempt: expectedAttempt ?? claim.answeredAt,
+    })
+    : undefined;
 
   // A block id is per SESSION, so its claim and receipts belong to whatever
   // generation the session is on NOW. Checking an older card against them would
@@ -714,10 +748,13 @@ export async function claimAndRouteAttentionAnswer(input: {
   const previousResolution = readResolution(block.blockId, input.feedRoot);
   const outcome = await claimOrReconcile(
     block, input.attentionKey, key.host, input.operator, verified,
-    route.kind === 'mailbox', Date.now(), deadline, input.feedRoot,
+    route.kind === 'mailbox', key.generation, Date.now(), deadline, input.feedRoot,
   );
   if (outcome.lost) return outcome.lost;
   const claim = outcome.claim as AnswerRecord;
+  // Every receipt this delivery writes names the ask and the attempt it belongs
+  // to, so a late acknowledgement can never be read against a different question.
+  const origin: ReceiptOrigin = { generation: key.generation, attempt: claim.answeredAt };
   const base = { attentionKey: input.attentionKey, blockId: block.blockId, host: key.host, attempt: claim.answeredAt };
 
   // An adopted claim was created by the killed run, so releasing it means
@@ -729,10 +766,10 @@ export async function claimAndRouteAttentionAnswer(input: {
   try {
     delivered = await withinDeadline(
       route.kind === 'mailbox'
-        ? deliverMailbox(block, answer, input.operator, outcome.adopted, input.mailboxRoot)
+        ? deliverMailbox(block, answer, input.operator, outcome.adopted, origin, input.mailboxRoot)
         : route.kind === 'resume'
-          ? deliverResume(route, block, claim.answeredAt, input.operator, input.attentionKey, deadline)
-          : deliverInject(route, block, answer, claim.answeredAt, input.operator),
+          ? deliverResume(route, block, claim.answeredAt, input.operator, input.attentionKey, deadline, origin)
+          : deliverInject(route, block, answer, claim.answeredAt, input.operator, origin, deadline),
       deadline,
       `Delivering '${input.attentionKey}' over ${route.kind}`,
     );
@@ -821,7 +858,11 @@ export async function forwardFeedAnswer(input: {
   timeoutMs?: number;
 }): Promise<FeedAnswerResult> {
   const timeoutMs = input.timeoutMs ?? REMOTE_ANSWER_TIMEOUT_MS;
-  const remoteCmd = remoteAnswerArgv(input).map(shellQuote).join(' ');
+  // The sentinel is echoed BEFORE the answer command runs, so its absence is
+  // positive proof the remote never began executing. Without it an ssh exit 255
+  // is ambiguous: it is equally "could not connect" and "connection dropped
+  // after the answer was already delivered".
+  const remoteCmd = `echo ${REMOTE_START_SENTINEL}; ${remoteAnswerArgv(input).map(shellQuote).join(' ')}`;
   const unknown = (reason: string): FeedAnswerResult => ({
     status: 'unknown', delivery: 'unconfirmed', resolved: false,
     reason: `${reason} Check delivery rather than resending.`,
@@ -844,13 +885,19 @@ export async function forwardFeedAnswer(input: {
     return unknown(`Answering on '${input.host}' did not finish in ${timeoutMs}ms — it may already have been delivered.`);
   }
 
-  // ssh's own 255 is the ONE confirmed non-delivery: the connection never
-  // carried the command, so nothing ran on the far side and a retry is safe.
-  if (result.code === SSH_CONN_FAILURE_CODE) {
+  // A confirmed non-delivery needs POSITIVE proof that nothing ran, not merely
+  // an ssh failure code: a link dropped AFTER the remote executed also exits
+  // 255. The sentinel is that proof — ssh failed AND the remote never reached
+  // the echo, so the answer command never started and a retry is safe.
+  const started = result.stdout.includes(REMOTE_START_SENTINEL);
+  if (result.code === SSH_CONN_FAILURE_CODE && !started) {
     throw new AnswerError(
       result.stderr.trim() || `Could not reach '${input.host}' to answer '${input.attentionKey}'.`,
       'remote_failed',
     );
+  }
+  if (result.code === SSH_CONN_FAILURE_CODE) {
+    return unknown(`The link to '${input.host}' dropped after the answer command had already started (exit 255).`);
   }
 
   // Everything past a live connection is ambiguous on failure: the remote may
@@ -866,26 +913,55 @@ export async function forwardFeedAnswer(input: {
   } catch {
     return unknown(`Remote answer on '${input.host}' returned unreadable JSON.`);
   }
-  const shapeProblem = remoteResultProblem(parsed, input.attentionKey);
+  const shapeProblem = remoteResultProblem(parsed, input.attentionKey, input.attempt);
   if (shapeProblem) return unknown(`Remote answer on '${input.host}' ${shapeProblem}.`);
   return { ...parsed, host: input.host };
 }
 
 const ANSWER_STATUSES: readonly AnswerStatus[] = ['delivered', 'already_answered', 'unknown', 'failed'];
 const ANSWER_DELIVERIES: readonly AnswerDelivery[] = ['receipt', 'unconfirmed', 'failed'];
+const RECEIPT_STATUSES: readonly MessageReceipt['status'][] = ['queued', 'consumed', 'continued', 'dropped', 'expired'];
+/**
+ * Echoed by the remote BEFORE the answer command runs. Its absence alongside an
+ * ssh failure is the only positive proof that nothing executed on the far side.
+ */
+const REMOTE_START_SENTINEL = '__agents_answer_started__';
 
 /**
  * Validate a forwarded result as a whole, not just its key: an off-key, truncated
  * or shape-invalid reply is not evidence about THIS request, and a caller that
  * trusted one would report another item's outcome as this one's.
  */
-function remoteResultProblem(parsed: FeedAnswerResult, attentionKey: string): string | undefined {
+function remoteResultProblem(
+  parsed: FeedAnswerResult, attentionKey: string, requestedAttempt?: string,
+): string | undefined {
   if (parsed?.attentionKey !== attentionKey) {
     return `reported '${parsed?.attentionKey ?? 'no key'}', not '${attentionKey}'`;
   }
   if (!ANSWER_STATUSES.includes(parsed.status)) return `reported an unknown status '${parsed.status}'`;
   if (!ANSWER_DELIVERIES.includes(parsed.delivery)) return `reported an unknown delivery '${parsed.delivery}'`;
   if (typeof parsed.resolved !== 'boolean') return 'omitted the resolved flag';
-  if (parsed.delivery === 'receipt' && !parsed.receipt?.msgId) return 'claimed a receipt without one';
+  if (parsed.blockId !== undefined && parsed.blockId !== blockIdForSession(parseAttentionKey(attentionKey).sessionId)) {
+    return `reported block '${parsed.blockId}', which is not this key's block`;
+  }
+  // An answer about a DIFFERENT attempt than the one asked about is not evidence
+  // for this one, even though the key matches.
+  if (requestedAttempt !== undefined && parsed.attempt !== undefined && parsed.attempt !== requestedAttempt) {
+    return `reported attempt '${parsed.attempt}', not the requested '${requestedAttempt}'`;
+  }
+  if (parsed.delivery === 'receipt') {
+    if (!parsed.receipt?.msgId) return 'claimed a receipt without one';
+    if (!RECEIPT_STATUSES.includes(parsed.receipt.status)) {
+      return `reported an unknown receipt status '${parsed.receipt.status}'`;
+    }
+    // `resolved` means the agent itself acknowledged — only consumed/continued
+    // can support it. A `queued` receipt claiming resolution is inconsistent.
+    const acknowledged = parsed.receipt.status === 'consumed' || parsed.receipt.status === 'continued';
+    if (parsed.resolved !== acknowledged) {
+      return `reported resolved=${parsed.resolved} for a '${parsed.receipt.status}' receipt`;
+    }
+  } else if (parsed.resolved) {
+    return `reported resolved=true with delivery '${parsed.delivery}'`;
+  }
   return undefined;
 }

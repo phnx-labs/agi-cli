@@ -17,7 +17,7 @@
  * and any UI that collapses blocks under deliverables.
  */
 import { detectTicket, extractPrUrl } from './session/state.js';
-import type { OpenBlock } from './feed/feed.js';
+import { deriveBlockState, type OpenBlock } from './feed/feed.js';
 
 type OutcomeKind = 'ticket' | 'pr' | 'worktree' | 'unassigned';
 
@@ -178,8 +178,14 @@ export interface OutcomeGroup {
   };
 }
 
+/**
+ * Openness is the canonical {@link deriveBlockState}, never a raw `block.answer`
+ * test: a PENDING claim carries an answer record while the block is still
+ * `open`, so reading the field directly showed a claimed-but-undelivered
+ * question as answered in the operator's own feed (PHNX-3999).
+ */
 function isOpen(block: OpenBlock): boolean {
-  return !block.answer && !block.parkedAt && !block.continuedAt && !block.defaultedAt;
+  return deriveBlockState(block) === 'open' && !block.parkedAt && !block.continuedAt && !block.defaultedAt;
 }
 
 /**
@@ -202,7 +208,7 @@ export function groupBlocksByOutcome(blocks: OpenBlock[]): OutcomeGroup[] {
     for (const b of members) {
       const next = b.parkedAt
         ? 'parked'
-        : b.answer || b.defaultedAt || b.continuedAt ? 'answered' : 'open';
+        : isOpen(b) ? 'open' : 'answered';
       const current = states.get(b.mailboxId);
       // One agent occupies one state. Its most actionable block wins.
       if (!current || next === 'open' || (next === 'parked' && current === 'answered')) {
