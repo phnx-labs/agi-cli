@@ -1,4 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -6,6 +8,14 @@ import { addNativeAccount, readSlots, removeAccount } from '../account-registry.
 import { getGlobalDefault, getVersionHomePath, listInstalledVersions } from '../installations/store.js';
 import { getHistoryDir, readMeta, updateMeta } from '../state.js';
 import { ensureSlot, projectAccountSlots, recordSlot, slotDir } from './slots.js';
+
+beforeAll(() => {
+  const tracker = path.resolve(__dirname, '../../../../packages/session-tracker');
+  execFileSync('bun', ['install', '--frozen-lockfile', '--ignore-scripts'], { cwd: tracker, stdio: 'pipe' });
+  execFileSync('bun', ['run', 'build'], { cwd: tracker, stdio: 'pipe' });
+  fs.copyFileSync(path.join(tracker, 'src/hook.sh'), path.join(tracker, 'dist/hook.sh'));
+  fs.chmodSync(path.join(tracker, 'dist/hook.sh'), 0o755);
+}, 60_000);
 
 describe('slotDir', () => {
   it('is ~/.agents/.history/accounts/<harness>/<accountId>/', () => {
@@ -191,6 +201,53 @@ describe('projectAccountSlots (PHNX-3940: slots follow the version home)', () =>
       expect(projectAccountSlots('claude').some((p) => p.accountId === created.id)).toBe(false);
     } finally {
       removeAccount('gone');
+    }
+  });
+
+  it('registers the tracker in new Codex slots and replaces stale registrations during sync', () => {
+    const fromHome = getVersionHomePath('codex', VERSION);
+    const previousDefault = readMeta().agents?.codex;
+    fs.mkdirSync(path.join(fromHome, '.codex'), { recursive: true });
+    updateMeta((m) => ({ ...m, agents: { ...m.agents, codex: VERSION } }));
+    const created = addNativeAccount('tracker', 'codex', 'codex:account=slot-tracker', 'tracker@example.com', VERSION);
+    const slot = ensureSlot('codex', created.id);
+    recordSlot(created.id, slot);
+    const hooksFile = path.join(slot.slotDir, '.codex', 'hooks.json');
+    const sessionId = randomUUID();
+    const sidecar = path.join(getHistoryDir(), 'by-session', `${sessionId}.json`);
+    const commands = (): string[] => JSON.parse(fs.readFileSync(hooksFile, 'utf8')).hooks.SessionStart
+      .flatMap((group: { hooks: { command: string }[] }) => group.hooks.map((hook) => hook.command));
+    try {
+      expect(commands().filter((command) => command.includes('session-tracker'))).toHaveLength(1);
+      const old = '/obsolete/session-tracker/dist/hook.sh codex';
+      const unrelated = 'echo unrelated-user-hook';
+      fs.writeFileSync(hooksFile, JSON.stringify({ hooks: { SessionStart: [{ matcher: '', hooks: [
+        { type: 'command', command: old }, { type: 'command', command: unrelated },
+      ] }] } }));
+      const credentials = path.join(slot.slotDir, '.codex', 'auth.json');
+      const credentialBytes = '{"fixture":"account-local credential sentinel"}\n';
+      fs.writeFileSync(credentials, credentialBytes);
+      for (let pass = 0; pass < 2; pass++) {
+        projectAccountSlots('codex');
+        const registered = commands();
+        expect(registered).not.toContain(old);
+        expect(registered).toContain(unrelated);
+        expect(registered.filter((command) => command.includes('session-tracker'))).toHaveLength(1);
+        expect(fs.readFileSync(credentials, 'utf8')).toBe(credentialBytes);
+      }
+      const command = commands().find((value) => value.includes('session-tracker'))!;
+      execFileSync('sh', ['-c', command], {
+        cwd: slot.slotDir,
+        input: JSON.stringify({ session_id: sessionId, cwd: slot.slotDir }),
+        env: { ...process.env, HOME: slot.slotDir, AGENTS_HISTORY_DIR: getHistoryDir(), AGENTS_RUN_ACCOUNT_ID: created.id },
+      });
+      expect(JSON.parse(fs.readFileSync(sidecar, 'utf8')).accountId).toBe(created.id);
+    } finally {
+      fs.rmSync(sidecar, { force: true });
+      removeAccount('tracker');
+      fs.rmSync(slot.slotDir, { recursive: true, force: true });
+      fs.rmSync(fromHome, { recursive: true, force: true });
+      updateMeta((m) => ({ ...m, agents: { ...m.agents, codex: previousDefault } }));
     }
   });
 });

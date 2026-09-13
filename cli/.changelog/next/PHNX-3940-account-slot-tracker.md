@@ -1,0 +1,1 @@
+- Account sync now refreshes the native session-tracking hook in every account home, replacing stale registrations from previous CLI installations so new sessions retain their account identity.

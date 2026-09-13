@@ -15,6 +15,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { agentConfigDirName } from '../agents.js';
 import { harnessAuth, harnessWorkerIsPerDevice } from '../harness-auth-capabilities.js';
+import { installSessionTrackerHookSync } from '../hooks/install.js';
 import { getGlobalDefault, getVersionHomePath, listInstalledVersions } from '../installations/store.js';
 import { carryForwardSettings } from '../settings-manifest.js';
 import { getHistoryDir, readMeta, updateMeta } from '../state.js';
@@ -76,6 +77,12 @@ function projectResources(harness: AgentId, version: string, destHome: string, f
     const names = getDetector(kind, harness)?.list({ version, versionHome: fromHome, cwd }) ?? [];
     if (names.length === 0) continue;
     writer.write({ version, versionHome: destHome, selection: names, cwd });
+  }
+  if (supports(harness, 'hooks', version).ok) {
+    const tracker = installSessionTrackerHookSync(harness, version, destHome);
+    if (!tracker.installed && tracker.error) {
+      console.warn(`agents: SessionStart hook not installed for ${harness} account home ${destHome}: ${tracker.error}`);
+    }
   }
 }
 

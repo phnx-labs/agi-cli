@@ -1884,6 +1884,8 @@ skips only the Linux suite run.
 `scripts/build.sh --clean --skip-tests` after its suite gate. This includes the
 session-tracker installer and hook under `dist/session-tracker/dist/`; plain
 `bun run build` only compiles the CLI and omits those installed resources.
+Account resource projection also invokes that installer for each account home,
+so both slot creation and later sync replace registrations from older CLI installs.
 
 **The attestation producer shards by default.** `release-attestation-produce.sh`
 (the suite run that mints the attestation) now fans the ~13k-test suite across the
