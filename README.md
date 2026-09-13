@@ -1557,7 +1557,7 @@ term write $SID "print('hello')\n"
 term stop $SID
 ```
 
-A sidecar server holds sessions alive between CLI calls. `screen` renders via xterm-headless. Sessions auto-clean after 30 minutes idle.
+`term`'s own sidecar server holds sessions alive between CLI calls and renders `screen` via a headless terminal emulator; sessions auto-clean after 30 minutes idle. See [term-cli's README](https://github.com/phnx-labs/term-cli#readme) for the full command reference.
 
 ---
 
