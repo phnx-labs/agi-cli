@@ -1650,7 +1650,15 @@ export function getDB(): Database.Database {
   db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_mirror_synced ON sessions(mirror_synced_at)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_routine_run_id ON sessions(routine_run_id)`);
   const sessionColumns = db.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>;
-  if (!sessionColumns.some(column => column.name === 'account_id')) db.exec('ALTER TABLE sessions ADD COLUMN account_id TEXT');
+  if (['account_id', 'phoenix_id'].some(name => !sessionColumns.some(column => column.name === name))) {
+    // Partial upgrades can stamp the current version before every column exists.
+    // Recheck under the writer lock so concurrent openers cannot add it twice.
+    db.transaction(() => {
+      const columns = db.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>;
+      if (!columns.some(column => column.name === 'account_id')) db.exec('ALTER TABLE sessions ADD COLUMN account_id TEXT');
+      if (!columns.some(column => column.name === 'phoenix_id')) db.exec('ALTER TABLE sessions ADD COLUMN phoenix_id TEXT');
+    })();
+  }
 
   // Account attribution repair. Two ways a Claude row ends up wrong even at v33:
   // an older CLI (whose INSERT does not name the column) writes NULL, and a DB

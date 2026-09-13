@@ -42,7 +42,7 @@ const Database = (await import('../sqlite.js')).default;
   seed.close();
 }
 
-const { getDB, SCHEMA_VERSION } = await import('./db.js');
+const { getDB, closeDB, SCHEMA_VERSION, getSessionById, upsertSession } = await import('./db.js');
 
 describe('schema migration v46 -> v47 (actor Phoenix id, PHNX-3798)', () => {
   it('adds a nullable phoenix_id column without damaging legacy rows', () => {
@@ -61,5 +61,25 @@ describe('schema migration v46 -> v47 (actor Phoenix id, PHNX-3798)', () => {
   it('stamps the new schema version', () => {
     const row = getDB().prepare(`SELECT value FROM meta WHERE key = 'schema_version'`).get() as { value: string };
     expect(row.value).toBe(String(SCHEMA_VERSION));
+  });
+
+  it('repairs a current-version index missing phoenix_id and preserves its metadata', () => {
+    const db = getDB();
+    db.prepare(`UPDATE sessions SET account_id = ?, generated_title = ? WHERE id = 'legacy'`)
+      .run('account-legacy', 'Existing session title');
+    db.exec('ALTER TABLE sessions DROP COLUMN phoenix_id');
+    closeDB();
+
+    const repaired = getDB();
+    expect(repaired.prepare(`SELECT value FROM meta WHERE key = 'schema_version'`).get())
+      .toEqual({ value: String(SCHEMA_VERSION) });
+    expect(repaired.prepare(`SELECT account_id, generated_title, actor, file_path, phoenix_id FROM sessions WHERE id = 'legacy'`).get())
+      .toEqual({ account_id: 'account-legacy', generated_title: 'Existing session title', actor: 'ada@example.com', file_path: '/s/legacy.jsonl', phoenix_id: null });
+
+    const session = getSessionById('legacy');
+    expect(session).not.toBeNull();
+    upsertSession({ ...session!, phoenixId: 'phx_ada' }, 'Recovered session');
+    closeDB();
+    expect(getSessionById('legacy')?.phoenixId).toBe('phx_ada');
   });
 });
