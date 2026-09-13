@@ -373,7 +373,7 @@ export function buildPermissionsFromGroups(groupNames: string[]): PermissionSet 
       // Split on CRLF or LF: git checks group yaml out with CRLF on Windows
       // (core.autocrlf), and a plain split('\n') leaves a trailing '\r' so the
       // closing-quote anchor `"$` never matches — extracting ZERO rules, which
-      // wrote an empty permission set and left `agents doctor --fix` unable to
+      // wrote an empty permission set and left `agents sync` unable to
       // reconcile permissions on Windows forever (PHNX-3187).
       const lines = content.split(/\r?\n/);
       let section: 'allow' | 'deny' | null = null;
