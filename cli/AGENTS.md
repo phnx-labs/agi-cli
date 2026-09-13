@@ -778,9 +778,9 @@ question, and a new health check goes in the one whose scope it matches.
 | `agents inspect <agent>[@version]` | Deep **single-harness** diagnosis | Per-resource diff between one version home and its resolved sources; manifest staleness; orphans. One harness, one machine. |
 | `agents doctor` | **Umbrella** — overall fleet + harness health | Local diagnostics (CLI presence, per-version sign-in, per-version sync, orphans) **and** cross-device divergence, rendered as the prioritized critical-at-top + per-computer hybrid below. The single command a user runs to discover problems before runtime. |
 
-**The per-version resource diff is content-aware for EVERY kind `syncResourcesToVersion` writes (PHNX-3504).** `diffVersionResources` ([`src/lib/doctor-diff.ts`](src/lib/doctor-diff.ts)) — the engine behind `agents doctor` and `agents inspect` — no longer name-compares mcp/permissions/subagents or skip workflows/memory. `DOCTOR_ALL_KINDS` = commands, skills, hooks, rules, mcp, permissions, subagents, plugins, **workflows**, **memory** (`promptcuts` is dropped — it is a single version-unscoped file, not per-home). A byte change under an unchanged name is `diff`, never a false `ok`: mcp structurally compares the parsed home server def vs the resolved source (no `claude mcp add` shell-out); subagents re-render the source through the `SUBAGENT_TARGETS` transform and byte-compare; workflows compare layout-aware per harness (Claude's copied WORKFLOW.md tree vs the transformed Kimi/Antigravity/OpenClaw/Grok file vs the Goose recipe; antigravity's is the shared HOME-global dir); memory diffs the knowledge facts (`~/.agents/memory/*.md`, bounded by the `.agents-cli-memory.json` manifest — NOT the rules-preset list that overloads `AvailableResources.memory`); permissions compare per-rule in the harness's native vocabulary for the **representable** harnesses (claude/opencode/cursor/droid/openclaw) and stay presence-only with `detail: 'format cannot verify content'` for the lossy TOML/flag harnesses (codex/grok/kimi/antigravity/hermes/copilot) rather than faking `ok`. The shared byte compare (`filesContentMatch`/`dirsContentMatch`, [`src/lib/resource-content-diff.ts`](src/lib/resource-content-diff.ts)) is reused by skills and the plugin-drift describer. A completeness test in `doctor-diff.test.ts` binds `DOCTOR_ALL_KINDS` to the writer set so a future synced kind cannot silently become a doctor blind spot, and `agents doctor --fix` (`src/lib/heal.ts`) reaches the newly-covered kinds.
+**The per-version resource diff is content-aware for EVERY kind `syncResourcesToVersion` writes (PHNX-3504).** `diffVersionResources` ([`src/lib/doctor-diff.ts`](src/lib/doctor-diff.ts)) — the engine behind `agents doctor` and `agents inspect` — no longer name-compares mcp/permissions/subagents or skip workflows/memory. `DOCTOR_ALL_KINDS` = commands, skills, hooks, rules, mcp, permissions, subagents, plugins, **workflows**, **memory** (`promptcuts` is dropped — it is a single version-unscoped file, not per-home). A byte change under an unchanged name is `diff`, never a false `ok`: mcp structurally compares the parsed home server def vs the resolved source (no `claude mcp add` shell-out); subagents re-render the source through the `SUBAGENT_TARGETS` transform and byte-compare; workflows compare layout-aware per harness (Claude's copied WORKFLOW.md tree vs the transformed Kimi/Antigravity/OpenClaw/Grok file vs the Goose recipe; antigravity's is the shared HOME-global dir); memory diffs the knowledge facts (`~/.agents/memory/*.md`, bounded by the `.agents-cli-memory.json` manifest — NOT the rules-preset list that overloads `AvailableResources.memory`); permissions compare per-rule in the harness's native vocabulary for the **representable** harnesses (claude/opencode/cursor/droid/openclaw) and stay presence-only with `detail: 'format cannot verify content'` for the lossy TOML/flag harnesses (codex/grok/kimi/antigravity/hermes/copilot) rather than faking `ok`. The shared byte compare (`filesContentMatch`/`dirsContentMatch`, [`src/lib/resource-content-diff.ts`](src/lib/resource-content-diff.ts)) is reused by skills and the plugin-drift describer. A completeness test in `doctor-diff.test.ts` binds `DOCTOR_ALL_KINDS` to the writer set so a future synced kind cannot silently become a doctor blind spot, and `agents sync` (`src/lib/heal.ts`) reaches the newly-covered kinds.
 
-**`agents doctor <agent>[@qualifier]` accepts symbolic qualifiers** — `@latest`, `@oldest`, `@default`/`@pinned`, `@all`, or an exact version — resolved through the shared agent-spec engine (`lib/agent-spec/index.ts`, `resolveAgentTargets`). Bare `agents doctor <agent>` (no qualifier) sweeps every installed version without setting `versionExplicit`; `--fix` then excludes isolated copies. Any explicit qualifier sets `versionExplicit: true`, scoping `--fix` to the resolved version set (including isolated copies for `@all`). `AgentSpecError` from the engine is surfaced as a user-facing error. Routing flags (`--device`/`--remote-cwd`) are stripped via `stripRoutingFlags` before target parsing, so `agents doctor claude@latest --device remotebox` resolves correctly on the remote. (issue #2058, `src/commands/doctor.ts:parseTargetArg`)
+**`agents doctor <agent>[@qualifier]` accepts symbolic qualifiers** — `@latest`, `@oldest`, `@default`/`@pinned`, `@all`, or an exact version — resolved through the shared agent-spec engine (`lib/agent-spec/index.ts`, `resolveAgentTargets`). Bare `agents doctor <agent>` (no qualifier) sweeps every installed version without setting `versionExplicit`. Any explicit qualifier sets `versionExplicit: true`, scoping the report to the resolved version set (including isolated copies for `@all`). `AgentSpecError` from the engine is surfaced as a user-facing error. Routing flags (`--device`/`--remote-cwd`) are stripped via `stripRoutingFlags` before target parsing, so `agents doctor claude@latest --device remotebox` resolves correctly on the remote. (issue #2058, `src/commands/doctor.ts:parseTargetArg`)
 
 **`agents doctor` is a prioritized, comprehensive-by-default hybrid (RUSH-2069).**
 There is no `--verbose`. A top `✗ CRITICAL — needs you now (N)` section lists every
@@ -1264,10 +1264,10 @@ the boost overrides load-based ordering without overriding hard health;
 `agents devices config <name> auto-launch.preferred --unset` removes it. Both flags are **shared** device-scope
 keys living in `devices/<name>/agents.yaml` `config.autoLaunch{Enabled,Preferred}`
 (a fleet-wide default rides `fleet.defaults.config`, set with `--fleet`), so they
-sync with `agents repo push/pull`. The four verbs are task-shaped forwarding
-spellings for `agents devices config <name> auto-launch.{enabled,preferred}
-<on|off>` — the one canonical per-device settings surface — so they print a
-deprecation-style "running that for you" notice and defer to it. The **menu bar**
+sync with `agents repo push/pull`. `agents devices enable|disable <name>` are
+the task-shaped spellings for `auto-launch.enabled`; `auto-launch.preferred` has
+no verb and is set through `agents devices config <name>` — the one canonical
+per-device settings surface. The **menu bar**
 surfaces `auto-launch.preferred` as a per-device **★ Favorite / Unfavorite**
 toggle (writing that same canonical `devices config … auto-launch.preferred
 on|off`, no separate store): a favorited device shows a ★ and sorts directly below
@@ -1332,13 +1332,15 @@ rebase carries the rows instead of stashing them.
 intentionally not a per-device key. To see it in the per-device view, use
 `agents devices config <name> --inherited`.
 
-The old commands still work but are deprecated and print a warning pointing to
-`agents config`:
+Two older spellings still work but are deprecated and print a warning pointing
+at the replacement:
 
 - `agents models tier` → `agents config set run.<agent@version>.tier.<tier>`
-- `agents devices set-interactive` → `agents config set interactive.host <name>`
-- `agents devices configure` → `agents config set devices.<name>.<key>`
 - `agents browser profiles set-default` → `agents browser use <name>`
+
+`agents devices set-interactive` and `agents devices configure` are gone:
+`agents config set interactive.host <name>` and `agents config set
+devices.<name>.<key>` are the only spellings.
 
 Implementation: [`src/commands/config.ts`](src/commands/config.ts) with key
 parsing in [`src/lib/config-keys.ts`](src/lib/config-keys.ts). Per-device config
