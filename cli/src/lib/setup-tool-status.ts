@@ -118,7 +118,7 @@ export function toolReadiness(tool: SetupTool, status: unknown): Pick<ToolSetupR
     if (value.running === true) return { readiness: 'ready', detail: 'Browser service is running.' };
     if (value.running === false) return { readiness: 'stopped', detail: 'Browser service is stopped.' };
   }
-  return { readiness: 'unknown', detail: 'The CLI did not report a recognized health state.' };
+  return { readiness: 'unknown', detail: typeof value.error === 'string' && value.error.trim() ? value.error.slice(0, 500) : 'The CLI did not report a recognized health state.' };
 }
 
 async function checkTool(row: ToolSetupRow): Promise<ToolSetupRow> {

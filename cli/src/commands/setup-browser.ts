@@ -9,6 +9,7 @@
  */
 
 import type { Command } from 'commander';
+import { openSetupTerminal } from './setup-terminal.js';
 import chalk from 'chalk';
 import { setConfigValue } from '../lib/device-config.js';
 import { listInstalledBrowsers } from '../lib/browser/chrome.js';
@@ -24,6 +25,7 @@ import { DEFAULT_VIEWPORT } from '../lib/browser/devices.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { defaultBrowserChoice } from './setup-preferences.js';
 import { installSetupTool } from '../lib/setup-tool-install.js';
+import { refreshToolSetup } from '../lib/setup-tool-status.js';
 
 const INSTALL_HINT =
   'Install one of: Google Chrome, Brave, Microsoft Edge, Chromium, Comet, or Arc, then re-run `agents setup browser`.\n' +
@@ -151,10 +153,13 @@ export function registerSetupBrowserCommand(setupCmd: Command): void {
     .command('browser')
     .description('Set up `agents browser` — detect an installed browser and create the default profile.')
     .option('--install-only', 'Install the standalone Browser CLI without changing profiles or starting a browser')
-    .action(async (options: { installOnly?: boolean }) => {
+    .option('--terminal [backend]', 'Open interactive setup in a detected or selected terminal')
+    .action(async (options: { installOnly?: boolean; terminal?: boolean | string }) => {
       try {
+        if (options.terminal !== undefined) { await openSetupTerminal('browser', options.terminal, options.installOnly); return; }
         if (options.installOnly) { if (!(await installSetupTool('browser'))) process.exitCode = 1; return; }
-        await runBrowserWizard();
+        if (!(await runBrowserWizard())) process.exitCode = 1;
+        await refreshToolSetup('browser');
       } catch (err) {
         if (isPromptCancelled(err)) {
           console.log(chalk.yellow('\nCancelled'));

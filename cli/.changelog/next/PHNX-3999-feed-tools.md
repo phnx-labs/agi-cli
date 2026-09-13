@@ -53,3 +53,4 @@
   transferred, and then opened with the normal local viewer — nothing is opened on
   the remote box. `--device` here names where the FILE is; it requires an absolute
   path and is refused together with a URL. Source: `cli/src/commands/browser.ts`.
+- **Setup from the menu uses a real terminal.** `agents setup browser|computer|secrets --terminal` hands interactive onboarding to the existing terminal engine and reports launch errors. Installation and readiness remain separate; only explicit checks run health probes, and concurrent checks share one probe.

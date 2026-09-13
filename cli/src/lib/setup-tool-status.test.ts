@@ -83,5 +83,6 @@ describe('standalone setup metadata and explicit health checks', () => {
     expect(toolReadiness('computer', { running: true, trusted: true }).readiness).toBe('ready');
     expect(toolReadiness('browser', { running: false }).readiness).toBe('stopped');
     expect(toolReadiness('browser', { ok: false }).readiness).toBe('unknown');
+    expect(toolReadiness('browser', { ok: false, service: { state: 'unknown' }, error: "IPC request 'status' timed out after 3000ms" })).toEqual({ readiness: 'unknown', detail: "IPC request 'status' timed out after 3000ms" });
   });
 });

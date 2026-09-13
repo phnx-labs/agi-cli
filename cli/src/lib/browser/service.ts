@@ -1558,6 +1558,8 @@ export class BrowserService {
       await this.saveTaskState(task.profile, conn.tasks);
       return { tabId: resolvedTabId };
     }
+    requireCdp(conn, 'enumerate');
+    await conn.cdp.send('Target.activateTarget', { targetId: task.tabs[resolvedTabId] });
     task.currentTabId = resolvedTabId;
     await this.saveTaskState(task.profile, conn.tasks);
     return { tabId: resolvedTabId };

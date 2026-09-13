@@ -68,7 +68,7 @@ export interface ToolCapture {
  * One tab a browser task has open, with the id the task itself addresses it by.
  *
  * `id` is the task's SHORT tab id (the key of `Task.tabs`), not the underlying
- * CDP target id: the short id is what `agents browser show --tab <id>` accepts
+ * CDP target id: the short id is what `agents browser tab focus <id>` accepts
  * and what stays stable for the life of the tab, while the target id is an
  * engine-internal handle that a reconnect can change.
  */
@@ -176,7 +176,7 @@ export type ToolRow = BrowserToolRow | ComputerToolRow;
  *
  * This is the only authority on a task's tabs: `tasks.json` is rewritten from
  * the live task map, so an entry here means the task exists right now, and its
- * `tabs` map is what `agents browser show --tab` addresses. A task whose run has
+ * `tabs` map is what `agents browser tab focus` addresses. A task whose run has
  * ended is absent even though its captures remain, which is exactly the
  * distinction `live` on a row reports.
  */
@@ -341,7 +341,7 @@ export function projectBrowserToolRow(
     ...(launchId ? { launchId } : {}),
     ...(row.linkedSession?.agent ? { agent: row.linkedSession.agent } : {}),
     ...(owner ? { owner } : {}),
-    linkStatus: row.linkStatus,
+    linkStatus: row.linkedSession ? 'linked' : sessionId ? 'unresolved' : 'unlinked',
     startedAtMs,
     updatedAtMs,
     captures,
@@ -352,7 +352,7 @@ export function projectBrowserToolRow(
     // `runOn` is the OBSERVING host, not `device`: the binding that resolves the
     // task's device lives here, and passing `--device` to a later verb is
     // refused outright. See {@link ToolCommand}.
-    ...(isLive && showTab ? { showCommand: { command: 'agents' as const, args: ['browser', 'show', '--task', row.task!, '--tab', showTab], runOn: host } } : {}),
+    ...(isLive && showTab ? { showCommand: { command: 'agents' as const, args: ['browser', 'tab', 'focus', showTab, '--task', row.task!], runOn: host } } : {}),
     ...(isLive ? { closeCommand: { command: 'agents' as const, args: ['browser', 'done', '--task', row.task!], runOn: host } } : {}),
   };
 }
