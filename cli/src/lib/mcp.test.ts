@@ -361,6 +361,25 @@ describe('MCP argv construction', () => {
     expect(log).toMatch(/ARG:--\nARG:remote\nARG:https:\/\/e\.x\/mcp/);
   });
 
+  it.skipIf(IS_WINDOWS)('puts Codex http name and --url flag', async () => {
+    const home = makeTempHome();
+    const version = '0.1.0';
+    const logPath = path.join(home, 'argv.log');
+    writeVersionBinary(home, 'codex', version, 'codex');
+    makeServerYaml(home, 'remote.yaml', [
+      'name: remote',
+      'transport: http',
+      'url: https://e.x/mcp',
+    ]);
+    const versionHome = path.join(home, '.agents', '.history', 'versions', 'codex', version, 'home');
+    const child = runInstall('codex', version, versionHome, home, logPath);
+    expect(child.status, child.stderr).toBe(0);
+    const result = JSON.parse(child.stdout.trim());
+    expect(result.success).toBe(true);
+    const log = fs.readFileSync(logPath, 'utf-8');
+    expect(log).toMatch(/ARG:mcp\nARG:add\nARG:remote\nARG:--url\nARG:https:\/\/e\.x\/mcp/);
+  });
+
   it('rejects option-like names from registerMcpCommand before spawning', async () => {
     const result = await registerMcpCommandToTargets(
       { directAgents: ['codex'], versionSelections: new Map() },

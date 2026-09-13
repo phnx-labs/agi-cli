@@ -9,6 +9,7 @@ import type { SessionMeta } from '../lib/session/types.js';
 import { resolveSessionMetadataValue } from './sessions.js';
 import { sessionOwnerDevice, consumeResumePinned, RESUME_PINNED_ENV } from '../lib/session/resume-owner.js';
 import { machineId } from '../lib/machine-id.js';
+import { takeOverDetachedSession } from '../lib/session/detached.js';
 
 const RESUME_SOURCE_ENV = 'AGENTS_RESUME_SOURCE_JSON';
 
@@ -192,7 +193,9 @@ export async function runStrictResume(
     return;
   }
 
-  process.exitCode = await delegateLocalResume(pinnedHere ? resumeLocalFallbackSource(outcome.session) : outcome.session, prompt, options);
+  const localSession = pinnedHere ? resumeLocalFallbackSource(outcome.session) : outcome.session;
+  await takeOverDetachedSession(localSession.id);
+  process.exitCode = await delegateLocalResume(localSession, prompt, options);
 }
 
 /**
