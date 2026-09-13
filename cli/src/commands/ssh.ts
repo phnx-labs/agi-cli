@@ -2864,12 +2864,38 @@ async function doDeviceTaskStop(ref: string): Promise<void> {
   }
 }
 
+/**
+ * Parse `--argv`'s JSON array, or report exactly what was wrong and return
+ * undefined. Fails loud rather than coercing: a caller that meant to pass argv
+ * and typo'd the JSON must not silently get shell-string semantics instead.
+ */
+export function parseArgvJson(raw: string, log: (line: string) => void = (line) => console.error(line)): string[] | undefined {
+  let parsed: unknown;
+  try { parsed = JSON.parse(raw); } catch (error) {
+    log(`--argv is not valid JSON: ${(error as Error).message}`);
+    log(`Expected a JSON array of strings, e.g. --argv '["uptime","-p"]'`);
+    return undefined;
+  }
+  if (!Array.isArray(parsed)) {
+    log('--argv must be a JSON ARRAY of strings.');
+    return undefined;
+  }
+  const bad = parsed.findIndex((token) => typeof token !== 'string');
+  if (bad >= 0) {
+    log(`--argv element ${bad} is ${typeof parsed[bad]}, not a string.`);
+    log('Every element is one argv token; numbers and objects have no argv meaning.');
+    return undefined;
+  }
+  return parsed as string[];
+}
+
 /** Register the `agents ssh` smart wrapper. */
 function registerSshWrapper(program: Command): void {
   const sshCmd = program
     .command('ssh <name> [cmd...]')
     .description('Connect to a registered device. Preflights reachability, picks the right shell, and authenticates (key or password-from-bundle).')
     .allowUnknownOption()
+    .option('--argv <json>', 'run a JSON array of argv tokens with exact per-token fidelity (no shell splitting)')
     .addHelpText('after', `
 Examples:
   agents ssh yosemite-s0                     # interactive login (mirrors your project dir)
@@ -2877,6 +2903,8 @@ Examples:
   agents ssh win-mini hostname               # run a command (PowerShell on Windows)
   agents ssh yosemite-s0 uptime              # run a command (POSIX)
   agents ssh auto                            # affinity-pick a device (same engine as 'agents run --device auto')
+  agents ssh box --argv '["agents","feed","post","--title","two words","a & b"]'
+                                             # exact tokens: spaces and metacharacters survive
 
 Devices come from 'agents devices'. Password auth pulls the secret from a
 secrets bundle via an askpass shim — the password never touches argv.
@@ -2891,8 +2919,30 @@ the target when it exists, else the remote home. Same portable-cwd rule as
 An 'agents browser …', 'ag browser …', or standalone 'browser …' command is
 stamped AGENTS_FLEET_REMOTE so the target's browser.remote-control consent
 gate applies, same as 'agents browser <verb> --device <name>'.
+
+--argv takes a JSON array of strings and delivers each element as exactly ONE
+token on the peer, so a token containing a space, '&', '|', '$' or a quote
+arrives intact. The positional form keeps its existing semantics — the remote
+shell parses it — so the two are mutually exclusive rather than interchangeable.
 `)
-    .action(async (name: string, cmd: string[]) => {
+    .action(async (name: string, cmd: string[], opts: { argv?: string }) => {
+      // `--argv` is a DIFFERENT delivery contract, not a spelling of the
+      // positional form, so accepting both would have to silently pick one.
+      if (opts.argv !== undefined && cmd.length > 0) {
+        console.error(chalk.red('Pass either --argv <json> or a positional command, not both.'));
+        console.error(chalk.gray('--argv delivers exact tokens; the positional form is parsed by the remote shell.'));
+        process.exit(1);
+      }
+      let argvTokens: string[] | undefined;
+      if (opts.argv !== undefined) {
+        argvTokens = parseArgvJson(opts.argv);
+        if (!argvTokens) process.exit(1);
+        if (argvTokens.length === 0) {
+          console.error(chalk.red('--argv needs at least one token (the program to run).'));
+          process.exit(1);
+        }
+        cmd = argvTokens;
+      }
       // Hidden askpass bridge: ssh execs the shim, which re-invokes us here.
       if (name === '__askpass') {
         await runAskpass();
@@ -2967,7 +3017,7 @@ gate applies, same as 'agents browser <verb> --device <name>'.
         // `agents run --device` (deriveMirroredCwd). Best-effort — a missing dir
         // falls back to the remote home. An explicit `cmd` keeps its cwd (RUSH-2412).
         const mirrorCwd = cmd.length === 0 ? deriveMirroredCwd(process.cwd()) : undefined;
-        const { args, env } = buildSshInvocation(device, cmd, shim, { pinned }, { interactiveCwd: mirrorCwd });
+        const { args, env } = buildSshInvocation(device, cmd, shim, { pinned }, { interactiveCwd: mirrorCwd, ...(argvTokens ? { argv: true } : {}) });
 
         // Interactive login: make the local terminal's terminfo (e.g.
         // xterm-ghostty) available on the remote so backspace/colors/clear work.
