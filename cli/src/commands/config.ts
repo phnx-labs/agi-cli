@@ -115,6 +115,7 @@ function parseValue(key: string, parsed: ParsedConfigKey, raw: string): unknown 
           return raw.trim();
         case 'browser.profile':
         case 'browser.viewer':
+        case 'computer.host':
           return raw.trim();
       }
       // A device property with no arm above used to fall out of the switch and
@@ -435,6 +436,9 @@ function* listDeviceConfigEntries(device: string): Generator<{ key: string; valu
         // Same duplication rule as browser.profile above.
         if (device === machineId()) continue;
         key = `${prefix}browser.viewer`;
+        break;
+      case 'computer.host':
+        key = `${prefix}computer.host`;
         break;
       default:
         // A `default: continue` here silently drops any device property with no

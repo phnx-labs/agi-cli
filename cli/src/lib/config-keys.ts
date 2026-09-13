@@ -94,7 +94,8 @@ export type DeviceConfigProperty =
   | 'browser.task-idle-minutes'
   | 'notes'
   | 'browser.profile'
-  | 'browser.viewer';
+  | 'browser.viewer'
+  | 'computer.host';
 
 const DEVICE_CONFIG_PROPERTIES: DeviceConfigProperty[] = [
   'browser.viewer',
@@ -108,6 +109,7 @@ const DEVICE_CONFIG_PROPERTIES: DeviceConfigProperty[] = [
   'browser.task-idle-minutes',
   'notes',
   'browser.profile',
+  'computer.host',
 ];
 
 /** Split an agent@version token into its parts. Accepts both `@` and `:`. */
@@ -215,7 +217,7 @@ export function parseConfigKey(key: string): ParsedConfigKey {
   }
 
   const deviceMatch = raw.match(
-    /^devices\.(.+)\.(role|max-agents|scheduler|daemon|watchdog|tmux|notes|browser\.remote-control|browser\.task-idle-minutes|browser\.profile|browser\.viewer)$/,
+    /^devices\.(.+)\.(role|max-agents|scheduler|daemon|watchdog|tmux|notes|browser\.remote-control|browser\.task-idle-minutes|browser\.profile|browser\.viewer|computer\.host)$/,
   );
   if (deviceMatch) {
     return {
@@ -346,6 +348,8 @@ export function devicePropertyToConfigName(property: DeviceConfigProperty): stri
       return 'browser.profile';
     case 'browser.viewer':
       return 'browser.viewer';
+    case 'computer.host':
+      return 'computer.host';
   }
 }
 

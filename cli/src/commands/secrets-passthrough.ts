@@ -15,13 +15,38 @@
  * retired in-repo engine (`commands/secrets.ts` and its siblings), which stays
  * in the tree, unregistered, until every consumer has moved off it (tasks.md
  * item 7).
+ *
+ * `secrets` is listed in {@link import('../lib/hosts/passthrough.js').OWN_HOST_COMMANDS}
+ * so `--device` never routes through the generic SSH passthrough — the engine
+ * has no fleet registry of its own (PHNX-4090), so a `--device <name>` here is
+ * rewritten to `--host ssh://user@host` before exec, exactly like
+ * `agents computer`'s equivalent rewrite. An explicit `--host` on the command
+ * line is left untouched.
  */
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import { spawnSync } from 'node:child_process';
 import { buildServeEnv, invocation, resolveSecretsBin, SecretsClientError } from '../lib/secrets-client.js';
+import { flagValue } from '../lib/hosts/routing-flag.js';
+import { stripRoutingFlags } from '../lib/hosts/remote-cmd.js';
+import { resolveRemoteDevice } from '../lib/ssh-tunnel.js';
 
 const INSTALL_HINT = 'npm i -g @phnx-labs/secrets-cli';
+
+/**
+ * Rewrite a `--device <name>` (or `-D`) on the forwarded argv to
+ * `--host ssh://user@host`, the address grammar `secrets` speaks (PHNX-4090).
+ * A `--host` the caller already typed wins — `--device` is left in place so
+ * the standalone binary reports the same "both given" ambiguity it always has.
+ */
+export async function rewriteDeviceToHost(argv: string[]): Promise<string[]> {
+  if (flagValue(argv, 'host', 'H') !== undefined) return argv;
+  const device = flagValue(argv, 'device', 'D');
+  if (device === undefined) return argv;
+  const resolved = await resolveRemoteDevice(device, {});
+  const stripped = stripRoutingFlags(argv, [{ long: 'device', short: 'D', takesValue: true }]);
+  return [...stripped, '--host', `ssh://${resolved.target}`];
+}
 
 export function registerSecretsCommands(program: Command): void {
   program
@@ -32,7 +57,7 @@ export function registerSecretsCommands(program: Command): void {
     // Hand `-h`/`--help` through too — the real subcommand help lives in the
     // installed `secrets` binary, not in this passthrough.
     .helpOption(false)
-    .action(() => {
+    .action(async () => {
       let bin: string;
       try {
         bin = resolveSecretsBin();
@@ -48,7 +73,7 @@ export function registerSecretsCommands(program: Command): void {
       // Everything after the literal `secrets` token on the real argv — the
       // subcommand + its own flags, verbatim, never re-parsed by commander.
       const secretsIndex = process.argv.indexOf('secrets');
-      const forwarded = secretsIndex >= 0 ? process.argv.slice(secretsIndex + 1) : [];
+      const forwarded = await rewriteDeviceToHost(secretsIndex >= 0 ? process.argv.slice(secretsIndex + 1) : []);
       const { command, prefix } = invocation(bin);
       const res = spawnSync(command, [...prefix, ...forwarded], {
         stdio: 'inherit',

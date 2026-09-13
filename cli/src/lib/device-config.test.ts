@@ -352,6 +352,7 @@ describe('listConfig', () => {
       'browser.remote-control',
       'browser.task-idle-minutes',
       'browser.viewer',
+      'computer.host',
       'daemon.enabled',
       'description',
       'interactive.host',

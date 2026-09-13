@@ -182,6 +182,27 @@ describe('config command', () => {
     expect(listOut).not.toMatch(/devices\.[\w-]+\.browser\.profile/);
   });
 
+  it('sets, gets, lists and unsets a device computer.host address (PHNX-4090)', () => {
+    const env = { AGENTS_SYNC_MACHINE_ID: 'testbox' };
+    runAgents(home, ['config', 'set', 'devices.testbox.computer.host', 'vnc://10.0.0.5:5901'], env);
+
+    expect(runAgents(home, ['config', 'get', 'devices.testbox.computer.host'], env)).toContain('vnc://10.0.0.5:5901');
+    const listOut = runAgents(home, ['config', 'list'], env);
+    expect(listOut).toContain('devices.testbox.computer.host');
+
+    const yaml = fs.readFileSync(path.join(home, '.agents', 'devices', 'testbox', 'agents.yaml'), 'utf-8');
+    expect(yaml).toContain('computerHost');
+
+    runAgents(home, ['config', 'unset', 'devices.testbox.computer.host'], env);
+    expect(runAgents(home, ['config', 'get', 'devices.testbox.computer.host'], env)).toContain('(unset)');
+  });
+
+  it('rejects a computer.host address with an unsupported scheme', () => {
+    const env = { AGENTS_SYNC_MACHINE_ID: 'testbox' };
+    expect(() => runAgents(home, ['config', 'set', 'devices.testbox.computer.host', 'cdp://127.0.0.1:9222'], env))
+      .toThrow(/computer\.host speaks ssh:\/\/, vnc:\/\/ and tcp:\/\/ only/);
+  });
+
   it('rejects unknown keys', () => {
     expect(() => runAgents(home, ['config', 'get', 'foo.bar'])).toThrow(/Unknown config scope/);
   });

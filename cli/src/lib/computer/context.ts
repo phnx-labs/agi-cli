@@ -40,7 +40,7 @@ import { loadComputerAllowList, loadDefaultPeers } from './policy.js';
 import { resolveRemoteDevice } from '../ssh-tunnel.js';
 
 /** A `--device <name>` target, resolved against the fleet. */
-interface ComputerTargetContext {
+export interface ComputerTargetContext {
   /** The device name as the user typed it. */
   alias: string;
   /** `user@host`, already validated against ssh option injection. */
@@ -89,6 +89,13 @@ interface BuildContextOptions {
   host?: string;
   /** Resolved path of the standalone executable, for the peer allow list. */
   computerBin?: string;
+  /**
+   * A precomputed target (PHNX-4090: `resolveDeviceHost` in `commands/computer.ts`
+   * already resolved the device's `computer.host` config, or the ssh fallback).
+   * When present, `device` is used only to gate the local-permissions branch
+   * below — this skips a second, possibly Windows-gated, fleet resolution.
+   */
+  target?: ComputerTargetContext;
 }
 
 /**
@@ -100,8 +107,8 @@ interface BuildContextOptions {
  * layer that can actually see the device's platform.
  */
 export async function buildComputerContext(opts: BuildContextOptions = {}): Promise<ComputerContext> {
-  let target: ComputerTargetContext | undefined;
-  if (opts.device) {
+  let target: ComputerTargetContext | undefined = opts.target;
+  if (!target && opts.device) {
     const resolved = await resolveRemoteDevice(opts.device, {
       expectPlatform: 'windows',
       forWhat: '`agents computer --device` drives the Windows computer-helper daemon, so it',
