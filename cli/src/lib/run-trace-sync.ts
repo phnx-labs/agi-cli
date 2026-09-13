@@ -83,7 +83,7 @@ export function armRunFinishTraceSync(opts: { disabled?: boolean } = {}): void {
 
 /**
  * Fire a fire-and-forget `agents traces sync` NOW (not on exit). An important
- * owner-bound ping (`feed post --level important`, `agents send --to owner`,
+ * owner-bound ping (`feed post --level important`, `agents notify`,
  * `send --to owner`) links the caller's `…/console/sessions/<id>` page, and that
  * page only exists once the session's shard has been uploaded — trace sync fires
  * on run exit (PHNX-3628), not when a mid-run ping is posted. This closes that

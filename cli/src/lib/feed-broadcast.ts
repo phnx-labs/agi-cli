@@ -27,7 +27,7 @@
  * A second sink shape (RUSH-2123) delivers **in-process** through the same
  * channel-provider registry `agents send` uses (`channel:` instead of
  * `command:`) — no spawn, no argv templating. `channel: owner` is the address
- * alias that expands to `notify.owner.{channel,to}`, matching `agents send --to owner`.
+ * alias that expands to `notify.owner.{channel,to}`, matching `agents notify`.
  * When the operator has never written a `feed.broadcast` block at all, an
  * important-level post falls back to that owner address implicitly
  * ({@link effectiveBroadcastConfig}) rather than reaching nobody — see that
@@ -67,9 +67,9 @@ export interface FeedSinkConfig {
   command?: string[];
   /**
    * In-process delivery through the same channel-provider registry `agents
-   * send`/`agents send --to owner` use — the composed `{message}` body, no argv, no
+   * send`/`agents notify` use — the composed `{message}` body, no argv, no
    * spawn. `'owner'` is the address alias (expands to `notify.owner.{channel,to}`
-   * in agents.yaml, same as `agents send --to owner`); any other value is a registered
+   * in agents.yaml, same as `agents notify`); any other value is a registered
    * channel name (or a `notify.transports` mapping) and requires `to`.
    */
   channel?: string;
@@ -640,7 +640,7 @@ export function planFeedBroadcast(
  * moment `feed.broadcast` was empty, even when `notify.owner` was fully
  * configured — so the common case (an operator who set up owner notifications
  * but never wrote a `feed.broadcast` block) produced a `--blocked` post that
- * looked recorded and reached nobody. `agents send --to owner` already treats
+ * looked recorded and reached nobody. `agents notify` already treats
  * `notify.owner` as the default human destination; this makes an important
  * feed post/block use that same default instead of requiring a second,
  * redundant config block that says the same thing.
@@ -715,7 +715,7 @@ function runCommandSink(name: string, argv: string[], timeoutMs: number): SinkOu
 
 /**
  * Deliver one `channel:` sink through the real provider registry —
- * `resolveSendEnvelope` reuses `agents send --to owner`'s owner-alias expansion, and
+ * `resolveSendEnvelope` reuses `agents notify`'s owner-alias expansion, and
  * `deliverEnvelope` is the same seam `agents send` calls. A bad channel name
  * is checked with `lookupTransport` (the non-throwing lookup) BEFORE handing
  * off to `deliverEnvelope`: that function's own resolution `die()`s on an

@@ -479,7 +479,7 @@ export function buildPreview(session: SessionMeta): string {
 
   // No transcript on disk — either an archived session (file gone, user turns
   // still in the DB — RUSH-2436), a live session not indexed locally, or a
-  // synthesized entry (an attach-only resume). Show the header + a clean note.
+  // synthesized entry (e.g. `sessions go`). Show the header + a clean note.
   if (!session.filePath || !fs.existsSync(session.filePath)) {
     const archivedContent = readSessionContent(session.id);
     if (archivedContent && archivedContent.trim() !== '') {

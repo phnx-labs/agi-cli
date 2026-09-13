@@ -377,7 +377,7 @@ export async function resolveAgentTargetsAutoInstalling(
 /**
  * Same as resolveAgentTargetsAutoInstalling but returns the broader
  * InstalledAgentTargetResult that includes `directAgents` (for paths like
- * `agents install` and `sync --mcp` that fall through to unmanaged homes
+ * `agents install` and `mcp register` that fall through to unmanaged homes
  * when no managed version is installed).
  */
 export async function resolveInstalledAgentTargetsAutoInstalling(

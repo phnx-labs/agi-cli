@@ -44,7 +44,7 @@ interface SelfHealOptions {
   checks?: HealCheckId[];
   /** Only run checks whose cadence is in this set (daemon scheduling). */
   cadences?: HealCadence[];
-  /** 'safe' (daemon default) or 'full' (agents sync). Default 'safe'. */
+  /** 'safe' (daemon default) or 'full' (doctor --fix). Default 'safe'. */
   mode?: 'safe' | 'full';
   /** Detect only — never write. Default false. */
   dryRun?: boolean;

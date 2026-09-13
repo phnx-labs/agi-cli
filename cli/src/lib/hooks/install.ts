@@ -996,7 +996,7 @@ export interface HookRuntimeRepairAttempt {
 
 /**
  * Result of one bounded repair pass over agents-managed generated hook shims.
- * Shared by self-heal and agents sync; additive types for the doctor track.
+ * Shared by self-heal and doctor --fix; additive types for the doctor track.
  */
 export interface HookRuntimeRepairReport {
   /** Broken artifacts found before any write (inspect-only snapshot). */

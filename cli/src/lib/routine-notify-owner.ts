@@ -4,14 +4,14 @@
  * The desktop lifecycle notifications (routine-notify.ts) never leave the
  * machine, so a failed scheduled routine on a headless fleet box was invisible
  * until someone happened to look. The per-routine prompt pattern (a prompt that
- * ends by shelling `agents send --to owner`) does not close the gap either: when the
+ * ends by shelling `agents notify`) does not close the gap either: when the
  * routine's OWN agent fails to spawn (`auth_failed`) that prompt never runs, so
  * the one failure most worth surfacing is the one that goes unheard.
  *
  * So the DAEMON delivers on failure, from the SAME owner channel stack `agents
- * send --to owner` uses (humans.yaml owner channels, or the legacy `notify.owner`),
+ * notify` uses (humans.yaml owner channels, or the legacy `notify.owner`),
  * calling the channel providers IN-PROCESS — no shelling out to `ssh mac-mini
- * agents send --to owner`. When the primary owner channel cannot deliver from this box it
+ * agents notify`. When the primary owner channel cannot deliver from this box it
  * walks the remaining configured owner channels as fallbacks (OpenClaw, a second
  * channel, …). Telegram is never used.
  *
@@ -115,7 +115,7 @@ function isTelegramChannel(
 
 /**
  * Ordered owner delivery plan for a failure ping: the primary owner destination
- * (the same one `agents send --to owner` resolves) first, then every other configured
+ * (the same one `agents notify` resolves) first, then every other configured
  * owner channel as a fallback. Deduped by (channel, to). Telegram channels and
  * intrusive channels (a voice call is too much for a routine failure) are
  * excluded entirely — so an owner whose ONLY channel is Telegram gets an empty
@@ -144,7 +144,7 @@ export function ownerFailureDeliveryPlan(meta: Meta): OwnerDest[] {
     plan.push({ channel: c, to: t });
   };
 
-  // Primary = the destination `agents send --to owner` would resolve (humans policy →
+  // Primary = the destination `agents notify` would resolve (humans policy →
   // first addressable → legacy notify.owner). Same filters as the fallbacks.
   const primary = readOwnerDest(meta);
   if (primary) push(primary.channel, primary.to);
