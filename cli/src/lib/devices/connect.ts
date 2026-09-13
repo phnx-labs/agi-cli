@@ -76,19 +76,57 @@ export function fleetDialTarget(device: DeviceProfile): string {
 }
 
 /**
- * Wrap a remote command for the device's shell. Windows devices speak
- * PowerShell, so a bare command is run through `powershell -NoProfile
- * -EncodedCommand`; POSIX devices get the command verbatim (the remote login
- * shell parses it). Returns undefined when no command was given (interactive
+ * Render `cmd` as the single command string ssh sends to the peer.
+ *
+ * Windows devices speak PowerShell, so the result is run through
+ * `powershell -NoProfile -EncodedCommand`; POSIX devices get it as the remote
+ * login shell sees it. Returns undefined when no command was given (interactive
  * login).
+ *
+ * TWO MODES, and the difference is load-bearing rather than a convenience.
+ *
+ * The default joins the tokens RAW. That is not a bug to be tidied away: every
+ * existing caller of `agents ssh` relies on the remote shell interpreting what it
+ * is handed — `agents ssh box 'bash -lc "cd x && make"'` arrives as ONE token
+ * whose pipeline, globs and redirections the peer's shell must expand. Quoting
+ * that would ship the whole line as a literal argument and break it.
+ *
+ * `{ argv: true }` is for a caller that genuinely holds an argv ARRAY and needs
+ * each element delivered as exactly one token. Joining those raw destroys any
+ * token containing a space or a metacharacter — `['--title', 'two words']`
+ * arrives as three tokens, and `'a & b'` arrives as a backgrounded command — which
+ * is what a native client hitting this path actually hit.
+ *
+ * So fidelity is opt-in at the call site that knows which shape it has, and the
+ * quoting itself reuses the canonical helpers (`shellQuote`, {@link pwshQuote})
+ * rather than introducing a third escaping scheme.
  */
-export function wrapRemoteCommand(device: DeviceProfile, cmd: string[]): string | undefined {
+export function wrapRemoteCommand(
+  device: DeviceProfile,
+  cmd: string[],
+  opts: { argv?: boolean } = {},
+): string | undefined {
   if (cmd.length === 0) return undefined;
-  const joined = cmd.join(' ');
+  // `argv` mode quotes EACH token so the peer receives it byte-for-byte; the
+  // default joins raw, which is what lets a caller hand the remote shell
+  // something to interpret. See the docblock above for why both must exist.
+  const joined = opts.argv
+    ? cmd.map((token) => (device.shell === 'powershell' ? pwshQuote(token) : shellQuote(token))).join(' ')
+    : cmd.join(' ');
   if (device.shell === 'powershell') {
     return `powershell -NoProfile -EncodedCommand ${encodePwshBase64(joined)}`;
   }
   return joined;
+}
+
+/**
+ * Single-quote one token for PowerShell. Inside a single-quoted pwsh string the
+ * only special character is `'` itself, escaped by doubling — so this is total
+ * over every byte, including `$`, backtick and newline, which is exactly what an
+ * argv token needs.
+ */
+export function pwshQuote(token: string): string {
+  return `'${token.replace(/'/g, "''")}'`;
 }
 
 /**
@@ -248,7 +286,7 @@ export function buildSshInvocation(
   cmd: string[],
   askpassShimPath: string,
   hostKey: SshHostKeyOptions = {},
-  opts: { agentOnly?: boolean; interactiveCwd?: string } = {},
+  opts: { agentOnly?: boolean; interactiveCwd?: string; argv?: boolean } = {},
 ): { args: string[]; env: Record<string, string> } {
   // The effective profile: central config (ssh.*/platform/user) overlaid on
   // the registry's discovery record.
@@ -264,7 +302,7 @@ export function buildSshInvocation(
   const remoteCmd = !interactive && isAgentsBrowserDrive(cmd) ? markFleetRemote(cmd, device) : cmd;
   const remote = interactive
     ? buildInteractiveShellCommand(device, opts.interactiveCwd)
-    : wrapRemoteCommand(device, remoteCmd);
+    : wrapRemoteCommand(device, remoteCmd, { ...(opts.argv ? { argv: true } : {}) });
   const env: Record<string, string> = {};
   const args: string[] = [
     ...hostKeyCheckingOpts(hostKey.pinned ?? false, hostKey.knownHostsFile),

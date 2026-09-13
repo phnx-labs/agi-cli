@@ -20,6 +20,22 @@
   `agents feed watch --json --local` is unchanged — it is the per-machine stream the
   collector itself subscribes to. Source: `cli/src/lib/feed/hub.ts`,
   `cli/src/lib/daemon/feed-stream-service.ts`.
+- **The standalone browser and computer engines are read at their real source
+  (PHNX-3999).** The standalone `computer` engine always appends to its own
+  `<cache>/computer/actions/<day>.jsonl`, which never reaches agents-cli's
+  recorder — so a `computer` command run directly was invisible to every
+  agents-cli surface. `agents computer sessions` and the feed now merge that
+  ledger, deduped on `invocationId` (forwarding rewrites `ts`/`pid`, so a
+  timestamp dedupe double-counts), and attribute a record the producer left
+  unidentified to the machine whose ledger it came from instead of `unknown`.
+  Live browser tasks are read from `tasks.json`, so a task that has produced no
+  capture yet now appears — with its real tabs, and a `show`/`close` command that
+  names the host to run it on. Source: `cli/src/lib/computer/sessions-list.ts`,
+  `cli/src/lib/feed/tool-activity.ts`.
+- **Tool setup readiness rides the feed (PHNX-3999).** `reset.setup` and
+  `setup.snapshot` carry each device's browser/computer/secrets readiness from the
+  setup cache, so a Settings surface needs no per-tool polling and no probe of its
+  own. Source: `cli/src/lib/feed/watch.ts`.
 - **A long-offline peer is retired instead of dialed forever (PHNX-3999).** The 60 s
   backoff cap bounded the delay but not the total work: a box off for a weekend was
   dialed every 60 s for two days. After ten consecutive failures the re-dial drops to
