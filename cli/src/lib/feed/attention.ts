@@ -156,7 +156,11 @@ function structuredToBlockQuestion(sq: StructuredQuestion): BlockQuestion {
   const options = sq.options?.length
     ? sq.options.map((o) => ({ label: o.label, ...(o.description ? { description: o.description } : {}) }))
     : undefined;
-  return { text: sq.text, ...(options ? { options } : {}) };
+  return {
+    text: sq.text,
+    ...(options ? { options } : {}),
+    ...(sq.context ? { context: sq.context } : {}),
+  };
 }
 
 /** A label slugged to the `[a-z0-9-]+` id shape the notify argv and UIs echo back. */
