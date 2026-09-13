@@ -4,11 +4,6 @@
 
 import { spawnSync } from 'child_process';
 
-interface OpVault {
-  id: string;
-  name: string;
-}
-
 interface OpItemSummary {
   id: string;
   title: string;

@@ -78,7 +78,7 @@ interface FleetSharedRepoSyncOptions {
   lockPath?: string;
 }
 
-interface FleetSharedRepoSyncResult {
+export interface FleetSharedRepoSyncResult {
   success: boolean;
   committed: boolean;
   pushed: boolean;
