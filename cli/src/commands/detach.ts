@@ -2,7 +2,7 @@
  * `agents sessions detach <id>` — send a live agent session to the background:
  * stop its interactive process and continue it headless, unattended, so it drives
  * its task to completion without holding a terminal. Bring it back with
- * `agents sessions attach`. A sibling of `sessions focus`/`resume` on the session
+ * `agents sessions resume`. A sibling of `sessions focus` on the session
  * lifecycle axis.
  *
  * Agent-agnostic and version-pinned by construction: it re-invokes

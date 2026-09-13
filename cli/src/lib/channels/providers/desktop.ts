@@ -113,7 +113,7 @@ export const desktopProvider: ChannelProvider = {
   async send(text: string, opts: SendOptions): Promise<SendResult> {
     // `target` is meaningless for a local notification — the recipient is whoever
     // is at this machine — but it is echoed for --json parity with every other
-    // provider, and `agents notify` still requires notify.owner.to to be set.
+    // provider, and `agents send --to owner` still requires notify.owner.to to be set.
     const id = opts.target || os.hostname();
 
     // Order matters, and CI caught it: validate the CALLER first, then honour
