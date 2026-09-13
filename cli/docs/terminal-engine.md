@@ -116,6 +116,21 @@ into the Mac's GUI session — `osascript` reaches the app through it. `tmux` ov
 to the already-open VSCodium instance over its user-scoped IPC socket, so it works
 from an SSH session as the same user (no `osascript`, no new window spawned).
 
+**`sessions resume`'s own `--device`/`-a`/`--all`/`--teams`/`--since`/`-n` never
+reach its action directly (PHNX-3940).** They share a name with flags the parent
+`sessions` command also owns, and `root-command.ts` cannot call
+`enablePositionalOptions()` globally (it would break `sessions backfill …`'s
+`optsWithGlobals()` pattern) — so commander's parser consumes a colliding flag
+into the PARENT's own option before `resume` is recognized as a subcommand,
+whatever its position on the line. `resolveResumeOptions`
+([`sessions-resume.ts`](../src/commands/sessions-resume.ts)) reads those values
+back off `cmd.parent`, preferring an explicit parent-level value
+(`getOptionValueSource(...) === 'cli'`) over the resume subcommand's own default
+(so a bare `sessions resume` keeps its 200-row default rather than inheriting
+the parent's 50), and collapses `--device`/`--devices` to exactly one host via
+the shared `normalizeSingleDeviceOption` (`commands/utils.ts`, also used by
+`sessions inject`), failing loud on more than one.
+
 ## Choosing a terminal for a GUI caller
 
 `detectCurrentBackend` reads `$TMUX` / `$TERM_PROGRAM` — right for a command the

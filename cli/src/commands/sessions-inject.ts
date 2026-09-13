@@ -21,6 +21,7 @@ import { sshExec, shellQuote } from '../lib/ssh-exec.js';
 import { resolveHost } from '../lib/hosts/registry.js';
 import { sshTargetFor } from '../lib/hosts/types.js';
 import { setHelpSections } from '../lib/help.js';
+import { normalizeSingleDeviceOption } from './utils.js';
 
 interface InjectOptions {
   pane?: string;
@@ -62,18 +63,12 @@ export function matchInjectSelector(session: ActiveSession, token: string): bool
  * merges the parent `sessions` command's variadic `-D, --device <target...>` over
  * this subcommand's scalar `--device`, so a single `--device box` arrives as
  * `['box']` — which flowed straight into `sshExec` and crashed on
- * `host.startsWith` (PHNX-3688). Coerce the array to its one element; fail loud on
- * several, since inject delivers to exactly one terminal (a fan-out spelling is a
- * user error, not a first-of-list guess).
+ * `host.startsWith` (PHNX-3688). Delegates to the shared
+ * {@link normalizeSingleDeviceOption} (also used by `sessions resume`,
+ * PHNX-3940) rather than re-implementing the array/scalar coercion here.
  */
 export function normalizeInjectDevice(value: string | string[] | undefined): string | undefined {
-  const list = value == null ? [] : Array.isArray(value) ? value : [value];
-  const hosts = list.map((v) => String(v).trim()).filter((v) => v.length > 0);
-  if (hosts.length === 0) return undefined;
-  if (hosts.length > 1) {
-    throw new Error(`sessions inject targets a single device, but --device named ${hosts.length}: ${hosts.join(', ')}.`);
-  }
-  return hosts[0];
+  return normalizeSingleDeviceOption(value, 'sessions inject');
 }
 
 /**

@@ -89,6 +89,24 @@ export function resolveSurface(cmd: Command): Surface {
 }
 
 /**
+ * Coerce a `--device` value that may arrive as a scalar or an array to a single
+ * host string. A subcommand whose own `--device` collides in name with an
+ * ancestor's variadic `-D, --device <target...>` (e.g. `sessions inject`,
+ * `sessions resume` under the parent `sessions` command) can receive an array
+ * even when the command only ever targets one device — fail loud on more than
+ * one rather than guessing the first (PHNX-3688, PHNX-3940).
+ */
+export function normalizeSingleDeviceOption(value: string | string[] | undefined, commandLabel: string): string | undefined {
+  const list = value == null ? [] : Array.isArray(value) ? value : [value];
+  const hosts = list.map((v) => String(v).trim()).filter((v) => v.length > 0);
+  if (hosts.length === 0) return undefined;
+  if (hosts.length > 1) {
+    throw new Error(`${commandLabel} targets a single device, but --device named ${hosts.length}: ${hosts.join(', ')}.`);
+  }
+  return hosts[0];
+}
+
+/**
  * Exit with a clean message when a picker would be required in a non-interactive shell.
  */
 export function requireInteractiveSelection(action: string, alternatives: string[]): never {
