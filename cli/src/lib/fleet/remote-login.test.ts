@@ -10,7 +10,7 @@ import {
   buildRemoteLoginSshCommand,
   buildDashboardHtml,
   driveRemoteLogin,
-  type PtyDriver,
+  type TermDriver,
 } from './remote-login.js';
 import { FLEET_LOGIN_FLOWS, type LoginFlow } from './auth-sync.js';
 import type { DeviceProfile } from '../devices/registry.js';
@@ -208,7 +208,7 @@ describe('buildDashboardHtml', () => {
 
 // A scripted fake PTY driver: `screen` returns each queued frame in order,
 // repeating the last. Records every write so we can assert steering keystrokes.
-function fakeDriver(frames: { screen: string; exited?: boolean }[]): PtyDriver & { writes: string[]; execs: string[] } {
+function fakeDriver(frames: { screen: string; exited?: boolean }[]): TermDriver & { writes: string[]; execs: string[] } {
   let i = 0;
   const writes: string[] = [];
   const execs: string[] = [];
@@ -260,7 +260,7 @@ describe('driveRemoteLogin', () => {
     // driveRemoteLogin must tear the session down before rethrowing, else the
     // caller never gets a sessionId and the ssh -tt process leaks until the reaper.
     const stops: string[] = [];
-    const driver: PtyDriver = {
+    const driver: TermDriver = {
       async start() { return 'sess1'; },
       async exec() { /* ok */ },
       async write() { /* ok */ },

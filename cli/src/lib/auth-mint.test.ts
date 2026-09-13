@@ -42,7 +42,7 @@ import {
 import { findAccount } from './account-registry.js';
 import { _resetSecretsClientForTest, bundleBackendSync, bundleExistsSync, readAndResolveBundleEnvSync, secretsKeychainItem, storeSetSync } from './secrets-client.js';
 import { standaloneKeychainIsFileBacked, useFreshSecretsHome } from '../../tests/secrets-standalone.js';
-import type { PtyDriver } from './fleet/remote-login.js';
+import type { TermDriver } from './fleet/remote-login.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixture = (name: string): string => fs.readFileSync(path.join(here, 'testdata', name), 'utf-8');
@@ -50,7 +50,7 @@ const fixture = (name: string): string => fs.readFileSync(path.join(here, 'testd
 const TOKEN = 'sk-ant-oat01-abcdefghijklmnopqrstuvwxyz012345';
 const EMAIL = 'ada@example.com';
 
-function fakeDriver(frames: { screen: string; exited?: boolean }[]): PtyDriver & { writes: string[]; execs: string[]; stopped: string[] } {
+function fakeDriver(frames: { screen: string; exited?: boolean }[]): TermDriver & { writes: string[]; execs: string[]; stopped: string[] } {
   let i = 0;
   const writes: string[] = [];
   const execs: string[] = [];
