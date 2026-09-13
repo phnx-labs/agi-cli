@@ -799,6 +799,55 @@ mechanism that **already exists** — there is no new "sync engine":
 | **Working codebase** | Phase 1: committed branch → `git fetch` + checkout on the box (per-repo, caller's `--remote-cwd`/`--branch`). Phase 2: uncommitted working tree → `rsync` over SSH (the differentiator). | per-repo git; rsync (Phase 2) |
 | **Secrets** | Persistent boxes self-auth once via `agents secrets` (keychain). Blank/leased boxes get an on-demand, never-on-disk injection. | `agents secrets export <bundle> --to-ssh --device <t>` (`secrets.ts:1089-1097`, env over ssh stdin) |
 | **Sessions / `.history`** | **Not bulk-copied.** Recall is exposed as a *remote command*, not a file sync (below). | the routines daemon + `agents sessions`; selective `session/sync/` for the rare "make this transcript present" case |
+| **Attachments** (files the operator hands to one run) | Copied per dispatch onto the resolved execution host, verified there, then named in the prompt as host-local paths. Bounded to that run — never a directory sync. | `hosts/attachments.ts`, entered from `dispatchToHost` / `runInteractiveOnHost` (below) |
+
+### Attachments — the one thing that IS pushed per dispatch (PHNX-3999)
+
+Everything else in the table above is bootstrapped once or pulled by the box
+itself. An attachment is the exception, and it has to be: it is a file that
+exists only on the operator's machine — a screen capture, a log, a video — handed
+to exactly one run. A path alone is worthless once the run lands on another box,
+so the bytes travel with the dispatch.
+
+The ordering is the whole contract, and it is why this lives in the dispatch
+layer rather than in the command:
+
+1. **Validate locally, before placement.** `validateAttachments` stats, reads and
+   sha256s every path. A missing, empty, unreadable, oversized, or
+   control-character-named file fails here — before a device is picked, before an
+   SSH connection, before a token is spent.
+2. **Placement resolves once.** `--device auto` collapses to a concrete host in
+   `applyDeviceAutoToOptions` (`smart-launch.ts`), exactly as it always did.
+3. **Stage on the resolved host.** `dispatchToHost` / `runInteractiveOnHost` call
+   `stageAttachmentsOnHost` with the host they are about to launch on, so the
+   bytes cannot land anywhere but the execution worker. Three round trips: create
+   the slots and learn the remote `$HOME`, `scp` each file, then verify size +
+   sha256 + readability **on the host**. A mismatch or a missing file throws
+   before the launch, leaving no task record and no half-transferred staging.
+4. **Rewrite the prompt.** The dispatcher appends an `Attached files` block naming
+   **host-local** paths only, and pushes the staging root onto `--add-dir`. The
+   operator's own path never reaches the agent — on a remote run it does not
+   exist there, and an agent that sees it will try to read it.
+
+Layout is `~/.agents/.cache/hosts/<id>.attachments/<1..N>/<original basename>` —
+a sibling of that dispatch's `<id>.log` and `<id>.exit`. One numbered subdir per
+attachment is what makes literal spaces, quotes, Unicode and **duplicate
+basenames** survive byte-exact: nothing is renamed, and the only path segments the
+CLI synthesizes are plain ASCII, so the destination handed to `scp` and the remote
+shell needs no quoting while the filename itself rides the transfer protocol.
+
+Lifecycle rides the run artifacts. The dir is recorded on the task as
+`remoteAttachDir`; a followed run that reaches a terminal exit reclaims it
+immediately (attachments are inputs — unlike the log, they are worth nothing
+afterwards), and `agents devices stop` / a rollback teardown remove it alongside
+the log and exit marker. A `--no-follow` run has no such moment, so its staging
+waits for the stop or for the age sweep, which drops any `*.attachments` dir older
+than seven days at the next stage.
+
+A local run (`--device auto` resolving to this box, or no device at all) uses
+`stageAttachmentsLocally`: the same layout, hardlinked rather than copied, with no
+network hop. Windows hosts are refused loudly — the staging protocol is POSIX —
+rather than handed a path shape they cannot resolve.
 
 ### `ensureHostReady(name)` — the Phase 1 readiness precondition
 

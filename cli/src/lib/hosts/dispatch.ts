@@ -21,6 +21,7 @@ import { resolveActor, actorEnv } from '../actor.js';
 import { saveTask, updateTask, terminalPatch, type HostTask } from './tasks.js';
 import { followHostTask } from './progress.js';
 import { wrapHostCommandWithCredentials, type HostCredentials } from './credentials.js';
+import { AttachmentError, stageAttachmentsOnHost, removeRemoteStaging, attachmentPromptSection, attachmentAddDirs, type ResolvedAttachment } from './attachments.js';
 import { hostKeyCheckingOpts } from '../devices/known-hosts.js';
 import { deriveMirroredCwd, homeRemainder, remoteCdPrefix } from '../project-root.js';
 import { RUN_AUTO_KEYWORD, RUN_AUTO_HOST_RESOLVED_ENV, REMOTE_INTERACTIVE_ENV } from '../types.js';
@@ -189,6 +190,19 @@ function terminateRemoteLaunch(task: HostTask): void {
       `${(result.stderr || result.stdout).trim() || 'ssh error'}`,
     );
   }
+  clearTaskAttachments(task);
+}
+
+/**
+ * Drop a task's staged attachments. They are run INPUTS, so unlike the log they
+ * are worth nothing once the run is over — and a video capture is large enough
+ * that leaving it for the 7-day age prune is a real cost. Separate from the
+ * stop/terminate command rather than appended to it, because both parse the
+ * remote's last stdout line as a protocol verdict.
+ */
+function clearTaskAttachments(task: HostTask): void {
+  if (!task.remoteAttachDir) return;
+  removeRemoteStaging(task.target, task.remoteAttachDir, task.identityFile ? ['-i', task.identityFile, '-o', 'IdentitiesOnly=yes'] : []);
 }
 
 /** Terminate a detached dispatch that its caller could not persist locally. */
@@ -270,6 +284,7 @@ export function stopDispatchedTask(task: HostTask): HostTask {
     const parsed = parseInt(line.slice('ALREADY '.length), 10);
     if (Number.isFinite(parsed)) code = parsed;
   }
+  clearTaskAttachments(task);
   // SIGNALED / GONE / ALREADY all end with a terminal local record.
   return updateTask(task.id, terminalPatch(code)) ?? { ...task, ...terminalPatch(code) };
 }
@@ -293,6 +308,12 @@ interface LaunchOptions {
   name?: string;
   /** Copy runtime credentials to the host before the run and shred them after. */
   copyCreds?: HostCredentials;
+  /**
+   * Staging root for this run's attachments on the host, already populated and
+   * verified by the caller. Recorded on the task so teardown removes it with the
+   * log and exit marker (PHNX-3999).
+   */
+  remoteAttachDir?: string;
 }
 
 /**
@@ -363,6 +384,7 @@ async function launchDetached(host: Host, target: string, opts: LaunchOptions): 
     name: opts.name,
     remoteLog,
     remoteExit,
+    remoteAttachDir: opts.remoteAttachDir,
     status: 'running',
     createdAt: new Date().toISOString(),
   };
@@ -397,6 +419,12 @@ async function launchDetached(host: Host, target: string, opts: LaunchOptions): 
   // record 'running' (do NOT freeze it terminal) so a later `agents devices ps` / `agents logs`
   // reconcile against the remote `.exit` resolves the true final status.
   const finished = exitCode === -1 ? task : (updateTask(id, terminalPatch(exitCode)) ?? task);
+  // A followed run that reached a terminal exit is over, and its attachments were
+  // inputs — reclaim them now rather than leaving a video capture on the worker
+  // for the age prune. The log and exit marker stay: `agents logs <id>` reads
+  // them. An unfollowed (`--no-follow`) run has no such moment, so its staging
+  // waits for stop/terminate or the prune.
+  if (exitCode !== -1) clearTaskAttachments(finished);
   return { task: finished, exitCode };
 }
 
@@ -466,6 +494,13 @@ export interface DispatchOptions {
   timeoutMs?: number;
   /** Copy runtime credentials to the host before the run and shred them after. */
   copyCreds?: HostCredentials;
+  /**
+   * Local files to stage on the execution host before the run starts. The
+   * dispatcher copies and verifies them there, then rewrites them into the
+   * prompt and `--add-dir` as host-local paths — `--attach` itself is never
+   * forwarded, since its values name paths only this machine has (PHNX-3999).
+   */
+  attachments?: ResolvedAttachment[];
 }
 
 /**
@@ -569,6 +604,8 @@ interface InteractiveDispatchOptions {
   fallback?: string;
   /** Copy runtime credentials to the host before the run and shred them after. */
   copyCreds?: HostCredentials;
+  /** Local files to stage on the host — see {@link DispatchOptions.attachments}. */
+  attachments?: ResolvedAttachment[];
 }
 
 /**
@@ -624,7 +661,33 @@ export async function runInteractiveOnHost(host: Host, opts: InteractiveDispatch
   const { warnings } = ensureHostReady(host, { agent: opts.agent, version: opts.version });
   for (const w of warnings) process.stderr.write(`[hosts] warning: ${w}\n`);
 
-  const invocation = ['agents', ...buildInteractiveRunForwardedArgs(opts)].map(shellQuote).join(' ');
+  // An interactive dispatch forwards its prompt ONLY under `forceInteractive`
+  // (buildInteractiveRunForwardedArgs) — the remote CLI would otherwise read a
+  // prompt as headless. With no prompt to carry them, the staged paths would
+  // never reach the agent and the run would silently behave as if nothing had
+  // been attached, so refuse instead of transferring bytes nobody can name.
+  if (opts.attachments?.length && !(opts.prompt && opts.forceInteractive)) {
+    throw new AttachmentError(
+      '--attach needs a prompt on an interactive device run: the staged file paths are handed to the agent ' +
+      'in the prompt, and an interactive launch with no prompt has nowhere to put them. ' +
+      'Pass a prompt, or drop --attach.',
+    );
+  }
+
+  // Same ordering as the headless path: stage onto the already-resolved host,
+  // then build the argv from the rewritten prompt/add-dir.
+  const staged = opts.attachments?.length
+    ? await stageAttachmentsOnHost(host, opts.attachments, { target })
+    : undefined;
+  const runOpts = staged
+    ? {
+        ...opts,
+        prompt: (opts.prompt ?? '') + attachmentPromptSection(staged),
+        addDir: [...(opts.addDir ?? []), ...attachmentAddDirs(staged)],
+      }
+    : opts;
+
+  const invocation = ['agents', ...buildInteractiveRunForwardedArgs(runOpts)].map(shellQuote).join(' ');
   const cwd = remoteCdPrefix(opts.remoteCwd, { mirror: opts.mirrorCwd });
   // Forward actor provenance so the interactive remote run inherits it rather
   // than re-resolving from this box's SSH_CONNECTION (RUSH-2028); a `run auto`
@@ -647,19 +710,35 @@ export async function runInteractiveOnHost(host: Host, opts: InteractiveDispatch
   // strictly against the managed pin and force a fresh connection so a stale
   // accept-new control socket can't bypass the check (RUSH-1767).
   const credHostKeyOpts = opts.copyCreds ? hostKeyCheckingOpts(true) : undefined;
-  return sshStream(target, remoteCmd, {
-    tty: process.stdin.isTTY,
-    // NOT multiplexed. `ControlPath=cm-%C` hashes only local host / remote host
-    // / port / user, so every agent tab pointed at a peer shares ONE master —
-    // and OpenSSH closes every channel on it the instant that master dies. One
-    // blink therefore ejected all six tabs on a box at once, which is what made
-    // a brief outage read as "all my agents exited" (RUSH-3125). The handshake
-    // this gives up is a one-time ~200ms on a session that runs for hours;
-    // probes and fan-outs keep the shared master, where it actually pays.
-    multiplex: false,
-    hostKeyOpts: credHostKeyOpts,
-    extraSshArgs: hostIdentityArgs(host),
-  });
+  try {
+    // NOTE: nothing cleans up `staged` once this stream is open, and that is
+    // deliberate. An interactive remote run OUTLIVES its ssh link — the peer
+    // wraps it in tmux and reconnect.ts rejoins the live pane after a drop
+    // (RUSH-3125) — so sshStream returning means "the operator detached", not
+    // "the run finished". Deleting the attachments here would pull the files out
+    // from under a run still using them. Unlike a detached dispatch there is no
+    // task record to hang an exact teardown off, so the age sweep reclaims this
+    // one; only a failure BEFORE the stream opens cleans up eagerly (below).
+    return sshStream(target, remoteCmd, {
+      tty: process.stdin.isTTY,
+      // NOT multiplexed. `ControlPath=cm-%C` hashes only local host / remote host
+      // / port / user, so every agent tab pointed at a peer shares ONE master —
+      // and OpenSSH closes every channel on it the instant that master dies. One
+      // blink therefore ejected all six tabs on a box at once, which is what made
+      // a brief outage read as "all my agents exited" (RUSH-3125). The handshake
+      // this gives up is a one-time ~200ms on a session that runs for hours;
+      // probes and fan-outs keep the shared master, where it actually pays.
+      multiplex: false,
+      hostKeyOpts: credHostKeyOpts,
+      extraSshArgs: hostIdentityArgs(host),
+    });
+  } catch (err) {
+    // The stream never opened (a bad host key, a spawn failure) — no run exists
+    // to need the files, so reclaim them now instead of leaving a video capture
+    // on the worker for a week.
+    if (staged) removeRemoteStaging(target, staged.dir, hostIdentityArgs(host));
+    throw err;
+  }
 }
 
 /** Dispatch an `agents run <agent> "<prompt>"` onto a host (the `run --device` path). */
@@ -670,20 +749,42 @@ export async function dispatchToHost(host: Host, opts: DispatchOptions): Promise
   const { warnings } = ensureHostReady(host, { agent: opts.agent, version: opts.version });
   for (const w of warnings) process.stderr.write(`[hosts] warning: ${w}\n`);
 
-  return launchDetached(host, target, {
-    forwardedArgs: buildRunForwardedArgs(opts),
-    remoteCwd: opts.remoteCwd,
-    mirrorCwd: opts.mirrorCwd,
-    follow: opts.follow,
-    timeoutMs: opts.timeoutMs,
-    agentLabel: opts.agent,
-    promptLabel: opts.prompt,
-    name: opts.name,
-    // On resume the remote session keeps its existing id; record that id so the
-    // task stays mapped to the same session.
-    sessionId: opts.resume ?? opts.sessionId,
-    copyCreds: opts.copyCreds,
-  });
+  // Attachments land AFTER the readiness gate and BEFORE the launch: `host` is
+  // already the resolved execution target, so the bytes cannot end up anywhere
+  // else, and a transfer that fails throws here with no task left behind.
+  const staged = opts.attachments?.length
+    ? await stageAttachmentsOnHost(host, opts.attachments, { target })
+    : undefined;
+  const runOpts = staged
+    ? {
+        ...opts,
+        prompt: opts.prompt + attachmentPromptSection(staged),
+        addDir: [...(opts.addDir ?? []), ...attachmentAddDirs(staged)],
+      }
+    : opts;
+
+  try {
+    return await launchDetached(host, target, {
+      remoteAttachDir: staged?.dir,
+      forwardedArgs: buildRunForwardedArgs(runOpts),
+      remoteCwd: opts.remoteCwd,
+      mirrorCwd: opts.mirrorCwd,
+      follow: opts.follow,
+      timeoutMs: opts.timeoutMs,
+      agentLabel: opts.agent,
+      // The operator's own prompt, without the appended attachment block — this
+      // is the label `agents devices ps` prints.
+      promptLabel: opts.prompt,
+      name: opts.name,
+      // On resume the remote session keeps its existing id; record that id so the
+      // task stays mapped to the same session.
+      sessionId: opts.resume ?? opts.sessionId,
+      copyCreds: opts.copyCreds,
+    });
+  } catch (err) {
+    if (staged) removeRemoteStaging(target, staged.dir, hostIdentityArgs(host));
+    throw err;
+  }
 }
 
 interface CommandDispatchOptions {

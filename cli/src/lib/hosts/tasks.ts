@@ -46,6 +46,13 @@ export interface HostTask {
   /** Remote paths (under the host's ~/.agents/.cache/hosts/). */
   remoteLog: string;
   remoteExit: string;
+  /**
+   * Staging root for this run's `--attach` files on the host, a sibling of
+   * `remoteLog` (`<id>.attachments/`). Recorded so teardown removes the bytes
+   * along with the log and exit marker instead of leaving them for the age
+   * prune. Absent when the run carried no attachments (PHNX-3999).
+   */
+  remoteAttachDir?: string;
   status: HostTaskStatus;
   exitCode?: number;
   createdAt: string;

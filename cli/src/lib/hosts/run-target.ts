@@ -22,6 +22,7 @@ import { dispatchToHost } from './dispatch.js';
 import type { DispatchResult } from './dispatch.js';
 import { registerHostSession, captureRemoteSessionId } from './session-index.js';
 import type { HostCredentials } from './credentials.js';
+import type { ResolvedAttachment } from './attachments.js';
 
 /**
  * Resolution failed with a user-actionable message the caller should print
@@ -101,6 +102,12 @@ export interface HostPromptRun {
   passthroughArgs?: string[];
   /** Copy runtime credentials to the host before the run and shred them after. */
   copyCreds?: HostCredentials;
+  /**
+   * Validated `--attach` files (hosts/attachments.ts `validateAttachments`).
+   * Staged onto `host` by the dispatch layer and rewritten into the prompt +
+   * `--add-dir` as host-local paths (PHNX-3999).
+   */
+  attachments?: ResolvedAttachment[];
 }
 
 /** Resolve the id the remote host will adopt for a fresh Claude session. */
@@ -172,6 +179,7 @@ export async function dispatchPromptToHost(host: Host, opts: HostPromptRun): Pro
     autoSecrets: opts.autoSecrets,
     passthroughArgs: opts.passthroughArgs,
     copyCreds: opts.copyCreds,
+    attachments: opts.attachments,
   });
   // Capture the remote-coined id from the followed log (non-Claude); harmlessly a
   // no-op when the task already carries a forced/resumed id or no marker landed.
