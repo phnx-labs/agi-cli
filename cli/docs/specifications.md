@@ -444,7 +444,7 @@ SSH access (§7); rendering sessions that no harness produced.
   Tests: `lib/session/active.test.ts`, `lib/session/title.test.ts`,
   `lib/session/title.tick.test.ts`, `lib/daemon/session-title-service.test.ts`,
   `lib/session/remote/watch.test.ts`, `lib/session/mirror.test.ts`,
-  `lib/session/db.migrate-v48.test.ts`, `lib/session/db.migrate-v46-to-48.test.ts`,
+  `lib/session/db.migrate-v50.test.ts`, `lib/session/db.migrate-v46-to-50.test.ts`,
   `commands/sessions.active-row.test.ts`.
 - **SES-15 (MUST).** A timestamp-less source MUST fall back to file mtime and
   MUST NOT bind NULL into the `NOT NULL` timestamp column
