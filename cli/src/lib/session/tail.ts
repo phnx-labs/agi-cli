@@ -11,7 +11,7 @@
 import * as fs from 'fs';
 import type { SessionAgentId, SessionEvent } from './types.js';
 import { parseClaudeContent, parseCodexContent, sanitizeEvents } from './parse.js';
-import { firstUserMessageFromEvents } from './prompt.js';
+import { firstUserMessageFromEvents, cleanFirstUserMessage } from './prompt.js';
 
 const DEFAULT_MAX_BYTES = 128 * 1024;
 const DEFAULT_MAX_EVENTS = 60;
@@ -320,6 +320,19 @@ function hasGenuineUserTurn(events: SessionEvent[]): boolean {
   return firstUserMessageFromEvents(events) !== undefined;
 }
 
+/** Index of the first genuine user event {@link firstUserMessageFromEvents}
+ * would report, or -1 when there is none. Same rejection rules, exposed as a
+ * position rather than a string, so a caller can guarantee that event
+ * survives a length cap instead of just checking whether one exists. */
+function genuineUserTurnIndex(events: SessionEvent[]): number {
+  for (let i = 0; i < events.length; i++) {
+    const event = events[i];
+    if (event.type !== 'message' || event.role !== 'user' || event._synthetic) continue;
+    if (cleanFirstUserMessage(event.content)) return i;
+  }
+  return -1;
+}
+
 /**
  * Read the FIRST `maxEvents` normalized events from a JSONL transcript's
  * head — the session's actual opening turns, bounded and cheap (one small
@@ -364,25 +377,49 @@ export function readSessionHead(
   const cheapContent = readSessionHeadContent(filePath, maxBytes);
   if (cheapContent.trim()) {
     const cheapEvents = parse(cheapContent);
-    if (hasGenuineUserTurn(cheapEvents)) return cheapEvents.slice(0, maxEvents);
+    if (hasGenuineUserTurn(cheapEvents)) return capToMaxEvents(cheapEvents, maxEvents);
   }
 
   const boundedContent = readSessionHeadContentBounded(filePath);
   if (!boundedContent.trim()) return [];
 
-  // readSessionHeadContentBounded may carry several trailing records within
-  // its byte budget (a header plus everything the elision scan reached after
-  // it) — this IS still a HEAD read, so records are added one at a time and
-  // parsing stops the moment a genuine user turn appears, rather than handing
-  // the parser everything the scan happened to capture and letting a later,
-  // unrelated turn leak into the result.
-  let events: SessionEvent[] = [];
-  let accumulated = '';
-  for (const line of boundedContent.split('\n')) {
-    if (!line.trim()) continue;
-    accumulated += (accumulated ? '\n' : '') + line;
-    events = parse(accumulated);
-    if (hasGenuineUserTurn(events)) break;
+  // readSessionHeadContentBounded may carry many leading records within its
+  // byte budget (a header plus everything the elision scan reached after it —
+  // a big Codex/Claude session can front-load thousands of small metadata
+  // lines before the real opening turn). This IS still a HEAD read, so a
+  // later, unrelated turn must never leak into the result — but finding the
+  // cutoff by re-parsing an ever-growing ACCUMULATED prefix string on every
+  // line is O(lines²) in total bytes parsed (10k metadata lines over a 1 MiB
+  // prefix reparsed each time is ~500 MB of cumulative parse work with no
+  // deadline of its own). Two bounded, linear passes instead: first find the
+  // cutoff line by parsing each line ALONE (cheap — a lone JSONL record is
+  // self-contained, so a single-line parse correctly reports whether IT
+  // carries a genuine user turn), then parse the needed prefix exactly once.
+  const rawLines = boundedContent.split('\n').filter(l => l.trim());
+  let cutoff = rawLines.length; // no genuine turn found in any single line -- use everything captured
+  for (let i = 0; i < rawLines.length; i++) {
+    if (hasGenuineUserTurn(parse(rawLines[i]))) {
+      cutoff = i + 1;
+      break;
+    }
   }
-  return events.length > maxEvents ? events.slice(0, maxEvents) : events;
+  const events = parse(rawLines.slice(0, cutoff).join('\n'));
+  return capToMaxEvents(events, maxEvents);
+}
+
+/**
+ * Cap `events` at `maxEvents`, but never at the cost of dropping the genuine
+ * opening request itself. A transcript that front-loads thousands of small
+ * metadata/tool events ahead of its real first user turn would otherwise have
+ * that turn sliced away by a plain `events.slice(0, maxEvents)` — the request
+ * this whole reader exists to recover would silently vanish behind the cap
+ * that was only ever meant to bound OUTPUT size, not to reject valid content.
+ * When the genuine turn falls outside the first `maxEvents`, the cap widens
+ * just enough to include it (index-inclusive), rather than dropping it.
+ */
+function capToMaxEvents(events: SessionEvent[], maxEvents: number): SessionEvent[] {
+  if (events.length <= maxEvents) return events;
+  const genuineIdx = genuineUserTurnIndex(events);
+  const keep = genuineIdx >= maxEvents ? genuineIdx + 1 : maxEvents;
+  return events.slice(0, keep);
 }

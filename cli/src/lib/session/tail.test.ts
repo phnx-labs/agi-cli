@@ -340,4 +340,41 @@ describe('readSessionHead escape-boundary and Codex-metadata-header fixes (PHNX-
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('recovers the request past a large metadata-only prefix without quadratic blowup, and past the 60-event cap', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-head-metadata-only-prefix-'));
+    try {
+      const filePath = path.join(dir, 'session.jsonl');
+      const ask = 'Fix the flaky retry logic in the deploy pipeline';
+      // 10,000 tiny session_meta records ahead of the real opening turn: each
+      // parses cleanly to a non-user 'init' event, so genuinely reaching the
+      // request requires walking past all of them, and each ALSO produces an
+      // event, so the request's own event index (~10,000) sits far outside
+      // the 60-event cap. Re-parsing a growing ACCUMULATED prefix on every one
+      // of these lines is O(lines^2) in bytes parsed with no deadline of its
+      // own; this fixture is exactly the shape that blows up.
+      const metadataLines: string[] = [];
+      for (let i = 0; i < 10_000; i++) {
+        metadataLines.push(
+          JSON.stringify({ type: 'session_meta', timestamp: '2026-08-01T14:00:00.000Z', payload: { cli_version: '1.0.0', cwd: `/home/u/repo-${i}` } }),
+        );
+      }
+      const userRecord =
+        '{"type":"response_item","timestamp":"2026-08-01T15:00:00.000Z","payload":{"type":"message","role":"user","content":[' +
+        JSON.stringify({ type: 'input_text', text: ask }) +
+        ']}}';
+      fs.writeFileSync(filePath, [...metadataLines, userRecord].join('\n') + '\n');
+
+      const startMs = Date.now();
+      const events = readSessionHead(filePath, 'codex');
+      const elapsedMs = Date.now() - startMs;
+
+      expect(firstUserMessageFromEvents(events)).toBe(ask);
+      // Well under a second on real hardware for ~10k small lines scanned
+      // linearly; a quadratic re-parse of the same shape takes far longer.
+      expect(elapsedMs).toBeLessThan(5_000);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
