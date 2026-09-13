@@ -17,6 +17,7 @@ import { getHistoryDir } from '../lib/state.js';
 import { resolveSecretsBin, invocation, SecretsClientError, _resetSecretsClientForTest } from '../lib/secrets-client.js';
 import { installCli, resolveCliManifest } from '../lib/cli-resources.js';
 import { refreshToolSetup } from '../lib/setup-tool-status.js';
+import { execFileShellSpec } from '../lib/platform/exec.js';
 
 export const SECRETS_CLI_PACKAGE = '@phnx-labs/secrets-cli@0.1.4';
 export const INSTALL_HINT = `agents clis install secrets   # or: npm i -g ${SECRETS_CLI_PACKAGE}`;
@@ -59,7 +60,8 @@ export function installSecretsCli(): boolean {
     if (result.error) console.error(chalk.gray(result.error));
   }
   console.log(chalk.gray(`Installing ${SECRETS_CLI_PACKAGE}…`));
-  const r = spawnSync('npm', ['install', '-g', SECRETS_CLI_PACKAGE], { stdio: 'inherit' });
+  const npm = execFileShellSpec('npm', ['install', '-g', SECRETS_CLI_PACKAGE]);
+  const r = spawnSync(npm.command, npm.args, { stdio: 'inherit', shell: npm.shell });
   _resetSecretsClientForTest();
   if (r.error) {
     console.error(chalk.red(`npm install failed: ${r.error.message}`));

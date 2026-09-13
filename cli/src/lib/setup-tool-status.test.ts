@@ -17,7 +17,7 @@ describe('standalone setup metadata and explicit health checks', () => {
   afterEach(() => { process.env = saved; fs.rmSync(root, { recursive: true, force: true }); });
   const opts = () => ({ cacheDir: root });
 
-  it('detects missing tools without running commands and rejects the legacy browser shim', () => {
+  it.skipIf(process.platform === 'win32')('detects missing tools without running commands and rejects the legacy browser shim', () => {
     expect(getCachedToolSetup(opts()).map((r) => r.installed)).toEqual([false, false, false]);
     const legacy = path.join(root, 'dist', 'browser.js');
     fs.mkdirSync(path.dirname(legacy));
@@ -26,7 +26,7 @@ describe('standalone setup metadata and explicit health checks', () => {
     expect(getCachedToolSetup(opts())[0].installed).toBe(false);
   });
 
-  it('reads package version through the executable symlink and invalidates changed installs', async () => {
+  it.skipIf(process.platform === 'win32')('reads package version through the executable symlink and invalidates changed installs', async () => {
     const dir = path.join(root, 'package');
     fs.mkdirSync(path.join(dir, 'bin'), { recursive: true });
     const executable = path.join(dir, 'bin', 'secrets');
@@ -42,7 +42,7 @@ describe('standalone setup metadata and explicit health checks', () => {
   });
 
   it('turns a real failed executable check into unknown without confusing absence', async () => {
-    fs.symlinkSync('/usr/bin/false', path.join(root, 'bin', 'browser'));
+    fs.linkSync(process.execPath, path.join(root, 'bin', process.platform === 'win32' ? 'browser.exe' : 'browser'));
     const [row] = await refreshToolSetup('browser', opts());
     expect(row).toMatchObject({ installed: true, readiness: 'unknown' });
     expect(row.checkedAtMs).toBeTypeOf('number');
@@ -56,12 +56,24 @@ describe('standalone setup metadata and explicit health checks', () => {
       stop = subscribeToolSetup((rows) => { changes.push(rows); resolve(); }, opts());
     });
     try {
-      fs.symlinkSync('/usr/bin/false', path.join(root, 'bin', 'computer'));
+      fs.linkSync(process.execPath, path.join(root, 'bin', process.platform === 'win32' ? 'computer.exe' : 'computer'));
       expect(getCachedToolSetup(opts())[1].installed).toBe(true);
       await changed;
     } finally { stop(); }
     expect(changes).toHaveLength(1);
     expect(changes[0][1].installed).toBe(true);
+  });
+
+  it('resolves npm command launchers to their JavaScript entrypoint', () => {
+    const dir = path.join(root, 'bin', 'node_modules', '@phnx-labs', 'secrets-cli');
+    fs.mkdirSync(path.join(dir, 'dist'), { recursive: true });
+    const entry = path.join(dir, 'dist', 'index.js');
+    fs.writeFileSync(entry, 'process.exit(88);\n');
+    fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: '@phnx-labs/secrets-cli', version: '1.2.3', bin: { secrets: 'dist/index.js' } }));
+    const launcher = path.join(root, 'bin', 'secrets.cmd');
+    fs.writeFileSync(launcher, '@node "%~dp0/node_modules/@phnx-labs/secrets-cli/dist/index.js" %*\n');
+    process.env.SECRETS_BIN = launcher;
+    expect(getCachedToolSetup(opts())[2]).toMatchObject({ installed: true, executable: entry, version: '1.2.3' });
   });
 
   it('keeps install, helper state and permission results distinct', () => {
