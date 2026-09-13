@@ -22,8 +22,6 @@ export type ProfiledResourceKind =
   | 'memory'
   | 'secrets';
 
-type PatternedProfileKind = Exclude<ProfiledResourceKind, 'memory' | 'secrets'>;
-
 interface ActiveResourceProfile {
   name: string;
   preset: ResourceProfilePreset;

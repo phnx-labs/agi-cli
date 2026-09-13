@@ -12,7 +12,6 @@
  * `runFleetStatusPublish` for the fleet-status mirror); this module is the read
  * side only.
  */
-import { readClaudeUsageCache, type UsageSnapshot } from './accounting/usage.js';
 import { readHeadroomEntry } from './usage-refresh.js';
 import { readFleetStatus as readFleetStatusMirror, type FleetStatusRow } from './fleet-status.js';
 
