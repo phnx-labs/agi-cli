@@ -64,6 +64,7 @@ export function probeCapture(
   cmd: string,
   args: string[],
   timeoutMs: number,
+  options: { acceptedExitCodes?: number[]; maxOutputBytes?: number } = {},
 ): Promise<{ stdout: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, {
@@ -96,6 +97,9 @@ export function probeCapture(
     child.stdout?.setEncoding('utf8');
     child.stdout?.on('data', (d: string) => {
       out += d;
+      if (Buffer.byteLength(out) > (options.maxOutputBytes ?? 1024 * 1024)) {
+        settle(new Error(`probe output exceeded limit: ${cmd}`));
+      }
     });
     child.on('error', (e) => settle(e));
     // 'exit', not 'close': a forked grandchild inherits the stdout pipe, and
@@ -104,7 +108,7 @@ export function probeCapture(
     // itself exits; one tick's grace lets its final stdout chunks land.
     child.on('exit', (code) => {
       setImmediate(() =>
-        settle(code === 0 ? null : new Error(`probe exited ${code}: ${cmd} ${args.join(' ')}`)),
+        settle(code !== null && (options.acceptedExitCodes ?? [0]).includes(code) ? null : new Error(`probe exited ${code}: ${cmd} ${args.join(' ')}`)),
       );
     });
   });
