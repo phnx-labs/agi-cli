@@ -30,3 +30,19 @@ export function configureRootCommand(program: Command, name: string, version: st
     .helpOption('-h, --help', 'Show help')
     .addHelpCommand(false);
 }
+
+/** Resume takes one device; its parent listing command takes a variadic list. */
+export function normalizeResumeDeviceArgs(args: string[]): string[] {
+  if (args[0] !== 'sessions' || args[1] !== 'resume') return args;
+  let options = true;
+  return args.map((arg, index) => {
+    if (index < 2 || !options) return arg;
+    if (arg === '--') { options = false; return arg; }
+    if (arg === '--device' || arg === '--devices' || arg === '-D') return '--resume-device';
+    if (arg.startsWith('--device=') || arg.startsWith('--devices=')) {
+      return `--resume-device=${arg.slice(arg.indexOf('=') + 1)}`;
+    }
+    if (arg.startsWith('-D')) return `--resume-device=${arg.slice(arg[2] === '=' ? 3 : 2)}`;
+    return arg;
+  });
+}

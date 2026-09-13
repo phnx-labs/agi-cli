@@ -21,7 +21,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { detectDevBuild } from './lib/startup/dev-build.js';
-import { configureRootCommand } from './lib/startup/root-command.js';
+import { configureRootCommand, normalizeResumeDeviceArgs } from './lib/startup/root-command.js';
 import { bootMark } from './lib/boot-profile.js';
 // `ora`, `@inquirer/prompts`, `./commands/utils.js`, and the agents/versions/shims
 // modules are imported dynamically at their use sites: they are needed only on
@@ -967,7 +967,8 @@ program.on('command:*', (operands) => {
 // Parse the invocation shape up front: the first non-flag token is the command,
 // and the doc flags (--version/--help/-h) drive both the registration strategy
 // and whether the update check + background sync run at all.
-const passedArgs = process.argv.slice(2);
+const passedArgs = normalizeResumeDeviceArgs(process.argv.slice(2));
+process.argv.splice(2, process.argv.length - 2, ...passedArgs);
 // Commander owns `--version` on the root command and otherwise intercepts it
 // even after `sessions`, before the subcommand can parse its version filter.
 // Rewrite only that value-taking nested form; bare `agents --version` and every
