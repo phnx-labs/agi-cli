@@ -1,5 +1,5 @@
 /**
- * Channel-provider registry for `agents send` / `agents notify`.
+ * Channel-provider registry for `agents send`.
  *
  * One primitive, many channels. A provider knows how to deliver a message over
  * exactly one channel — the agent mailbox, a rush-daemon gateway (telegram /

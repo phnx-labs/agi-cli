@@ -300,7 +300,7 @@ export function remediationFor(finding: DoctorFinding): string {
     case 'content-drift':
     case 'stale':
       // doctor diagnoses; `agents sync` fixes (the superset of the old
-      // `doctor --fix`). A bare `agents sync <agent>` hits only the default
+      // `agents sync`). A bare `agents sync <agent>` hits only the default
       // version, so an agent-only row collapsed across versions must ask for
       // @all to reach every one it covers.
       if (agent && version) return `agents sync ${agent}@${version} --yes`;

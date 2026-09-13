@@ -398,7 +398,7 @@ function fieldHasBareEntries(value: unknown): boolean {
 
 /**
  * The repairable fields present-and-invalid in a parsed manifest. Drives both
- * the dry-run preview (heal/doctor --fix) and the actual write below.
+ * the dry-run preview (heal/agents sync) and the actual write below.
  */
 export function repairableManifestFields(manifest: unknown): string[] {
   if (!manifest || typeof manifest !== 'object') return [];

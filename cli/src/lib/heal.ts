@@ -107,7 +107,7 @@ export interface HealResult {
 }
 
 export interface HealOptions {
-  /** 'full' (doctor --fix): fix drift + refresh unknown-baseline plugins.
+  /** 'full' (agents sync): fix drift + refresh unknown-baseline plugins.
    *  'safe' (daemon): missing + invalid-manifest + unmodified refresh only. */
   mode: 'full' | 'safe';
   /** Resolution cwd. Defaults to the home dir so no project layer is ever
@@ -376,7 +376,7 @@ export async function heal(opts: HealOptions): Promise<HealResult> {
   // unattended from the daemon (~30s after start, then every ~6h) — a sweep that
   // walked into an isolated home would quietly refill it with shared commands,
   // skills, hooks, MCP config and permissions. Explicitly NAMED versions
-  // (`agents doctor <agent>@<version> --fix`) are honoured as-is: naming the
+  // (`agents sync <agent>@<version>`) are honoured as-is: naming the
   // version is the operator's consent.
   const sweep = (a: AgentId) => listInstalledVersions(a).filter((v) => !isVersionIsolated(a, v));
   const targets: Array<{ agent: AgentId; versions: string[] }> = opts.agent

@@ -767,7 +767,7 @@ export interface MultiInstallInventoryEntry {
   /** True for the copy that is currently executing. */
   running: boolean;
   /**
-   * True when a bare `agents doctor --fix` deletes this copy (RUSH-2415:
+   * True when a bare `agents sync` deletes this copy (RUSH-2415:
    * npx-cache / unsafe-legacy / pre-1.22.30 with a fixed peer). False for the
    * running copy and for any duplicate --fix will not touch — a healthy
    * >=1.22.30 peer, or a pre-1.22.30 copy with no fixed peer to fall back to;
@@ -811,7 +811,7 @@ function withRunningInstall(
 
 /**
  * The exact shell command that removes the install at `packageRoot` by hand —
- * the remedy for duplicates `doctor --fix` deliberately will not purge
+ * the remedy for duplicates `agents sync` deliberately will not purge
  * (RUSH-2705). `--prefix` pins the target tree no matter which npm binary
  * PATH resolves, mirroring installPackageIntoPrefix.
  */
@@ -889,7 +889,7 @@ export interface PurgeRemovableInstallsResult {
 /** True when the package root lives under npm's `_npx` cache (ephemeral runs). */
 export function isNpxCacheInstall(packageRoot: string): boolean {
   // Split on either separator so a POSIX-shaped path is still recognized when
-  // this runs on Windows (doctor --fix / tests pass forward literal `_npx`
+  // this runs on Windows (agents sync / tests pass forward literal `_npx`
   // paths from other boxes). `path.sep` alone missed `/home/…/_npx/…` on win32.
   const parts = packageRoot.split(/[\\/]/);
   return parts.includes('_npx');
@@ -910,7 +910,7 @@ export function isTouchIdStormFixedVersion(version: string): boolean {
 }
 
 /**
- * Classify discovered installs that doctor --fix / upgrade may delete.
+ * Classify discovered installs that agents sync / upgrade may delete.
  *
  * Never marks the running package root. Auto-purge is limited to copies that
  * cannot be the intended primary install:
@@ -1043,7 +1043,7 @@ export function purgeRemovableAgentsCliInstalls(
   return result;
 }
 
-/** A detected duplicate that `doctor --fix` will not purge (RUSH-2705). */
+/** A detected duplicate that `agents sync` will not purge (RUSH-2705). */
 export interface UnresolvedDuplicateInstall {
   packageRoot: string;
   version: string;
@@ -1067,7 +1067,7 @@ export interface RemediateStaleInstallsResult extends PurgeRemovableInstallsResu
 }
 
 /**
- * Scan + classify + purge in one call. Used by `agents doctor --fix` and
+ * Scan + classify + purge in one call. Used by `agents sync` and
  * `agents upgrade` so both paths remediate the same set of latent copies.
  */
 export function remediateStaleAgentsCliInstalls(opts: {
