@@ -50,7 +50,8 @@ extractions. What stays here is `agents sessions share <id>`, which renders the
 transcript locally and shells out to `artifacts share`.
 
 `agents feed watch --json` is the canonical thin-client operator stream: it
-composes the existing session watcher with feed attention and activity, while
+composes the existing session watcher with feed attention, activity, and **tool
+rows** (browser tasks + computer runs), while
 `agents sessions watch --json` remains the compatible session-only stream.
 Answers go through `agents feed answer <attention-key>` so the CLI atomically
 claims the first reply and routes it over the recorded session reply rail.
@@ -107,7 +108,82 @@ peer after three consecutive failed spawns until the device registry changes.
 `isDialableDevice` deliberately never excludes an unreachable box
 ([`devices/registry.ts`](src/lib/devices/registry.ts)), so backoff — not the
 dialable set — is what keeps an offline peer from minting an ssh child every few
-seconds. Add a third fan-out and it uses this helper; do not re-roll the loop.
+seconds. A peer that fails **ten** in a row is RETIRED onto a 15-minute re-dial
+(`PEER_RETIRE_AFTER_FAILURES` / `PEER_RETIRED_RECHECK_MS`, PHNX-3999): the cap
+bounds the delay but not the total work, and a box off for a weekend was otherwise
+dialed ~2,880 times per watcher. It still wakes immediately on a registry change,
+so a returning box is never stranded. Add a third fan-out and it uses this helper;
+do not re-roll the loop.
+
+### One shared fleet collector, N readers (PHNX-3999)
+
+`watchFleetFeed` is correct per peer and was wrong per CALLER: it opened that ssh
+child **for every consumer**, so the extension's leader child, the menu-bar helper
+and an operator's `agents feed watch --json` each held their own fan-out — three
+readers on a thirteen-device fleet is thirty-nine ssh children carrying
+byte-identical NDJSON, three activity cursors, and three independent backoff
+ladders re-dialing the same offline box.
+
+[`FeedHub`](src/lib/feed/hub.ts) owns exactly ONE `watchFleetFeed` and broadcasts
+to every subscriber; [`FeedHubServer`](src/lib/feed/hub-server.ts) exposes it over
+a unix socket (named pipe on Windows) writing the SAME NDJSON envelopes, and the
+daemon's `feed-stream` service owns it — the fan-out dials peers, so by the
+one-scheduler/one-executor rule it cannot live in a UI surface. Four properties
+are load-bearing:
+
+- **Demand-gated.** The fan-out starts on the FIRST subscriber and stops on the
+  LAST, so a box with no reader open holds no peer connections at all.
+- **A late reader costs nothing.** The hub keeps the per-scope rows the stream has
+  delivered and synthesizes a reset per scope out of that state — no second
+  fan-out, no re-dial, no waiting for peers to re-announce. Each subscriber's
+  `streamId`/`sequence` are its own and start at 1, which is exactly what the
+  published "order by streamId + sequence" contract allows.
+- **No client-side fallback.** `feed watch --json` attaches to the hub and, if the
+  daemon is down, STARTS it and retries; it never runs its own `watchFleetFeed`,
+  because that restores the per-caller fan-out this replaced.
+  `feed watch --json --local` is untouched — it is the per-machine stream the
+  collector itself subscribes to over ssh.
+- **Reset semantics preserved.** A peer's reset replaces that ONE scope's rows; a
+  peer going unavailable forwards the `scope` event and RETAINS its rows, so a
+  reader attaching while a box is offline still sees its last-known rows.
+
+`normalizePeerEnvelope` ([`feed/watch.ts`](src/lib/feed/watch.ts)) is the single
+ingress for a foreign envelope: `tools` was added to the `reset` payload *within*
+protocol v1, so a peer on an older CLI is a correct v1 producer that reports no
+tool rows. Normalizing once there is what lets every consumer treat the field as
+present, and is why a mixed-version fleet during a rollout does not take the
+fan-out down.
+
+### Tool activity on the feed stream (PHNX-3999)
+
+Browser tasks and computer runs are the third row kind on the stream, projected by
+[`feed/tools.ts`](src/lib/feed/tools.ts) from the sources that already own them —
+`browser sessions`' task-first rows and `computer sessions`' ledger rows. Before
+this, a status surface had exactly one way to ask "what tools are running": shell
+out to both commands, per tool, per device, on a timer. Now the rows ride the one
+open stream, so a consumer switching its All/Agents/Browser/Computer filter
+**spawns zero commands**.
+
+The envelope gains `tool.upsert` / `tool.remove`, and `reset` gains a `tools`
+array beside `agents` and `attention`.
+[`feed/tool-activity.ts`](src/lib/feed/tool-activity.ts) is the event-driven
+collector: it watches the browser runtime tree and the event ledger dir
+recursively and re-projects ONLY on a reported change, emitting the diff rather
+than a snapshot — a warm idle does no directory read, no projection, and no
+subprocess. When no watcher can arm it says so on `armed` and falls back to the
+bounded sweep, a stated degradation rather than a silent one.
+
+Two rules are not negotiable in a consumer or a future change:
+
+- **A computer run is history, not a session.** `ComputerToolRow` pins
+  `live: false` and carries no close/stop command — the CLI process that performed
+  those actions has exited, so an operator control there could not work. Only a
+  browser task still bound in the task index gets a `closeCommand`.
+- **No secret values in a row.** Captures carry PATHS and names, never contents,
+  and a task URL goes through `redactToolUrl` (userinfo stripped,
+  credential-shaped query parameters replaced, fragment dropped) before it leaves
+  the producing machine. A URL that does not parse is dropped rather than
+  published unexamined.
 
 ### Session request + timeline on every row (PHNX-3939)
 

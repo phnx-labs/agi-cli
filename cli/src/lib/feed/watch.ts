@@ -13,16 +13,21 @@ import { readBlock, readResolution, blockIdForSession } from './feed.js';
 import { reconcileAttention, type AttentionItem } from './attention.js';
 import { type ActivityEvent } from './activity.js';
 import { ActivityStream } from './activity-stream.js';
+import { collectToolRows, watchToolActivity, type ToolDiff } from './tool-activity.js';
+import { type ToolRow } from './tools.js';
 import { PR_STATUS_TTL_MS, readPullRequestStatus, withPullRequestStatus, type PullRequestStatus } from './pr-status.js';
 import type { GhExec } from '../github/pr-mergeable.js';
 type Base = { v: 1; type: string; streamId: string; sequence: number; scope: string };
 export type FeedWatchEnvelope =
-  | Base & { type: 'reset'; capturedAt: number; agents: SessionWatchRow[]; attention: AttentionItem[] }
+  | Base & { type: 'reset'; capturedAt: number; agents: SessionWatchRow[]; attention: AttentionItem[]; tools: ToolRow[] }
   | Base & { type: 'agent.upsert'; rowKey: string; agent: SessionWatchRow }
   | Base & { type: 'agent.remove'; rowKey: string }
   | Base & { type: 'attention.upsert'; rowKey: string; attention: AttentionItem }
   | Base & { type: 'attention.remove'; rowKey: string }
   | Base & { type: 'activity.append'; event: ActivityEvent }
+  /** A browser task or computer run, projected by `feed/tools.ts`. */
+  | Base & { type: 'tool.upsert'; rowKey: string; tool: ToolRow }
+  | Base & { type: 'tool.remove'; rowKey: string }
   | Base & { type: 'scope'; capturedAt: number; status: SessionWatchScopeStatus; reason?: string }
   | Base & { type: 'heartbeat'; capturedAt: number };
 type FeedWatchPayload = FeedWatchEnvelope extends infer Envelope
@@ -43,6 +48,12 @@ export class FeedSessionProjection {
   private readonly sessions = new SessionProjection();
   private readonly observations = new Map<string, Map<string, AttentionItem>>();
   private projectedAttention = new Map<string, { scope: string; item: AttentionItem }>();
+  /**
+   * Tool rows per observing scope. A reset replaces one scope's rows and must
+   * not touch another's — the same per-scope rule the agent rows follow, and
+   * the reason a peer reconnecting cannot erase the local machine's tasks.
+   */
+  private readonly toolsByScope = new Map<string, Map<string, ToolRow>>();
   constructor(private readonly state = new FeedWatchState()) {}
 
   apply(event: FeedWatchEnvelope): FeedWatchEnvelope[] {
@@ -57,6 +68,7 @@ export class FeedSessionProjection {
         if (item && !row.previous) attention.set(row.rowKey, item);
       }
       this.observations.set(scope, attention);
+      this.toolsByScope.set(scope, new Map(event.tools.map((tool) => [tool.rowKey, tool])));
     } else if (event.type === 'agent.upsert') {
       sessionEvent = { ...base, type: 'upsert', rowKey: event.rowKey, row: event.agent };
     } else if (event.type === 'agent.remove') {
@@ -67,6 +79,13 @@ export class FeedSessionProjection {
       this.observations.get(scope)!.set(event.rowKey, event.attention);
     } else if (event.type === 'attention.remove') {
       this.observations.get(scope)?.delete(event.rowKey);
+    } else if (event.type === 'tool.upsert') {
+      if (!this.toolsByScope.has(scope)) this.toolsByScope.set(scope, new Map());
+      this.toolsByScope.get(scope)!.set(event.rowKey, event.tool);
+      return [this.state.emit({ type: 'tool.upsert', scope, rowKey: event.rowKey, tool: event.tool })];
+    } else if (event.type === 'tool.remove') {
+      this.toolsByScope.get(scope)?.delete(event.rowKey);
+      return [this.state.emit({ type: 'tool.remove', scope, rowKey: event.rowKey })];
     } else {
       const { v: _v, streamId: _streamId, sequence: _sequence, ...payload } = event;
       return [this.state.emit(payload)];
@@ -83,7 +102,8 @@ export class FeedSessionProjection {
       if (rowEvent.type === 'reset') {
         resetScopes.add(rowEvent.scope);
         result.push(this.state.emit({ type: 'reset', scope: rowEvent.scope, capturedAt: rowEvent.capturedAt, agents: rowEvent.rows,
-          attention: [...next.values()].filter(value => value.scope === rowEvent.scope).map(value => value.item) }));
+          attention: [...next.values()].filter(value => value.scope === rowEvent.scope).map(value => value.item),
+          tools: [...(this.toolsByScope.get(rowEvent.scope)?.values() ?? [])] }));
       } else if (rowEvent.type === 'upsert') {
         result.push(this.state.emit({ type: 'agent.upsert', scope: rowEvent.scope, rowKey: rowEvent.rowKey, agent: rowEvent.row }));
       } else if (rowEvent.type === 'remove') {
@@ -143,11 +163,11 @@ async function projectAgent(agent: SessionWatchRow, gh?: GhExec): Promise<{ agen
   return { agent: withPullRequestStatus(agent, pullRequest), attention: attentionFor(agent, pullRequest) };
 }
 
-export async function projectSessionEnvelope(event: SessionWatchEnvelope, state: FeedWatchState, gh?: GhExec): Promise<FeedWatchEnvelope[]> {
+export async function projectSessionEnvelope(event: SessionWatchEnvelope, state: FeedWatchState, gh?: GhExec, tools: ToolRow[] = []): Promise<FeedWatchEnvelope[]> {
   if (event.type === 'reset') {
     const projected = await Promise.all(event.rows.map((row) => projectAgent(row, gh)));
     const attention = projected.map((p) => p.attention).filter((item): item is AttentionItem => item !== undefined);
-    return [state.emit({ type: 'reset', capturedAt: event.capturedAt, scope: event.scope, agents: projected.map((p) => p.agent), attention })];
+    return [state.emit({ type: 'reset', capturedAt: event.capturedAt, scope: event.scope, agents: projected.map((p) => p.agent), attention, tools })];
   }
   if (event.type === 'upsert') {
     const { agent, attention } = await projectAgent(event.row, gh);
@@ -206,6 +226,8 @@ interface WatchLocalFeedOptions {
   sessions?: Pick<WatchLocalOptions, 'readCache' | 'readPrevious' | 'journalPath' | 'journalPollMs' | 'heartbeatMs'>;
   /** The `gh` runner behind PR status; a test passes a recorded table. */
   gh?: GhExec;
+  /** Tool-activity inputs, forwarded verbatim to {@link watchToolActivity}. */
+  tools?: Pick<Parameters<typeof watchToolActivity>[0], 'sweepMs' | 'roots' | 'sources'>;
 }
 
 export async function watchLocalFeed(options: WatchLocalFeedOptions): Promise<void> {
@@ -217,6 +239,11 @@ export async function watchLocalFeed(options: WatchLocalFeedOptions): Promise<vo
   // dropping it from a window the caller believes was covered.
   const activity = new ActivityStream();
   let activityCursor = Date.now();
+  // The tool rows as this machine last projected them. Held here rather than
+  // re-collected per reset: a session-watch reconnect emits a fresh reset, and
+  // re-reading the browser tree and the ledger for it would reintroduce exactly
+  // the per-render cost `tool-activity.ts` exists to remove.
+  let toolRows: ToolRow[] = collectToolRows(options.scope, options.tools?.sources);
   const agents = new Map<string, SessionWatchRow>();
   const attention = new Map<string, string>();
   // The PR status last projected onto each row, so a merge or a check verdict
@@ -262,7 +289,20 @@ export async function watchLocalFeed(options: WatchLocalFeedOptions): Promise<vo
       await reconcileRows();
     });
   }, options.activityPollMs ?? 500);
-  const stopActivity = () => { clearInterval(activityTimer); stopAttentionWatch(); activity.close(); };
+  const toolWatch = watchToolActivity({
+    ...options.tools, scope: options.scope, signal: options.signal, initial: toolRows,
+    onDiff: (diff: ToolDiff) => {
+      for (const tool of diff.upserts) {
+        toolRows = [...toolRows.filter((row) => row.rowKey !== tool.rowKey), tool];
+        options.emit(state.emit({ type: 'tool.upsert', scope: options.scope, rowKey: tool.rowKey, tool }));
+      }
+      for (const rowKey of diff.removes) {
+        toolRows = toolRows.filter((row) => row.rowKey !== rowKey);
+        options.emit(state.emit({ type: 'tool.remove', scope: options.scope, rowKey }));
+      }
+    },
+  });
+  const stopActivity = () => { clearInterval(activityTimer); stopAttentionWatch(); activity.close(); toolWatch.stop(); };
   options.signal.addEventListener('abort', stopActivity, { once: true });
   try {
     await watchLocalSessions({ ...options.sessions, scope: options.scope, signal: options.signal, emit: (event) => {
@@ -271,7 +311,7 @@ export async function watchLocalFeed(options: WatchLocalFeedOptions): Promise<vo
         for (const row of event.rows) agents.set(row.rowKey, row);
       } else if (event.type === 'upsert') agents.set(event.rowKey, event.row);
       else if (event.type === 'remove') { agents.delete(event.rowKey); attention.delete(event.rowKey); prStatus.delete(event.rowKey); }
-      pending = pending.then(() => projectSessionEnvelope(event, state, options.gh)).then((events) => {
+      pending = pending.then(() => projectSessionEnvelope(event, state, options.gh, toolRows)).then((events) => {
         for (const projected of events) {
           if (projected.type === 'reset') {
             attention.clear();
@@ -300,6 +340,22 @@ function remoteFeedWatchCommand(os: string): string {
     : `bash -lc ${shellQuote(`agents ${args.map(shellQuote).join(' ')}`)}`;
 }
 
+/**
+ * The one ingress for an envelope produced by ANOTHER agents-cli.
+ *
+ * `tools` was added to the `reset` payload within protocol v1, so a peer on an
+ * older CLI is a correct v1 producer that simply reports no tool rows — which is
+ * true of it, not a data defect to paper over. Normalizing HERE, at the single
+ * place a foreign envelope enters, is what keeps every consumer downstream able
+ * to treat the field as present instead of each re-checking it. A mixed-version
+ * fleet is the normal state during a rollout, so an absent field must not take
+ * the whole fan-out down.
+ */
+export function normalizePeerEnvelope(event: FeedWatchEnvelope): FeedWatchEnvelope {
+  if (event.type !== 'reset' || Array.isArray(event.tools)) return event;
+  return { ...event, tools: [] };
+}
+
 export async function watchFleetFeed(options: { signal: AbortSignal; emit: (event: FeedWatchEnvelope) => void; reconnectMs?: number }): Promise<void> {
   const coordinator = new FeedWatchState();
   const projection = new FeedSessionProjection(coordinator);
@@ -322,7 +378,7 @@ export async function watchFleetFeed(options: { signal: AbortSignal; emit: (even
         try {
           const event = JSON.parse(line) as FeedWatchEnvelope;
           if (event.v !== 1) return false;
-          forward(event);
+          forward(normalizePeerEnvelope(event));
           return true;
         } catch { return false; /* protocol only */ }
       },

@@ -106,6 +106,15 @@ function eventsDir(date: Date = new Date()): string {
   return path.dirname(eventsPath(date));
 }
 
+/**
+ * The directory today's ledger is appended to. Exported for the tool-activity
+ * collector, which watches it instead of re-running `agents computer sessions`
+ * on a timer to notice a new `computer.action` (see `feed/tool-activity.ts`).
+ */
+export function getEventsDir(): string {
+  return eventsDir();
+}
+
 /** Default retention period in days. */
 const DEFAULT_RETENTION_DAYS = 7;
 
