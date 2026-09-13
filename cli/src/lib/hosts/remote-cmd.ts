@@ -358,7 +358,7 @@ export function stripClixml(stdout: string): string {
 
 /**
  * Statements that run the Agents CLI on a Windows peer with EXACT argv, leaving the
- * child's exit code in `$__code`.
+ * child's exit code in `$zq`.
  *
  * `& agents …` cannot be used, and the reason is not our quoting. On Windows
  * `agents` is an npm-generated `agents.ps1`, whose body ends in
@@ -444,7 +444,7 @@ export function windowsAgentsScript(cmd: WindowsAgentsCommand): string {
 
 /**
  * Build the `ssh <target> <cmd>` string for one `agents …` invocation on a
- * Windows remote: a `powershell -NoProfile -EncodedCommand <base64>` call. The
+ * Windows remote: a rendered `powershell -NoProfile` call. The
  * Windows counterpart of `bash -lc '<...>'`, shared by every `--device` site.
  */
 /**
@@ -459,9 +459,8 @@ export function windowsAgentsScript(cmd: WindowsAgentsCommand): string {
  *
  * The alternative is to deflate the UTF-8 script and emit a small fixed bootstrap
  * that inflates it back. That trades ~2.67x for ~1.33x on the compressible part,
- * which on scripts of this shape is a large net win. The bootstrap itself still
- * rides the ordinary `-EncodedCommand` route, so the transport, quoting and stdin
- * behaviour are untouched — only the payload representation changes.
+ * which on scripts of this shape is a large net win. The variable-free bootstrap
+ * uses `-Command` with a base64 payload and leaves stdin available to the child.
  *
  * Applied ONLY when the result is actually shorter: for a small script the fixed
  * bootstrap costs more than it saves, so picking the shorter of the two keeps the
@@ -469,8 +468,6 @@ export function windowsAgentsScript(cmd: WindowsAgentsCommand): string {
  */
 export function renderPowershellCommand(script: string): string {
   const plain = `powershell -NoProfile -EncodedCommand ${encodePowershell(script)}`;
-  // Raw DEFLATE (RFC 1951) — what .NET's `DeflateStream` reads. `deflateSync`
-  // would prepend a zlib header that `DeflateStream` rejects.
   // Raw DEFLATE (RFC 1951) — what .NET's `DeflateStream` reads. `deflateSync`
   // would prepend a zlib header that `DeflateStream` rejects.
   const packed = zlib.deflateRawSync(Buffer.from(script, 'utf-8'), { level: 9 }).toString('base64');
