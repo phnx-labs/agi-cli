@@ -15,7 +15,7 @@ import { fetchPeerPreviewDigest } from '../lib/session/remote-list.js';
 import { parseSession, sanitizeForTerminal, SNAPSHOT_TODO_TOOLS } from '../lib/session/parse.js';
 import { readSessionTail, readSessionHead } from '../lib/session/tail.js';
 import { safeTeamText } from '../lib/session/team-filter.js';
-import { cleanSessionPrompt, extractSessionTopic, isSyntheticUserMessage } from '../lib/session/prompt.js';
+import { cleanSessionPrompt, extractSessionTopic, isSyntheticUserMessage, firstUserMessageFromEvents } from '../lib/session/prompt.js';
 import { linkPath, linkUrl, relativeToCwd, shortenModel } from '../lib/session/render.js';
 import { linearIssueUrl } from '../lib/session/linear.js';
 import { extractTodoProgress, WORKTREE_RE } from '../lib/session/state.js';
@@ -446,9 +446,11 @@ export function loadSessionPreviewDigest(session: SessionMeta): {
       if (session.firstUserMessage) {
         digest.firstUser = session.firstUserMessage;
       } else {
-        const headEvents = readSessionHead(session.filePath, session.agent);
-        const firstHeadUser = headEvents.find(e => e.type === 'message' && e.role === 'user' && !e._synthetic && e.content);
-        digest.firstUser = firstHeadUser?.content ?? '';
+        // Reuse the canonical extractor (rejects synthetic/system-injected
+        // turns, unwraps a Grok/Cursor <user_query> wrapper) rather than a
+        // bespoke inline find — the same rules SessionMeta.firstUserMessage
+        // itself was built with.
+        digest.firstUser = firstUserMessageFromEvents(readSessionHead(session.filePath, session.agent)) ?? '';
       }
       digest.partial = true;
       digest.partialReason = `transcript is ${formatBytes(sourceStamp.size)}, over the ${formatBytes(PREVIEW_DIGEST_MAX_PARSE_BYTES)} bounded-parse limit for an uncached preview; digest reflects only the last ~128 KiB (tail) of the transcript, not the whole session`;
