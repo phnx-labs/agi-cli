@@ -207,8 +207,8 @@ describe('local and fleet readers share their own collectors', () => {
     socket.setEncoding('utf-8');
     socket.on('data', (chunk: string) => lines.push(chunk));
     await new Promise((resolve) => socket.once('connect', resolve));
-    await until('the silent reader to be rejected', () => server.rejectedHandshakes > 0);
-    expect(lines.join('')).toContain('no scope line');
+    await until('the silent reader to receive its rejection', () => lines.join('').includes('no scope line'));
+    expect(server.rejectedHandshakes).toBe(1);
     // Critically: no collector was started for it.
     expect(fleet.starts).toHaveLength(0);
     expect(local.starts).toHaveLength(0);
