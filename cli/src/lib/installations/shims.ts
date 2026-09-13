@@ -2277,12 +2277,12 @@ export function listShimFileNames(): string[] {
  * `computer` bin of its own: a machine that installed an older CLI has a real
  * shim on PATH under the name the standalone engine now owns.
  */
-const LEGACY_SHIMS_ALWAYS_PRUNED: ReadonlySet<string> = new Set(['secrets', 'sessions', 'computer']);
+const LEGACY_SHIMS_ALWAYS_PRUNED: ReadonlySet<string> = new Set(['secrets', 'sessions', 'computer', 'pty']);
 
 /**
  * Prune a stale, orphaned shim: one that is NOT a managed agent shim and NOT a user
  * alias, whose baked `AGENTS_BIN` points at an install that no longer exists. These
- * are `exec "$AGENTS_BIN" <cmd>` command shims (browser/sessions/pty/teams) that
+ * are `exec "$AGENTS_BIN" <cmd>` command shims (browser/teams) that
  * `scripts/postinstall.js` writes for the LIVE install; one baked at a removed
  * install either dies with `exit 127` or shadows the real package bin on PATH.
  * Only removed when the baked target is gone, so a working shim is never touched —

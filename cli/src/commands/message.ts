@@ -3,7 +3,7 @@
  *
  * Delivery is routed by agent state (RUSH-1474):
  *   - running, between tool calls → mailbox spool (PreToolUse inject)
- *   - parked on AskUserQuestion with a tmux/iterm/pty rail → keystroke inject
+ *   - parked on AskUserQuestion with a tmux/iterm rail → keystroke inject
  *   - parked headless (no rail) → `agents run --resume <id> -- <answer>`
  *   - cloud task → provider.message()
  *
@@ -221,7 +221,7 @@ async function deliverViaHostReroute(
  */
 const CONTROL_PLANE_NOTES = `
   Planes (do not mix them up):
-    message / sessions inject  - CONTROL a running agent (mailbox answer, PTY keystroke, or resume by runtime)
+    message / sessions inject  - CONTROL a running agent (mailbox answer, terminal keystroke, or resume by runtime)
     send / notify              - DELIVER a message to a human recipient over a channel provider
     feed post                  - RECORD progress / milestones (optional broadcast may call send/notify)
 
@@ -234,7 +234,7 @@ const CONTROL_PLANE_NOTES = `
 export function registerMessageCommand(program: Command): void {
   const messageCmd = program
     .command('message <target> <text>')
-    .description('Send a message to a running or parked agent (mailbox / PTY-select / resume by runtime).')
+    .description('Send a message to a running or parked agent (mailbox / terminal-select / resume by runtime).')
     .option('--from <who>', 'Label recorded as the sender of this message')
     .option('--as <operator>', 'Verified operator id answering a high-consequence block')
     .option('--surface <surface>', 'Surface that is sending this answer (feed, terminal, etc.)', 'cli')
@@ -292,7 +292,7 @@ export function registerMessageCommand(program: Command): void {
               await deliverViaMailbox(res.id, text, block, { from: opts.from, ttlSeconds });
               return;
             }
-            if (route.kind === 'tmux' || route.kind === 'iterm' || route.kind === 'pty') {
+            if (route.kind === 'tmux' || route.kind === 'iterm') {
               await deliverViaInject(route, res.id);
               if (block) {
                 recordMessageReceipt(block.blockId, {

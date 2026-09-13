@@ -2,7 +2,7 @@
  * Tests for the inject-target resolver (RUSH-1415) — the safety choke point.
  *
  * `resolveInjectTargetForSession` is PURE (takes an ActiveSession, returns a
- * resolution), so the whole tmux > iterm > vscodium > pty precedence and the
+ * resolution), so the whole tmux > iterm > vscodium precedence and the
  * Ghostty refusal are asserted here without touching the process table. The
  * fixtures mirror what active.ts produces: provenance (env-derived rails) + host
  * (detectHost) + sessionId.
@@ -109,12 +109,7 @@ describe('resolveInjectTargetForSession — ghostty (honest degradation)', () =>
   });
 });
 
-describe('resolveInjectTargetForSession — pty + refusals', () => {
-  it('emits pty only when a sidecar id is supplied (lowest precedence)', () => {
-    const r = resolveInjectTargetForSession(session({ host: undefined }), { ptyId: 'pty-7' });
-    expect(r).toEqual({ addressable: true, rail: 'pty', target: { backend: 'pty', id: 'pty-7' } });
-  });
-
+describe('resolveInjectTargetForSession — refusals', () => {
   it('refuses with an honest reason when no rail exists', () => {
     const r = resolveInjectTargetForSession(session({ host: undefined }));
     expect(r.addressable).toBe(false);

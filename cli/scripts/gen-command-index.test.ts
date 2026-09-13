@@ -114,9 +114,9 @@ describe('command index generation', () => {
     const start = find(nodes, 'browser start');
     expect(start).toBeDefined();
     expect(start!.options.some((option) => option.long?.startsWith('--'))).toBe(true);
-    const pty = find(nodes, 'pty');
-    expect(pty?.examples).toContain('agents pty');
-    expect(pty?.notes?.length).toBeGreaterThan(0);
+    const tmux = find(nodes, 'tmux');
+    expect(tmux?.examples).toContain('agents tmux');
+    expect(tmux?.notes?.length).toBeGreaterThan(0);
   });
 
   it('renders scannable Markdown with a fenced block per group', async () => {

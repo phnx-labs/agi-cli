@@ -53,17 +53,18 @@ jobs:
       - name: Install dependencies
         run: bun install --ignore-scripts
 
-      # The daemon integration test (#568) spawns the REAL daemon, which loads
-      # node-pty (@homebridge/node-pty-prebuilt-multiarch). That package ships
-      # prebuilt binaries only for Linux; macOS/Windows fetch (or compile)
-      # pty.node via its own install script. bun does not run that script here
-      # (not even without --ignore-scripts, as of bun 1.3.x), so build this one
-      # native dep explicitly — otherwise the daemon crashes on macOS/Windows
-      # (Linux uses the shipped prebuild and stayed green, masking the break;
-      # this matrix runs only nightly, so a break shows the next morning, not on
-      # the PR). The package's install script prefers a prebuilt download and
-      # falls back to a node-gyp compile, so it self-heals on runners with no
-      # matching prebuilt.
+      # picker.test.ts and sync.test.ts spawn a REAL pty via node-pty
+      # (@homebridge/node-pty-prebuilt-multiarch, a devDependency now that the
+      # engine itself lives in the standalone term-cli, PHNX-4091). That
+      # package ships prebuilt binaries only for Linux; macOS/Windows fetch
+      # (or compile) pty.node via its own install script. bun does not run
+      # that script here (not even without --ignore-scripts, as of bun
+      # 1.3.x), so build this one native dep explicitly — otherwise those
+      # tests crash on macOS/Windows (Linux uses the shipped prebuild and
+      # stayed green, masking the break; this matrix runs only nightly, so a
+      # break shows the next morning, not on the PR). The package's install
+      # script prefers a prebuilt download and falls back to a node-gyp
+      # compile, so it self-heals on runners with no matching prebuilt.
       - name: Build node-pty native binary
         shell: bash
         run: cd node_modules/@homebridge/node-pty-prebuilt-multiarch && npm run install

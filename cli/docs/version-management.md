@@ -526,7 +526,7 @@ pty output. Specifically:
 | Hypothetical change | Breaks |
 |---|---|
 | Shim uses `$BINARY "$@"` instead of `exec $BINARY "$@"` | `pgrep -P shell_pid` keeps returning the shim pid even after the agent exits; consumers can't detect "shell idle" |
-| Shim wraps the agent in `tmux`/`screen`/`agents pty` as a persistent parent | `pgrep -P shell_pid` returns the wrapper pid; the actual agent is a deeper descendant, requiring a tree-walk |
+| Shim wraps the agent in `tmux`/`screen`/`term` as a persistent parent | `pgrep -P shell_pid` returns the wrapper pid; the actual agent is a deeper descendant, requiring a tree-walk |
 | Shim daemonizes or backgrounds the agent | Terminal's pty is not the agent's stdin; typed input goes to the wrong process |
 
 When introducing new launch modes, preserve this contract or provide an

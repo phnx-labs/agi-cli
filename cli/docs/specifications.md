@@ -73,7 +73,7 @@ row its surface sits in.
 |---|---|---|
 | **Specified here** | `sessions`, `secrets`, `run`, the scheduling/executor singularity, **routine execution & readiness**, `watchdog` | RFC-2119 requirements + Given/When/Then. A change that deviates is a bug in the code or in this doc. |
 | **Governed in part** | `monitors`, `doctor`, `daemon` | One requirement reaches them, no command contract does. `monitors` is bound by [§Scheduling & execution singularity](#scheduling--execution-singularity) (SING-5, SING-8, SING-9) — who may schedule and execute it. `doctor` is bound by SEC-17 for one behavior only: warning on a credential-shaped var in a shell rc file. `daemon` is bound by SING-1 (it IS the singular scheduler/executor) and SING-4a (the `daemon.enabled` kill switch); per-service toggles (`agents daemon services enable|disable`) are an operational convenience with no normative contract. The daemon's status/health rendering (`agents daemon status`/`services`/`doctor`) carries no requirement of its own. Everything else these commands do is unspecified. |
-| **Documented, not specified** | `hosts`, `teams`, `cloud`, `browser`, `computer`, `plugins`, `subagents`, `workflows`, `profiles`, `share`, `pty`, `menubar`, resource sync (`skills`/`rules`/`commands`/`hooks`/`mcp`/`permissions`), version management (`add`/`use`/`prune`/`import`/`export`) | The architecture spine describes these mechanisms in [fleet.md](fleet.md), [orchestration.md](orchestration.md), [execution.md](execution.md), [interfaces.md](interfaces.md), [resources.md](resources.md), and [distribution.md](distribution.md), but those decision records do not create RFC-2119 requirements. Treat them as explanation, never as a contract. |
+| **Documented, not specified** | `hosts`, `teams`, `cloud`, `browser`, `computer`, `plugins`, `subagents`, `workflows`, `profiles`, `share`, `menubar`, resource sync (`skills`/`rules`/`commands`/`hooks`/`mcp`/`permissions`), version management (`add`/`use`/`prune`/`import`/`export`) | The architecture spine describes these mechanisms in [fleet.md](fleet.md), [orchestration.md](orchestration.md), [execution.md](execution.md), [interfaces.md](interfaces.md), [resources.md](resources.md), and [distribution.md](distribution.md), but those decision records do not create RFC-2119 requirements. Treat them as explanation, never as a contract. |
 | **Unspecified** | `wallet`, `helper`, `sync`/`apply`/`status`, `webhook`, `daemon funnel`, `mailboxes`, `feed`, `message`/`send`, `budget`, `audit`, and the remaining groups | Neither a spec nor a design doc. Behavior is whatever the code does today; nothing here entitles a caller to it. |
 
 **Where the absence bites hardest.** These act on other machines, hold durable
@@ -3848,7 +3848,7 @@ not the watchdog's.
 
 - **WD-14 (MUST).** A nudge MUST be delivered into the exact split the session lives in,
   resolved by the single canonical `resolveInjectTargetForSession`
-  (`lib/terminal/resolve.ts`, precedence `tmux > iterm > vscodium > pty`) and injected by
+  (`lib/terminal/resolve.ts`, precedence `tmux > iterm > vscodium`) and injected by
   `injectIntoTerminal` (`lib/terminal/inject.ts`).
 - **WD-15 (MUST).** `agents sessions inject` MUST resolve targets through the same
   `resolveInjectTargetForSession` as the watchdog, so the manual unblock path and the
@@ -3859,7 +3859,7 @@ not the watchdog's.
   shape, with persisted transcript context bounded so it cannot consume the audit window
   (`lib/watchdog/log.ts`).
 - **WD-21 (MUST).** A nudge MUST be booked in the cooldown ledger (`nudges.json`) and
-  logged as a `nudge` event ONLY when delivery is CONFIRMED. tmux / iterm / pty self-confirm
+  logged as a `nudge` event ONLY when delivery is CONFIRMED. tmux / iterm self-confirm
   (a successful transport IS delivery); vscodium's `--open-url` is fire-and-forget, so it is
   `confirmed: false` until the swarm-ext extension acks the verb (`backendConfirmsDelivery`,
   `lib/terminal/inject.ts`). An unconfirmed-but-dispatched delivery MUST be logged as an

@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_68 command groups · 512 commands._
+_67 command groups · 498 commands._
 
 ## accounts — Browse and manage harness accounts
 
@@ -416,10 +416,10 @@ agents menubar setup    Configure AGI Menu end-to-end: one instance, started at 
 agents menubar status   Show whether AGI Menu is installed and running
 ```
 
-## message — Send a message to a running or parked agent (mailbox / PTY-select / resume by runtime).
+## message — Send a message to a running or parked agent (mailbox / terminal-select / resume by runtime).
 
 ```
-agents message <target> <text>  Send a message to a running or parked agent (mailbox / PTY-select / resume by runtime).
+agents message <target> <text>  Send a message to a running or parked agent (mailbox / terminal-select / resume by runtime).
 ```
 
 ## models — Show the cost-tier map (cheap|default|best|ultra) for installed harnesses; pin overrides with `tier set`.
@@ -518,25 +518,6 @@ agents projects status [nameOrPath]  Progress card for every project across the 
 ```
 agents prune <specs...>        Uninstall agent CLI versions. Moves version data to trash for recovery.
 agents prune cleanup [target]  Remove orphan resources, old versions, or routine runs
-```
-
-## pty — Drive interactive terminal programs from AI agents. Use this for REPLs, TUIs, or anything needing a real terminal.
-
-```
-agents pty                       Drive interactive terminal programs from AI agents. Use this for REPLs, TUIs, or anything needing a real terminal.
-agents pty exec <id> <command>   Send a command to a PTY session. Returns immediately (non-blocking). Use screen or read to see output.
-agents pty list                  List all active PTY sessions (running or idle).
-agents pty read <id>             Read raw output from the PTY (includes ANSI codes). Use screen for clean text instead.
-agents pty resize <id>           Resize a PTY session
-agents pty screen <id>           Render the terminal screen as clean text (no ANSI codes). This is what a human sees looking at the terminal.
-agents pty server                Manage the PTY sidecar server (auto-starts on first use, usually you do not need this).
-agents pty server start          Start the PTY server manually (auto-starts on first pty command anyway).
-agents pty server status         Check if the PTY server is running and how many sessions are active.
-agents pty server stop           Stop the PTY server and kill all active sessions.
-agents pty signal <id> [signal]  Send a POSIX signal to the running process. Defaults to INT (Ctrl-C).
-agents pty start                 Start a new PTY session and return its ID. The session persists until you stop it.
-agents pty stop <id>             Stop a PTY session and clean up. The session ID becomes invalid.
-agents pty write <id> <input>    Send keystrokes to the PTY (like typing into the terminal). Processes escape sequences by default.
 ```
 
 ## registry — Manage package registries

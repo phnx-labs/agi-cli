@@ -7,7 +7,7 @@
  * extension, raw shells, `agents teams`, routines, and the Swarm MCP can all
  * call into.
  *
- * Surface mirrors `agents pty`:
+ * Surface mirrors the standalone `term` CLI's:
  *   agents tmux check
  *   agents tmux new <name>     [--cmd ...] [--cwd DIR] [--replace] [--attach-existing] [--source S]
  *   agents tmux attach <name>

@@ -107,7 +107,28 @@ export function termScreen(id: string): Promise<TermResponse> {
   return runTerm(['screen', id, '--json']);
 }
 
-/** `term stop <id> --json` — end the session and clean up. */
+/**
+ * `term stop <id>` — end the session and clean up.
+ *
+ * Unlike every other verb, `stop` has no `--json` mode and prints nothing on
+ * success (confirmed against a real built `term` binary — a bare `--json`
+ * flag errors `unknown option '--json'`, and success alone leaves stdout
+ * empty), so this synthesizes the `{ ok }` envelope from the exit code
+ * instead of routing through {@link runTerm}'s stdout-JSON parse.
+ */
 export function termStop(id: string): Promise<TermResponse> {
-  return runTerm(['stop', id, '--json']);
+  return new Promise((resolve, reject) => {
+    const bin = resolveTermBin();
+    if (!bin) {
+      reject(new Error(TERM_NOT_INSTALLED_ERROR));
+      return;
+    }
+    execFile(bin, ['stop', id], { maxBuffer: 16 * 1024 * 1024, timeout: 30_000 }, (err, _stdout, stderr) => {
+      if (err) {
+        resolve({ ok: false, error: stderr.toString().trim() || err.message });
+        return;
+      }
+      resolve({ ok: true });
+    });
+  });
 }

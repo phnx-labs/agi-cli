@@ -27,7 +27,7 @@ over-aggressive docs sweep removed them (2026-08-25); kept concise.
 - Execution & fleet: [ssh-transport](ssh-transport.md), [hosts](hosts.md),
   [version-management](version-management.md), [resource-sync](resource-sync.md),
   [self-healing](self-healing.md)
-- Tools: [browser](browser.md), [computer](computer.md), [pty](pty.md)
+- Tools: [browser](browser.md), [computer](computer.md)
 - Orchestration: [teams](teams.md), [routines](routines.md), [monitors](monitors.md),
   [cloud](cloud.md)
 - Resources: [hooks](hooks.md), [subagents](subagents.md), [plugins](plugins.md),

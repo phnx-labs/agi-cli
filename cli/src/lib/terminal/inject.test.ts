@@ -220,20 +220,6 @@ describe('injectIntoTerminal — vscodium routing', () => {
   });
 });
 
-describe('injectIntoTerminal — pty guards', () => {
-  it('refuses a remote pty target (the sidecar is local-only)', async () => {
-    const res = await injectIntoTerminal({ backend: 'pty', id: 'x' }, 'hi', { host: 'box-a', dryRun: true });
-    expect(res.ok).toBe(false);
-    expect(res.error).toContain('local-only');
-  });
-
-  it('dryRun reports the Ink-safe two-write plan for pty', async () => {
-    const res = await injectIntoTerminal({ backend: 'pty', id: 'x' }, 'hi', { dryRun: true });
-    expect(res.ok).toBe(true);
-    expect(res.writes).toBe(2);
-  });
-});
-
 const skipReason = isTmuxInstalled() ? null : 'tmux not installed';
 
 describe.skipIf(skipReason)('injectIntoTerminal — real tmux round-trip', () => {

@@ -33,8 +33,6 @@
  *             via System Events keystrokes, stealing focus. The resolver refuses
  *             to route here by default (see resolve.ts); it stays behind an
  *             explicit opt-in.
- *   - pty   → the `agents pty write` sidecar path (ptyRequest). Local-only —
- *             the sidecar is not an engine transport surface.
  *
  * Ink-TUI Enter semantics: Claude's Ink TUI swallows an Enter fused to the text,
  * so the default path delivers the text and the Enter as TWO SEPARATE writes
@@ -42,7 +40,6 @@
  * opts into one fused write for plain shells / REPLs.
  */
 
-import { ptyRequest } from '../pty-client.js';
 import { appleScriptStr } from './quote.js';
 import { runSpec, type HostResolver } from './transport.js';
 import { itermBackend, ghosttyBackend } from './backends/index.js';
@@ -50,8 +47,7 @@ import { currentContext, type LaunchSpec, type EngineContext } from './types.js'
 
 /**
  * An already-running surface to type into. A superset of the engine's launch
- * `Backend` — it adds `pty` (the sidecar), which the engine can't launch but can
- * be injected into.
+ * `Backend`.
  */
 export type InjectTarget =
   | { backend: 'tmux'; pane: string; socket?: string }
@@ -63,8 +59,7 @@ export type InjectTarget =
    * URL scheme (`vscodium` / `cursor` / `vscode`) — the resolver fills both.
    */
   | { backend: 'vscodium'; terminalId: string; cli: string; scheme: string }
-  | { backend: 'ghostty'; window?: string }
-  | { backend: 'pty'; id: string };
+  | { backend: 'ghostty'; window?: string };
 
 export type InjectBackend = InjectTarget['backend'];
 
@@ -95,10 +90,9 @@ export interface InjectResult {
   /**
    * Delivery is CONFIRMED to have reached the running agent, not merely dispatched.
    *
-   * For tmux / iterm / ghostty / pty, `ok` already means delivered: `tmux
+   * For tmux / iterm / ghostty, `ok` already means delivered: `tmux
    * send-keys` errors on a missing pane, `osascript write text` errors on a bad
-   * session id, and a pty write errors if the sidecar can't reach the fd — so a
-   * successful transport IS the confirmation. For **vscodium**, `ok` only means the
+   * session id — so a successful transport IS the confirmation. For **vscodium**, `ok` only means the
    * editor CLI accepted the `--open-url` hand-off; whether the swarm-ext extension
    * actually parsed the verb and typed anything is unknown from the CLI side (the
    * ext must ack — RUSH follow-up). So vscodium is delivered-but-UNCONFIRMED, and
@@ -286,33 +280,6 @@ export function vscodiumInjectSpec(
   return { argv: [target.cli, '--open-url', vscodiumInjectUri(target.scheme, target.terminalId, text, opts)] };
 }
 
-// --- pty --------------------------------------------------------------------
-
-async function injectPty(
-  target: Extract<InjectTarget, { backend: 'pty' }>,
-  text: string,
-  o: { enter: boolean; combined: boolean; host?: string; dryRun?: boolean },
-): Promise<InjectResult> {
-  if (o.host && o.host !== 'local') {
-    return { ok: false, confirmed: false, backend: 'pty', writes: 0, error: 'pty injection is local-only (the sidecar is not a remote surface)' };
-  }
-  // Same Ink-safe split as tmux: text write, then a separate CR write.
-  const writes: string[] = o.enter && o.combined ? [text + CR] : o.enter ? [text, CR] : [text];
-
-  if (o.dryRun) return { ok: true, confirmed: true, backend: 'pty', writes: writes.length };
-
-  try {
-    for (const input of writes) {
-      const res = await ptyRequest('write', target.id, { input });
-      if (!res.ok) return { ok: false, confirmed: false, backend: 'pty', writes: 0, error: res.error ?? 'pty write failed' };
-    }
-    // A successful sidecar write reached the fd — real delivery.
-    return { ok: true, confirmed: true, backend: 'pty', writes: writes.length };
-  } catch (err) {
-    return { ok: false, confirmed: false, backend: 'pty', writes: 0, error: err instanceof Error ? err.message : String(err) };
-  }
-}
-
 // --- public entry -----------------------------------------------------------
 
 /**
@@ -328,9 +295,6 @@ export async function injectIntoTerminal(
   const enter = opts.enter !== false;
   const combined = opts.combined === true;
 
-  if (target.backend === 'pty') {
-    return injectPty(target, text, { enter, combined, host: opts.host, dryRun: opts.dryRun });
-  }
 
   // tmux + AppleScript + editor-CLI backends all run through the engine transport.
   const specs =

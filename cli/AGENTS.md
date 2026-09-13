@@ -9,7 +9,7 @@ OpenCode, OpenClaw, Grok, Droid, …).
 
 This is the **internal architecture** map. The user-facing feature tour is
 [README.md](README.md) (pin versions, run, sessions, hosts, teams, workflows,
-plugins, browser, secrets, routines, pty). This file covers the design choices,
+plugins, browser, secrets, routines). This file covers the design choices,
 module map, build, and release mechanics the README does not.
 
 > Phoenix Labs · FSL-1.1-Apache-2.0. Repo-wide policy (conventions, code review, security)
