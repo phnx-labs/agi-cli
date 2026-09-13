@@ -61,6 +61,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { getCacheDir } from '../state.js';
+import { machineId } from '../machine-id.js';
 import { query, truncate, type EventRecord } from '../feed/events.js';
 import { formatRelativeTime } from '../session/relative-time.js';
 import type { SessionMeta } from '../session/types.js';
@@ -180,7 +181,7 @@ export function standaloneComputerActionsDir(): string {
  * skipped, never defaulted: the file is plain JSONL another process may be
  * mid-append to.
  */
-function standaloneLineToAction(line: string): ComputerAction | null {
+function standaloneLineToAction(line: string, observer: string): ComputerAction | null {
   let parsed: unknown;
   try { parsed = JSON.parse(line); } catch { return null; }
   if (!parsed || typeof parsed !== 'object') return null;
@@ -192,6 +193,15 @@ function standaloneLineToAction(line: string): ComputerAction | null {
   if (Number.isNaN(tsMs)) return null;
   const text = (key: string): string | undefined => (typeof record[key] === 'string' ? record[key] as string : undefined);
   const num = (key: string): number | undefined => (typeof record[key] === 'number' ? record[key] as number : undefined);
+  // The producer identifies the DRIVEN host only for a remote run, and emits no
+  // `hostname`/`machineId` of its own at all. Defaulting those to the observing
+  // machine HERE, at the source, is what keeps a direct local action attributable:
+  // without it `groupIntoComputerRuns` fell back to `machine: 'unknown'`, the row's
+  // device read `unknown`, and every locally-run `computer` action vanished the
+  // moment a consumer filtered by device. The observer IS the machine that ran it
+  // — this ledger is per-machine by construction, written by the engine on the box
+  // it ran on — so the fallback is a fact, not a guess. An explicit `host` still
+  // wins, because that names a genuinely different driven machine.
   return {
     verb, ts, tsMs,
     // The engine's pid is its own; a record without one still groups by
@@ -206,7 +216,7 @@ function standaloneLineToAction(line: string): ComputerAction | null {
     launchId: text('launchId'),
     agent: text('agent'),
     machineId: text('machineId'),
-    hostname: text('hostname'),
+    hostname: text('hostname') ?? observer,
     capture: parseActionCapture(record.capture),
   };
 }
@@ -218,9 +228,12 @@ function standaloneLineToAction(line: string): ComputerAction | null {
  * as the budget is met, so a box with months of history costs the same as one
  * with a day of it.
  */
-export function listStandaloneComputerActions(opts: { limit?: number; dir?: string } = {}): ComputerAction[] {
+export function listStandaloneComputerActions(opts: { limit?: number; dir?: string; observer?: string } = {}): ComputerAction[] {
   const dir = opts.dir ?? standaloneComputerActionsDir();
   const limit = opts.limit ?? DEFAULT_ACTION_LIMIT;
+  // This ledger is per-machine by construction, so "who ran it" is this machine
+  // unless the record names a driven remote host.
+  const observer = opts.observer ?? machineId();
   let days: string[];
   try {
     days = fs.readdirSync(dir).filter((name) => name.endsWith('.jsonl')).sort().reverse();
@@ -237,7 +250,7 @@ export function listStandaloneComputerActions(opts: { limit?: number; dir?: stri
     for (let index = lines.length - 1; index >= 0 && out.length < limit; index--) {
       const line = lines[index]!;
       if (!line) continue;
-      const action = standaloneLineToAction(line);
+      const action = standaloneLineToAction(line, observer);
       if (action) out.push(action);
     }
   }
@@ -471,9 +484,11 @@ function appendPrunedRunsFromDb(rows: ComputerRunRow[], limit?: number): void {
  *  session against the live indexes. The interactive picker's (and the
  *  flat/`--json` printer's) data source. `machine` narrows to rows whose
  *  invoking hostname, machineId, or `--device` target contains the substring. */
-export function buildComputerSessionRows(opts: { limit?: number; machine?: string } = {}): ComputerRunRow[] {
+export function buildComputerSessionRows(opts: { limit?: number; machine?: string; observer?: string } = {}): ComputerRunRow[] {
   const actions = mergeComputerActionSources(
-    listStandaloneComputerActions({ limit: opts.limit }),
+    // `observer` is threaded from the caller's scope so a row's device and the
+    // scope that reported it can never name the same box differently.
+    listStandaloneComputerActions({ limit: opts.limit, ...(opts.observer ? { observer: opts.observer } : {}) }),
     listComputerActions({ limit: opts.limit }),
   );
   const index = buildLaunchSessionIndex();

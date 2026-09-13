@@ -44,8 +44,22 @@ const SOCKET_NAME = 'feed-stream.sock';
  */
 export const HUB_CLIENT_BACKLOG_LIMIT = 4 * 1024 * 1024;
 
-/** How long a reader gets to send its scope line before it defaults to fleet. */
-const HUB_HANDSHAKE_GRACE_MS = 250;
+/**
+ * How long a reader gets to send its scope line before it is REJECTED.
+ *
+ * The handshake is required, not defaulted. Silently treating a missing or
+ * unparseable scope as `fleet` meant a reader that sent nothing — or sent
+ * garbage, or sent its line after the grace elapsed — was quietly subscribed to
+ * the whole-fleet collector: it started ssh children to every peer on behalf of a
+ * client that never asked for them, and delivered peer data to a client that may
+ * have wanted only this box. A boundary that guesses is worse than one that
+ * refuses, so an unusable handshake is reported and the connection ends.
+ */
+export const HUB_HANDSHAKE_GRACE_MS = 2_000;
+/** Bytes of handshake accepted before the reader is rejected outright. */
+const HUB_HANDSHAKE_MAX_BYTES = 1024;
+/** The scopes a reader may ask for. */
+const HUB_SCOPES = new Set(['fleet', 'local']);
 
 /** The canonical socket path (POSIX) / pipe-name key (Windows). */
 export function feedHubSocketPath(): string {
@@ -68,6 +82,8 @@ export class FeedHubServer {
   private readonly attachedTo = new Map<net.Socket, FeedHub>();
   /** Readers dropped for exceeding {@link HUB_CLIENT_BACKLOG_LIMIT}. Observability. */
   droppedForBacklog = 0;
+  /** Readers refused for a missing, invalid, or late scope line. Observability. */
+  rejectedHandshakes = 0;
 
   /**
    * @param hub      the FLEET collector (every reachable peer plus this box).
@@ -123,6 +139,15 @@ export class FeedHubServer {
       // leaving it subscribed would hold every peer connection open forever.
       socket.on('error', end);
 
+      /** Refuse this reader, telling it why rather than hanging up silently. */
+      const reject = (reason: string) => {
+        clearTimeout(grace);
+        if (socket.destroyed) return;
+        this.rejectedHandshakes += 1;
+        socket.write(`${JSON.stringify({ v: 1, type: 'error', scope: '', error: `feed handshake rejected: ${reason}` })}\n`);
+        socket.end();
+      };
+
       const attach = (hub: FeedHub) => {
         if (socket.destroyed || this.detachers.has(socket)) return;
         const detach = hub.subscribe((event) => {
@@ -145,27 +170,36 @@ export class FeedHubServer {
         if (hub.lastFailure) this.failReaders(hub, hub.lastFailure);
       };
 
-      // One optional handshake line selects the collector. A reader that sends
-      // nothing is a fleet reader, which is what every pre-handshake client was,
-      // so an older consumer keeps working unchanged.
+      // The scope line is REQUIRED and must arrive within the grace window.
       let handshake = '';
-      const grace = setTimeout(() => attach(this.hub), HUB_HANDSHAKE_GRACE_MS);
+      const grace = setTimeout(() => reject(`no scope line within ${HUB_HANDSHAKE_GRACE_MS}ms`), HUB_HANDSHAKE_GRACE_MS);
       grace.unref();
       socket.on('data', (chunk: Buffer) => {
-        if (this.detachers.has(socket)) return; // already attached; ignore chatter
+        if (socket.destroyed) return;
+        // A line arriving AFTER this reader is attached is a protocol error: the
+        // scope is settled and a second one cannot retroactively change it.
+        if (this.detachers.has(socket)) { reject('scope sent after the stream was already open'); return; }
         handshake += chunk.toString('utf-8');
         const newline = handshake.indexOf('\n');
         if (newline < 0) {
-          // A peer that floods without ever sending a newline must not grow this
-          // buffer without bound either.
-          if (handshake.length > 1024) { clearTimeout(grace); attach(this.hub); }
+          if (handshake.length > HUB_HANDSHAKE_MAX_BYTES) reject('scope line exceeded the handshake budget');
           return;
         }
         clearTimeout(grace);
         let scope: unknown;
         try { scope = (JSON.parse(handshake.slice(0, newline)) as { scope?: unknown }).scope; }
-        catch { scope = undefined; /* an unreadable line is not a scope request */ }
-        attach(scope === 'local' && this.localHub ? this.localHub : this.hub);
+        catch { reject('scope line is not valid JSON'); return; }
+        if (typeof scope !== 'string' || !HUB_SCOPES.has(scope)) {
+          reject(`unknown scope ${JSON.stringify(scope)}; expected "fleet" or "local"`);
+          return;
+        }
+        if (scope === 'local' && !this.localHub) {
+          // Serving the fleet collector instead would start peer connections a
+          // local-only reader never asked for.
+          reject('this server has no local collector');
+          return;
+        }
+        attach(scope === 'local' ? this.localHub! : this.hub);
       });
       socket.once('end', () => clearTimeout(grace));
     });

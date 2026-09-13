@@ -187,11 +187,25 @@ are load-bearing:
   fan-out, no re-dial, no waiting for peers to re-announce. Each subscriber's
   `streamId`/`sequence` are its own and start at 1, which is exactly what the
   published "order by streamId + sequence" contract allows.
-- **No client-side fallback.** `feed watch --json` attaches to the hub and, if the
-  daemon is down, STARTS it and retries; it never runs its own `watchFleetFeed`,
-  because that restores the per-caller fan-out this replaced.
-  `feed watch --json --local` is untouched — it is the per-machine stream the
-  collector itself subscribes to over ssh.
+- **TWO collectors, one socket, and the scope is mandatory.** The `feed-stream`
+  service hosts the fleet hub (`watchFleetFeed`) AND the shared local hub
+  (`sharedLocalFeedHub()` in [`feed/watch.ts`](src/lib/feed/watch.ts), which wraps
+  `watchLocalFeed` and dials no peer), so a local-only reader can never start a
+  fan-out. A client selects one with a required handshake line
+  (`{"v":1,"scope":"fleet"|"local"}`); a missing, unparseable, unknown, or LATE
+  scope is **rejected with a reason**, never defaulted — guessing `fleet` started
+  ssh children to every peer for a client that never asked for them.
+- **No client-side fallback.** `feed watch --json` (both scopes) attaches to the
+  hub and, if the daemon is down, starts it and WAITS for the bind (`waitForHub`)
+  before retrying; it never runs its own collector, because that restores the
+  per-caller fan-out this replaced. `--local` no longer runs `watchLocalFeed`
+  in-process: each observing box's ssh subscription used to build a separate
+  activity cursor set, tool watcher and setup subscription on the same peer.
+- **A stalled reader cannot grow the daemon.** `socket.write` backpressure is
+  bounded by `HUB_CLIENT_BACKLOG_LIMIT`; a reader past it is dropped and can
+  reconnect from held state. A collector that fails to start is reported to its
+  readers rather than leaving them on a stream indistinguishable from an idle
+  fleet.
 - **Reset semantics preserved.** A peer's reset replaces that ONE scope's rows; a
   peer going unavailable forwards the `scope` event and RETAINS its rows, so a
   reader attaching while a box is offline still sees its last-known rows.
@@ -213,14 +227,55 @@ out to both commands, per tool, per device, on a timer. Now the rows ride the on
 open stream, so a consumer switching its All/Agents/Browser/Computer filter
 **spawns zero commands**.
 
-The envelope gains `tool.upsert` / `tool.remove`, and `reset` gains a `tools`
-array beside `agents` and `attention`.
+The envelope gains `tool.upsert` / `tool.remove` and `setup.snapshot`, and `reset`
+gains `tools: ToolRow[]` + `setup: ToolSetupRow[]` beside `agents` and
+`attention`. Setup rows are the setup teammate's cache
+([`setup-tool-status.ts`](src/lib/setup-tool-status.ts) `getCachedToolSetup` /
+`subscribeToolSetup`) — that side owns DETECTION, this stream only publishes, so
+no probe and no secret unlock. `setup` is a **snapshot, not per-row upserts**:
+the cache always answers for every tool, so it is one coherent reading of the box
+and three independent upserts would let a pane render a mix of two readings.
+
 [`feed/tool-activity.ts`](src/lib/feed/tool-activity.ts) is the event-driven
-collector: it watches the browser runtime tree and the event ledger dir
-recursively and re-projects ONLY on a reported change, emitting the diff rather
-than a snapshot — a warm idle does no directory read, no projection, and no
-subprocess. When no watcher can arm it says so on `armed` and falls back to the
-bounded sweep, a stated degradation rather than a silent one.
+collector. It watches three roots recursively — the browser runtime tree, the
+event ledger dir, and the standalone computer engine's own action ledger — and
+re-projects ONLY on a reported change, emitting the diff rather than a snapshot,
+so a warm idle does no directory read, no projection, and no subprocess.
+`armed()` is a FUNCTION over live watchers, not a flag captured at setup: a
+watcher can die later, and a frozen `armed: true` left the tick short-circuiting
+on one that would never report again, missing changes permanently. Each tick
+re-arms what is missing and sweeps until everything is watched.
+
+**An incomplete read preserves rows; it never removes them.** `collectToolRows`
+returns `{ rows, complete }`, and the readers it depends on THROW rather than
+returning empty for a failure they cannot trust — an absent `tasks.json` is "no
+live browser", but EACCES, EMFILE or malformed JSON (usually a write in progress)
+are failures. An empty list was indistinguishable from "every task closed", so the
+differ published a remove for every live row and the operator watched their tasks
+flicker out.
+
+**Both producers are read at their real source, and rows are attributed to a real
+machine.** The standalone computer engine ALWAYS appends to
+`<cache>/computer/actions/<day>.jsonl`, which never reaches
+`recordComputerAction` — so a `computer` command an operator ran directly reached
+neither the feed ledger nor `computer_sessions`, and was invisible to every
+agents-cli surface. `buildComputerSessionRows` merges that ledger, deduped on
+`invocationId` because forwarding through `agents computer` rewrites `ts` and
+`pid` (so a timestamp dedupe double-counts). The installed producer emits no
+`hostname`/`machineId`, which made `groupIntoComputerRuns` fall back to the
+`'unknown'` sentinel and every local action vanish under a device filter, so the
+observing scope is threaded down as the default at the ledger source — that ledger
+is per-machine by construction, and an explicit `host` (a genuinely driven remote)
+still wins.
+
+Live browser tasks come from `tasks.json` via `readLiveBrowserTasks`, which is the
+only authority on a task's tabs and the reason a task with zero captures appears
+at all. It reads the real persisted schema (`Task.createdAt` / `Task.lastActionAt`
+— **not** the `startedAt` field the service DTO uses and `tasks.json` never
+carries). A row's session identity is resolved ONCE, durable history → live record
+→ device binding, before the owner link is projected, so one task cannot have an
+owner on one assembly path and not another; nothing is invented when no source
+recorded one.
 
 Two rules are not negotiable in a consumer or a future change:
 
@@ -233,6 +288,15 @@ Two rules are not negotiable in a consumer or a future change:
   credential-shaped query parameters replaced, fragment dropped) before it leaves
   the producing machine. A URL that does not parse is dropped rather than
   published unexamined.
+- **`ToolCapture.host` is the box that HOLDS the file, which for a computer run is
+  the INVOKING machine, not the driven one.** The engine's helper RPC returns the
+  image as base64 and the invoking process resolves `--out` and writes it locally,
+  so even a remote-desktop screenshot lands on the box that ran the command.
+  Naming the driven host sends a consumer looking on a machine that never had the
+  file. `closeCommand`/`showCommand` carry `runOn` for the same reason — a later
+  browser verb resolves the device from the local binding and REJECTS `--device`,
+  so acting on a peer's task means running the plain argv on the host that holds
+  the binding.
 
 ### Session request + timeline on every row (PHNX-3939)
 
