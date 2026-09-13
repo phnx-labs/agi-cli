@@ -13,6 +13,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { Server, type Connection } from 'ssh2';
 import { sessionHeadline } from '../title.js';
+import type { SessionMeta } from '../types.js';
 import {
   REMOTE_STDOUT_MAX_BYTES,
   REMOTE_TOOL_AGGREGATE_MAX_BYTES,
@@ -428,6 +429,24 @@ describe('parseRemoteListPayload', () => {
       }],
       valid: true,
     });
+  });
+
+  it('accepts the production resolver projection with launch mode and custom harness', async () => {
+    const { serializeResolvedSessionsJson } = await import('../../../commands/sessions.js');
+    const row = {
+      id: 'abcd7777', shortId: 'abcd7777', agent: 'claude', harness: 'custom-claude',
+      timestamp: '2026-09-13T00:00:00Z', mode: 'plan', origin: 'cli',
+      lastActivity: '2026-09-13T00:01:00Z', project: 'project', version: '2.1.270',
+      label: 'Resume probe', topic: 'Session resume', machine: 'origin',
+      filePath: '/private/transcript.jsonl', cwd: '/private/project',
+    } as SessionMeta;
+    const payload = serializeResolvedSessionsJson([row]);
+    const parsed = parseRemoteListPayload(payload, 'origin', true);
+    expect(parsed.valid).toBe(true);
+    expect(parsed.items).toEqual([{ ...JSON.parse(payload)[0], machine: 'origin', _remote: true }]);
+    expect(parsed.items[0]).toMatchObject({ harness: 'custom-claude', mode: 'plan' });
+    expect(parsed.items[0]).not.toHaveProperty('filePath');
+    expect(parsed.items[0]).not.toHaveProperty('cwd');
   });
 
   it('marks an exit-0 structurally invalid resolver row incomplete', () => {

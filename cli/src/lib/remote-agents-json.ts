@@ -262,7 +262,7 @@ export async function gatherRemoteAgentsJson<T>(
       if (!cancelled) {
         parseFailed.push(target.name);
         if (!options.quiet) {
-          process.stderr.write(chalk.gray(`  ${target.name}: unreachable or no agents CLI — skipped\n`));
+          process.stderr.write(chalk.gray(`  ${target.name}: invalid response data — skipped\n`));
         }
       }
       return [] as T[];
