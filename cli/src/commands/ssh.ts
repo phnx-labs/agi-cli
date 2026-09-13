@@ -1494,11 +1494,9 @@ function registerDevicesCommands(program: Command): void {
   // ─── devices config (unified settings surface) ────────────────────────────
   //
   // ONE command for every per-device setting: `agents devices config <name>
-  // [key] [value] [--unset] [--json]`. The retired subcommands (configure,
-  // note, set-interactive, set, enable/disable/prefer/unprefer) are hidden
-  // tombstones below — each prints a deprecation notice on STDERR (so a --json
-  // consumer's stdout stays parseable) and delegates to this same engine,
-  // preserving its old output shape and exit codes.
+  // [key] [value] [--unset] [--json]`. configure, note, set-interactive, set,
+  // prefer, and unprefer are deleted (PHNX-4051) — use this command directly.
+  // enable/disable stay as first-class sugar over auto-launch.enabled.
 
   /** Parse a raw CLI string into a config key's typed value (bool/int pass validation, strings verbatim). */
   const parseConfigValueInput = (spec: ConfigKeySpec, raw: string): unknown => {
@@ -1885,8 +1883,10 @@ function registerDevicesCommands(program: Command): void {
       the device itself; --fleet still writes a fleet-wide default those boxes
       inherit until they override.
 
-      The retired subcommands still work and forward here: configure, note,
-      set, set-interactive, enable, disable, prefer, unprefer.
+      configure, note, set, set-interactive, prefer, and unprefer are deleted;
+      use this command directly (auto-launch.preferred, interactive.host, or
+      any other key). enable/disable stay as first-class sugar over
+      auto-launch.enabled.
     `,
   });
 

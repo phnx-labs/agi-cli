@@ -1242,9 +1242,9 @@ is the only way a provider credential crosses machines.
 
 Selection order for a run is explicit `--account` / `<harness>#<name>`, then
 `accounts default` for that harness, then the harness's native/balanced behavior.
-The hidden `connect` / `name` / `label` / `mint` / `attach` / `detach` /
-`switch` / `set-default` verbs are still accepted this release and print their
-replacement (`add` / `login` / `default` / `run <harness>#<name>`).
+The `connect` / `name` / `label` / `mint` / `attach` / `detach` / `switch` /
+`set-default` verbs are deleted; use `add` / `login` / `default` /
+`run <harness>#<name>` instead.
 
 ---
 

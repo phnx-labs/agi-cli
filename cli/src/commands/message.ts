@@ -217,12 +217,12 @@ async function deliverViaHostReroute(
  * injected input a running agent consumes, never a notification a human reads.
  * Mirrors SHARED_NOTES in commands/send.ts so an agent reading either --help
  * sees the same three-plane map and doesn't reach for `message` when it means
- * `send`/`notify`.
+ * `send`.
  */
 const CONTROL_PLANE_NOTES = `
   Planes (do not mix them up):
     message / sessions inject  - CONTROL a running agent (mailbox answer, terminal keystroke, or resume by runtime)
-    send / notify              - DELIVER a message to a human recipient over a channel provider
+    send                       - DELIVER a message to a human recipient over a channel provider
     feed post                  - RECORD progress / milestones (optional broadcast may call send)
 
   <text> here is consumed BY THE TARGET AGENT (an answer, a keystroke, or the
