@@ -44,7 +44,10 @@ describe('session tracker hook installation', () => {
 
   it('registers Droid and Kimi SessionStart hooks in their native config formats', () => {
     const root = tmpHome();
-    const result = spawnSync('bunx', ['tsx', 'src/install-hook.ts', 'droid', 'kimi'], {
+    const result = spawnSync(process.execPath, [
+      path.join(import.meta.dirname, '..', 'node_modules', 'tsx', 'dist', 'cli.mjs'),
+      'src/install-hook.ts', 'droid', 'kimi',
+    ], {
       cwd: path.join(import.meta.dirname, '..'),
       env: { ...process.env, HOME: root },
       encoding: 'utf8',
