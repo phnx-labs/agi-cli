@@ -339,6 +339,12 @@ export function projectComputerToolRow(scope: string, row: ComputerRunRow): Comp
   // written. A screenshot action from before the producer carried that field has
   // no path to report, and this deliberately reports none rather than guessing one
   // from an output flag — a fabricated path is worse than an honest absence.
+  //
+  // `host` is the INVOKING machine, never `remoteHost`. The engine's helper RPC
+  // returns the image as base64 and the invoking process resolves `--out` and
+  // writes the file locally, so even a remote-desktop run leaves its screenshot
+  // on the box that ran the command. Naming the driven host would send a consumer
+  // looking for the file on a machine it was never written to.
   const captures: ToolCapture[] = [];
   const captureCounts: Record<string, number> = {};
   for (const action of row.actions) {
@@ -347,7 +353,7 @@ export function projectComputerToolRow(scope: string, row: ComputerRunRow): Comp
     if (captures.length >= TOOL_CAPTURE_LIMIT) continue;
     captures.push({
       kind: action.capture.kind, name: action.capture.name, path: action.capture.path,
-      host: normalizeHost(row.remoteHost ?? row.machine ?? scope),
+      host,
       ...(action.capture.bytes !== undefined ? { bytes: action.capture.bytes } : {}),
       atMs: action.tsMs,
     });
