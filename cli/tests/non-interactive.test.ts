@@ -679,6 +679,7 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
     const home = makeTempHome();
     tempHomes.push(home);
     writeFakeManagedVersion(home, 'opencode', '1.0.0', 'opencode');
+    writeFakeManagedVersion(home, 'opencode', '2.0.0', 'opencode');
     expect(runAgents(home, ['use', 'opencode@1.0.0']).status).toBe(0);
 
     const pluginRoot = path.join(home, '.agents', 'plugins', 'trusted-plugin');
@@ -694,14 +695,14 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
       JSON.stringify({ mcpServers: { demo: { command: 'node', args: ['server.js'] } } }),
     );
 
-    const result = runAgents(home, ['sync', '--plugin', 'trusted-plugin', '--allow-exec-surfaces', '--yes']);
-    const installed = path.join(
-      home, '.agents', '.history', 'versions', 'opencode', '1.0.0', 'home',
+    const result = runAgents(home, ['sync', '--plugin', 'trusted-plugin', '--allow-exec-surfaces']);
+    const installed = ['1.0.0', '2.0.0'].map((version) => path.join(
+      home, '.agents', '.history', 'versions', 'opencode', version, 'home',
       '.config', 'opencode', 'plugins', 'trusted-plugin.ts',
-    );
+    ));
 
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
-    expect(fs.existsSync(installed)).toBe(true);
+    expect(installed.every((target) => fs.existsSync(target))).toBe(true);
   });
 
   it('registers HTTP MCPs from the manifest to Codex with --url', () => {
