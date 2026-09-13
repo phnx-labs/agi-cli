@@ -1,1 +1,1 @@
-- Account sync now refreshes the native session-tracking hook in every account home, replacing stale registrations from previous CLI installations so new sessions retain their account identity.
+- Account sync now refreshes the native session-tracking hook in every account home, replacing stale registrations from previous CLI installations so new sessions retain their account identity. Codex tracker installation also refreshes hook trust so headless runs can execute the registered hook.

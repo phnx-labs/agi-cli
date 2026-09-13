@@ -2613,6 +2613,77 @@ export function pruneVersionHomeHookEntriesFromSettings(
   return removed;
 }
 
+function trustCodexHooks(hooksPath: string): void {
+  const configPath = path.join(path.dirname(hooksPath), 'config.toml');
+  const hooksFile = JSON.parse(fs.readFileSync(hooksPath, 'utf-8')) as CodexHooksFile;
+  let tomlConfig: Record<string, unknown> = {};
+  if (fs.existsSync(configPath)) {
+    tomlConfig = TOML.parse(fs.readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
+  }
+
+  if (!tomlConfig.features || typeof tomlConfig.features !== 'object') {
+    tomlConfig.features = {};
+  }
+  // Codex 0.116+ feature flag is `hooks` (the legacy `codex_hooks` name is
+  // an unrecognized key that triggers a deprecation error and is ignored).
+  const features = tomlConfig.features as Record<string, unknown>;
+  delete features.codex_hooks;
+  features.hooks = true;
+
+  // Pre-trust hooks. The [hooks.state] key is keyed by the hooks.json path
+  // exactly as Codex resolves it (the absolute CODEX_HOME path), the
+  // snake_case event label, and the per-event group/handler indices — which
+  // must match Codex's parse order, so we iterate the just-written
+  // hooksFile structure in array order.
+  if (!tomlConfig.hooks || typeof tomlConfig.hooks !== 'object') {
+    tomlConfig.hooks = {};
+  }
+  const hooksTable = tomlConfig.hooks as Record<string, unknown>;
+  const existingState =
+    hooksTable.state && typeof hooksTable.state === 'object'
+      ? (hooksTable.state as Record<string, { enabled?: boolean; trusted_hash?: string }>)
+      : {};
+  const hookState: Record<string, { enabled?: boolean; trusted_hash?: string }> = {};
+
+  for (const [event, eventGroups] of Object.entries(hooksFile.hooks)) {
+    const eventKeyLabel = CODEX_EVENT_KEY_LABELS[event];
+    if (!eventKeyLabel) continue;
+    eventGroups.forEach((group, groupIdx) => {
+      if (!group.hooks) return;
+      group.hooks.forEach((handler, handlerIdx) => {
+        if (handler.type !== 'command') return;
+        const key = `${hooksPath}:${eventKeyLabel}:${groupIdx}:${handlerIdx}`;
+        const trustedHash = computeCodexHookTrustHash(
+          eventKeyLabel,
+          handler.command,
+          handler.timeout,
+          group.matcher
+        );
+        // Preserve a user's explicit `enabled = false` for this exact hook;
+        // only (re)write the trust hash.
+        const prior = existingState[key];
+        const entry: { enabled?: boolean; trusted_hash?: string } = { trusted_hash: trustedHash };
+        if (prior && prior.enabled === false) {
+          entry.enabled = false;
+        }
+        hookState[key] = entry;
+      });
+    });
+  }
+
+  // Carry forward trust state for any hooks we did not (re)register this
+  // pass — e.g. user-added hooks under a different command path.
+  for (const [key, entry] of Object.entries(existingState)) {
+    if (!(key in hookState)) {
+      hookState[key] = entry;
+    }
+  }
+
+  hooksTable.state = hookState;
+
+  fs.writeFileSync(configPath, TOML.stringify(tomlConfig as Parameters<typeof TOML.stringify>[0]), 'utf-8');
+}
+
 function registerHooksForCodex(
   versionHome: string,
   manifest: Record<string, ManifestHook>,
@@ -2624,7 +2695,6 @@ function registerHooksForCodex(
 
   const configDir = path.join(versionHome, '.codex');
   const hooksPath = path.join(configDir, 'hooks.json');
-  const configPath = path.join(configDir, 'config.toml');
 
   // Read existing hooks.json — must have top-level "hooks" wrapper key
   let hooksFile: CodexHooksFile = { hooks: {} };
@@ -2751,74 +2821,7 @@ function registerHooksForCodex(
   // them, so an untrusted hook is silently dropped. We compute the same
   // trust hash Codex would and persist it under [hooks.state].
   try {
-    let tomlConfig: Record<string, unknown> = {};
-    if (fs.existsSync(configPath)) {
-      try {
-        tomlConfig = TOML.parse(fs.readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
-      } catch { /* start fresh if corrupt */ }
-    }
-
-    if (!tomlConfig.features || typeof tomlConfig.features !== 'object') {
-      tomlConfig.features = {};
-    }
-    // Codex 0.116+ feature flag is `hooks` (the legacy `codex_hooks` name is
-    // an unrecognized key that triggers a deprecation error and is ignored).
-    const features = tomlConfig.features as Record<string, unknown>;
-    delete features.codex_hooks;
-    features.hooks = true;
-
-    // Pre-trust hooks. The [hooks.state] key is keyed by the hooks.json path
-    // exactly as Codex resolves it (the absolute CODEX_HOME path), the
-    // snake_case event label, and the per-event group/handler indices — which
-    // must match Codex's parse order, so we iterate the just-written
-    // hooksFile structure in array order.
-    if (!tomlConfig.hooks || typeof tomlConfig.hooks !== 'object') {
-      tomlConfig.hooks = {};
-    }
-    const hooksTable = tomlConfig.hooks as Record<string, unknown>;
-    const existingState =
-      hooksTable.state && typeof hooksTable.state === 'object'
-        ? (hooksTable.state as Record<string, { enabled?: boolean; trusted_hash?: string }>)
-        : {};
-    const hookState: Record<string, { enabled?: boolean; trusted_hash?: string }> = {};
-
-    for (const [event, eventGroups] of Object.entries(hooksFile.hooks)) {
-      const eventKeyLabel = CODEX_EVENT_KEY_LABELS[event];
-      if (!eventKeyLabel) continue;
-      eventGroups.forEach((group, groupIdx) => {
-        if (!group.hooks) return;
-        group.hooks.forEach((handler, handlerIdx) => {
-          if (handler.type !== 'command') return;
-          const key = `${hooksPath}:${eventKeyLabel}:${groupIdx}:${handlerIdx}`;
-          const trustedHash = computeCodexHookTrustHash(
-            eventKeyLabel,
-            handler.command,
-            handler.timeout,
-            group.matcher
-          );
-          // Preserve a user's explicit `enabled = false` for this exact hook;
-          // only (re)write the trust hash.
-          const prior = existingState[key];
-          const entry: { enabled?: boolean; trusted_hash?: string } = { trusted_hash: trustedHash };
-          if (prior && prior.enabled === false) {
-            entry.enabled = false;
-          }
-          hookState[key] = entry;
-        });
-      });
-    }
-
-    // Carry forward trust state for any hooks we did not (re)register this
-    // pass — e.g. user-added hooks under a different command path.
-    for (const [key, entry] of Object.entries(existingState)) {
-      if (!(key in hookState)) {
-        hookState[key] = entry;
-      }
-    }
-
-    hooksTable.state = hookState;
-
-    fs.writeFileSync(configPath, TOML.stringify(tomlConfig as Parameters<typeof TOML.stringify>[0]), 'utf-8');
+    trustCodexHooks(hooksPath);
   } catch (err) {
     errors.push(`Failed to update config.toml: ${(err as Error).message}`);
   }
@@ -3810,11 +3813,13 @@ export async function installSessionTrackerHook(
   if (!invocation) {
     return { installed: false, error: 'session-tracker not built and tsx is unavailable' };
   }
+  const env = sessionTrackerInstallEnv(agent, version, home);
   try {
     await execFileAsync(invocation.command, invocation.args, {
-      env: sessionTrackerInstallEnv(agent, version, home),
+      env,
       encoding: 'utf8',
     });
+    if (agent === 'codex') trustCodexHooks(path.join(env.HOME ?? os.homedir(), '.codex', 'hooks.json'));
     return { installed: true };
   } catch (err) {
     return { installed: false, error: installFailureMessage(err) };
@@ -3856,12 +3861,14 @@ export function installSessionTrackerHookSync(
   if (!invocation) {
     return { installed: false, error: 'session-tracker not built and tsx is unavailable' };
   }
+  const env = sessionTrackerInstallEnv(agent, version, home);
   try {
     execFileSync(invocation.command, invocation.args, {
-      env: sessionTrackerInstallEnv(agent, version, home),
+      env,
       stdio: ['ignore', 'pipe', 'pipe'],
       encoding: 'utf8',
     });
+    if (agent === 'codex') trustCodexHooks(path.join(env.HOME ?? os.homedir(), '.codex', 'hooks.json'));
     return { installed: true };
   } catch (err) {
     return { installed: false, error: installFailureMessage(err) };
