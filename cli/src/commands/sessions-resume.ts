@@ -291,17 +291,7 @@ export async function sessionsResumeAction(
     process.exitCode = 1;
     return;
   }
-  const items: Array<SurfaceItem & { session: SessionMeta }> = [];
-  for (const s of resumable) {
-    // Terminal backends join `command` with a bare space and hand it to a shell
-    // (loginExec/execOnly in lib/terminal/shell.ts), so every word must already be
-    // shell-quoted — the same contract run-surface.ts's buildRunCommand follows.
-    // spawnCliInPlace below stays on the RAW argv from buildSelectedResumeArgs,
-    // since node's spawn() takes literal argv with no shell in between.
-    const command = ['agents', ...buildSelectedResumeArgs(s.id, prompt, options)].map(shellQuote);
-    const cwd = resolveSelectedResumeCwd(s, options);
-    items.push({ session: s, cwd, command });
-  }
+  const items = resumable.map((session) => buildSelectedResumeSurface(session, prompt, options));
 
   // 3. Resolve the backend (and host).
   const ctx = currentContext();
@@ -497,21 +487,24 @@ export function resolveResumePacking(options: Pick<ResumeOptions, 'splits'>): Pa
   return options.splits ? 'two-per-tab' : 'tabs';
 }
 
-/**
- * Directory a selected resume's terminal surface opens in. A `--device` surface
- * executes ON the session's already-validated origin device (resumeHostMismatch
- * checked that above), so its filesystem is never this box's — `fs.existsSync`
- * against a remote path (e.g. a peer's /home cwd probed from a local /Users
- * checkout) always resolves false and silently swapped in this box's cwd
- * instead. Trust the recorded origin cwd and let that device validate it. A
- * local/--here run is unaffected and keeps the existing existence guard.
- */
-export function resolveSelectedResumeCwd(
-  session: Pick<SessionMeta, 'cwd'>,
-  options: Pick<ResumeOptions, 'device'>,
-): string {
-  if (options.device) return session.cwd || process.cwd();
-  return session.cwd && fs.existsSync(session.cwd) ? session.cwd : process.cwd();
+/** Surface commands use shell words; spawnCliInPlace keeps the original argv. */
+export function buildSelectedResumeSurface(
+  session: SessionMeta,
+  prompt: string | undefined,
+  options: ResumeOptions,
+): SurfaceItem & { session: SessionMeta } {
+  const requestedCwd = options.cwd || session.cwd;
+  if (options.device && !requestedCwd) {
+    throw new Error(`Cannot open ${session.shortId} on ${options.device} without a recorded working directory. Pass --cwd <path>.`);
+  }
+  const cwd = options.device
+    ? requestedCwd!
+    : requestedCwd && fs.existsSync(requestedCwd) ? requestedCwd : process.cwd();
+  return {
+    session,
+    cwd,
+    command: ['agents', ...buildSelectedResumeArgs(session.id, prompt, options)].map(shellQuote),
+  };
 }
 
 export function resumeHostMismatch(
