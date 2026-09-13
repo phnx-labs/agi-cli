@@ -82,6 +82,13 @@ export interface InjectOptions {
   ctx?: EngineContext;
   /** Don't execute — return the spec(s) that WOULD run. Lets the macOS paths be asserted on Linux. */
   dryRun?: boolean;
+  /**
+   * Frame the text in bracketed-paste markers so a TUI inserts it verbatim
+   * instead of reading each embedded newline as a submit. Required for a
+   * multiline free-text answer. Only the tmux rail can carry it (see
+   * {@link backendCarriesPaste}); every other backend refuses with an error.
+   */
+  paste?: boolean;
 }
 
 export interface InjectResult {
@@ -117,6 +124,26 @@ function backendConfirmsDelivery(backend: InjectBackend): boolean {
 
 /** Carriage return — what Enter delivers into a raw PTY/tmux byte stream. */
 const CR = '\r';
+
+/**
+ * Bracketed-paste framing (DEC mode 2004) — the pty contract for "insert this
+ * verbatim, do not submit". A readline/Ink composer that sees the start marker
+ * buffers every byte up to the end marker, so an embedded newline lands as a
+ * literal newline in the draft instead of submitting the partial line.
+ */
+export const BRACKETED_PASTE_START = '[200~';
+export const BRACKETED_PASTE_END = '[201~';
+
+/**
+ * Only tmux can carry the framing: `send-keys -l` writes the marker bytes
+ * straight to the pty. ghostty simulates keystrokes, vscodium hands a JSON
+ * payload to the extension, and iTerm's AppleScript `write text` cannot encode
+ * a raw ESC byte — so a paste request on those is refused rather than
+ * half-delivered as one submit per line.
+ */
+export function backendCarriesPaste(backend: InjectBackend): boolean {
+  return backend === 'tmux';
+}
 
 // --- tmux -------------------------------------------------------------------
 
@@ -295,14 +322,23 @@ export async function injectIntoTerminal(
   const enter = opts.enter !== false;
   const combined = opts.combined === true;
 
+  // Fail loud at the rail boundary: a backend that cannot carry the markers must
+  // not silently deliver the raw text, which submits once per embedded newline.
+  if (opts.paste === true && !backendCarriesPaste(target.backend)) {
+    return {
+      ok: false, confirmed: false, backend: target.backend, writes: 0, specs: [],
+      error: `The ${target.backend} rail cannot deliver a bracketed paste — open the session and paste it there.`,
+    };
+  }
+  const payload = opts.paste === true ? `${BRACKETED_PASTE_START}${text}${BRACKETED_PASTE_END}` : text;
 
   // tmux + AppleScript + editor-CLI backends all run through the engine transport.
   const specs =
     target.backend === 'tmux'
-      ? tmuxInjectSpecs(target, text, { enter, combined, socket: opts.socket })
+      ? tmuxInjectSpecs(target, payload, { enter, combined, socket: opts.socket })
       : target.backend === 'vscodium'
-        ? [vscodiumInjectSpec(target, text, { enter, combined })]
-        : [appleScriptInjectSpec(target, text, enter, combined)];
+        ? [vscodiumInjectSpec(target, payload, { enter, combined })]
+        : [appleScriptInjectSpec(target, payload, enter, combined)];
 
   // Discrete writes delivered on the far side. tmux counts its send-keys calls.
   // iterm/vscodium honor `combined` (text+Enter fused into one write). ghostty's

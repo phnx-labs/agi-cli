@@ -42,6 +42,7 @@ export {
 } from './engine.js';
 export { runLocal, runRemote, runSpec, remoteCommand, type HostResolver, type RunResult } from './transport.js';
 export {
+  backendCarriesPaste,
   injectIntoTerminal,
   tmuxSendKeysArgv,
   tmuxInjectSpecs,

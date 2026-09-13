@@ -75,7 +75,10 @@ import { gatherRemoteAgentsJson } from '../lib/remote-agents-json.js';
 import { loadPolicy, applyPolicyToBlock, isPhoneUrgent } from '../lib/feed-policy.js';
 import { notifyUrgentBlock } from '../lib/notify.js';
 import { registerFeedWatchCommand } from './feed-watch.js';
-import { claimAndRouteAttentionAnswer, forwardFeedAnswer } from '../lib/feed/answer.js';
+import {
+  AnswerError, answerOwnerIsLocal, checkAnswerDelivery, claimAndRouteAttentionAnswer, forwardFeedAnswer,
+  parseAttentionKey, type FeedAnswerResult,
+} from '../lib/feed/answer.js';
 import { gcMailbox } from '../lib/mailbox-gc.js';
 import { isValidMailboxId } from '../lib/mailbox.js';
 import { getActiveSessions } from '../lib/session/active.js';
@@ -429,6 +432,24 @@ export async function loadSessionMetasForFeedEnrichment<T>(
   }
 }
 
+/**
+ * One human line per answer outcome. The three states the operator has to tell
+ * apart are a real receipt, a hand-off no rail can confirm, and a refusal —
+ * never collapsed into a single "Delivered" (PHNX-3999).
+ */
+function renderAnswerResult(result: FeedAnswerResult): string {
+  switch (result.status) {
+    case 'failed':
+      return `Not delivered: ${result.reason ?? 'unknown failure'} — answering again is safe.`;
+    case 'unknown':
+      return `Delivery unconfirmed: ${result.reason ?? 'no rail reported a receipt.'} Run \`agents feed answer ${result.attentionKey} --check\` rather than resending.`;
+    case 'already_answered':
+      return `Already answered — ${result.receipt?.status ?? 'claimed'}${result.receipt ? ` as ${result.receipt.msgId}` : ''} at ${result.receipt?.at ?? result.attempt}.`;
+    default:
+      return `Delivered ${result.receipt?.msgId} (${result.receipt?.status}).`;
+  }
+}
+
 export function registerFeedCommand(program: Command): void {
   const feed = program
     .command('feed')
@@ -453,20 +474,49 @@ export function registerFeedCommand(program: Command): void {
     .option('--choice <choice-id>', 'Stable choice id from the attention item')
     .option('--text <answer>', 'Free-text answer')
     .option('--as <operator>', 'Verified operator id for high-consequence answers')
+    .option('--check', 'Read-only: report this item\'s delivery state without claiming, routing or resending')
+    .option('--attempt <at>', 'With --check: the attempt timestamp being checked, so a newer one is reported as such')
     .option('--json', 'Emit the delivery result as JSON')
-    .action(async (attentionKey: string, opts: { choice?: string; text?: string; as?: string; json?: boolean }, invoked: Command) => {
+    .action(async (attentionKey: string, opts: { choice?: string; text?: string; as?: string; check?: boolean; attempt?: string; json?: boolean }, invoked: Command) => {
+      const wantsJson = Boolean(opts.json || (invoked.parent?.opts() as { json?: boolean } | undefined)?.json);
       try {
-        const ownerHost = attentionKey.slice(0, attentionKey.indexOf('/'));
-        const result = ownerHost && ownerHost !== machineId()
-          ? await forwardFeedAnswer({ host: ownerHost, attentionKey, choiceId: opts.choice, text: opts.text, operatorId: opts.as })
-          : await claimAndRouteAttentionAnswer({
-            attentionKey, choiceId: opts.choice, text: opts.text,
-            operator: { id: opts.as, verified: Boolean(opts.as), label: opts.as },
-          });
-        if (opts.json || (invoked.parent?.opts() as { json?: boolean } | undefined)?.json) console.log(JSON.stringify(result));
-        else console.log(result.status === 'delivered' ? `Delivered ${result.receipt.msgId}.` : `Already answered (${result.receipt.at}).`);
+        // The key's own host decides the rail; `answerOwnerIsLocal` normalizes
+        // both sides so a `.local` suffix is not read as a different machine.
+        const { host: ownerHost } = parseAttentionKey(attentionKey);
+        const local = answerOwnerIsLocal(ownerHost);
+        if (opts.check && (opts.choice != null || opts.text != null)) {
+          throw new AnswerError('--check is read-only; it takes no --choice or --text.', 'empty_answer');
+        }
+        if (opts.attempt != null && !opts.check) {
+          throw new AnswerError('--attempt only applies to --check.', 'empty_answer');
+        }
+        const result = opts.check
+          ? (local
+            ? checkAnswerDelivery(attentionKey, undefined, opts.attempt)
+            : await forwardFeedAnswer({ host: ownerHost, attentionKey, check: true, attempt: opts.attempt, operatorId: opts.as }))
+          : local
+            ? await claimAndRouteAttentionAnswer({
+              attentionKey, choiceId: opts.choice, text: opts.text,
+              operator: { id: opts.as, verified: Boolean(opts.as), label: opts.as },
+            })
+            : await forwardFeedAnswer({ host: ownerHost, attentionKey, choiceId: opts.choice, text: opts.text, operatorId: opts.as });
+        if (wantsJson) console.log(JSON.stringify(result));
+        else console.log(renderAnswerResult(result));
       } catch (error) {
-        invoked.error(`error: ${error instanceof Error ? error.message : String(error)}`);
+        // A failure is a first-class outcome for the operator UI, not a parse
+        // error: `--json` still gets a result object it can branch on, with a
+        // non-zero exit so a scripted caller sees the failure too.
+        const message = error instanceof Error ? error.message : String(error);
+        if (wantsJson) {
+          const failure: FeedAnswerResult = {
+            status: 'failed', delivery: 'failed', resolved: false, reason: message,
+            code: error instanceof AnswerError ? error.code : 'rail_failed', attentionKey,
+          };
+          console.log(JSON.stringify(failure));
+          process.exitCode = 1;
+          return;
+        }
+        invoked.error(`error: ${message}`);
       }
     });
 

@@ -120,6 +120,41 @@ runs the stage on the release home base and pulls the result back.
   colour a resolved generation as needing you from its own phase fallback, and
   must not treat a dismissed banner as an answer — the record clears when the
   transcript moves past it.
+- **Answering is bounded, exactly-once, and says what it can actually prove
+  (PHNX-3999).** `agents feed answer <attention-key> --json` is the one reply
+  path, and its result is a typed record the helper branches on rather than a
+  boolean:
+
+  | Field | Meaning for the helper |
+  |---|---|
+  | `status` | `delivered` (this call handed it to a rail) · `already_answered` (another claim owns it; the evidence reported is that claim's) · `unknown` (something may have landed — **do not resend**) · `failed` (confirmed: nothing was delivered, answering again is safe) |
+  | `delivery` | `receipt` (a real `MessageReceipt` exists on the block) · `unconfirmed` (no receipt evidence either way) · `failed` (confirmed failure, including a `dropped`/`expired` receipt) |
+  | `resolved` | The AGENT's own evidence that it received the answer — a `consumed`/`continued` receipt. A `queued` receipt is delivery, never resolution, so it leaves this `false`. |
+  | `receipt` | The block's real receipt, or absent. **Never synthesized** — an answer marker proves a claim was taken, not that anything was delivered. |
+  | `code` | Set when `status` is `failed`: `malformed_key` · `no_session` · `stale` · `unverified` · `unauthorized` · `unknown_choice` · `empty_answer` · `refused` · `rail_failed` · `timeout` · `remote_failed`. |
+  | `host` | The device that owns the item — the exact target a delivery check re-queries. |
+  | `attempt` | Stable identity of the delivery attempt (the claim timestamp), so a check can tell "still unconfirmed" from "a newer attempt replaced it". |
+
+  The helper MUST distinguish the three of these that look alike. A `failed`
+  result is the only one that licenses a **Retry answer**. An `unknown` result
+  licenses **Check delivery** and nothing else — it means the claim is still
+  held precisely so a retry cannot double-send behind a delivery that may have
+  landed. A `delivered` result with `delivery: "unconfirmed"` is not a cleared
+  card.
+
+  **Check delivery is a read-only verb, never an implicit resend**:
+  `agents feed answer <attention-key> --check [--attempt <at>] --json` reports
+  the stored claim and the block's real receipt without claiming, routing or
+  delivering anything. It is bound to the requested generation and attempt, so a
+  stale card can never be resolved by the next question's receipt.
+
+  **Removal from the feed is itself the resolution.** A claim alone no longer
+  resolves an item: the block stays `open` with no resolution tombstone until the
+  agent itself acknowledges the answer (a `consumed`/`continued` receipt, bound
+  to the generation and attempt the claim was taken for) or the transcript moves
+  past the block. A `queued` receipt is delivery, not resolution. So the helper
+  clears a card when the record leaves `agents feed watch --json`, never because
+  an answer call returned.
 
 - **Settings reads facts, it never probes the fleet (PHNX-3999 F25).** Device
   specs come from the fleet-stats cache the CLI already keeps
