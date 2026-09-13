@@ -110,6 +110,17 @@ const SSH_AUTH_METHODS = ['key', 'password'] as const;
 const DEVICE_ROLES = ['worker', 'personal', 'desktop'] as const;
 /** Which devices automatic placement may pick — see the `auto.pool` key below. */
 const AUTO_POOL_MODES = ['workers', 'all'] as const;
+/**
+ * A device's physical form factor (`formFactor` key) — a factual hardware fact
+ * the menu bar shows as an icon. Set explicitly per device (no inference from
+ * platform, no hardcoded device names). `unknown` is the effective default.
+ */
+const DEVICE_FORM_FACTORS = ['laptop', 'desktop', 'server', 'unknown'] as const;
+
+/** A validate() that accepts only one of `allowed` — the enum-string keys reuse it. */
+function oneOf(name: string, allowed: readonly string[]): (v: unknown) => string | null {
+  return (v) => (allowed.includes(v as string) ? null : `${name} must be one of ${allowed.join(' | ')}.`);
+}
 
 export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
   {
@@ -450,6 +461,136 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     defaultValue: false,
     description: 'Boost this device in `--device auto` ranking (default off) — picked ahead of load-equal peers when eligible.',
   },
+  {
+    name: 'formFactor',
+    yamlKey: 'formFactor',
+    scope: 'device',
+    visibility: 'shared',
+    type: 'string',
+    defaultValue: 'unknown',
+    description:
+      "This device's physical form factor, a factual hardware fact the menu bar renders as an icon: " +
+      'laptop, desktop, server, or unknown. Synced fleet-wide (any box may set it for any device). Set it ' +
+      'explicitly — never inferred from the OS platform. Unset reads as `unknown`.',
+    validate: oneOf('formFactor', DEVICE_FORM_FACTORS),
+  },
+
+  // ─── AGI Menu preferences (PHNX-3999) ──────────────────────────────────────
+  // User-scope so one value syncs fleet-wide via `agents repo push/pull` and the
+  // native menu reads it from `agents config list --json`. Names mirror the Swift
+  // MenuPreferences local-cache keys. `config list` OMITS an unset key, so the
+  // native app falls back to its own known defaults — the defaults documented
+  // here match those, they are not substituted on read.
+  {
+    name: 'menubar.menu.defaultProject',
+    yamlKey: 'menubarMenuDefaultProject',
+    scope: 'user',
+    type: 'string',
+    description: 'AGI Menu: the project name the menu opens focused on. Unset = no default project.',
+  },
+  {
+    name: 'menubar.menu.workingRowsShown',
+    yamlKey: 'menubarMenuWorkingRowsShown',
+    scope: 'user',
+    type: 'int',
+    defaultValue: 3,
+    description: 'AGI Menu: how many working (in-progress) rows to show per group — 2, 3, or 4.',
+    validate: (v) => ([2, 3, 4].includes(v as number) ? null : 'menubar.menu.workingRowsShown must be 2, 3, or 4.'),
+  },
+  {
+    name: 'menubar.menu.showPreviews',
+    yamlKey: 'menubarMenuShowPreviews',
+    scope: 'user',
+    type: 'bool',
+    defaultValue: true,
+    description: 'AGI Menu: show the session preview line under each row.',
+  },
+  {
+    name: 'menubar.menu.projectPriorityFilter',
+    yamlKey: 'menubarMenuProjectPriorityFilter',
+    scope: 'user',
+    type: 'string',
+    defaultValue: 'all',
+    description: 'AGI Menu: minimum project priority shown — all, urgent, high, or medium.',
+    validate: oneOf('menubar.menu.projectPriorityFilter', ['all', 'urgent', 'high', 'medium']),
+  },
+  {
+    name: 'menubar.menu.hideCompletedMilestones',
+    yamlKey: 'menubarMenuHideCompletedMilestones',
+    scope: 'user',
+    type: 'bool',
+    defaultValue: true,
+    description: 'AGI Menu: hide milestones that are fully complete.',
+  },
+  {
+    name: 'menubar.menu.bannerWhenNeedsYou',
+    yamlKey: 'menubarMenuBannerWhenNeedsYou',
+    scope: 'user',
+    type: 'bool',
+    defaultValue: true,
+    description: 'AGI Menu: show a top banner when a session needs the operator.',
+  },
+  {
+    name: 'menubar.menu.includeOtherDeviceRequests',
+    yamlKey: 'menubarMenuIncludeOtherDeviceRequests',
+    scope: 'user',
+    type: 'bool',
+    defaultValue: true,
+    description: 'AGI Menu: include needs-you requests from sessions on OTHER fleet devices.',
+  },
+  {
+    name: 'menubar.menu.groupBy',
+    yamlKey: 'menubarMenuGroupBy',
+    scope: 'user',
+    type: 'string',
+    defaultValue: 'project',
+    description: 'AGI Menu: primary grouping of rows — none, project, agent, or device.',
+    validate: oneOf('menubar.menu.groupBy', ['none', 'project', 'agent', 'device']),
+  },
+  {
+    name: 'menubar.menu.thenBy',
+    yamlKey: 'menubarMenuThenBy',
+    scope: 'user',
+    type: 'string',
+    defaultValue: 'none',
+    description: 'AGI Menu: secondary grouping within each group — none, project, agent, or device.',
+    validate: oneOf('menubar.menu.thenBy', ['none', 'project', 'agent', 'device']),
+  },
+  {
+    name: 'menubar.menu.projectScope',
+    yamlKey: 'menubarMenuProjectScope',
+    scope: 'user',
+    type: 'string',
+    defaultValue: 'cycle',
+    description: 'AGI Menu: which project issues to show — the current cycle only, or all.',
+    validate: oneOf('menubar.menu.projectScope', ['cycle', 'all']),
+  },
+  {
+    name: 'menubar.menu.projectSort',
+    yamlKey: 'menubarMenuProjectSort',
+    scope: 'user',
+    type: 'string',
+    defaultValue: 'updated',
+    description: 'AGI Menu: how projects are ordered — updated, priority, or name.',
+    validate: oneOf('menubar.menu.projectSort', ['updated', 'priority', 'name']),
+  },
+  {
+    name: 'menubar.menu.ticketSort',
+    yamlKey: 'menubarMenuTicketSort',
+    scope: 'user',
+    type: 'string',
+    defaultValue: 'priority',
+    description: 'AGI Menu: how tickets within a project are ordered — priority, updated, or title.',
+    validate: oneOf('menubar.menu.ticketSort', ['priority', 'updated', 'title']),
+  },
+  {
+    name: 'menubar.menu.showPullRequests',
+    yamlKey: 'menubarMenuShowPullRequests',
+    scope: 'user',
+    type: 'bool',
+    defaultValue: true,
+    description: 'AGI Menu: show the open pull requests section for each project.',
+  },
 ];
 
 /** Look up a key spec by CLI dotted name, or throw listing the known keys. */
@@ -487,7 +628,7 @@ export function configKeySpec(name: string): ConfigKeySpec {
 }
 
 /** Throw when `value` does not match the key's declared type or validation. */
-function assertValidValue(spec: ConfigKeySpec, value: unknown): void {
+export function assertValidValue(spec: ConfigKeySpec, value: unknown): void {
   switch (spec.type) {
     case 'string':
       if (typeof value !== 'string' || value.length === 0) {

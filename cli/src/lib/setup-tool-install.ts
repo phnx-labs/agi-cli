@@ -2,8 +2,8 @@ import { installCli, resolveCliManifest } from './cli-resources.js';
 import { getCachedToolSetup, refreshToolSetup, type SetupTool } from './setup-tool-status.js';
 
 const PACKAGES = {
-  browser: '@phnx-labs/browser-cli@0.1.0',
-  computer: '@phnx-labs/computer-cli@0.1.2',
+  browser: '@phnx-labs/browser-cli@0.1.1',
+  computer: '@phnx-labs/computer-cli@0.1.5',
 } as const;
 
 /** Use the host installer; setup must not install or start a tool from a read. */

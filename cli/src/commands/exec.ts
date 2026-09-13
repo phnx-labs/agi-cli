@@ -2442,7 +2442,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         import('../lib/run-defaults.js'),
         import('../lib/mcp.js'),
         import('../lib/capabilities.js'),
-        import('../lib/share/config.js'),
+        import('../lib/share-runtime.js'),
       ]);
       bootMark('run-deps:imported');
       const isValidAgent = (agent: string): agent is AgentId => ALL_AGENT_IDS.includes(agent as AgentId);

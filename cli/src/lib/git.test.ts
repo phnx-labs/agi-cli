@@ -28,8 +28,6 @@ import {
   tryAutoPullSystemRepo,
   pullRepo,
   pushOrigin,
-  resolveGitHubUsername,
-  resolveGitHubUsernameSync,
   resolveSnapshotSha,
   sameGitRemote,
   syncRepoGit,
@@ -921,43 +919,6 @@ describe('isSystemRepoRemote / isSystemRepoOrigin (PHNX-3394 additive rename)', 
     } finally {
       fs.rmSync(base, { recursive: true, force: true });
     }
-  });
-});
-
-describe('resolveGitHubUsername', () => {
-  let prevEnv: string | undefined;
-  let prevHome: string | undefined;
-  let tmpHome: string;
-
-  beforeEach(() => {
-    prevEnv = process.env.AGENTS_SHARE_GITHUB_USER;
-    delete process.env.AGENTS_SHARE_GITHUB_USER;
-    prevHome = process.env.HOME;
-    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-git-user-'));
-    process.env.HOME = tmpHome;
-  });
-
-  afterEach(() => {
-    if (prevEnv === undefined) delete process.env.AGENTS_SHARE_GITHUB_USER;
-    else process.env.AGENTS_SHARE_GITHUB_USER = prevEnv;
-    if (prevHome === undefined) delete process.env.HOME;
-    else process.env.HOME = prevHome;
-    fs.rmSync(tmpHome, { recursive: true, force: true });
-  });
-
-  it('uses the AGENTS_SHARE_GITHUB_USER env override synchronously', () => {
-    process.env.AGENTS_SHARE_GITHUB_USER = 'env-user';
-    expect(resolveGitHubUsernameSync()).toBe('env-user');
-  });
-
-  it('reads github.user from git config when env is unset', async () => {
-    execFileSync('git', ['config', '--global', 'github.user', 'gitconfig-user']);
-    expect(resolveGitHubUsernameSync()).toBe('gitconfig-user');
-    expect(await resolveGitHubUsername()).toBe('gitconfig-user');
-  });
-
-  it('returns null when no source can resolve the username', () => {
-    expect(resolveGitHubUsernameSync()).toBeNull();
   });
 });
 

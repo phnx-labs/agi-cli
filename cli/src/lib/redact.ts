@@ -166,3 +166,16 @@ export function knownSecretValuesFromEnv(env: NodeJS.ProcessEnv = process.env): 
   }
   return out;
 }
+
+const EMAIL_RE = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+
+/**
+ * Mask email addresses in already-rendered text. A published page's sensitive-
+ * content scan refuses a body containing an email (`artifacts share` does the
+ * same), and almost every real transcript carries a few — git author addresses,
+ * `gh api user`, a pasted log. Masking them here means the page genuinely does
+ * not carry them, rather than training callers to pass `--force`.
+ */
+export function redactEmails(text: string): string {
+  return text.replace(EMAIL_RE, '[EMAIL]');
+}

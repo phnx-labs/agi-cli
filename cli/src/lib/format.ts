@@ -133,7 +133,7 @@ export function humanDuration(ms: number): string {
 
 /**
  * Human-readable byte size. Previously copy-pasted into five files
- * (`commands/prune.ts`, `commands/share.ts`, `commands/inspect.ts`,
+ * (`commands/prune.ts`, `commands/inspect.ts`,
  * `commands/sessions.ts`, `lib/browser/sessions-list.ts`) — this is the
  * canonical home.
  */

@@ -240,8 +240,8 @@ export function getOptionalUserAgentsDir(): string | null {
  * Origin `owner/repo` slug (lowercased, `.git` stripped) of a git checkout, or
  * null when `dir` isn't a git repo / has no origin. Extracts the slug from any
  * remote URL form: `git@host:owner/repo.git`, `https://host/owner/repo.git`,
- * `ssh://git@host/owner/repo`. Sync (mirrors readGitConfigUser in git.ts) so it
- * can be used from the synchronous getProjectAgentsDir walk.
+ * `ssh://git@host/owner/repo`. Sync (uses `execFileSync`, not the async git
+ * helpers) so it can be used from the synchronous getProjectAgentsDir walk.
  */
 function gitOriginSlug(dir: string): string | null {
   let url: string;

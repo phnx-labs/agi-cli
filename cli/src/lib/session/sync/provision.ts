@@ -1,5 +1,5 @@
 // Cloudflare orchestration for the managed session-backup store. The generic
-// request primitives live in share/provision; only the isolated sessions
+// request primitives live in cloudflare/provision; only the isolated sessions
 // resource choices and Worker template belong here. Mirrors lib/traces/provision.ts.
 //
 // This is the OPERATOR provisioning path — cutting the `agents-sessions` Worker +
@@ -14,7 +14,7 @@ import {
   findZoneId,
   putWorkerSecret,
   type CloudflareRequester,
-} from '../../share/provision.js';
+} from '../../cloudflare/provision.js';
 import {
   DEFAULT_SESSIONS_BUCKET_NAME,
   DEFAULT_SESSIONS_DOMAIN,

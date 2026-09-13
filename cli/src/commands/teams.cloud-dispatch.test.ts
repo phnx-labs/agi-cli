@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { cloudDispatchOptions } from './teams.js';
-import { shareRuntimeEnv } from '../lib/share/config.js';
+import { shareRuntimeEnv } from '../lib/share-runtime.js';
 
 const originalToken = process.env.SHARE_WRITE_TOKEN;
 

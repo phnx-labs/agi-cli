@@ -16,7 +16,7 @@ module map, build, and release mechanics the README does not.
 > lives in the root [AGENTS.md](../AGENTS.md).
 
 `agents setup` is the re-runnable onboarding hub. It reports live readiness for
-core, browser, computer, secrets, accounts, fleet, share, watchdog, and preferences, then
+core, browser, computer, secrets, accounts, fleet, watchdog, and preferences, then
 delegates each selected phase to its existing `agents setup <capability>` wizard.
 `agents setup status --json` is the non-interactive view of the same probes.
 
@@ -41,62 +41,13 @@ to it are attributed at a glance. A malformed file is swallowed
 by the statusline (a broken prompt is worse than a missing line) but surfaced by
 `agents reminders`. The file syncs across the fleet via `agents repo push/pull`.
 
-`agents artifacts share` publishes an artifact under a **single Phoenix ID**
-identity (Google-only device-code OAuth via `agents auth login`,
-`src/lib/identity/client.ts` `PhoenixSession` — there is no separate GetRush
-account and no Supabase). The URL namespace is the signed-in email's local-part
-(`handleFromEmail`, `src/lib/share/backend.ts`). A publish stamps one of five
-visibility levels (`ShareVisibility`, `src/lib/storage/visibility.ts`): `public`
-(gallery + OG card; the DEFAULT only for a BYO publish), `unlisted` (= `--private`; capability URL, `noindex`,
-gallery-hidden — obscurity, **NOT** read-auth, so the CLI warns loudly), `private`
-(= `--protected`; token-gated read auth, PHNX-3654 — the Worker serves it only to a
-request whose `?k=`/`Bearer` key hashes to the stored `viewer-token-hash`, else
-`404`; the raw key rides only in the emitted `…?k=<token>` URL, works for BYO too),
-`me` (owner-only, Phoenix-gated — the DEFAULT for a signed-in/managed publish),
-and `org` (anyone at the **sharer's** email
-domain, Phoenix-gated). The no-flag default is backend-aware — `me` on managed,
-`public` on BYO — resolved by the shared `publishVisibility`
-(`src/lib/storage/visibility.ts`), which both `agents artifacts share` and the
-`sessions` backup surface consume. Both `unlisted` and `private` force a 64-bit random slug
-tail so the capability URL can't be guessed from the title. `org` is refused on a
-public-inbox
-domain (`PUBLIC_INBOX_DOMAINS` in `src/lib/share/worker-template.ts`), so it needs a
-workspace-domain Google account, never a personal `gmail.com`. Managed publishes
-are metered per user against a free-tier storage quota, object limit, per-file size
-cap, and publish rate limit (a CAS ledger at `__usage/<owner>`; enforcement keys on
-the real request body, fails loud with `413`/`429`), while a BYO `WRITE_TOKEN`
-publish to the operator's own bucket skips all four (PHNX-3542). The full model is
-[`docs/share.md`](docs/share.md); the publication boundary is
-[`docs/observability.md`](docs/observability.md).
-
-The managed OG renderer is a multipart module-Worker deployment: JavaScript and
-font bytes live in the main bundle, while Yoga and resvg are uploaded as compiled
-WASM modules (`renderWorkerBundle` → `deployWorker`). Do not inline WASM with
-esbuild's `binary` loader: Node permits the resulting runtime compilation but
-workerd rejects it. The real-workerd render in `worker-template.integration.test.ts`
-is the contract test for this boundary.
-
-`agents artifacts share list` mirrors the public gallery by default. Use
-`--scope unlisted|private|me|org` or `--all` (alias for `--scope all`) to list the
-authenticated owner's hidden pages; the CLI forwards the owner's bearer and a
-`scope=mine` hint to the Worker's JSON listing route, which includes hidden pages
-only after verifying that the bearer owns the requested namespace. The filter is
-`--scope` (not `--visibility`) because the parent `share <file>` command owns
-`--visibility`. `agents artifacts share visibility <target> <level>` re-scopes an
-already-published page in place through the same `PATCH` metadata-edit route as
-`share edit`: the slug/URL and body are preserved, so no revision is created; the
-result flag is `--visibility-json` (the same ancestor-collision rename as
-`--scope`/`--for-user`). `agents artifacts share open <target>` opens the owner's own
-page **signed in**, so the served page's inline visibility chip is a live control and
-not a static cue (PHNX-3370): the served chip is interactive only when `isOwner`
-(`handleFromEmail(identity.email) === firstSeg`), and a browser gets that identity from
-the `__share` cookie the Worker sets by redeeming a `?phoenix_ticket=`. Nothing minted
-that ticket before, so `share open` has the Worker mint a short-lived, single-use,
-self-signed one at `POST /__ticket` (authenticated by the caller's Phoenix bearer;
-signed with the cookie's HMAC secret but domain-separated so neither can be replayed as
-the other — `signSelfTicket`/`verifySelfTicket` in `worker-template.ts`) and appends it
-to the opened URL. Managed-only; a pre-feature Worker 501s the mint into an
-`agents artifacts share update` hint.
+Artifact sharing is no longer part of agents-cli. The `agents artifacts`
+command group, the managed share Worker, and the `lib/share/` engine were removed
+(PHNX-3992); publishing an HTML artifact now lives entirely in the standalone
+`artifacts` CLI (`@phnx-labs/artifacts-cli`), driven as `artifacts share …` /
+`artifacts auth login`, mirroring the secrets (PHNX-3989) and computer (PHNX-4075)
+extractions. What stays here is `agents sessions share <id>`, which renders the
+transcript locally and shells out to `artifacts share`.
 
 `agents feed watch --json` is the canonical thin-client operator stream: it
 composes the existing session watcher with feed attention, activity, and **tool
@@ -697,8 +648,9 @@ signs out nothing else).
 - `PHOENIX_ID_BASE` (default `https://id.byphoenix.com`) points the CLI at a different
   account service for local/private backends.
 - The CLI never reads another product's credentials (e.g. `~/.rush/user.yaml`); each surface
-  holds its own copy of the same Phoenix bearer. Managed `agents artifacts share` publishes
-  under this identity — the share Worker verifies the bearer at `${PHOENIX_ID_BASE}/api/v1/auth/me`.
+  holds its own copy of the same Phoenix bearer. The surfaces that use it are `agents traces
+  sync` and the managed `agents sessions export/backup` target, each verifying the bearer at
+  `${PHOENIX_ID_BASE}/api/v1/auth/me`.
 
 ## Core design choices (read this first)
 
@@ -1338,6 +1290,33 @@ computer --device <name>` both rewrite `--device` to `--host` before exec —
 neither engine has a fleet registry of its own — while `agents view --device
 <name>` (not in `OWN_HOST_COMMANDS`) keeps SSHing the whole command, unchanged.
 
+`menubar.menu.*` (user-scope, central `agents.yaml`, syncs fleet-wide) are the
+**AGI Menu preferences** (PHNX-3999) — `defaultProject`, `workingRowsShown` (2/3/4),
+`showPreviews`, `projectPriorityFilter` (all/urgent/high/medium),
+`hideCompletedMilestones`, `bannerWhenNeedsYou`, `includeOtherDeviceRequests`,
+`groupBy` (none/project/agent/device), `thenBy` (none/project/agent/device),
+`projectScope` (cycle/all), `projectSort` (updated/priority/name),
+`ticketSort` (priority/updated/title), and `showPullRequests`. They are registered
+`agents config` keys, so the native menu reads them via `agents config list --json`
+(`{key,value,hint}` rows) and writes one per action; an **unset** key is omitted from
+the list so the menu falls back to its own baked-in default (the defaults in
+`config-keys.ts`/`device-config.ts` match those). No credential ever lives here.
+`agents menubar snapshot --json` also emits a `menuPreferences` map (each
+`menubar.menu.*` key → its effective value, i.e. the stored value or the registered
+default; `defaultProject` omitted when unset) so the menu consumes preferences from
+the snapshot it already polls rather than a second read path. On macOS, a one-shot
+sentinel-gated migration (`menubar/migrate-prefs.ts`, run from the snapshot compute)
+lifts legacy `com.phnx-labs.agents-menubar` UserDefaults into these keys — known keys
+only, never overriding an already-set value, never the `.dev` bundle, and never
+re-run after the sentinel is written (so a later `unset` cannot resurrect a legacy
+value).
+
+`devices.<name>.formFactor` (stored as `formFactor`, shared device-scope) is a
+factual hardware fact — `laptop`/`desktop`/`server`/`unknown` — the menu bar renders
+as an icon. Set it explicitly per device (`agents devices config <name> formFactor
+laptop`); it is **never** inferred from the OS platform, and unset reads as
+`unknown`. It rides `agents menubar snapshot --json` in each `devices[]` row.
+
 `devices.<name>.tmux` (stored as `tmux.enabled`) defaults off, so a LOCAL
 interactive `agents run` launch spawns the agent directly. Turn it on for a
 device to wrap eligible local launches in the shared-socket tmux session and give
@@ -1856,7 +1835,6 @@ that the caller be on a clean `main`:
 scripts/release.sh <version>                      # dry-run: bump, type-check, tarball preview, detected state
 scripts/release.sh <version> --apply              # tests on an auto-picked fleet worker -> PR + CI -> merge + tag -> build/sign/publish on the home base (mac-mini)
 scripts/release.sh <version> --apply --device <mac>  # sign/publish on <mac> when mac-mini is down -- <mac> must ALREADY be a provisioned signing home base (see below)
-scripts/release.sh <version> --apply --deploy-worker off  # publish only; skip the post-publish share-Worker redeploy
 ```
 
 The release has **three self-selected homes** and prints a `[n/6]` phase tracker,
@@ -1881,27 +1859,6 @@ would otherwise abort a good CLI release whenever a helper's sources moved. `ass
 auth + a headlessly readable `npmjs.com` `NPM_TOKEN`) before the release's
 first mutation. Helper signing is a separate, source-change-only path and still
 needs a provisioned Mac. The test worker is **not** hardcoded.
-
-**A release redeploys the managed share OG-cover Worker so prod can't drift from
-the shipped template (PHNX-3403).** The Worker that renders share preview cards
-was deployed only by a manual `agents artifacts share update` run, decoupled from
-release — so a release could ship a `worker-template.ts` change while the deployed
-Worker stayed stale (the gap that made PHNX-2835 look shipped while every new share
-still 404'd its cover). `--deploy-worker <auto|on|off>` (default `auto`) closes it:
-after publish, in the home-base phase, `deploy_share_worker` runs the
-**just-published** `@phnx-labs/agents-cli@<version>` (via a pinned `npx`, never the
-box's installed `agents`, so the deployed Worker matches the released source) as
-`agents artifacts share update --bundle cloudflare.com`. `auto` first runs
-`share update --check` — a pure local render+hash that needs **no** Cloudflare
-credentials — and deploys only when the shipped template differs from what the
-endpoint deployed; `on` always redeploys; `off` opts out. The deploy uses bundle
-`cloudflare.com` (the name the home base holds, not the CLI default `cloudflare`),
-`agents secrets exec` resolves it headlessly like the npm token, and the promote
-preflight verifies the share endpoint + that token on the home base **before**
-publishing (so a Worker-touching release can't publish then fail to deploy). A
-deploy failure fails the release loud with the exact manual fallback. It is
-idempotent — the already-published early return redeploys too — so a re-run after a
-publish/deploy split finishes the deploy.
 
 **A `--device` fallback must ALREADY be a provisioned signing home base — it is
 not turnkey.** Signing + notarizing + publishing needs, on that box: the

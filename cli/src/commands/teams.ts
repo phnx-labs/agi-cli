@@ -28,7 +28,7 @@ import { resolveProvider } from '../lib/cloud/registry.js';
 import type { CloudProviderId, DispatchOptions } from '../lib/cloud/types.js';
 import { emit } from '../lib/feed/events.js';
 import { maybeShowStarNudge } from '../lib/star-nudge.js';
-import { shareRuntimeEnv } from '../lib/share/config.js';
+import { shareRuntimeEnv } from '../lib/share-runtime.js';
 import { runSupervisor } from '../lib/teams/supervisor.js';
 import { debug } from '../lib/teams/debug.js';
 import {

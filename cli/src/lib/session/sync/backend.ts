@@ -18,9 +18,9 @@
  * MANAGED-FIRST — the mere PRESENCE of an r2.backups bundle is NOT a BYO
  * override. A signed-in user with a stale r2.backups bundle still backs up to
  * managed unless they opt out explicitly: `--byo`, `AGENTS_SESSIONS_BACKEND=byo`,
- * or a DI write token. This mirrors `lib/share/backend.ts` (a persisted BYO
- * config is deliberately not an override) so the product's managed-first
- * contract is identical across surfaces.
+ * or a DI write token. This mirrors the artifact-share backend contract (a
+ * persisted BYO config is deliberately not an override) so the product's
+ * managed-first contract is identical across surfaces.
  */
 
 import { readSession, type PhoenixSession } from '../../identity/client.js';

@@ -15,16 +15,7 @@
 #
 # Runs on the home base: inline when the release is invoked there, else piped
 # over `agents ssh <home-base> bash -s` by assert_promote_home_base.
-#
-# $1 (optional) is the --deploy-worker mode (auto|on|off, default off). When it is
-# not `off`, the probe ALSO verifies this box can deploy the managed share Worker
-# after publish (PHNX-3403): the share endpoint must be configured here and the
-# cloudflare.com API token must resolve headlessly — checked BEFORE the release's
-# first mutation so a Worker-touching release can't publish and then discover it
-# cannot deploy. Pass --deploy-worker=off to release without this requirement.
 set -u
-
-DEPLOY_WORKER="${1:-off}"
 
 fail() { echo "promote-probe: $*" >&2; exit 1; }
 
@@ -37,12 +28,5 @@ command -v agents >/dev/null 2>&1 || fail "agents CLI not on PATH (npmjs.com tok
 gh auth status >/dev/null 2>&1 || fail "gh is not authenticated"
 agents secrets exec npmjs.com -- sh -c 'test -n "$NPM_TOKEN"' >/dev/null 2>&1 \
   || fail "npmjs.com bundle NPM_TOKEN is not readable headlessly (agents secrets add npmjs.com NPM_TOKEN, file-backed)"
-
-if [[ "$DEPLOY_WORKER" != "off" ]]; then
-  agents artifacts share status >/dev/null 2>&1 \
-    || fail "share endpoint not configured on this home base (run 'agents artifacts share join'), required for --deploy-worker=$DEPLOY_WORKER; provision it or release with --deploy-worker=off"
-  agents secrets exec cloudflare.com -- sh -c 'test -n "${CLOUDFLARE_API_TOKEN:-}${CF_API_TOKEN:-}"' >/dev/null 2>&1 \
-    || fail "cloudflare.com bundle API token not readable headlessly (agents secrets add cloudflare.com CLOUDFLARE_API_TOKEN, file-backed), required for --deploy-worker=$DEPLOY_WORKER; provision it or release with --deploy-worker=off"
-fi
 
 echo "promote-ready"
