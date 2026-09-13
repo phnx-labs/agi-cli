@@ -2,11 +2,30 @@ import { describe, expect, it } from 'vitest';
 import type { ActiveSession } from '../session/active.js';
 import type { SessionMeta } from '../session/types.js';
 import { SessionWatchState, toSessionWatchRow } from '../session/watch.js';
-import { FeedSessionProjection, FeedWatchState, projectSessionEnvelope } from './watch.js';
+import { FeedSessionProjection, FeedWatchState, normalizePeerEnvelope, projectSessionEnvelope, type FeedWatchEnvelope } from './watch.js';
 
 function session(id: string, extra: Partial<ActiveSession> = {}): ActiveSession {
   return { context: 'headless', kind: 'kimi', host: 'worker-a', sessionId: id, status: 'running', ...extra } as ActiveSession;
 }
+
+describe('cross-version peer envelopes', () => {
+  it('reads an older peer\'s tool-less reset as a peer with no tool rows', () => {
+    // A peer on a pre-tools CLI is a correct v1 producer. Before this the
+    // projection read `event.tools.map` and took the whole fan-out down with a
+    // TypeError the moment one such peer connected.
+    const older = { v: 1, type: 'reset', streamId: 'peer', sequence: 1, scope: 'worker', capturedAt: 1, agents: [], attention: [] } as unknown as FeedWatchEnvelope;
+    const normalized = normalizePeerEnvelope(older);
+    expect(normalized.type === 'reset' && normalized.tools).toEqual([]);
+    expect(() => new FeedSessionProjection().apply(normalized)).not.toThrow();
+  });
+
+  it('leaves an envelope that already carries tools untouched', () => {
+    const state = new FeedWatchState('peer');
+    const tool = { kind: 'browser', rowKey: 't1', scope: 'worker', device: 'worker', live: true, task: 'post', profile: 'work', linkStatus: 'unlinked', startedAtMs: 1, updatedAtMs: 2, captures: [], captureCounts: {} } as const;
+    const event = state.emit({ type: 'reset', scope: 'worker', capturedAt: 1, agents: [], attention: [], tools: [tool] });
+    expect(normalizePeerEnvelope(event)).toBe(event);
+  });
+});
 
 describe('feed watch operator projection', () => {
   it('streams Previous rows without inventing live attention for them', async () => {
@@ -83,7 +102,7 @@ describe('fleet feed shares canonical session ownership', () => {
     const state = new FeedWatchState();
     const live = toSessionWatchRow('worker', session('same'));
     const history = { ...live, rowKey: 'history', previous: true };
-    projection.apply(state.emit({ type: 'reset', scope: 'worker', capturedAt: 1, agents: [live, history], attention: [] }));
+    projection.apply(state.emit({ type: 'reset', scope: 'worker', capturedAt: 1, agents: [live, history], attention: [], tools: [] }));
     expect(projection.apply(state.emit({ type: 'agent.upsert', scope: 'worker', rowKey: history.rowKey, agent: { ...history, preview: 'new historical text' } }))).toEqual([]);
     expect(projection.apply(state.emit({ type: 'attention.remove', scope: 'worker', rowKey: history.rowKey }))).toEqual([]);
     expect(projection.apply(state.emit({ type: 'attention.remove', scope: 'worker', rowKey: live.rowKey }))).toEqual([]);

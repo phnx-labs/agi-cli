@@ -8,6 +8,8 @@ import {
   PEER_BACKOFF_CAP_MS,
   PEER_PARK_AFTER_FAILURES,
   peerBackoffDelayMs,
+  PEER_RETIRE_AFTER_FAILURES,
+  PEER_RETIRED_RECHECK_MS,
   streamFromPeer,
 } from './peer-stream.js';
 
@@ -49,7 +51,50 @@ describe('peer subscription backoff', () => {
     expect([1, 2, 3, 4, 5, 6, 7].map((n) => peerBackoffDelayMs(n)))
       .toEqual([2_000, 4_000, 8_000, 16_000, 32_000, 60_000, 60_000]);
     expect(peerBackoffDelayMs(1)).toBe(PEER_BACKOFF_BASE_MS);
-    expect(peerBackoffDelayMs(99)).toBe(PEER_BACKOFF_CAP_MS);
+    // The cap holds up to the retire threshold; past it the slow tier takes over
+    // (asserted in the retire test below).
+    expect(peerBackoffDelayMs(PEER_RETIRE_AFTER_FAILURES - 1)).toBe(PEER_BACKOFF_CAP_MS);
+  });
+
+  it('retires a long-offline peer onto the slow cadence instead of dialing it forever', () => {
+    // The cap bounds the DELAY; without the retire tier a box off for a weekend
+    // is still dialed every 60s for two days. Past the threshold the re-dial
+    // drops to the slow cadence, which is what bounds the total work.
+    expect(peerBackoffDelayMs(PEER_RETIRE_AFTER_FAILURES - 1)).toBe(PEER_BACKOFF_CAP_MS);
+    expect(peerBackoffDelayMs(PEER_RETIRE_AFTER_FAILURES)).toBe(PEER_RETIRED_RECHECK_MS);
+    expect(peerBackoffDelayMs(500)).toBe(PEER_RETIRED_RECHECK_MS);
+    expect(PEER_RETIRED_RECHECK_MS).toBeGreaterThan(PEER_BACKOFF_CAP_MS);
+  });
+
+  it('reports a retired peer as retired, with the slow re-dial named', async () => {
+    const dir = root();
+    const ssh = fakeSsh(dir, 'echo "ssh: connect to host peer-a port 22: No route to host" >&2\nexit 255');
+    const controller = new AbortController();
+    const reasons: string[] = [];
+    await streamFromPeer({
+      device: device(),
+      signal: controller.signal,
+      command: 'agents sessions watch --json --local',
+      sshBin: ssh,
+      backoffBaseMs: 1,
+      backoffCapMs: 2,
+      parkAfterFailures: 2,
+      retireAfterFailures: 4,
+      // Scaled down from the shipped 15min so the schedule is observable.
+      retiredRecheckMs: 30,
+      registryPollMs: 5,
+      registryPath: path.join(dir, 'registry.json'),
+      onLine: () => false,
+      onUnavailable: (reason) => {
+        reasons.push(reason);
+        if (reasons.length >= 4) controller.abort();
+      },
+    });
+    expect(reasons[2]).toContain('parked after 3 failed connections');
+    expect(reasons[3]).toContain('retired after 4 failed connections');
+    expect(reasons[3]).toContain('re-dialing in');
+    // A retired peer still re-dials on a device refresh, so it is never stranded.
+    expect(reasons[3]).toContain('or on a device refresh');
   });
 
   it('backs off a failing peer, surfaces its stderr, and parks it after three spawns', async () => {

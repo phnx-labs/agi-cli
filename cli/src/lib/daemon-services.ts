@@ -35,6 +35,7 @@ export type DaemonServiceId =
   | 'tmux-reap'
   | 'browser-task-reap'
   | 'session-state'
+  | 'feed-stream'
   | 'session-summarizer'
   | 'attention-notify'
   | 'harness-update';
@@ -126,6 +127,11 @@ export const DAEMON_SERVICES: DaemonServiceDef[] = [
     id: 'session-state',
     title: 'Live session state',
     description: 'Publishes this host\'s active session metadata for sessions watch and fleet consumers.',
+  },
+  {
+    id: 'feed-stream',
+    title: 'Shared feed stream',
+    description: 'Owns the one fleet feed fan-out and serves it to every reader over a socket, so N consumers cost one ssh per peer instead of N.',
   },
   {
     id: 'session-index',
