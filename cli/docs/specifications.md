@@ -1318,17 +1318,19 @@ SSH access (§7); rendering sessions that no harness produced.
   run arguments, native passthrough arguments, recorded mode/model/cwd and
   lifecycle constraints. Explicit terminal backends MUST work with concrete IDs
   and MUST be consumed before the child re-enters resume.
-- **SES-40 (MUST).** Focus, single and multi-session resume, attach, and both
+- **SES-40 (MUST).** Focus, single and multi-session resume, and both
   concrete-id and picker forms of `run --resume` MUST route through SES-39's one
   origin-device recovery decision, preferring the origin device. When that origin
   device is genuinely unreachable, single-session resume MAY fall back to a
   clearly-announced, explicitly chosen local `/continue` replay from the synced mirror
   (`resumeLocalFallbackSource` rewrites `machine` to self); it MUST NOT do so
   silently, and MUST NOT fall back while the origin is reachable (RUSH-2022). A
-  host-dispatched session row MUST persist the dispatch host as `machine`. Cross-device attach MUST route before reading
-  the detach record or stopping its headless PID, because both are local to the
-  origin (`lib/hosts/session-index.ts`; `commands/attach.ts`; `commands/exec.ts`;
-  tests `lib/hosts/session-index.test.ts`, `commands/attach.test.ts`).
+  host-dispatched session row MUST persist the dispatch host as `machine`.
+  Cross-device resume MUST route before reading the detach record or stopping
+  its headless PID, because both are local to the origin
+  (`lib/hosts/session-index.ts`; `commands/resume.ts`; `lib/session/detached.ts`;
+  `commands/exec.ts`; tests `lib/hosts/session-index.test.ts`,
+  `lib/session/detached.test.ts`).
 - **SES-43 (MUST, RUSH-2336).** Every bare-active surface — the CLI's grouped
   table and `--json` (`renderActiveSessions`), the interactive browser's
   `--active` filter (`applyFilters`), `focus`'s attach gate

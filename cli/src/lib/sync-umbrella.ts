@@ -20,6 +20,7 @@ import { pullRepo, adoptUserRepoIfNeeded } from './git.js';
 import { getUserAgentsDir, getEnabledExtraRepos } from './state.js';
 import { listRemoteBundles, pullBundle } from './secrets-client.js';
 import { SYNC_PASSPHRASE_ENV } from './sync-passphrase.js';
+import type { ResourceSelection } from './installations/versions.js';
 
 /** The umbrella flags off `agents sync`. */
 export interface UmbrellaFlags {
@@ -97,6 +98,10 @@ interface RunUmbrellaArgs {
    * `agents sync --json` / fleet fan-out leave stdout as a single JSON object.
    */
   quiet?: boolean;
+  /** Optional resource-only reconcile across installed versions. */
+  selection?: ResourceSelection;
+  /** Explicit consent for selected plugins that add executable surfaces. */
+  allowExecSurfaces?: boolean;
 }
 
 /**
@@ -105,7 +110,7 @@ interface RunUmbrellaArgs {
  * reconcile — `agents sync` should make as much current as it can in one pass.
  */
 export async function runUmbrellaSync(args: RunUmbrellaArgs): Promise<UmbrellaResult> {
-  const { flags, log, yes, passphrase, quiet = false } = args;
+  const { flags, log, yes, passphrase, quiet = false, selection, allowExecSurfaces = false } = args;
   const plan = planUmbrellaStages(flags);
   const result: UmbrellaResult = { plan, reconciled: false, declined: [], reconciledVersions: [] };
 
@@ -182,7 +187,13 @@ export async function runUmbrellaSync(args: RunUmbrellaArgs): Promise<UmbrellaRe
 
   if (plan.reconcile) {
     const { refresh } = await import('./refresh.js');
-    const refreshed = await refresh({ skipPrompts: yes, quiet });
+    const refreshed = await refresh({
+      skipPrompts: yes,
+      quiet,
+      skipClis: selection !== undefined,
+      selection,
+      allowExecSurfaces,
+    });
     result.reconciled = true;
     result.declined = refreshed.declined;
     result.reconciledVersions = refreshed.reconciled;
@@ -192,13 +203,15 @@ export async function runUmbrellaSync(args: RunUmbrellaArgs): Promise<UmbrellaRe
     // rather than silently adding them (refresh mode). Soft: a machine without
     // tailscale is a clean no-op, never a sync failure. First-run population is
     // `agents setup` / manual `agents devices sync` (bootstrap).
-    const { runDeviceSync } = await import('./devices/sync.js');
-    const { reconcilePendingSentinels } = await import('./devices/pending.js');
-    const dev = await runDeviceSync({ soft: true, mode: 'refresh' });
-    if (dev.ok) await reconcilePendingSentinels(dev.pending);
-    result.devices = { synced: dev.synced, pending: dev.pending.length, skipped: !dev.ok };
-    if (dev.ok) {
-      log(`devices: ${dev.synced} refreshed${dev.pending.length ? `, ${dev.pending.length} new pending` : ''}`);
+    if (!selection) {
+      const { runDeviceSync } = await import('./devices/sync.js');
+      const { reconcilePendingSentinels } = await import('./devices/pending.js');
+      const dev = await runDeviceSync({ soft: true, mode: 'refresh' });
+      if (dev.ok) await reconcilePendingSentinels(dev.pending);
+      result.devices = { synced: dev.synced, pending: dev.pending.length, skipped: !dev.ok };
+      if (dev.ok) {
+        log(`devices: ${dev.synced} refreshed${dev.pending.length ? `, ${dev.pending.length} new pending` : ''}`);
+      }
     }
   }
 

@@ -75,6 +75,10 @@ interface RefreshOptions {
    * (`agents sync --json` / fleet fan-out) so stdout stays a single JSON object.
    */
   quiet?: boolean;
+  /** Limit reconciliation to the requested resource kinds/names. */
+  selection?: ResourceSelection;
+  /** Explicit consent for selected plugins that add executable surfaces. */
+  allowExecSurfaces?: boolean;
 }
 
 /**
@@ -128,7 +132,14 @@ interface RefreshResult {
 }
 
 export async function refresh(options: RefreshOptions = {}): Promise<RefreshResult> {
-  const { agentFilter, skipPrompts = false, skipClis = false, quiet = false } = options;
+  const {
+    agentFilter,
+    skipPrompts = false,
+    skipClis = false,
+    quiet = false,
+    selection: requestedSelection,
+    allowExecSurfaces = false,
+  } = options;
   const agentsDir = getUserAgentsDir();
   // Gate every human progress line so --json / fleet fan-out can parse stdout.
   const log = (...args: unknown[]) => { if (!quiet) console.log(...args); };
@@ -137,7 +148,7 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
   const declined: string[] = [];
   const reconciled: Array<{ agent: AgentId; version: string }> = [];
 
-  migratePromptcutsToRoot(agentsDir, quiet);
+  if (!requestedSelection) migratePromptcutsToRoot(agentsDir, quiet);
 
   const manifest = readManifest(agentsDir);
   if (!manifest) {
@@ -174,10 +185,11 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
   }
 
   // 2. Register MCP servers
-  if (manifest?.mcp && Object.keys(manifest.mcp).length > 0) {
+  if ((!requestedSelection || requestedSelection.mcp) && manifest?.mcp && Object.keys(manifest.mcp).length > 0) {
     log(chalk.bold('\nMCP Servers:\n'));
 
     for (const [name, config] of Object.entries(manifest.mcp)) {
+      if (Array.isArray(requestedSelection?.mcp) && !requestedSelection.mcp.includes(name)) continue;
       const transport = config.transport || 'stdio';
       const commandOrUrl = transport === 'http' ? config.url : config.command;
       if (!commandOrUrl) {
@@ -218,22 +230,24 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
   }
 
   // 3. Sync resources into version homes.
-  // Unattended (`skipPrompts` / `agents sync --yes --local`): every installed
-  // version — otherwise non-default homes keep stale hooks after a system
-  // update (fleet multi-harness: only the default version was refreshed).
-  // Interactive: default only; re-run `agents sync <agent>@all` for the rest.
+  // Unattended (`skipPrompts` / `agents sync --yes --local`) and explicit
+  // resource selectors: every installed version. Otherwise non-default homes
+  // keep stale resources after a system update or named plugin sync.
+  // Interactive full reconcile: default only.
   const cliStates = await getAllCliStates();
   const agentsToSync = agentFilter ? [agentFilter] : MANAGED_AGENT_IDS;
   const available = getAvailableResources();
 
   for (const agentId of agentsToSync) {
-    if (!cliStates[agentId]?.installed && listInstalledVersions(agentId).length === 0) continue;
+    const installedVersions = listInstalledVersions(agentId);
+    if (!cliStates[agentId]?.installed && installedVersions.length === 0) continue;
     const defaultVer = getGlobalDefault(agentId);
-    if (!defaultVer) continue;
+    if (!defaultVer && !requestedSelection) continue;
 
-    const versionsToSync = skipPrompts
-      ? listInstalledVersions(agentId)
-      : [defaultVer];
+    const versionsToSync = requestedSelection || skipPrompts
+      ? installedVersions
+      : [defaultVer!];
+    if (versionsToSync.length === 0) continue;
 
     // Interactive-only: getActuallySyncedResources walks every skill tree with
     // content compares (~1s/agent on a full install). The unattended path
@@ -242,8 +256,8 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
     let actuallySynced: ReturnType<typeof getActuallySyncedResources> | undefined;
     let newResources: ReturnType<typeof getNewResources> | undefined;
     let hasAnySynced = false;
-    if (!skipPrompts) {
-      actuallySynced = getActuallySyncedResources(agentId, defaultVer);
+    if (!skipPrompts && !requestedSelection) {
+      actuallySynced = getActuallySyncedResources(agentId, defaultVer!);
       newResources = getNewResources(available, actuallySynced, getProjectOnlyResources());
       hasAnySynced = actuallySynced.commands.length > 0 ||
         actuallySynced.skills.length > 0 ||
@@ -258,15 +272,17 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
       let selection: ResourceSelection | undefined;
       let forceFullSync = false;
 
-      if (skipPrompts) {
+      if (requestedSelection) {
+        selection = requestedSelection;
+      } else if (skipPrompts) {
         forceFullSync = true;
       } else if (!hasAnySynced) {
-        log(chalk.yellow(`\n${agentLabel(agentId)}@${defaultVer} has no synced resources.`));
+        log(chalk.yellow(`\n${agentLabel(agentId)}@${defaultVer!} has no synced resources.`));
         const userSelection = await promptResourceSelection(agentId);
         if (userSelection) selection = userSelection;
-      } else if (newResources && hasNewResources(newResources, agentId, defaultVer)) {
+      } else if (newResources && hasNewResources(newResources, agentId, defaultVer!)) {
         log(chalk.cyan(`\n${agentLabel(agentId)}@${defaultVer}:`));
-        const userSelection = await promptNewResourceSelection(agentId, newResources, defaultVer);
+        const userSelection = await promptNewResourceSelection(agentId, newResources, defaultVer!);
         if (userSelection) selection = userSelection;
       } else {
         forceFullSync = true;
@@ -281,7 +297,11 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
             agentId,
             ver,
             selection,
-            { available, ...(forceFullSync ? { force: true as const } : {}) },
+            {
+              available,
+              allowExecSurfaces,
+              ...(forceFullSync || requestedSelection ? { force: true as const } : {}),
+            },
           );
           reconciled.push({ agent: agentId, version: ver });
           if (syncResult.commands) kinds.add('commands');
@@ -313,7 +333,7 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
   }
 
   // 4. Register hooks as lifecycle events (same version set as resource sync)
-  const hookManifest = parseHookManifest();
+  const hookManifest = requestedSelection ? {} : parseHookManifest();
   if (Object.keys(hookManifest).length > 0) {
     let hookRegistered = 0;
     const hookAgents = new Set(capableAgents('hooks') as readonly AgentId[]);
@@ -342,24 +362,26 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
   // 5. Auto-add shims to PATH
   // Refresh the gh overload shim so `gh pr checks` escapes the GraphQL rate limit
   // for every user, transparently (PHNX-3501). Idempotent; POSIX-only in v1.
-  try {
-    ensureGhOverloadShim();
-  } catch {
-    // Never let a shim-write hiccup break sync — real gh stays fine without it.
-  }
-  if (!isShimsInPath()) {
-    const pathResult = addShimsToPath();
-    if (pathResult.success && !pathResult.alreadyPresent) {
-      log(chalk.green(`\nAdded shims to ${pathResult.location}`));
-      log(chalk.gray(pathResult.reloadHint));
-    } else if (!pathResult.success) {
-      log(chalk.yellow('\nCould not auto-add shims to PATH:'));
-      log(chalk.gray(getPathSetupInstructions()));
+  if (!requestedSelection) {
+    try {
+      ensureGhOverloadShim();
+    } catch {
+      // Never let a shim-write hiccup break sync — real gh stays fine without it.
+    }
+    if (!isShimsInPath()) {
+      const pathResult = addShimsToPath();
+      if (pathResult.success && !pathResult.alreadyPresent) {
+        log(chalk.green(`\nAdded shims to ${pathResult.location}`));
+        log(chalk.gray(pathResult.reloadHint));
+      } else if (!pathResult.success) {
+        log(chalk.yellow('\nCould not auto-add shims to PATH:'));
+        log(chalk.gray(getPathSetupInstructions()));
+      }
     }
   }
 
   // 6. Prompt for missing default versions
-  if (!skipPrompts) {
+  if (!skipPrompts && !requestedSelection) {
     const agentsNeedingDefault: AgentId[] = [];
     for (const agentId of agentsToSync) {
       const versions = listInstalledVersions(agentId);
@@ -411,50 +433,52 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
   }
 
   // 7. Install declared host-CLIs
-  try {
-    const { statuses, errors } = listCliStatus(process.cwd());
-    for (const err of errors) {
-      log(chalk.yellow(`  CLI manifest parse error: ${err.file}: ${err.reason}`));
-    }
-    const missing = statuses.filter((s) => !s.installed);
-    if (missing.length > 0) {
-      log(chalk.bold('\nDeclared CLIs missing from this host:'));
-      for (const s of missing) {
-        const method = selectInstallMethod(s.manifest);
-        const action = method ? describeMethod(method) : chalk.red('no compatible install method');
-        log(`  ${chalk.cyan(s.manifest.name.padEnd(20))} ${chalk.gray(action)}`);
+  if (!requestedSelection) {
+    try {
+      const { statuses, errors } = listCliStatus(process.cwd());
+      for (const err of errors) {
+        log(chalk.yellow(`  CLI manifest parse error: ${err.file}: ${err.reason}`));
       }
-      log('');
+      const missing = statuses.filter((s) => !s.installed);
+      if (missing.length > 0) {
+        log(chalk.bold('\nDeclared CLIs missing from this host:'));
+        for (const s of missing) {
+          const method = selectInstallMethod(s.manifest);
+          const action = method ? describeMethod(method) : chalk.red('no compatible install method');
+          log(`  ${chalk.cyan(s.manifest.name.padEnd(20))} ${chalk.gray(action)}`);
+        }
+        log('');
 
-      if (!skipPrompts) {
-        const proceed = await confirm({ message: `Install ${missing.length} missing CLI(s) now?`, default: true });
-        if (proceed) {
-          for (const s of missing) {
-            log(chalk.bold(`\n→ ${s.manifest.name}`));
-            const result = installCli(s.manifest);
-            if (result.error) {
-              log(chalk.red(`  ${result.error}`));
-              continue;
-            }
-            if (result.installed) {
-              log(chalk.green(`  installed`));
-              if (s.manifest.postInstall) {
-                log(chalk.gray(s.manifest.postInstall.trim().split('\n').map((l) => '  ' + l).join('\n')));
+        if (!skipPrompts) {
+          const proceed = await confirm({ message: `Install ${missing.length} missing CLI(s) now?`, default: true });
+          if (proceed) {
+            for (const s of missing) {
+              log(chalk.bold(`\n→ ${s.manifest.name}`));
+              const result = installCli(s.manifest);
+              if (result.error) {
+                log(chalk.red(`  ${result.error}`));
+                continue;
               }
-            } else {
-              log(chalk.yellow(`  install ran but \`${describeCheck(s.manifest.check)}\` still fails`));
+              if (result.installed) {
+                log(chalk.green(`  installed`));
+                if (s.manifest.postInstall) {
+                  log(chalk.gray(s.manifest.postInstall.trim().split('\n').map((l) => '  ' + l).join('\n')));
+                }
+              } else {
+                log(chalk.yellow(`  install ran but \`${describeCheck(s.manifest.check)}\` still fails`));
+              }
             }
+          } else {
+            log(chalk.gray(`Skipped. Run 'agents cli install' later.`));
           }
         } else {
-          log(chalk.gray(`Skipped. Run 'agents cli install' later.`));
+          log(chalk.gray(`Run 'agents cli install' to install them.`));
         }
-      } else {
-        log(chalk.gray(`Run 'agents cli install' to install them.`));
       }
-    }
-  } catch (err) {
-    if (!isPromptCancelled(err)) {
-      log(chalk.yellow(`CLI install skipped: ${(err as Error).message}`));
+    } catch (err) {
+      if (!isPromptCancelled(err)) {
+        log(chalk.yellow(`CLI install skipped: ${(err as Error).message}`));
+      }
     }
   }
 

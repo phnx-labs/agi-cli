@@ -96,6 +96,36 @@ export function isHeadlessAlive(rec: DetachRecord): boolean {
 }
 
 /**
+ * Stop the detached continuation before a local foreground resume starts.
+ * The start-time check in {@link isHeadlessAlive} prevents signalling a reused
+ * PID; a continuation that ignores SIGTERM fails closed instead of running
+ * alongside a second process against the same transcript.
+ */
+export async function takeOverDetachedSession(sessionId: string): Promise<boolean> {
+  const rec = readDetachRecord(sessionId);
+  if (!rec) return false;
+
+  if (isHeadlessAlive(rec)) {
+    try {
+      process.kill(rec.headlessPid, 'SIGTERM');
+    } catch (err) {
+      if (isHeadlessAlive(rec)) throw err;
+    }
+
+    const deadline = Date.now() + 2_000;
+    while (isHeadlessAlive(rec) && Date.now() < deadline) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    }
+    if (isHeadlessAlive(rec)) {
+      throw new Error(`Detached continuation ${rec.headlessPid} did not stop; refusing to resume a duplicate process.`);
+    }
+  }
+
+  clearDetachRecord(sessionId);
+  return true;
+}
+
+/**
  * Presence for a session id from the detach store alone:
  *   - no record            -> undefined (caller decides: `attached` for a live
  *                             interactive row, nothing for cloud/team rows)
