@@ -116,20 +116,11 @@ into the Mac's GUI session — `osascript` reaches the app through it. `tmux` ov
 to the already-open VSCodium instance over its user-scoped IPC socket, so it works
 from an SSH session as the same user (no `osascript`, no new window spawned).
 
-**`sessions resume`'s own `--device`/`-a`/`--all`/`--teams`/`--since`/`-n` never
-reach its action directly (PHNX-3940).** They share a name with flags the parent
-`sessions` command also owns, and `root-command.ts` cannot call
-`enablePositionalOptions()` globally (it would break `sessions backfill …`'s
-`optsWithGlobals()` pattern) — so commander's parser consumes a colliding flag
-into the PARENT's own option before `resume` is recognized as a subcommand,
-whatever its position on the line. `resolveResumeOptions`
-([`sessions-resume.ts`](../src/commands/sessions-resume.ts)) reads those values
-back off `cmd.parent`, preferring an explicit parent-level value
-(`getOptionValueSource(...) === 'cli'`) over the resume subcommand's own default
-(so a bare `sessions resume` keeps its 200-row default rather than inheriting
-the parent's 50), and collapses `--device`/`--devices` to exactly one host via
-the shared `normalizeSingleDeviceOption` (`commands/utils.ts`, also used by
-`sessions inject`), failing loud on more than one.
+Resume accepts `--device <alias>` before or after the selector, including the
+`-D` and `--devices` aliases. It targets one device; repeated different targets
+are rejected. Startup normalizes these spellings before the parent listing
+command can consume the selector as another device. Explicit parent filters are
+preserved, while the picker keeps its own 200-session default.
 
 ## Choosing a terminal for a GUI caller
 
@@ -240,8 +231,8 @@ await openSurfaces(items, {
 | `--splits` | Pack two sessions side by side per tab (default is one tab per session). |
 
 Every selected harness goes through the shared session-recovery command. Native
-resume is used only by the healthy origin version; otherwise a healthy version of
-the same harness receives `/continue <id>`. With no GUI backend and no tmux,
+resume uses the installed harness with the conversation’s account on its origin
+device. Context replay requires an explicit choice. With no GUI backend and no tmux,
 resume falls back to an in-place, sequential takeover of the current terminal.
 
 ## VSCodium agent terminals

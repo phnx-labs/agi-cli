@@ -22,6 +22,7 @@ import type { SessionMeta } from '../lib/session/types.js';
 import { shellQuote } from '../lib/terminal/index.js';
 import { execOnly } from '../lib/terminal/shell.js';
 import { buildFullCommandTree } from '../cli/command-registry.js';
+import { normalizeResumeDeviceArgs } from '../lib/startup/root-command.js';
 
 describe('resolveResumePacking', () => {
   it('opens every resumed session in its own tab by default', () => {
@@ -357,20 +358,6 @@ describe('partitionResumableSelections — the picker drops what recovery would 
   });
 });
 
-/**
- * `sessions resume` shares flag names with its parent `sessions` command
- * (-a/--agent, --all, --teams, --since, -n/--limit, --local, -D/--device,
- * --devices). root-command.ts deliberately never calls
- * `enablePositionalOptions()`, so commander's parser scans the FULL argv for
- * options belonging to `sessions` before it recognizes `resume` as a
- * subcommand — a colliding flag is consumed into the PARENT's own option and
- * never reaches the resume subcommand's action. These tests parse the real,
- * fully registered command tree (`buildFullCommandTree`, the same helper
- * root-command.test.ts uses for the sibling RUSH-2687 collision) to prove the
- * collision actually happens on live wiring, then exercise the exported
- * `resolveResumeOptions` — which the resume action calls — against the real
- * post-parse `Command` instances, not hand-fed options.
- */
 describe('resolveResumeOptions — recovering resume flags the parent command swallows', () => {
   async function parseResume(argv: string[]): Promise<{ resumeCmd: Command; captured: Record<string, unknown> }> {
     const program = await buildFullCommandTree();
@@ -381,21 +368,28 @@ describe('resolveResumeOptions — recovering resume flags the parent command sw
     if (!resumeCmd) throw new Error('sessions resume not registered');
     let captured: Record<string, unknown> = {};
     resumeCmd.action((..._args: unknown[]) => { captured = resumeCmd.opts(); });
-    await program.parseAsync(['node', 'agents', 'sessions', ...argv], { from: 'node' });
+    await program.parseAsync(['node', 'agents', ...normalizeResumeDeviceArgs(['sessions', ...argv])], { from: 'node' });
     return { resumeCmd, captured };
   }
 
-  it('reproduces the real collision: a --device typed after "resume" never reaches the subcommand\'s own opts', async () => {
-    const { resumeCmd, captured } = await parseResume(['resume', '019fd0c8b3e977a2a1a4444698c4d897', 'finish it', '--device', 'yosemite-m5', '--tmux']);
-    // The genuine bug: commander's parent-level scan ate --device before dispatch.
-    expect(captured.device).toBeUndefined();
-    expect(captured.tmux).toBe(true);
-    expect(resumeCmd.parent?.getOptionValueSource('device')).toBe('cli');
-    expect((resumeCmd.parent?.opts() as { device?: string[] }).device).toEqual(['yosemite-m5']);
-    // resolveResumeOptions recovers it onto the resume options the action uses.
+  it.each([
+    ['--device', 'yosemite-m5', '019fd0c8', 'finish it'],
+    ['019fd0c8', 'finish it', '--device', 'yosemite-m5'],
+    ['-D', 'yosemite-m5', '019fd0c8', 'finish it'],
+    ['-Dyosemite-m5', '019fd0c8', 'finish it'],
+    ['--devices=yosemite-m5', '019fd0c8', 'finish it'],
+  ])('preserves the selector and prompt with device arguments %j', async (...argv) => {
+    const { resumeCmd, captured } = await parseResume(['resume', ...argv, '--tmux']);
+    expect(resumeCmd.args).toEqual(['019fd0c8', 'finish it']);
     const resolved = resolveResumeOptions(resumeCmd, captured as never);
     expect(resolved.device).toBe('yosemite-m5');
-    expect((resolved as { tmux?: boolean }).tmux).toBe(true);
+    expect(resolved.tmux).toBe(true);
+  });
+
+  it('preserves a picker query after the device', async () => {
+    const { resumeCmd, captured } = await parseResume(['resume', '--device', 'zion', 'auth middleware']);
+    expect(resumeCmd.args).toEqual(['auth middleware']);
+    expect(resolveResumeOptions(resumeCmd, captured as never).device).toBe('zion');
   });
 
   it('keeps resume\'s own 200 default when no --limit is typed, even though the parent default is 50', async () => {
@@ -419,7 +413,7 @@ describe('resolveResumeOptions — recovering resume flags the parent command sw
   });
 
   it('fails clearly on multiple devices instead of silently picking one', async () => {
-    const { resumeCmd, captured } = await parseResume(['resume', '019fd0c8b3e977a2a1a4444698c4d897', '--device', 'zion', 'yosemite-m5']);
+    const { resumeCmd, captured } = await parseResume(['resume', '019fd0c8b3e977a2a1a4444698c4d897', '--device', 'zion', '--device', 'yosemite-m5']);
     expect(() => resolveResumeOptions(resumeCmd, captured as never)).toThrow(/sessions resume targets a single device/);
   });
 

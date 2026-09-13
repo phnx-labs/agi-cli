@@ -12,7 +12,7 @@
  */
 import * as fs from 'fs';
 import chalk from 'chalk';
-import type { Command } from 'commander';
+import { Option, type Command } from 'commander';
 import { isAgentTmuxAlias, type SessionMeta } from '../lib/session/types.js';
 import { discoverSessions } from '../lib/session/discover.js';
 import { filterTeamSessions } from '../lib/session/team-filter.js';
@@ -84,6 +84,8 @@ export function registerSessionsResumeCommand(sessionsCmd: Command): void {
     .option('--teams', 'Include team-spawned sessions (hidden by default)')
     .option('--since <time>', 'Only sessions newer than this (e.g., 2h, 7d, 4w, or ISO date)')
     .option('-n, --limit <n>', 'Maximum number of sessions to load into the picker', '200')
+    .addOption(new Option('--resume-device <alias>').hideHelp()
+      .argParser((value: string, previous: string[] = []) => [...previous, value]))
     .option('--device <alias>', 'Open on the session origin device over SSH; the device must match every selected session')
     .option('--iterm', 'Force the iTerm backend')
     .option('--ghostty', 'Force the Ghostty backend')
@@ -154,45 +156,21 @@ export function registerSessionsResumeCommand(sessionsCmd: Command): void {
  *  array-merge handling below, so it is not in this list. */
 const RESUME_PARENT_COLLISION_FLAGS = ['agent', 'all', 'teams', 'since', 'limit', 'local'] as const;
 
-/**
- * Recover the caller's real intent for flags `sessions resume` shares by name
- * with its parent `sessions` command (-a/--agent, --all, --teams, --since,
- * -n/--limit, --local, -D/--device, --devices).
- *
- * `root-command.ts` deliberately never calls `enablePositionalOptions()`
- * (that broke other leaf subcommands that read `--since`/`--json` back via
- * `optsWithGlobals()`), so commander's parser scans the FULL argv for options
- * belonging to `sessions` before it ever recognizes `resume` as the
- * subcommand — a colliding flag typed anywhere on the line, before or after
- * `resume`, is consumed straight into the PARENT command's own option and
- * never reaches the resume subcommand's `action` at all. The resume
- * subcommand's own same-named `.option()` declarations therefore exist only
- * to supply THEIR default (e.g. limit=200) — they never receive an explicit
- * CLI value. Naively preferring "whichever is defined" is wrong too, since
- * the parent's own `--limit` also carries a default (50): reading it
- * unconditionally would silently override resume's 200 default on every
- * plain `sessions resume` invocation with no `--limit` typed at all. So an
- * explicit parent-level value (`getOptionValueSource(...) === 'cli'`)
- * overrides the resume subcommand's own default; otherwise the resume
- * default stands (PHNX-3940). `--device`/`--devices` get the same parent-wins
- * treatment but additionally merge the two aliases and collapse to one
- * device via the shared {@link normalizeSingleDeviceOption} (reused from
- * `sessions inject`, PHNX-3688), since resume — like inject — targets exactly
- * one device and a fan-out spelling is a user error, not a first-of-list guess.
- */
+/** Keep explicit parent options without replacing resume's own defaults. */
 export function resolveResumeOptions(cmd: Command, local: ResumeOptions): ResumeOptions {
   const parent = cmd.parent;
-  if (!parent) return local;
-  const resolved: ResumeOptions = { ...local };
-  const parentOpts = parent.opts() as Record<string, unknown>;
+  const { resumeDevice, ...resolved } = local as ResumeOptions & { resumeDevice?: string[] };
+  const parentOpts = parent?.opts() as Record<string, unknown> | undefined;
   for (const key of RESUME_PARENT_COLLISION_FLAGS) {
-    if (parent.getOptionValueSource(key) === 'cli') {
-      (resolved as Record<string, unknown>)[key] = parentOpts[key];
+    if (parent?.getOptionValueSource(key) === 'cli') {
+      (resolved as Record<string, unknown>)[key] = parentOpts?.[key];
     }
   }
   const rawDeviceTargets = [
-    ...((parentOpts.device as string[] | undefined) ?? []),
-    ...((parentOpts.devices as string[] | undefined) ?? []),
+    ...(resumeDevice ?? []),
+    ...(local.device ? [local.device] : []),
+    ...((parentOpts?.device as string[] | undefined) ?? []),
+    ...((parentOpts?.devices as string[] | undefined) ?? []),
   ];
   if (rawDeviceTargets.length > 0) {
     resolved.device = normalizeSingleDeviceOption(rawDeviceTargets, 'sessions resume');

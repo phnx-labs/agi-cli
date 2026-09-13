@@ -31,6 +31,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { Command } from 'commander';
+import { normalizeResumeDeviceArgs } from './root-command.js';
 import { buildFullCommandTree } from '../../cli/command-registry.js';
 
 /** Find a (possibly nested) subcommand by name path, e.g. `find(program, 'artifacts', 'share', 'list')`. */
@@ -114,5 +115,24 @@ describe('RUSH-2687 — per-surface fix on the real command tree, no global regr
     expect(captured?.since).toBe('7d');
     expect(captured?.json).toBe(true);
     expect(captured?.local).toBe(true);
+  });
+});
+
+describe('resume device argument normalization', () => {
+  it.each(['--device', '--devices', '-D'])('normalizes %s without consuming its value or the selector', (flag) => {
+    expect(normalizeResumeDeviceArgs(['sessions', 'resume', flag, 'zion', 'query']))
+      .toEqual(['sessions', 'resume', '--resume-device', 'zion', 'query']);
+  });
+  it.each(['--device=zion', '--devices=zion', '-Dzion', '-D=zion'])('normalizes attached %s', (flag) => {
+    expect(normalizeResumeDeviceArgs(['sessions', 'resume', flag, 'query']))
+      .toEqual(['sessions', 'resume', '--resume-device=zion', 'query']);
+  });
+  it('preserves literal arguments after -- and sibling command arguments', () => {
+    for (const args of [
+      ['sessions', 'resume', '--', '--device', 'zion'],
+      ['sessions', 'backfill', 'tools', '--device', 'zion', 'yosemite-m5'],
+      ['sessions', '--device', 'zion', 'yosemite-m5'],
+      ['run', 'claude', '--device', 'zion'],
+    ]) expect(normalizeResumeDeviceArgs(args)).toEqual(args);
   });
 });
