@@ -50,7 +50,11 @@
   and splits it itself, a native target is launched through `System.Diagnostics.Process`
   with a `CommandLineToArgvW`-escaped argument string and a script or `.cmd`
   launcher is invoked with a splatted array — PowerShell 5.1's own native
-  serializer drops an empty argument and eats embedded quotes. The fleet-provenance
+  serializer drops an empty argument and eats embedded quotes. The Agents CLI itself
+  is launched through its package's declared entry rather than the npm `agents.ps1`
+  shim, because that shim splats its own `$args` into native `node.exe` and lost the
+  arguments one layer deeper — a quoted device name reached the parser unquoted. The
+  fleet-provenance
   prefix is composed around the quoted argv rather than inside it; quoting it twice
   broke any actor value containing a space or a quote. Source:
   `cli/src/lib/devices/connect.ts`.

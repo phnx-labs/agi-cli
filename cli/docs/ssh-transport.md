@@ -266,6 +266,80 @@ garbage and turns a pwsh assignment into an inert string literal. `markFleetRemo
 (the array-prefixing form the `--device` passthrough uses) shares that one prelude
 definition, so the two paths cannot drift.
 
+### 2f. The Windows `agents` launcher, and why the shim is bypassed (PHNX-3999)
+
+On Windows `agents` is an npm-generated `agents.ps1`, whose body ends in
+
+```powershell
+& "node$exe" --no-warnings=… "$basedir/node_modules/@phnx-labs/agents-cli/dist/index.js" $args
+```
+
+`$args` splatted into a **native** program — the PowerShell 5.1 lossy serializer.
+So the argument loss happens INSIDE the user's shim, after our own quoting is
+already correct: measured on a live peer, `agents ssh no-such-"menu"-proof` reached
+the Agents parser as `no-such-menu-proof`. Quoting harder upstream cannot fix that,
+and rewriting a user's npm shim is not ours to do.
+
+`windowsAgentsInvocation` therefore bypasses it, the same way `getCliLaunch`
+(`lib/cli-entry.ts`) resolves a launch locally — a node-script entry becomes
+`<node> <entry> …args`:
+
+1. `Get-Command agents` on the peer. A **real** native executable is used directly.
+   `CommandType` alone is not that test: `Get-Command` reports `Application` for
+   `agents.cmd` too, and a `.cmd` launcher re-parses through cmd.exe with the same
+   loss, so `.cmd`/`.bat` are excluded explicitly.
+2. Otherwise the entry comes from the package's **declared** `bin` in
+   `node_modules/@phnx-labs/agents-cli/package.json` — not a hand-synced
+   `dist/index.js` literal, which would rot on upgrade. One check covers a missing
+   bin and the single-string `bin` form.
+3. The runtime is a `node.exe` beside the launcher when present, else PATH — the
+   same two-step the shim itself performs.
+4. It is executed through `System.Diagnostics.Process` with a
+   `CommandLineToArgvW`-escaped `Arguments` string, so the child rebuilds exact
+   argv. `WorkingDirectory` is set from `(Get-Location).ProviderPath` because
+   `Set-Location` moves the SHELL's location without updating the .NET process's OS
+   working directory — without it `--remote-cwd` is silently ignored.
+5. A peer where nothing resolves **fails loud**. Falling back to `& agents` would
+   silently restore the loss, which is worse than an error naming what is missing.
+
+`$ErrorActionPreference = 'Stop'` is set before the env assignments and the
+`Set-Location`, so a cwd that does not exist on the peer aborts instead of running
+the command in the wrong directory. The child's code lands in `$zq`, and an unknown
+outcome is forced to 1 rather than being allowed to read as success.
+
+### 2g. Rendering: compressed when shorter (PHNX-3999)
+
+`renderPowershellCommand` is the one boundary that turns a script into the command
+ssh sends, and it picks whichever representation is shorter:
+
+- `-EncodedCommand <base64 of UTF-16LE>` — the historical route, inflating ~2.67x.
+- a `-Command` bootstrap carrying the **deflated** UTF-8 script.
+
+That choice matters because OpenSSH-for-Windows caps the whole remote command far
+below cmd.exe's 8191. Bisected against a live peer: **2934 characters succeed, 3102
+fail**, and the peer's only symptom is `The command line is too long.` The launcher
+above pushed a realistic payload-bearing command to 3314 — over the cliff.
+Compressing brings the same command to ~1250, restoring the headroom a caller's
+arguments, `--remote-cwd` and forwarded env need.
+
+Two details are load-bearing:
+
+- **The blob is embedded directly in `-Command`, not wrapped in a second
+  `-EncodedCommand`** — routing an already-base64 payload through the encoded form
+  would inflate it by another 2.67x and cancel most of the gain.
+- **The bootstrap is variable-free**, a single nested expression with no `$`
+  anywhere. OpenSSH-for-Windows may have PowerShell as its `DefaultShell`, in which
+  case the outer double-quoted string is parsed by PowerShell first and a `$b = …`
+  form would be expanded before our script ran. Base64's alphabet
+  (`A-Za-z0-9+/=`) contains no quote, `$`, `%`, backtick or cmd metacharacter, so
+  the same text survives either default shell. stdin is untouched by both routes,
+  and the interactive login route (`-NoExit`) is deliberately never compressed.
+
+Verified on a live Windows peer: exact argv (space, empty, `'`, `"`, `&`, literal
+`%PATH%`, newline, trailing backslash), exit-code propagation, `propagateExit:false`
+still yielding 0, a non-existent `--remote-cwd` failing loud, and a stdin-consuming
+child.
+
 ### 3. The follow loop: one persistent stream (P1)
 
 The original loop made two calls per cycle — `tail -c +offset` for new log bytes,

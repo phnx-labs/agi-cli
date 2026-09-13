@@ -12,18 +12,17 @@ import { describe, expect, it } from 'vitest';
 import { buildAskpassShimBody, buildInteractiveShellCommand, buildSshInvocation, deviceIdentityArgs, fleetDialTarget, isAgentsBrowserDrive, markFleetRemote, sshTargetFor, wrapRemoteCommand, ASKPASS_BUNDLE_ENV, ASKPASS_KEY_ENV, ASKPASS_AGENT_ONLY_ENV } from './connect.js';
 import type { DeviceProfile } from './registry.js';
 import { assertRemoteControlAllowed } from '../browser/remote-control.js';
+import { decodeRenderedPowershell } from '../hosts/remote-cmd.test-fixture.js';
 
-function decodePowerShell(cmd: string): string {
-  const m = cmd.match(/^powershell -NoProfile -EncodedCommand (\S+)$/);
-  if (!m) throw new Error(`not an EncodedCommand invocation: ${cmd}`);
-  return Buffer.from(m[1], 'base64').toString('utf16le');
-}
+const decodePowerShell = decodeRenderedPowershell;
 
 /** Decode the interactive PowerShell login form: `-NoLogo -NoExit -EncodedCommand …`. */
 function decodeInteractivePowerShell(cmd: string): string {
+  // The interactive login route is deliberately NOT compressed — it must stay an
+  // interactive session — so this one form is the only valid shape here.
   const m = cmd.match(/^powershell -NoLogo -NoExit -EncodedCommand (\S+)$/);
   if (!m) throw new Error(`not an interactive EncodedCommand invocation: ${cmd}`);
-  return Buffer.from(m[1], 'base64').toString('utf16le');
+  return Buffer.from(m[1]!, 'base64').toString('utf16le');
 }
 
 function dev(over: Partial<DeviceProfile> & { name: string }): DeviceProfile {
