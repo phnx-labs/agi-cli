@@ -1886,6 +1886,8 @@ session-tracker installer and hook under `dist/session-tracker/dist/`; plain
 `bun run build` only compiles the CLI and omits those installed resources.
 Account resource projection also invokes that installer for each account home,
 so both slot creation and later sync replace registrations from older CLI installs.
+Both tracker bridges refresh Codex hook trust after registration using the same
+config writer as ordinary hooks; invalid TOML is reported and preserved.
 
 **The attestation producer shards by default.** `release-attestation-produce.sh`
 (the suite run that mints the attestation) now fans the ~13k-test suite across the
