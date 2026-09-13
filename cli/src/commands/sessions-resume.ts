@@ -30,6 +30,7 @@ import {
   availableBackends,
   detectCurrentBackend,
   currentContext,
+  shellQuote,
   type Backend,
   type SurfaceItem,
   type EngineContext,
@@ -292,8 +293,13 @@ export async function sessionsResumeAction(
   }
   const items: Array<SurfaceItem & { session: SessionMeta }> = [];
   for (const s of resumable) {
-    const command = ['agents', ...buildSelectedResumeArgs(s.id, prompt, options)];
-    const cwd = s.cwd && fs.existsSync(s.cwd) ? s.cwd : process.cwd();
+    // Terminal backends join `command` with a bare space and hand it to a shell
+    // (loginExec/execOnly in lib/terminal/shell.ts), so every word must already be
+    // shell-quoted — the same contract run-surface.ts's buildRunCommand follows.
+    // spawnCliInPlace below stays on the RAW argv from buildSelectedResumeArgs,
+    // since node's spawn() takes literal argv with no shell in between.
+    const command = ['agents', ...buildSelectedResumeArgs(s.id, prompt, options)].map(shellQuote);
+    const cwd = resolveSelectedResumeCwd(s, options);
     items.push({ session: s, cwd, command });
   }
 
@@ -489,6 +495,23 @@ async function spawnCliInPlace(args: string[]): Promise<void> {
 
 export function resolveResumePacking(options: Pick<ResumeOptions, 'splits'>): Packing {
   return options.splits ? 'two-per-tab' : 'tabs';
+}
+
+/**
+ * Directory a selected resume's terminal surface opens in. A `--device` surface
+ * executes ON the session's already-validated origin device (resumeHostMismatch
+ * checked that above), so its filesystem is never this box's — `fs.existsSync`
+ * against a remote path (e.g. a peer's /home cwd probed from a local /Users
+ * checkout) always resolves false and silently swapped in this box's cwd
+ * instead. Trust the recorded origin cwd and let that device validate it. A
+ * local/--here run is unaffected and keeps the existing existence guard.
+ */
+export function resolveSelectedResumeCwd(
+  session: Pick<SessionMeta, 'cwd'>,
+  options: Pick<ResumeOptions, 'device'>,
+): string {
+  if (options.device) return session.cwd || process.cwd();
+  return session.cwd && fs.existsSync(session.cwd) ? session.cwd : process.cwd();
 }
 
 export function resumeHostMismatch(
