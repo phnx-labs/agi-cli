@@ -623,7 +623,7 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
     writeLoggingManagedVersion(home, 'codex', '0.2.0', 'codex', logPath);
 
     const addResult = runAgents(home, ['mcp', 'add', 'demo', '--agents', 'codex@0.2.0', '--', 'demo-server']);
-    const registerResult = runAgents(home, ['mcp', 'register', 'demo']);
+    const registerResult = runAgents(home, ['sync', '--mcp', 'demo', '--yes']);
     const manifest = fs.readFileSync(path.join(home, '.agents', 'agents.yaml'), 'utf-8');
     const log = fs.readFileSync(logPath, 'utf-8');
 
@@ -654,7 +654,7 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
       '--agents',
       'codex@0.2.0',
     ]);
-    const registerResult = runAgents(home, ['mcp', 'register', 'docs']);
+    const registerResult = runAgents(home, ['sync', '--mcp', 'docs', '--yes']);
     const log = fs.readFileSync(logPath, 'utf-8');
 
     expect(addResult.status).toBe(0);
