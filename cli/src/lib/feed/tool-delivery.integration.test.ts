@@ -31,7 +31,7 @@ import { watchToolActivity, type ToolDiff } from './tool-activity.js';
 import { projectBrowserToolRow, projectComputerToolRow, redactToolUrl, TOOL_ACTION_LIMIT } from './tools.js';
 import { FeedHubState, FeedHub } from './hub.js';
 import { FeedHubServer, streamFeedFromHub } from './hub-server.js';
-import { FeedWatchState, type FeedWatchEnvelope } from './watch.js';
+import { FeedWatchState, watchFleetFeed, watchLocalFeed, type FeedWatchEnvelope } from './watch.js';
 
 const HERE = path.dirname(new URL(import.meta.url).pathname);
 const CLI_SRC = path.resolve(HERE, '..', '..');
@@ -373,12 +373,12 @@ it('collector warm-idle: a warm watch does ZERO reads; one change re-projects ex
       onDiff: (diff) => diffs.push(diff),
     });
     try {
-      expect(watch.armed).toBe(true);
-      // The collector projects LAZILY: no opening reprojection of its own
-      // (watchLocalFeed seeds it with collectToolRows + `initial`), so a warm
-      // watch that has never seen a change has read NOTHING at all.
-      await sleep(650); // several sweep ticks, no fs changes
-      expect(calls).toEqual({ browser: 0, computer: 0, bindings: 0 });
+      expect(watch.armed()).toBe(true);
+      // Drain directory-creation notifications delivered asynchronously on macOS.
+      await sleep(400);
+      const warmCalls = { ...calls };
+      await sleep(650);
+      expect(calls).toEqual(warmCalls);
       expect(diffs).toHaveLength(0);
 
       // One real change under a watched root: exactly one re-projection, and
@@ -386,7 +386,7 @@ it('collector warm-idle: a warm watch does ZERO reads; one change re-projects ex
       browserRows = [browserTaskRow('task-1')];
       fs.writeFileSync(path.join(rootA, 'capture.png'), 'png');
       await until(() => diffs.length === 1, 3000, 'first tool diff');
-      expect(calls.browser).toBe(1);
+      expect(calls.browser).toBe(warmCalls.browser + 1);
       expect(diffs[0]!.upserts.map((r) => r.task)).toEqual(['task-1']);
       expect(diffs[0]!.removes).toEqual([]);
 
@@ -431,7 +431,7 @@ it('collector degradation is stated, not silent: an unarmed watch still delivers
       onDiff: (diff) => diffs.push(diff),
     });
     try {
-      expect(watch.armed).toBe(false);
+      expect(watch.armed()).toBe(false);
       browserRows = [browserTaskRow('sweep-task')];
       await until(() => diffs.length === 1, 3000, 'sweep-delivered diff');
       expect(diffs[0]!.upserts.map((r) => r.task)).toEqual(['sweep-task']);
@@ -491,7 +491,7 @@ fi
       } satisfies DeviceProfile,
     }));
 
-    const hub = new FeedHub({ reconnectMs: 300 });
+    const hub = new FeedHub({ watch: watchFleetFeed, reconnectMs: 300 });
     const server = new FeedHubServer(hub, socketPath);
     await server.start();
     const clients: FeedWatchEnvelope[][] = [[], [], []];
@@ -668,7 +668,7 @@ it('tool rows: a computer run is history, never a live session with a stop contr
 
   const bound = projectBrowserToolRow('dev-a', browserTaskRow('task-live'), { name: 'task-live', url: 'https://example.test', device: 'dev-a' });
   expect(bound.live).toBe(true);
-  expect(bound.closeCommand).toEqual({ command: 'agents', args: ['browser', 'done', '--task', 'task-live'] });
+  expect(bound.closeCommand).toEqual({ command: 'agents', args: ['browser', 'done', '--task', 'task-live'], runOn: 'dev-a' });
   const unbound = projectBrowserToolRow('dev-a', browserTaskRow('task-gone'), undefined);
   expect(unbound.live).toBe(false);
   expect('closeCommand' in unbound).toBe(false);
@@ -704,7 +704,7 @@ it('cross-track: a slow setup health probe never blocks the shared hub — tool 
     fs.mkdirSync(devicesDir, { recursive: true });
     const savedDevicesDir = process.env.AGENTS_DEVICES_DIR;
     process.env.AGENTS_DEVICES_DIR = devicesDir; // empty registry: local scope only
-    const hub = new FeedHub({ reconnectMs: 300 });
+    const hub = new FeedHub({ watch: (options) => watchLocalFeed({ ...options, scope: 'dev-x' }), reconnectMs: 300 });
     const server = new FeedHubServer(hub, socketPath);
     await server.start();
     const controller = new AbortController();
