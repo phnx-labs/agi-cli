@@ -1525,7 +1525,7 @@ spawn, that prompt never runs.
   thresholds above are unchanged; this is an additional failures-only lane.
 - **In-process, not `ssh`.** The daemon calls the channel providers directly
   (`src/lib/routine-notify-owner.ts`) — it does not shell out to `ssh mac-mini
-  agents notify`.
+  agents send --to owner`.
 - **Fallback channel.** If the primary owner channel cannot deliver from this
   box, the daemon walks the remaining configured `owner.channels` in order
   (e.g. an OpenClaw channel after iMessage). Telegram and intrusive (voice)

@@ -64,8 +64,6 @@ export interface EventsOptions {
   limit?: string;
   json?: boolean;
   follow?: boolean;
-  /** @deprecated Prefer --include ops / --exclude activity */
-  audit?: boolean;
   include?: string;
   exclude?: string;
 }
@@ -209,7 +207,7 @@ function registerEmitSubcommand(events: Command): void {
 }
 
 /** Add the one canonical event-reader option surface to a command or alias. */
-export function addEventsReadOptions(command: Command, includeAuditFlag: boolean = true): Command {
+export function addEventsReadOptions(command: Command): Command {
   command
     .option('--include <families>', `Only these families (comma-sep): ${EVENT_FAMILIES.join(', ')}`)
     .option('--exclude <families>', `Drop these families (comma-sep): ${EVENT_FAMILIES.join(', ')}`)
@@ -225,9 +223,6 @@ export function addEventsReadOptions(command: Command, includeAuditFlag: boolean
     .option('--limit <n>', 'Max records to show; 0 for no cap (default 50)', '50')
     .option('--json', 'Output raw records as JSON')
     .option('-f, --follow', "Tail today's operational log live");
-  if (includeAuditFlag) {
-    command.option('--audit', 'Deprecated: operational events only — prefer --include ops or --exclude activity');
-  }
   return command;
 }
 
@@ -256,11 +251,11 @@ export async function runEventsCommand(options: EventsOptions, forceAudit: boole
     return;
   }
 
-  // --audit / forceAudit = ops-only when no family flags. Families own the
-  // source selection via applyFamilies — never override includeActivity after.
+  // forceAudit (`events audit` / `logs`) = ops-only when no family flags. Families
+  // own the source selection via applyFamilies — never override includeActivity after.
   const includeActivity = (includeFamilies !== undefined || excludeFamilies !== undefined)
     ? true
-    : !(forceAudit || options.audit);
+    : !forceAudit;
 
   const fetched = readUnifiedEvents({
     startDate,

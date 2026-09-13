@@ -17,11 +17,9 @@ import { capableAgents, isCapable } from '../lib/capabilities.js';
 import { emit } from '../lib/feed/events.js';
 import {
   AGENTS,
-  ALL_AGENT_IDS,
   getAllCliStates,
   resolveAgentName,
   formatAgentError,
-  registerMcpToTargets,
   unregisterMcpFromTargets,
   listInstalledMcpsWithScope,
   parseMcpConfig,
@@ -48,7 +46,6 @@ import {
   listInstalledVersions,
   getVersionHomePath,
   resolveInstalledAgentTargets,
-  resolveConfiguredAgentTargets,
   syncResourcesToVersion,
 } from '../lib/installations/versions.js';
 import { getUserAgentsDir } from '../lib/state.js';
@@ -60,7 +57,6 @@ import {
   parseCommaSeparatedList,
   ensureAgentVersionsInstalled,
   resolveAgentTargetsAutoInstalling,
-  resolveInstalledAgentTargetsAutoInstalling,
   VersionNotInstalledError,
   type RemovalTarget,
   resolveListFilterOrExit,
@@ -212,12 +208,12 @@ Examples:
   agents mcp add my-api https://api.example.com --transport http --agents claude
 
   # Apply servers from manifest to specific agents
-  agents mcp register --agents codex@0.116.0
+  agents sync --mcp codex@0.116.0
 
 When to use:
   - After install: 'agents mcp add <server>' to connect a new service
-  - Version upgrade: 'agents mcp register' to sync servers to the new version
-  - Team setup: commit mcp config to .agents and run 'agents mcp register'
+  - Version upgrade: 'agents sync --mcp' to sync servers to the new version
+  - Team setup: commit mcp config to .agents and run 'agents sync --mcp'
 `);
 
   withAliases(mcpCmd
@@ -303,7 +299,7 @@ When to use:
 
   mcpCmd
     .command('add <name> [command_or_url...]')
-    .description('Add an MCP server to the manifest (run "agents mcp register" afterward to apply)')
+    .description('Add an MCP server to the manifest (run "agents sync --mcp" afterward to apply)')
     .option('-a, --agents <list>', 'Targets: claude, codex@0.116.0', capableAgents('mcp').join(','))
     .option('-s, --scope <scope>', 'user (global) or project (repo-specific)', 'user')
     .option('-t, --transport <type>', 'stdio (default) or http', 'stdio')
@@ -428,7 +424,7 @@ Examples:
       writeManifest(localPath, manifest);
       emit('mcp.add', { module: 'mcp', server: name });
       console.log(chalk.green(`Added MCP server '${name}' to manifest`));
-      console.log(chalk.gray('Run: agents mcp register to apply'));
+      console.log(chalk.gray('Run: agents sync --mcp to apply'));
     });
 
   withAliases(mcpCmd
@@ -674,90 +670,6 @@ Examples:
       console.log();
     });
 
-  // Deprecated: superseded by `agents sync --mcp`. Kept as a warned, functional
-  // alias so old muscle-memory and scripts don't break.
-  mcpCmd
-    .command('register [name]', { hidden: true })
-    .description('Deprecated — use `agents sync --mcp` instead.')
-    .option('-a, --agents <list>', 'Override manifest targets: claude, codex@0.116.0')
-    .option('-y, --yes', 'Auto-install any missing agent versions without prompting')
-    .addHelpText('after', `
-Examples:
-  # Register all servers from manifest
-  agents mcp register
-
-  # Register a specific server
-  agents mcp register notion
-
-  # Register to specific agents (overrides manifest config)
-  agents mcp register --agents codex@0.116.0
-`)
-    .action(async (name: string | undefined, options) => {
-      console.warn(chalk.yellow('`agents mcp register` is deprecated — use `agents sync --mcp` instead:'));
-      console.warn(chalk.gray('  all servers:     agents sync --mcp'));
-      console.warn(chalk.gray('  specific server: agents sync --mcp <name>'));
-      const localPath = getUserAgentsDir();
-      const manifest = readManifest(localPath);
-
-      if (!manifest?.mcp) {
-        console.log(chalk.yellow('No MCP servers in manifest'));
-        return;
-      }
-
-      const entries = name
-        ? (() => {
-            const config = manifest.mcp?.[name];
-            return config ? [[name, config] as [string, McpServerConfig]] : [];
-          })()
-        : Object.entries(manifest.mcp);
-
-      if (entries.length === 0) {
-        console.log(chalk.yellow(`MCP server '${name}' not found in manifest`));
-        return;
-      }
-
-      for (const [mcpName, config] of entries) {
-        const transport = config.transport || 'stdio';
-        const commandOrUrl = transport === 'http' ? config.url : config.command;
-        if (!commandOrUrl) {
-          console.log(`\n  ${chalk.cyan(mcpName)}: ${chalk.yellow(`missing ${transport === 'http' ? 'url' : 'command'}`)}`);
-          continue;
-        }
-
-        console.log(`\n  ${chalk.cyan(mcpName)}:`);
-        let targets;
-        if (options.agents) {
-          const resolved = await resolveInstalledAgentTargetsAutoInstalling(options.agents, capableAgents('mcp'), { yes: options.yes });
-          if (!resolved) {
-            console.log(chalk.gray('  Cancelled.'));
-            continue;
-          }
-          targets = resolved;
-        } else {
-          targets = resolveConfiguredAgentTargets(config.agents, config.agentVersions, capableAgents('mcp'));
-        }
-        const results = await registerMcpToTargets(
-          targets,
-          mcpName,
-          commandOrUrl,
-          config.scope || 'user',
-          transport,
-          { headers: config.headers }
-        );
-
-        const applied = results.filter(r => r.success).length;
-        for (const result of results) {
-          if (result.success) {
-            console.log(`    ${chalk.green('+')} ${formatTargetLabel(result.agentId, result.version)}`);
-          } else if (result.error?.startsWith('skipped:')) {
-            console.log(`    ${chalk.yellow('-')} ${formatTargetLabel(result.agentId, result.version)}: ${result.error}`);
-          } else {
-            console.log(`    ${chalk.red('x')} ${formatTargetLabel(result.agentId, result.version)}: ${result.error}`);
-          }
-        }
-        if (applied > 0) emit('mcp.register', { module: 'mcp', server: mcpName, applied });
-      }
-    });
 }
 
 async function installMcpsFromRepoSource(

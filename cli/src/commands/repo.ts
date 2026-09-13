@@ -74,8 +74,8 @@ import {
   syncRepoGit,
 } from '../lib/git.js';
 import { DEFAULT_SYSTEM_REPO } from '../lib/types.js';
-import type { AgentId, ExtraRepoConfig } from '../lib/types.js';
-import { ALL_AGENT_IDS, isAgentName, resolveAgentName } from '../lib/agents.js';
+import type { ExtraRepoConfig } from '../lib/types.js';
+
 import { refresh } from '../lib/refresh.js';
 import { capableAgents } from '../lib/capabilities.js';
 import { getGlobalDefault, getVersionHomePath, listInstalledVersions } from '../lib/installations/versions.js';
@@ -1393,48 +1393,6 @@ Examples:
           spinner.fail(`${formatRepoTarget(t.alias, t.dir)}: ${result.error}`);
           process.exitCode = 1;
         }
-      }
-    });
-
-  // Deprecated: superseded by `agents sync`. `agents sync --local` runs the same
-  // reconcile stage (sync-umbrella.ts calls this exact `refresh()`), and `agents
-  // sync <agent>` targets one agent — with the added reach `refresh` lacks
-  // (all installed versions, no silent skip when there is no global default).
-  // Hidden from help; kept as a warned, functional alias so old muscle-memory and
-  // scripts don't break. Migrate callers to `agents sync`.
-  repoCmd
-    .command('refresh [agent]', { hidden: true })
-    .description('Deprecated — use `agents sync` instead.')
-    .option('-y, --yes', 'Auto-sync everything without prompting')
-    .option('--skip-clis', 'Skip CLI version install/upgrade from agents.yaml')
-    .action(async (arg: string | undefined, options: { yes?: boolean; skipClis?: boolean }) => {
-      console.warn(chalk.yellow('`agents repo refresh` is deprecated — use `agents sync` instead:'));
-      console.warn(chalk.gray('  all agents:  agents sync --local'));
-      console.warn(chalk.gray('  one agent:   agents sync <agent>'));
-      let agentFilter: AgentId | undefined;
-      if (arg) {
-        if (!isAgentName(arg)) {
-          console.log(chalk.red(`Unknown agent "${arg}".`));
-          console.log(chalk.gray(`Available: ${ALL_AGENT_IDS.join(', ')}`));
-          process.exitCode = 1;
-          return;
-        }
-        agentFilter = resolveAgentName(arg)!;
-      }
-      try {
-        await refresh({
-          agentFilter,
-          skipPrompts: options.yes,
-          skipClis: options.skipClis,
-        });
-        console.log(chalk.green('\nRefresh complete'));
-      } catch (err) {
-        if (isPromptCancelled(err)) {
-          console.log(chalk.yellow('\nCancelled'));
-          return;
-        }
-        console.error(chalk.red((err as Error).message));
-        process.exit(1);
       }
     });
 

@@ -85,8 +85,7 @@ owner taps a Slack crumb — trace sync otherwise only runs on `agents run` exit
 run-exit arm (signed in and already opted into the store; `AGENTS_NO_TRACE_SYNC=1`
 opts out) and never blocks or fails the post.
 
-`agents notify` and `agents send --to owner` deliver through this **same**
-composer, so an owner ping is identical to an important `feed post` of the same
+`agents send --to owner` delivers through this **same** composer, so an owner ping is identical to an important `feed post` of the same
 event — short-shaped body with a `Sent from …` footer — instead of the raw body
 dump they sent before. The owner fan-out re-renders that body **per destination**
 (`ownerMessageComposer` → `sendToOwner`, PHNX-3698): an iMessage/rush owner channel

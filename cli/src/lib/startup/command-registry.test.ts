@@ -104,6 +104,6 @@ describe('KNOWN_TOP_LEVEL_COMMANDS', () => {
     expect(names).toContain('ssh');
     expect(names).toContain('repos');
     expect(names).toContain('computer');
-    expect(names).toContain('notify');
+    expect(names).toContain('send');
   });
 });

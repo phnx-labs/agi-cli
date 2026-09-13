@@ -10,10 +10,10 @@
  *
  * Compat: positional text still works (`agents send "hi" --channel … --to …`).
  *
- * `agents notify` is the same delivery path with owner defaults
- * (`send --to owner`) and is deprecated — new callers should use
- * `agents feed post`. Not a second stack. Not agent control — use
- * `agents message` / `agents sessions inject` for running agents.
+ * `send --to owner` is the owner-delivery path; `agents feed post --level
+ * important` records a milestone and broadcasts it through the same sink.
+ * Not a second stack. Not agent control — use `agents message` /
+ * `agents sessions inject` for running agents.
  *
  * Feed / activity are a different plane (record + read); feed.broadcast may
  * call this command as a forward sink.
@@ -51,7 +51,6 @@ function mergeAttachments(opts: SendCliOpts): string[] | undefined {
 function toInput(
   positionalText: string | undefined,
   opts: SendCliOpts,
-  ownerMode: boolean,
 ): ResolveSendInput {
   return {
     text: opts.text,
@@ -63,24 +62,22 @@ function toInput(
     urls: opts.url,
     from: opts.from,
     dryRun: opts.dryRun,
-    ownerMode,
   };
 }
 
 async function runSend(
   positionalText: string | undefined,
   opts: SendCliOpts,
-  ownerMode: boolean,
 ): Promise<void> {
   const meta = readMeta();
-  let input = toInput(positionalText, opts, ownerMode);
+  let input = toInput(positionalText, opts);
 
-  // An owner-bound ping (`agents notify`, `agents send --to owner`) goes through
+  // An owner-bound ping (`agents send --to owner`) goes through
   // the SAME composer as an important `feed post` (PHNX-3698): short-shaped body,
   // TEAM-N keys linkified, session crumb as a tappable console URL — instead of a
   // raw dump. A non-owner send (explicit --channel/--to) is delivered verbatim.
   let ownerCompose: ((format: SinkMessageFormat) => string) | undefined;
-  if (ownerMode || isOwnerAlias(opts.to)) {
+  if (isOwnerAlias(opts.to)) {
     const flagged = opts.text?.trim() ?? '';
     const positional = (positionalText ?? '').trim();
     const raw = flagged || positional;
@@ -168,9 +165,6 @@ export function registerSendCommand(program: Command): void {
       # Attach a local file
       agents send --to owner --text "screenshot" --attach ./out/cover.png
 
-      # Owner alias without the notify verb
-      agents send --to owner --text "wiring test"
-
       # Legacy positional text still works
       agents send "hi" --channel desktop --to local
 
@@ -181,56 +175,6 @@ export function registerSendCommand(program: Command): void {
   });
 
   sendCmd.action(async (text: string | undefined, opts: SendCliOpts) => {
-    await runSend(text, opts, false);
-  });
-
-  const notifyCmd = program
-    .command('notify [text]')
-    .description(
-      '[DEPRECATED] Deliver to the owner (alias of send --to owner). Use "agents feed post" for new code.',
-    )
-    .option('--text <text>', 'message body (preferred over positional text)')
-    .option('--channel <name>', 'override owner channel')
-    .option('--to <target>', 'override owner target (or pass a non-owner dest with --channel)')
-    .option('--thread <id>', 'channel thread id / timestamp')
-    .option('--attach <path...>', 'local file attachment path (repeatable)')
-    .option('--attachment <path...>', 'alias of --attach')
-    .option('--url <url...>', 'link or remote media URL to include in the body (repeatable)')
-    .option('--from <who>', 'sender label (mailbox)')
-    .option('--json', 'output JSON')
-    .option('--dry-run', 'resolve + build but do not send');
-
-  setHelpSections(notifyCmd, {
-    examples: `
-      # Deprecated: prefer "agents feed post --title \"…\" \"…\" --level important"
-      agents notify --text "Build finished — PR #1346 is green"
-      agents notify "legacy positional still works"
-
-      # Override channel for this one ping
-      agents notify --text "fallback" --channel desktop --to local
-
-      agents notify --text "probe" --dry-run --json
-    `,
-    notes: `
-      DEPRECATED. notify ≡ send --to owner and still works, but new callers
-      should use "agents feed post" (record + optional broadcast) instead.
-      Set owner.channels + owner.policy.normal in humans.yaml once per fleet.
-      Every channel listed in the normal policy receives an owner-addressed send.
-
-      Owner sends go through the same composer as "feed post": the body is
-      short-shaped, any TEAM-N key becomes a Linear URL, and the session crumb
-      becomes a tappable https://prix.dev/console/sessions/<id> link.
-
-      ${SHARED_NOTES}
-    `,
-  });
-
-  notifyCmd.action(async (text: string | undefined, opts: SendCliOpts) => {
-    console.error(
-      chalk.yellow(
-        'Warning: "agents notify" is deprecated. Use "agents feed post" for progress posts that can also reach the owner.',
-      ),
-    );
-    await runSend(text, opts, true);
+    await runSend(text, opts);
   });
 }

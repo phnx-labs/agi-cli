@@ -25,7 +25,6 @@ export function registerAuditCommands(events: Command): void {
     events
       .command('audit')
       .description('Alias of `agents events --include runs` — dispatched-run outcomes'),
-    false,
   )
     .addHelpText('after', `
 Examples:

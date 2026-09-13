@@ -57,7 +57,6 @@ const loadMonitors: ModuleLoader = async () => (await import('../commands/monito
 const loadProjects: ModuleLoader = async () => (await import('../commands/projects.js')).registerProjectsCommands;
 export const loadRun: ModuleLoader = async () => (await import('../commands/exec.js')).registerRunCommand;
 const loadOpen: ModuleLoader = async () => (await import('../commands/open.js')).registerOpenCommand;
-const loadReconnect: ModuleLoader = async () => (await import('../commands/reconnect.js')).registerReconnectCommand;
 const loadFork: ModuleLoader = async () => (await import('../commands/fork.js')).registerForkCommand;
 const loadConfig: ModuleLoader = async () => (await import('../commands/config.js')).registerConfigCommand;
 const loadModels: ModuleLoader = async () => (await import('../commands/models.js')).registerModelsCommand;
@@ -115,7 +114,6 @@ export const loadReminders: ModuleLoader = async () => (await import('../command
 // `roster` was a sessions --active alias — removed; use sessions --active.
 export const LAZY_COMMAND_NAMES: ReadonlySet<string> = new Set([
   'sessions',
-  'reconnect',
   'teams',
   'cloud',
   'message',
@@ -173,7 +171,6 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   // tokens must lazy-load the same module so either resolves. See commands/open.ts.
   _callback: [loadOpen],
   open: [loadOpen],
-  reconnect: [loadReconnect],
   fork: [loadFork],
   config: [loadConfig],
   models: [loadModels],
@@ -218,7 +215,6 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   cloud: [loadCloud],
   message: [loadMessage],
   send: [loadSend],
-  notify: [loadSend],
   feed: [loadFeed],
   mailboxes: [loadMailboxes],
   mailbox: [loadMailboxes],

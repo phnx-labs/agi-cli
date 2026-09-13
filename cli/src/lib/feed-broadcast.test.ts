@@ -702,7 +702,7 @@ describe.skipIf(process.platform === 'win32')('feed owner sink forwards over SSH
  * sink; this proves the sink, once RUN, re-renders the body PER destination so a
  * Slack channel in the owner policy gets mrkdwn labeled links while iMessage
  * stays plain — the same two-different-bodies guarantee notify.test.ts asserts
- * for `agents notify`, but through the `feed post` entry point. Real path, no
+ * for `agents send --to owner`, but through the `feed post` entry point. Real path, no
  * mocking of the composer: spy providers stand in for the rush `imessage`/`slack`
  * transports and capture the exact body each was handed.
  */

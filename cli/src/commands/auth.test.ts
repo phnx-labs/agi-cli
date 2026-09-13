@@ -252,7 +252,7 @@ describe('agents auth login — the device poll loop', () => {
 });
 
 describe('agents auth — command surface', () => {
-  it('hides mint from auth help (retired to accounts add/login)', async () => {
+  it('has no mint verb (retired to accounts add/login)', async () => {
     const { registerAuthCommand } = await import('./auth.js');
     const program = new Command();
     registerAuthCommand(program);
@@ -262,8 +262,6 @@ describe('agents auth — command surface', () => {
     expect(help).toMatch(/^  whoami\b/m);
     expect(help).not.toMatch(/^  mint\b/m);
     expect(help).not.toContain('agents auth mint');
-    const mint = auth.commands.find((c) => c.name() === 'mint');
-    expect(mint).toBeDefined();
-    expect((mint as unknown as { _hidden: boolean })._hidden).toBe(true);
+    expect(auth.commands.find((c) => c.name() === 'mint')).toBeUndefined();
   });
 });

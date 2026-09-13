@@ -1,27 +1,24 @@
 import type { Command } from 'commander';
-import * as fs from 'fs';
 import * as path from 'path';
 import chalk from 'chalk';
-import { password, select } from '@inquirer/prompts';
-import { readClaudeAccountEmail, resolveClaudeSetupToken, resolveClaudeSetupTokenForEmail, seedClaudeWorkerHomeIdentity } from '../lib/claude-account-token.js';
+import { password } from '@inquirer/prompts';
 import { setHelpSections } from '../lib/help.js';
 import { readMeta, updateMeta } from '../lib/state.js';
 import { machineId } from '../lib/machine-id.js';
 import type { AgentId } from '../lib/types.js';
-import { ALL_AGENT_IDS, getAccountInfo, resolveAgentName } from '../lib/agents.js';
+import { ALL_AGENT_IDS, resolveAgentName } from '../lib/agents.js';
 import { getGlobalDefault, getVersionHomePath, listInstalledVersions } from '../lib/installations/versions.js';
-import { assertNativeAccountNameable, nativeAccountCapability, nativeIdentityKey } from '../lib/account-capabilities.js';
-import { collectRunCandidates, type RotateCandidate } from '../lib/accounting/rotate.js';
-import { isInteractiveTerminal, isPromptCancelled, requireInteractiveSelection } from './utils.js';
+import { assertNativeAccountNameable } from '../lib/account-capabilities.js';
+import { collectRunCandidates } from '../lib/accounting/rotate.js';
+import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { buildSwitchAccountChoices, formatAccountLimits, pickSwitchAccount, type SwitchAccountRow } from './run-account-picker.js';
-import { profileExists, readProfile, type Profile } from '../lib/profiles.js';
+
 import { assertCredentialTransportHostPinned, resolveHostSshTarget } from '../lib/hosts/credential-transport.js';
 import { resolveRemoteOsSync } from '../lib/hosts/remote-os.js';
 import { renderAccountFleetMatrix } from '../lib/devices/harness-inventory.js';
 import {
   accountListJson,
   collectNativeHomeRows,
-  discoverNativeAccounts,
   listDevicesWithoutAccountVerdicts,
   loadAccountCatalog,
   renderAccountRows,
@@ -29,33 +26,21 @@ import {
   type NativeAccountCatalogRow,
   type ProviderAccountCatalogRow,
 } from '../lib/account-catalog.js';
-import { addRefusal, addSupported, runAdd, runLogin, supportedAddHarnesses, type AddResult } from '../lib/accounts/add.js';
+import { addRefusal, runAdd, runLogin, supportedAddHarnesses, type AddResult } from '../lib/accounts/add.js';
 import { applyAccountMigration, formatMigrationPlan, planAccountMigration } from '../lib/accounts/migrate.js';
 import { isSymlinkAdoptedHarness } from '../lib/installations/shims.js';
 import { ensureAdoptedDefaultRepoint } from '../lib/exec-account-home.js';
 import { acquireAuthOperationLock } from '../lib/accounts/auth-operation-lock.js';
 import { isSecretsClientError, pushBundleToHost, readAndResolveBundleEnv, readBundle } from '../lib/secrets-client.js';
 import { getAccountProvider, listAccountProviders, providerAuthenticatesHarness, type AccountAuthKind } from '../lib/account-provider-registry.js';
-import { accountBindings, addAccount, addNativeAccount, assertUnambiguousNativeAccount, bindAccount, findAccount, findUnifiedAccount, inspectAccount, labelNativeAccount, listNativeAccounts, nativeAccountHome, parseAccountSelector, readAccountRegistry, removeAccount, renameAccount, setAccountSecret, unbindAccount, type UnifiedAccount } from '../lib/account-registry.js';
-import { registerMintCommand } from './auth-mint.js';
+import { accountBindings, addAccount, assertUnambiguousNativeAccount, findAccount, findUnifiedAccount, inspectAccount, listNativeAccounts, nativeAccountHome, parseAccountSelector, readAccountRegistry, removeAccount, renameAccount, setAccountSecret, type UnifiedAccount } from '../lib/account-registry.js';
 
 /** Comma-joined list of harnesses `accounts add` can drive today. */
 function addSupportedList(): string {
   return supportedAddHarnesses().join(', ');
 }
 
-/**
- * Legacy-verb retirement: the command is created with `{ hidden: true }` (help
- * no longer lists it) and this hook prints the pointer to its replacement when
- * it runs. Verbs keep executing for one release.
- */
-function retireVerb(cmd: Command, pointer: string): void {
-  cmd.hook('preAction', () => {
-    console.error(chalk.gray(`'agents accounts ${cmd.name()}' is replaced by '${pointer}' — still works this release.`));
-  });
-}
-
-/** Shared result printer for `accounts add` / `accounts login` / hidden `connect`. */
+/** Shared result printer for `accounts add` / `accounts login`. */
 function printAddResult(result: AddResult, json: boolean): void {
   if (json) {
     console.log(JSON.stringify(result, null, 2));
@@ -90,84 +75,6 @@ async function runAccountsAction(command: Command, fn: () => void | Promise<void
     if (isPromptCancelled(err)) process.exit(130);
     cleanCommandError(command, err);
   }
-}
-
-function parseInstallation(raw: string): { agent: AgentId; version: string } {
-  const at = raw.lastIndexOf('@');
-  if (at < 1 || at === raw.length - 1) throw new Error(`Expected <agent>@<version>, got '${raw}'.`);
-  const agent = resolveAgentName(raw.slice(0, at));
-  if (!agent) throw new Error(`Unknown agent '${raw.slice(0, at)}'.`);
-  return { agent, version: raw.slice(at + 1) };
-}
-
-export async function nativeIdentityFromSource(raw: string): Promise<{ agent: AgentId; version: string; identityKey: string; identityLabel?: string; scope: 'version' | 'device' }> {
-  const parsed = parseInstallation(raw);
-  const capability = nativeAccountCapability(parsed.agent);
-  assertNativeAccountNameable(parsed.agent);
-  if (!listInstalledVersions(parsed.agent).includes(parsed.version)) throw new Error(`${raw} is not installed.`);
-  const info = await getAccountInfo(parsed.agent, getVersionHomePath(parsed.agent, parsed.version));
-  const identityKey = nativeIdentityKey(info, capability);
-  if (!identityKey) throw new Error(`${raw} has no stable signed-in identity. Run it and complete its normal login first.`);
-  return { agent: parsed.agent, version: parsed.version, identityKey, identityLabel: info.email ?? undefined, scope: capability.scope as 'version' | 'device' };
-}
-
-type AttachTarget =
-  | { kind: 'installation'; agent: AgentId; version: string }
-  | { kind: 'device-agent'; agent: AgentId }
-  | { kind: 'profile'; profile: Profile };
-
-/**
- * Classify + validate an attach target, rejecting a typo BEFORE any binding is
- * written: it must be an existing custom-harness profile, an installed
- * `agent@version`, or a known harness id.
- */
-export function classifyAttachTarget(target: string): AttachTarget {
-  if (profileExists(target)) return { kind: 'profile', profile: readProfile(target) };
-  if (target.includes('@')) {
-    const at = target.lastIndexOf('@');
-    const agent = resolveAgentName(target.slice(0, at));
-    const version = target.slice(at + 1);
-    if (!agent) throw new Error(`Unknown harness '${target.slice(0, at)}' in target '${target}'.`);
-    if (!version) throw new Error(`Target '${target}' is missing a version.`);
-    if (!listInstalledVersions(agent).includes(version)) throw new Error(`${agent}@${version} is not installed.`);
-    return { kind: 'installation', agent, version };
-  }
-  const agent = resolveAgentName(target);
-  if (agent) return { kind: 'device-agent', agent };
-  throw new Error(`Unknown attach target '${target}'. Expected an installed <agent>@<version>, a harness id, or an existing custom harness profile.`);
-}
-
-/**
- * Persist the attached setup-token to a per-version `.oauth_token` file so an
- * INTERACTIVE Claude launch on a keychain-less Linux worker can authenticate from it.
- * Headless runs inject the token via `buildExecEnv`. Since PHNX-3502 an interactive
- * launch on a worker-role device ALSO injects it through `claudeAdapter.applyExecConfigEnv`
- * (only a headed `personal`/`desktop` device defers to its per-version native login), and
- * the shim's Linux fallback (`claudeAdapter.shimConfigEnvBash`) reads exactly this file —
- * so writing it is what makes a freshly-attached setup-token visible to that shim fallback
- * on a worker. macOS keeps the credential in the keychain, so `resolveClaudeSetupToken`
- * returns null there and this is a no-op off Linux.
- */
-export function writeClaudeInteractiveOauthToken(target: AttachTarget, targetAgent: AgentId, email?: string): void {
-  if (process.platform !== 'linux' || targetAgent !== 'claude' || target.kind !== 'installation') return;
-  const versionHome = getVersionHomePath('claude', target.version);
-  const tokenPath = path.join(versionHome, '.claude', '.oauth_token');
-  // Resolve by the attached account's email when known (a freshly-seeded worker
-  // home the `.claude.json` read below could not key on yet), else by the home's
-  // own recorded identity for a re-point/detach.
-  const token = email
-    ? resolveClaudeSetupTokenForEmail(email, versionHome)
-    : resolveClaudeSetupToken(versionHome);
-  // A re-point (attach B over A, or a detach) can leave no setup-token resolving for
-  // this version — B's may not be minted yet. A leftover file from the previous binding
-  // would silently authenticate interactive runs as the OLD account (the shim's Linux
-  // fallback reads it), so clear it rather than leave it stale.
-  if (!token) {
-    fs.rmSync(tokenPath, { force: true });
-    return;
-  }
-  fs.mkdirSync(path.dirname(tokenPath), { recursive: true });
-  fs.writeFileSync(tokenPath, token, { mode: 0o600 });
 }
 
 export function parseBundleKey(raw: string): { bundle: string; key: string } {
@@ -269,126 +176,6 @@ function parseHarness(agentRaw: string): AgentId {
   return agentRaw as AgentId;
 }
 
-/** One labelable signed-in identity, folded across every version it is signed into. */
-export interface LabelIdentity {
-  identityKey: string;
-  email: string | null;
-  versions: string[];
-  isDefault: boolean;
-}
-
-/**
- * Fold signed-in run candidates into distinct identities — the unit a label
- * binds to. The same account signed into several versions is ONE row, so a
- * multi-version single-account harness never demands a selector. Candidates
- * with no stable identity (no accountKey, no email) are dropped: there is
- * nothing durable for a label to bind to. Default-version identity first.
- */
-export function groupLabelIdentities(
-  candidates: Pick<RotateCandidate, 'version' | 'email' | 'accountKey'>[],
-  defaultVersion: string | null,
-): LabelIdentity[] {
-  const byKey = new Map<string, LabelIdentity>();
-  for (const candidate of candidates) {
-    const key = candidate.accountKey ?? candidate.email?.toLowerCase();
-    if (!key) continue;
-    const row = byKey.get(key) ?? { identityKey: key, email: null, versions: [], isDefault: false };
-    row.email ??= candidate.email;
-    row.versions.push(candidate.version);
-    if (candidate.version === defaultVersion) row.isDefault = true;
-    byKey.set(key, row);
-  }
-  return [...byKey.values()].sort((a, b) =>
-    a.isDefault !== b.isDefault ? (a.isDefault ? -1 : 1) : (a.email ?? a.identityKey).localeCompare(b.email ?? b.identityKey));
-}
-
-export type LabelSelection =
-  | { kind: 'selected'; identity: LabelIdentity }
-  | { kind: 'ambiguous'; identities: LabelIdentity[] };
-
-/**
- * Resolve which signed-in login a bare-harness `accounts label` call means.
- * `collect` is injectable (the `resolveRunVersion` pattern) so tests drive the
- * real selection path against fixture candidates.
- */
-export async function resolveLabelIdentity(
-  agent: AgentId,
-  accountSelector: string | undefined,
-  collect: typeof collectRunCandidates = collectRunCandidates,
-): Promise<LabelSelection> {
-  const candidates = (await collect(agent)).filter(candidate => candidate.signedIn);
-  const identities = groupLabelIdentities(candidates, getGlobalDefault(agent));
-  if (identities.length === 0) throw new Error(`No signed-in ${agent} account with a stable identity. Run the harness and complete its login first.`);
-  const needle = accountSelector?.toLowerCase();
-  if (needle) {
-    const match = identities.find(identity => identity.email?.toLowerCase() === needle || identity.identityKey.toLowerCase() === needle);
-    if (!match) throw new Error(`Unknown ${agent} account '${accountSelector}'.`);
-    return { kind: 'selected', identity: match };
-  }
-  if (identities.length === 1) return { kind: 'selected', identity: identities[0] };
-  return { kind: 'ambiguous', identities };
-}
-
-/**
- * Body of `accounts label`, exported with the injectable candidate collector
- * so tests exercise everything but the TTY prompt itself.
- */
-export async function runAccountsLabel(
-  source: string,
-  label: string | undefined,
-  opts: { account?: string },
-  collect: typeof collectRunCandidates = collectRunCandidates,
-): Promise<void> {
-  if (source.includes('@')) {
-    // <harness>@<version> pins the login by where it is signed in, so a
-    // second selector can only contradict it.
-    if (opts.account) throw new Error(`'${source}' already selects one login; drop --account.`);
-    const identity = await nativeIdentityFromSource(source);
-    const account = labelNativeAccount(identity.agent, identity.identityKey, identity.identityLabel, label, identity.scope);
-    console.log(chalk.green(`Labeled ${identity.agent} account ${identity.identityLabel ?? identity.identityKey} as '${account.name}'.`));
-    return;
-  }
-  const agent = parseHarness(source);
-  assertNativeAccountNameable(agent);
-  const selection = await resolveLabelIdentity(agent, opts.account, collect);
-  let selected: LabelIdentity;
-  if (selection.kind === 'selected') {
-    selected = selection.identity;
-  } else {
-    if (!isInteractiveTerminal()) {
-      requireInteractiveSelection(`Selecting the ${agent} login to label`, [
-        `agents accounts label ${agent} ${label ?? '<label>'} --account <email|id>`,
-        `agents accounts label ${agent}@<version> ${label ?? '<label>'}`,
-      ]);
-    }
-    const picked = await pickLabelIdentity(agent, selection.identities);
-    if (!picked) return;
-    selected = picked;
-  }
-  const account = labelNativeAccount(agent, selected.identityKey, selected.email ?? undefined, label, nativeAccountCapability(agent).scope as 'version' | 'device');
-  console.log(chalk.green(`Labeled ${agent} account ${selected.email ?? selected.identityKey} as '${account.name}'.`));
-}
-
-/** Prompt for the login a label should bind to. A cancelled picker writes nothing. */
-async function pickLabelIdentity(agent: AgentId, identities: LabelIdentity[]): Promise<LabelIdentity | null> {
-  const idW = Math.max(0, ...identities.map(identity => (identity.email ?? identity.identityKey).length));
-  const choices = identities.map(identity => ({
-    name: [
-      (identity.email ?? identity.identityKey).padEnd(idW),
-      identity.isDefault ? chalk.green('default') : '       ',
-      chalk.gray(identity.versions.join(', ')),
-    ].join('  '),
-    value: identity.identityKey,
-  }));
-  try {
-    const key = await select({ message: `Select the ${agent} login to label:`, choices, loop: false });
-    return identities.find(identity => identity.identityKey === key) ?? null;
-  } catch (err) {
-    if (isPromptCancelled(err)) return null;
-    throw err;
-  }
-}
-
 /** Every account (native + provider) registered/usable for this harness, oldest-first by name. */
 function accountsForHarness(agent: AgentId): UnifiedAccount[] {
   const meta = readMeta();
@@ -399,13 +186,13 @@ function accountsForHarness(agent: AgentId): UnifiedAccount[] {
   return [...native, ...providers].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** Named accounts that `set-default` / `switch` can pin for this harness. */
+/** Named accounts that `accounts default` can pin for this harness. */
 export async function listSwitchableAccounts(agent: AgentId): Promise<UnifiedAccount[]> {
   return accountsForHarness(agent);
 }
 
 /**
- * Pin the per-harness default. Shared by `accounts set-default` and `accounts switch`.
+ * Pin the per-harness default — the `accounts default` write path.
  * Provider accounts must authenticate the harness; native accounts must belong to it.
  */
 export function setDefaultAccount(agentRaw: string, name: string): { agent: AgentId; account: UnifiedAccount } {
@@ -454,7 +241,7 @@ async function switchAccountRows(agent: AgentId): Promise<SwitchAccountRow[]> {
   });
 }
 
-export async function runAccountsSwitch(
+export async function runAccountsDefault(
   harness: string,
   accountName: string | undefined,
   opts: { json: boolean },
@@ -601,7 +388,6 @@ agents accounts list --fleet`,
     notes: 'One row per account per harness: the account name, its usage bars (`*` stale), then nothing at all when the account is healthy. A state worth acting on trails the row — `rate-limited` (the usage snapshot via `deriveUsageStatusFromSnapshot`/`applyUsageHonesty`, never a probe 429), `expired`/`revoked`/`missing`, partial fleet coverage (`usable on 3 of 5 boxes`), then the exact repair command. `live`, `unverified`, `ready` and `per-device` are the ordinary cases and print nothing. For the identity behind an account use `agents accounts view <name>`; for per-device state use `--fleet`; for everything use `--json`. Reserved credential stores are not listed here; `agents secrets` is the place those show.',
   });
 
-  registerMintCommand(accounts, undefined, { hidden: true });
 
   const addCmd = accounts.command('add <target> [name]')
     .description('Add an account. Harness form: add <harness> [name] runs the native login in a fresh credential slot and provisions workers. Provider form: add <name> --provider <p> --auth <t> stores a durable credential.')
@@ -709,13 +495,13 @@ agents accounts login kimi#main                       # per-device: logs THIS bo
     .description('Set the fleet-wide default account for a harness (picker when no name)')
     .option('--json', 'Machine-readable account list or the resulting default')
     .action(async (harness: string, name: string | undefined, o: { json?: boolean }, command: Command) => {
-      await runAccountsAction(command, () => runAccountsSwitch(harness, name, { json: !!(o.json || command.optsWithGlobals().json) }));
+      await runAccountsAction(command, () => runAccountsDefault(harness, name, { json: !!(o.json || command.optsWithGlobals().json) }));
     });
   setHelpSections(defaultCmd, {
     examples: `agents accounts default claude
 agents accounts default claude work
 agents accounts default claude --json`,
-    notes: 'The one write path for the per-harness default (the hidden set-default/switch share it). Pass a name to skip the picker. Rotation already honors the default.',
+    notes: 'The one write path for the per-harness default. Pass a name to skip the picker. Rotation already honors the default.',
   });
 
   const migrateCmd = accounts.command('migrate')
@@ -783,24 +569,6 @@ agents accounts migrate --dry-run --device worker-1`,
     notes: 'Folds leftover per-account installations (the old connect homes) into one managed install plus a HOME-shaped slot per identity. Empty logged-out homes and duplicate identities go to trash (agents trash restore reverses). A busy home is deferred, never moved. --apply is required to write; this upgrade only prints the dry-run report. Native OAuth files stay on this device inside the moved home.',
   });
 
-  // Hidden legacy verb: connect is the old spelling of add.
-  const connectCmd = accounts.command('connect <harness> [name]', { hidden: true })
-    .description('Legacy alias of accounts add')
-    .option('--json', 'Machine-readable result')
-    .action(async (harness: string, name: string | undefined, o: { json?: boolean }, command: Command) => {
-      await runAccountsAction(command, async () => {
-        const agent = parseHarness(harness);
-        const reason = addRefusal(agent);
-        if (reason) throw new Error(reason);
-        const result = await runAdd(agent, name, {
-          meta: readMeta(),
-          onProgress: (m: string) => console.log(chalk.gray(`  ${m}`)),
-        });
-        printAddResult(result, !!(o.json || command.optsWithGlobals().json));
-      });
-    });
-  retireVerb(connectCmd, 'agents accounts add <harness> [name]');
-
   accounts.command('set-key <name>')
     .description('Rotate an account credential without changing its identity')
     .option('--from-secrets <bundle:key>', 'Import from an existing agents secrets entry')
@@ -859,117 +627,6 @@ agents accounts view codex#icloud`,
     notes: 'Native names are unique per harness. A bare name that exists for several harnesses is refused — pick one with <harness>#<name>.',
   });
 
-  retireVerb(accounts.command('name <source> <name>', { hidden: true })
-    .description('Name a signed-in native installation without copying its OAuth credentials')
-    .action(async (source: string, name: string, _o: unknown, command: Command) => {
-      await runAccountsAction(command, async () => {
-        const identity = await nativeIdentityFromSource(source);
-        const account = addNativeAccount(name, identity.agent, identity.identityKey, identity.identityLabel, identity.scope);
-        console.log(chalk.green(`Named ${source} as ${account.name}.`));
-        if (account.scope === 'device') console.log(chalk.gray(`${identity.agent} authentication is device-scoped; attach '${account.name}' to '${identity.agent}', not an individual version.`));
-      });
-    }), 'agents accounts add <harness> <name> (names are chosen at add time)');
-
-  const labelCmd = accounts.command('label <source> [label]', { hidden: true })
-    .description('Label a native login by harness or <harness>@<version>; the label binds to the account identity, not the version')
-    .option('--account <email-or-id>', 'Native identity to label when the harness has multiple logins')
-    .action(async (source: string, label: string | undefined, o: { account?: string }, command: Command) => {
-      await runAccountsAction(command, () => runAccountsLabel(source, label, o));
-    });
-  retireVerb(labelCmd, 'agents accounts add <harness> <name> (rename: agents accounts rename <harness>#<old> <new>)');
-  setHelpSections(labelCmd, {
-    examples: `agents accounts label codex work
-agents accounts label codex@0.146.0 personal
-agents accounts label codex work --account you@example.com
-agents run codex#work`,
-    notes: 'The label binds to the signed-in account identity, not the version — codex#work keeps selecting that account after it moves to a newer install. Labels live on the central account rows in agents.yaml, which `agents repo push/pull` already syncs fleet-wide, keyed by (agent, identityKey). One signed-in login needs no selector; with several, an interactive terminal opens a picker, while scripts pass --account or <harness>@<version>.',
-  });
-
-  retireVerb(accounts.command('attach <account> <target>', { hidden: true })
-    .description('Attach a named account to a native installation or custom harness')
-    .action(async (name: string, target: string, _o: unknown, command: Command) => {
-      await runAccountsAction(command, async () => {
-        const meta = readMeta();
-        // Validate the target exists before mutating any binding — and resolve it
-        // FIRST so the account lookup can be scoped to the harness being attached
-        // to. `identityLabel` defaults to the login's email, so a bare identity
-        // (`muqsitnawaz@gmail.com`) matches every harness that identity is signed
-        // into; un-scoped this resolved whichever row the store ordered first and
-        // then rejected it below as "is a <other> login".
-        const t = classifyAttachTarget(target);
-        const targetAgent = t.kind === 'profile' ? t.profile.host.agent : t.agent;
-        const account = findUnifiedAccount(name, meta, undefined, targetAgent);
-        if (!account) throw new Error(`Unknown account '${name}'.`);
-        if (account.kind === 'native') assertNativeAccountNameable(account.agent);
-        if (account.kind === 'native') {
-          // A provider-backed profile injects provider env at spawn, which would run
-          // under a different credential than the native identity claims — refuse it.
-          if (t.kind === 'profile' && t.profile.provider) {
-            throw new Error(`Custom harness '${target}' is provider-backed (${t.profile.provider}); it cannot host the native login account '${account.name}'. Attach a matching provider account instead.`);
-          }
-          if (targetAgent !== account.agent) throw new Error(`Account '${account.name}' is a ${account.agent} login; '${target}' runs ${targetAgent}.`);
-          if (account.scope === 'device') {
-            if (t.kind !== 'device-agent') throw new Error(`${account.agent} authentication is device-scoped. Attach it with 'agents accounts attach ${account.name} ${account.agent}'.`);
-          } else {
-            if (t.kind !== 'installation') throw new Error(`${account.agent} authentication is per-version. Attach '${account.name}' to a specific ${account.agent}@<version>.`);
-            const versionHome = getVersionHomePath(t.agent, t.version);
-            // The literal email keys the account's `auth`-bundle setup-token. It lives
-            // in `identityLabel` — `identityKey` is a synthetic composite
-            // (`claude:account=<uuid>:org=<uuid>`, agents.ts nativeIdentityKey), never
-            // the address, so it must NOT be used to derive the token key.
-            const accountEmail = account.identityLabel;
-            // Headless-worker bootstrap: a keychain-less Linux worker home never had
-            // an interactive login, so its `.claude.json` carries no identity and
-            // `nativeIdentityFromSource` would reject the attach — yet the account's
-            // non-rotating setup-token is already fleet-synced in the `auth` bundle.
-            // Seed the identity (email only, no rotating credential) so the token
-            // resolves; `writeClaudeInteractiveOauthToken` then writes `.oauth_token`.
-            if (
-              process.platform === 'linux' &&
-              account.agent === 'claude' &&
-              accountEmail &&
-              !readClaudeAccountEmail(versionHome) &&
-              resolveClaudeSetupTokenForEmail(accountEmail)
-            ) {
-              seedClaudeWorkerHomeIdentity(versionHome, accountEmail);
-            } else {
-              const identity = await nativeIdentityFromSource(target);
-              if (identity.identityKey !== account.identityKey) throw new Error(`'${target}' is signed in to a different identity than account '${account.name}'.`);
-            }
-          }
-        } else {
-          // Provider account: it must be able to authenticate the target's harness.
-          getAccountProvider(account.provider).envFor(targetAgent, account.auth);
-        }
-        bindAccount(name, target, targetAgent);
-        writeClaudeInteractiveOauthToken(t, targetAgent, account.kind === 'native' && account.agent === 'claude' ? account.identityLabel : undefined);
-        console.log(chalk.green(`Attached ${account.name} to ${target}.`));
-      });
-    }), 'agents run <harness>#<name> (accounts select by name; installation bindings are legacy)');
-
-  retireVerb(accounts.command('detach <account> <target>', { hidden: true })
-    .description('Remove one account attachment')
-    .action(async (name: string, target: string, _o: unknown, command: Command) => {
-      await runAccountsAction(command, () => {
-        // Classify the target first so the unbind is scoped to the right harness
-        // for a colliding identity selector (same as the attach path).
-        let targetAgent: AgentId | undefined;
-        try {
-          const t = classifyAttachTarget(target);
-          targetAgent = t.kind === 'profile' ? t.profile.host.agent : t.agent;
-        } catch { /* an unresolvable target still unbinds by whatever row matches */ }
-        unbindAccount(name, target, targetAgent);
-        // With the binding gone, no setup-token resolves for this version home, so this
-        // clears any .oauth_token the attach left behind (else interactive runs would keep
-        // authenticating as the just-detached account).
-        try {
-          const t = classifyAttachTarget(target);
-          writeClaudeInteractiveOauthToken(t, t.kind === 'profile' ? t.profile.host.agent : t.agent);
-        } catch { /* an unresolvable target has no version home to clean */ }
-        console.log(chalk.green(`Detached ${name} from ${target}.`));
-      });
-    }), 'agents run <harness>#<name> (accounts select by name; installation bindings are legacy)');
-
   const renameCmd = accounts.command('rename <old> <new>')
     .description('Rename an account without changing its stable id. Target may be <harness>#<name> when the name exists for several harnesses')
     .action(async (oldName: string, newName: string, _o: unknown, command: Command) => {
@@ -989,23 +646,6 @@ agents accounts rename codex#icloud cloud`,
     examples: `agents accounts remove claude#icloud`,
     notes: 'Native names are unique per harness. A bare name that exists for several harnesses is refused — pick one with <harness>#<name>.',
   });
-
-  retireVerb(accounts.command('set-default <agent> <name>', { hidden: true })
-    .description('Use this account for a harness when --account is omitted')
-    .action(async (agentRaw: string, name: string, _o: unknown, command: Command) => {
-      await runAccountsAction(command, () => {
-        const { agent, account } = setDefaultAccount(agentRaw, name);
-        console.log(chalk.green(`${agent} now uses account '${account.name}' unless --account overrides it.`));
-      });
-    }), 'agents accounts default <harness> <name>');
-
-  const switchCmd = accounts.command('switch <harness> [account]', { hidden: true })
-    .description('Pick the default account for a harness')
-    .option('--json', 'Machine-readable account list or the resulting default')
-    .action(async (harness: string, account: string | undefined, o: { json?: boolean }, command: Command) => {
-      await runAccountsAction(command, () => runAccountsSwitch(harness, account, { json: !!(o.json || command.optsWithGlobals().json) }));
-    });
-  retireVerb(switchCmd, 'agents accounts default <harness> [name]');
 
   accounts.command('clear-default <agent>')
     .description('Return a harness to native login or balanced account selection')
@@ -1096,14 +736,6 @@ agents accounts rename codex#icloud cloud`,
       });
     });
 
-  setHelpSections(switchCmd, {
-    examples: `agents accounts switch claude
-agents accounts switch claude work
-agents accounts switch claude --json
-agents run claude`,
-    notes: 'Switch writes the existing per-harness default (same binding as set-default). Rotation already honors it. Pass an account name to skip the picker. Native name/attach is only for harnesses agents-cli can isolate (claude, codex, grok); provider add is unrestricted.',
-  });
-
   setHelpSections(accounts, {
     examples: `agents accounts add claude work
 agents accounts add codex personal --api-key sk-…
@@ -1119,6 +751,6 @@ agents run claude#work
 agents accounts logout claude
 agents accounts migrate --dry-run
 agents accounts migrate --apply`,
-    notes: 'An account is a credential SLOT, not an installation: `accounts add <harness> [name]` runs the native login in a fresh HOME-shaped slot of the one managed install, registers the fleet-wide row, and mints the durable worker credential (claude: setup-token; codex/grok/cursor/opencode: --api-key or a prompt) in one step. Headed devices only — workers are provisioned automatically. `accounts login <harness>#<name>` re-auths into the same slot and re-mints; `accounts default <harness> [name]` is the one default write path. Native account records contain metadata only; harness-owned OAuth credentials are never copied. Provider accounts are explicit portable bundles with policy never. Harness-native OAuth sign-out is `agents accounts logout <harness>` (API-key accounts use `accounts remove`). Leftover per-account installations fold with `agents accounts migrate --dry-run|--apply`. Synced vault unlock is `agents secrets vault unlock`. The legacy connect/name/label/mint/attach/detach/switch/set-default verbs still work this release and print their replacement.',
+    notes: 'An account is a credential SLOT, not an installation: `accounts add <harness> [name]` runs the native login in a fresh HOME-shaped slot of the one managed install, registers the fleet-wide row, and mints the durable worker credential (claude: setup-token; codex/grok/cursor/opencode: --api-key or a prompt) in one step. Headed devices only — workers are provisioned automatically. `accounts login <harness>#<name>` re-auths into the same slot and re-mints; `accounts default <harness> [name]` is the one default write path. Native account records contain metadata only; harness-owned OAuth credentials are never copied. Provider accounts are explicit portable bundles with policy never. Harness-native OAuth sign-out is `agents accounts logout <harness>` (API-key accounts use `accounts remove`). Leftover per-account installations fold with `agents accounts migrate --dry-run|--apply`. Synced vault unlock is `agents secrets vault unlock`.',
   });
 }

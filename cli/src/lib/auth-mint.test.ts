@@ -27,7 +27,6 @@ import {
   unmintableMessage,
   workerCredentialEnv,
   workerCredentialStoreKey,
-  type MintDriveHooks,
 } from './auth-mint.js';
 import { harnessWorkerKinds } from './harness-auth-capabilities.js';
 import { upsertDevice } from './devices/registry.js';
@@ -476,65 +475,6 @@ describe.skipIf(!fileBacked)('mintAndSeed — named account + reserved auth key'
     }
   });
 
-  it('accounts mint --code --json stdout is only parseable JSON', async () => {
-    const { registerMintCommand } = await import('../commands/auth-mint.js');
-    const driver = fakeDriver([
-      { screen: fixture('claude-setup-token.txt') },
-      { screen: fixture('claude-setup-token-done.txt') },
-    ]);
-    const hooks: MintDriveHooks = {
-      driver,
-      drive: { initialDelayMs: 0, pollMs: 1, timeoutMs: 400 },
-    };
-    const program = new Command();
-    program.exitOverride();
-    registerMintCommand(program.command('accounts'), hooks);
-    const out: string[] = [];
-    const err: string[] = [];
-    const log = vi.spyOn(console, 'log').mockImplementation((...a) => void out.push(a.map(String).join(' ')));
-    const error = vi.spyOn(console, 'error').mockImplementation((...a) => void err.push(a.map(String).join(' ')));
-    const proc = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
-      throw new Error(`__exit__:${code}`);
-    }) as never);
-    try {
-      await program.parseAsync([
-        'node', 'agents', 'accounts', 'mint', 'claude',
-        '--code', 'AUTHCODE#state',
-        '--json',
-        '--no-open',
-        '--account', EMAIL,
-      ]);
-    } catch (e) {
-      if (!(e instanceof Error) || !e.message.startsWith('__exit__')) throw e;
-    } finally {
-      log.mockRestore();
-      error.mockRestore();
-      proc.mockRestore();
-    }
-    const stdout = out.join('\n');
-    expect(stdout).not.toMatch(/Authorize/);
-    const parsed = JSON.parse(stdout) as {
-      harness: string;
-      account: string;
-      email: string;
-      authBundleKey: string;
-      rotated: boolean;
-      fleet: unknown[];
-      token?: string;
-      error?: string;
-    };
-    expect(parsed).toEqual({
-      harness: 'claude',
-      account: 'ada-at-example.com',
-      email: EMAIL,
-      authBundleKey: claudeAccountTokenKey(EMAIL),
-      rotated: false,
-      fleet: [],
-    });
-    expect(parsed).not.toHaveProperty('token');
-    expect(parsed.error).toBeUndefined();
-  });
-
   describe('--fleet / --device through mintAndSeed', () => {
     const SELF = 'mint-self';
     const PEER = 'peer-a';
@@ -600,80 +540,6 @@ describe.skipIf(!fileBacked)('mintAndSeed — named account + reserved auth key'
       expect(findAccount('ada-at-example.com')?.auth).toBe('setup-token');
       expect(resolveClaudeSetupToken(home())).toBe(TOKEN);
     });
-  });
-});
-
-describe('agents auth mint / accounts mint command wiring', () => {
-  async function run(group: 'auth' | 'accounts', ...argv: string[]): Promise<{ out: string; err: string; exit: number | undefined }> {
-    const { registerAuthCommand } = await import('../commands/auth.js');
-    const { registerAccountsCommand } = await import('../commands/accounts.js');
-    const program = new Command();
-    program.exitOverride();
-    registerAuthCommand(program);
-    registerAccountsCommand(program);
-    const out: string[] = [];
-    const err: string[] = [];
-    const log = vi.spyOn(console, 'log').mockImplementation((...a) => void out.push(a.map(String).join(' ')));
-    const error = vi.spyOn(console, 'error').mockImplementation((...a) => void err.push(a.map(String).join(' ')));
-    let exit: number | undefined;
-    const proc = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
-      exit = code;
-      throw new Error('__exit__');
-    }) as never);
-    try {
-      await program.parseAsync(['node', 'agents', group, ...argv]);
-    } catch (e) {
-      if (!(e instanceof Error) || e.message !== '__exit__') throw e;
-    } finally {
-      log.mockRestore();
-      error.mockRestore();
-      proc.mockRestore();
-    }
-    return { out: out.join('\n'), err: err.join('\n'), exit };
-  }
-
-  it('registers mint on both auth and accounts as hidden, teaching add/login', async () => {
-    const { registerAuthCommand } = await import('../commands/auth.js');
-    const { registerAccountsCommand } = await import('../commands/accounts.js');
-    const { applyGlobalHelpConventions } = await import('./help.js');
-    const program = new Command('agents');
-    applyGlobalHelpConventions(program);
-    registerAuthCommand(program);
-    registerAccountsCommand(program);
-    const auth = program.commands.find((c) => c.name() === 'auth')!;
-    const accounts = program.commands.find((c) => c.name() === 'accounts')!;
-    const authMint = auth.commands.find((c) => c.name() === 'mint')!;
-    const accountsMint = accounts.commands.find((c) => c.name() === 'mint')!;
-    expect((authMint as unknown as { _hidden: boolean })._hidden).toBe(true);
-    expect((accountsMint as unknown as { _hidden: boolean })._hidden).toBe(true);
-    expect(auth.helpInformation()).not.toMatch(/^  mint\b/m);
-    expect(accounts.helpInformation()).not.toMatch(/^  mint\b/m);
-    const authHelp = authMint.helpInformation();
-    const accountsHelp = accountsMint.helpInformation();
-    expect(authHelp).toContain('agents accounts add claude work');
-    expect(authHelp).toContain('agents accounts login claude#work');
-    expect(authHelp).toContain('--token-stdin');
-    expect(authHelp).toContain('--code AUTHCODE --json');
-    expect(accountsHelp).toContain('sk-ant-oat01-');
-    expect(program.commands.find((c) => c.name() === 'auth')!.commands.map((c) => c.name())).toContain('mint');
-    expect(program.commands.find((c) => c.name() === 'accounts')!.commands.map((c) => c.name())).toContain('mint');
-  });
-
-  it('fails loud for an unmintable harness before touching a PTY', async () => {
-    const r = await run('auth', 'mint', 'grok');
-    const text = `${r.out}${r.err}`;
-    expect(text).toMatch(/no derivable token.*agents accounts add grok/);
-    expect(r.err).toContain("hidden alias; use `agents accounts add <harness> [name] / agents accounts login <harness>#<name>`");
-    expect(r.exit).toBe(1);
-  });
-
-  it('mint --json for an unmintable harness emits only parseable JSON on stdout', async () => {
-    const r = await run('accounts', 'mint', 'grok', '--json');
-    expect(r.exit).toBe(1);
-    expect(r.out).not.toMatch(/Authorize/);
-    expect(r.err).toContain("hidden alias; use `agents accounts add <harness> [name] / agents accounts login <harness>#<name>`");
-    const parsed = JSON.parse(r.out);
-    expect(parsed.error).toMatch(/no derivable token.*agents accounts add grok/);
   });
 });
 

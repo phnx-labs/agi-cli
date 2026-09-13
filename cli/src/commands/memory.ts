@@ -14,12 +14,11 @@ import {
   addMemoryFact,
   removeMemoryFact,
   readMemoryFact,
-  ensureUserMemoryDir,
   getUserMemoryDir,
   syncMemoryToVersionHome,
 } from '../lib/memory.js';
 import { capableAgents } from '../lib/capabilities.js';
-import { resolveAgentName, formatAgentError, agentLabel, ALL_AGENT_IDS } from '../lib/agents.js';
+import { ALL_AGENT_IDS } from '../lib/agents.js';
 import type { AgentId } from '../lib/types.js';
 import {
   listInstalledVersions,
@@ -49,7 +48,7 @@ export function registerMemoryCommands(program: Command): void {
       agents memory remove preferred-editor
 
       # Fan out to all capable installed agent versions
-      agents memory sync
+      agents sync --memory
     `,
     notes: `
       Memory is the knowledge store (learned facts), distinct from rules
@@ -101,7 +100,7 @@ export function registerMemoryCommands(program: Command): void {
           console.log(chalk.gray(`  synced ${r.agent}@${r.version} (${r.facts.length} facts)`));
         }
       } else {
-        console.log(chalk.gray('  Run: agents memory sync  (or agents sync) to fan out'));
+        console.log(chalk.gray('  Run: agents sync --memory to fan out'));
       }
     });
 
@@ -130,50 +129,6 @@ export function registerMemoryCommands(program: Command): void {
       console.log(fs.readFileSync(fact.path, 'utf-8'));
     });
 
-  // Deprecated: superseded by `agents sync --memory`. Kept as a warned, functional
-  // alias so old muscle-memory and scripts don't break.
-  memoryCmd
-    .command('sync [agent]', { hidden: true })
-    .description('Deprecated — use `agents sync --memory` instead.')
-    .option('-a, --agent <agent>', 'Limit to one agent (or agent@version)')
-    .action(async (agentArg: string | undefined, options: { agent?: string }) => {
-      console.warn(chalk.yellow('`agents memory sync` is deprecated — use `agents sync --memory` instead:'));
-      console.warn(chalk.gray('  all agents:  agents sync --memory'));
-      console.warn(chalk.gray('  one agent:   agents sync --memory <agent>'));
-      ensureUserMemoryDir();
-      const input = agentArg || options.agent;
-      if (input) {
-        const parts = input.split('@');
-        const resolved = resolveAgentName(parts[0]);
-        if (!resolved) {
-          console.error(chalk.red(formatAgentError(parts[0], capableAgents('memory'))));
-          process.exit(1);
-        }
-        const agent = resolved as AgentId;
-        const versions = parts[1]
-          ? [parts[1]]
-          : listInstalledVersions(agent);
-        if (versions.length === 0) {
-          console.log(chalk.yellow(`No installed versions of ${agentLabel(agent)}`));
-          return;
-        }
-        for (const version of versions) {
-          const home = getVersionHomePath(agent, version);
-          const facts = syncMemoryToVersionHome(agent, home, process.cwd());
-          console.log(chalk.green(`Synced ${facts.length} fact(s) → ${agent}@${version}`));
-        }
-        return;
-      }
-
-      const results = syncAllMemory(process.cwd());
-      if (results.length === 0) {
-        console.log(chalk.gray('No memory-capable agent versions installed.'));
-        return;
-      }
-      for (const r of results) {
-        console.log(chalk.green(`Synced ${r.facts.length} fact(s) → ${r.agent}@${r.version}`));
-      }
-    });
 }
 
 function syncAllMemory(cwd: string): { agent: AgentId; version: string; facts: string[] }[] {

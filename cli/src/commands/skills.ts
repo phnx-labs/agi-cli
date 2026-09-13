@@ -615,14 +615,6 @@ Examples:
       printWithPager(output, lines.length);
     });
 
-  // Deprecated alias for 'view'
-  skillsCmd
-    .command('info [name]', { hidden: true })
-    .action(async (name?: string) => {
-      console.log(chalk.yellow('Deprecated: Use "agents skills view" instead of "agents skills info"\n'));
-      // Re-execute view command logic
-      await skillsCmd.commands.find((c) => c.name() === 'view')?.parseAsync(['view', ...(name ? [name] : [])], { from: 'user' });
-    });
 }
 
 /**

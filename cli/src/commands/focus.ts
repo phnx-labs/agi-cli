@@ -213,7 +213,7 @@ export function registerFocusCommand(program: Command): void {
       # Resolve latest on yosemite-s0, then pick from that version's sessions
       agents sessions focus claude@latest --device yosemite-s0
 
-      # Attach only — refuse if nothing is joinable (old sessions go)
+      # Attach only — refuse if nothing is joinable
       agents sessions focus a1b2c3d4 --attach-only
 
       # Pick from live sessions on this machine only
