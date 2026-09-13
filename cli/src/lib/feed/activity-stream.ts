@@ -112,6 +112,12 @@ export class ActivityStream {
     this.maxBytesPerRead = options.maxBytesPerRead ?? ACTIVITY_TAIL_BYTES;
     this.sweepMs = options.sweepMs ?? ACTIVITY_SWEEP_MS;
     this.watchRequested = options.watch ?? true;
+    // A log directory that does not exist yet (nothing has logged activity
+    // since boot) means fs.watch below throws ENOENT and never retries except
+    // on the bounded sweep cadence — the very first session's activity can
+    // then sit unwatched for up to `sweepMs` before it is even noticed.
+    // Creating it up front lets the watcher arm immediately.
+    try { fs.mkdirSync(this.dir, { recursive: true }); } catch { /* best-effort: sweep() covers a dir that still isn't there */ }
     this.sweep(Date.now());
     this.armWatcher();
   }
