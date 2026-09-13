@@ -523,9 +523,11 @@ async function deliverMailbox(
   // The match is on the ASK and the ATTEMPT, not just the block id: a block id
   // is per SESSION, so an already-consumed message answering question N would
   // otherwise suppress a genuine delivery for question N+1.
+  // Matched on the ASK, not the attempt: adopting a stranded claim necessarily
+  // mints a NEW attempt, so requiring an attempt match would never find the
+  // message the killed run queued and would duplicate the answer.
   const existing = adopted
-    ? readBox(dir).find((msg) => msg.blockId === block.blockId
-      && msg.generation === origin.generation && msg.attempt === origin.attempt)
+    ? readBox(dir).find((msg) => msg.blockId === block.blockId && msg.generation === origin.generation)
     : undefined;
   const msgId = existing?.msgId ?? enqueue(dir, {
     to: block.mailboxId, text: answer, from: operator.label, blockId: block.blockId,
@@ -605,14 +607,17 @@ async function deliverInject(
     // `writes === 0` means no write was even issued, so nothing landed and the
     // item is cleanly retryable. Anything past the first write is ambiguous: the
     // text may sit in the composer with only its submit missing.
-    if (delivered.writes === 0) {
+    // `started === 0` is the ONLY proof nothing reached the terminal. A spec that
+    // was started and then failed or timed out may have written bytes first, so
+    // `writes` (which counts COMPLETED specs) cannot license a retry.
+    if (delivered.started === 0) {
       throw new AnswerError(
         `${delivered.error ?? `Failed to deliver over ${route.kind}`} — no keystroke was sent.`,
         'rail_failed',
       );
     }
     throw new AnswerUnknownError(
-      `${delivered.error ?? `Failed to deliver over ${route.kind}`} — ${delivered.writes} of the keystroke sequence already landed; open the session before resending.`,
+      `${delivered.error ?? `Failed to deliver over ${route.kind}`} — ${delivered.started} of ${delivered.specs?.length ?? '?'} keystroke write(s) had already begun; open the session before resending.`,
     );
   }
   if (!delivered.confirmed) {
@@ -858,11 +863,7 @@ export async function forwardFeedAnswer(input: {
   timeoutMs?: number;
 }): Promise<FeedAnswerResult> {
   const timeoutMs = input.timeoutMs ?? REMOTE_ANSWER_TIMEOUT_MS;
-  // The sentinel is echoed BEFORE the answer command runs, so its absence is
-  // positive proof the remote never began executing. Without it an ssh exit 255
-  // is ambiguous: it is equally "could not connect" and "connection dropped
-  // after the answer was already delivered".
-  const remoteCmd = `echo ${REMOTE_START_SENTINEL}; ${remoteAnswerArgv(input).map(shellQuote).join(' ')}`;
+  const remoteCmd = remoteAnswerArgv(input).map(shellQuote).join(' ');
   const unknown = (reason: string): FeedAnswerResult => ({
     status: 'unknown', delivery: 'unconfirmed', resolved: false,
     reason: `${reason} Check delivery rather than resending.`,
@@ -885,24 +886,16 @@ export async function forwardFeedAnswer(input: {
     return unknown(`Answering on '${input.host}' did not finish in ${timeoutMs}ms — it may already have been delivered.`);
   }
 
-  // A confirmed non-delivery needs POSITIVE proof that nothing ran, not merely
-  // an ssh failure code: a link dropped AFTER the remote executed also exits
-  // 255. The sentinel is that proof — ssh failed AND the remote never reached
-  // the echo, so the answer command never started and a retry is safe.
-  const started = result.stdout.includes(REMOTE_START_SENTINEL);
-  if (result.code === SSH_CONN_FAILURE_CODE && !started) {
-    throw new AnswerError(
-      result.stderr.trim() || `Could not reach '${input.host}' to answer '${input.attentionKey}'.`,
-      'remote_failed',
-    );
-  }
+  // Once ssh has been handed the command there is NO way to prove the remote did
+  // not run it. Exit 255 covers both "could not connect" and "connection dropped
+  // after the answer was delivered", and a dropped link can lose stdout, so even
+  // an echoed start marker is not proof of its own absence. Every post-dispatch
+  // remote outcome is therefore UNKNOWN — the operator gets "check delivery",
+  // never a retry that could double-send. (A locally-detectable fault, such as an
+  // invalid ssh target, throws from `sshExecAsync` before anything is dispatched.)
   if (result.code === SSH_CONN_FAILURE_CODE) {
-    return unknown(`The link to '${input.host}' dropped after the answer command had already started (exit 255).`);
+    return unknown(`ssh to '${input.host}' failed (exit 255)${result.stderr.trim() ? `: ${result.stderr.trim()}` : ''}; whether the answer ran there is unknown.`);
   }
-
-  // Everything past a live connection is ambiguous on failure: the remote may
-  // have delivered and then crashed, or had its stdout truncated. Absent an
-  // affirmative non-delivery, that is unknown — never a retry-safe failure.
   const line = result.stdout.trim().split('\n').reverse().find((value: string) => value.startsWith('{'));
   if (!line) {
     return unknown(`Remote answer on '${input.host}' returned no JSON receipt (exit ${result.code}${result.stderr.trim() ? `: ${result.stderr.trim()}` : ''}).`);
@@ -921,11 +914,6 @@ export async function forwardFeedAnswer(input: {
 const ANSWER_STATUSES: readonly AnswerStatus[] = ['delivered', 'already_answered', 'unknown', 'failed'];
 const ANSWER_DELIVERIES: readonly AnswerDelivery[] = ['receipt', 'unconfirmed', 'failed'];
 const RECEIPT_STATUSES: readonly MessageReceipt['status'][] = ['queued', 'consumed', 'continued', 'dropped', 'expired'];
-/**
- * Echoed by the remote BEFORE the answer command runs. Its absence alongside an
- * ssh failure is the only positive proof that nothing executed on the far side.
- */
-const REMOTE_START_SENTINEL = '__agents_answer_started__';
 
 /**
  * Validate a forwarded result as a whole, not just its key: an off-key, truncated
@@ -953,6 +941,19 @@ function remoteResultProblem(
     if (!parsed.receipt?.msgId) return 'claimed a receipt without one';
     if (!RECEIPT_STATUSES.includes(parsed.receipt.status)) {
       return `reported an unknown receipt status '${parsed.receipt.status}'`;
+    }
+    // A dead message is a failure, not a delivery.
+    if (parsed.receipt.status === 'dropped' || parsed.receipt.status === 'expired') {
+      return `reported delivery 'receipt' for a '${parsed.receipt.status}' message`;
+    }
+    // The receipt must be about the ASK that was requested.
+    const generation = parseAttentionKey(attentionKey).generation;
+    if (parsed.receipt.generation !== undefined && parsed.receipt.generation !== generation) {
+      return `returned a receipt for ask '${parsed.receipt.generation}', not '${generation}'`;
+    }
+    if (parsed.attempt !== undefined && parsed.receipt.attempt !== undefined
+      && parsed.receipt.attempt !== parsed.attempt) {
+      return `returned a receipt for attempt '${parsed.receipt.attempt}', not its own '${parsed.attempt}'`;
     }
     // `resolved` means the agent itself acknowledged — only consumed/continued
     // can support it. A `queued` receipt claiming resolution is inconsistent.

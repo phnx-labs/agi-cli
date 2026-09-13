@@ -38,11 +38,15 @@ export function runLocal(spec: LaunchSpec, timeoutMs?: number): Promise<RunResul
     const child = spawn(spec.argv[0], spec.argv.slice(1), { stdio: 'ignore', detached: !!timeoutMs });
     let settled = false;
     let killTimer: ReturnType<typeof setTimeout> | null = null;
+    // NOTE: the pending SIGKILL is deliberately NOT cancelled here. Resolving
+    // the promise is the CALLER giving up; it is not the child exiting. Clearing
+    // the kill timer on the timeout path (which resolves immediately after
+    // arming it) meant a SIGTERM-ignoring child was never killed and simply
+    // survived the bound this function exists to enforce.
     const done = (result: RunResult): void => {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
-      if (killTimer) clearTimeout(killTimer);
       resolve(result);
     };
     const signalGroup = (signal: NodeJS.Signals): void => {
@@ -58,10 +62,13 @@ export function runLocal(spec: LaunchSpec, timeoutMs?: number): Promise<RunResul
           done({ ok: false, error: `${spec.argv[0]} did not finish in ${timeoutMs}ms` });
         }, timeoutMs)
       : null;
-    child.on('error', (err: any) => done({ ok: false, error: err.message }));
-    child.on('close', (code) =>
-      done(code === 0 ? { ok: true } : { ok: false, error: `${spec.argv[0]} exited with code ${code}` }),
-    );
+    // Only the child ACTUALLY exiting retires the pending SIGKILL.
+    const childGone = (): void => { if (killTimer) { clearTimeout(killTimer); killTimer = null; } };
+    child.on('error', (err: any) => { childGone(); done({ ok: false, error: err.message }); });
+    child.on('close', (code) => {
+      childGone();
+      done(code === 0 ? { ok: true } : { ok: false, error: `${spec.argv[0]} exited with code ${code}` });
+    });
   });
 }
 

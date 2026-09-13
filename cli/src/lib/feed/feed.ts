@@ -23,6 +23,7 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import * as yaml from 'yaml';
 import { stringifyDoc } from '../yaml-io.js';
 import { getFeedDir, getUserAgentsDir } from '../state.js';
@@ -70,20 +71,29 @@ export interface MessageReceipt {
   attempt?: string;
 }
 
-/** The ask + attempt a receipt or queued message belongs to. */
+/** The ask a receipt or queued message belongs to, plus the attempt that sent it. */
 export interface ReceiptOrigin {
   generation: string;
   attempt: string;
 }
 
 /**
- * Whether a receipt describes exactly this ask and attempt. An UNBOUND receipt
- * (one written before the origin fields existed) is accepted, so older queued
- * messages still resolve rather than being silently ignored.
+ * Whether a receipt describes THIS ask.
+ *
+ * Identity is the GENERATION alone, never the attempt. The question is "does
+ * this receipt answer this ask?", and a second attempt on the same ask carries
+ * the same answer -- so a stranded claim that is adopted (which necessarily
+ * mints a new attempt) must still recognise the message its predecessor queued,
+ * or it enqueues a duplicate. `attempt` rides along as provenance for the
+ * delivery check, not as part of identity.
+ *
+ * An UNBOUND receipt (written before these fields existed) matches NOTHING: it
+ * cannot name an ask, so attributing it to one would let a message queued for an
+ * earlier question resolve whichever question is current (PHNX-3999).
  */
 export function receiptMatchesOrigin(receipt: MessageReceipt, origin: ReceiptOrigin): boolean {
-  if (receipt.generation === undefined && receipt.attempt === undefined) return true;
-  return receipt.generation === origin.generation && receipt.attempt === origin.attempt;
+  if (receipt.generation === undefined) return false;
+  return receipt.generation === origin.generation;
 }
 
 export interface AnswerRecord {
@@ -510,9 +520,11 @@ export function confirmAnswerResolution(
   // delivery for the PREVIOUS question must not resolve the one the agent has
   // moved on to. A caller that knows which ask and which attempt it is
   // confirming says so, and a mismatch is a no-op rather than a wrong tombstone.
-  if (expected && (blockGeneration(block) !== expected.generation || record.answeredAt !== expected.answeredAt)) {
-    return false;
-  }
+  // Bound to the ASK. The attempt is deliberately NOT compared: adopting a
+  // stranded claim mints a new attempt for the same question, and that adoption
+  // must still be able to resolve the ask it completed. The generation is what
+  // distinguishes one question from the next, which is the actual hazard.
+  if (expected && blockGeneration(block) !== expected.generation) return false;
   recordResolution({
     blockId,
     generation: blockGeneration(block),
@@ -556,12 +568,7 @@ export function rollbackAnswerClaim(
   // the exact claim being released -- the same primitive `recordAnswer` uses, so
   // exactly one caller can ever release a given `answeredAt` (PHNX-3999).
   const release = path.join(answeredDir(dir), `${blockId}.${answeredAt.replace(/[^0-9A-Za-z]/g, '')}.release`);
-  try {
-    fs.closeSync(fs.openSync(release, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o644));
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false; // another caller owns this release
-    throw error;
-  }
+  if (!acquireReleaseToken(release)) return false;
   const dropToken = (): void => {
     try { fs.unlinkSync(release); } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
@@ -591,6 +598,51 @@ export function rollbackAnswerClaim(
   // dead file per released claim forever.
   dropToken();
   return true;
+}
+
+/**
+ * How long a release token may sit before it is treated as abandoned. A release
+ * is a handful of synchronous file operations, so anything this old belongs to a
+ * process that died holding it.
+ */
+export const RELEASE_TOKEN_STALE_MS = 60_000;
+
+/**
+ * Take the O_EXCL token that serialises releasing one specific claim.
+ *
+ * The token MUST be recoverable: a process killed between creating it and
+ * finishing would otherwise wedge that claim forever, and "the answer can never
+ * be released again" is a worse failure than the race the token prevents. So the
+ * token records its owner and its age, and a token whose owner is provably gone
+ * (same host, no such pid) or which is simply stale is reclaimed once.
+ */
+function acquireReleaseToken(release: string): boolean {
+  const mine = { pid: process.pid, host: os.hostname(), at: Date.now() };
+  const create = (): boolean => {
+    try {
+      const fd = fs.openSync(release, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o644);
+      try { fs.writeSync(fd, Buffer.from(JSON.stringify(mine), 'utf-8')); } finally { fs.closeSync(fd); }
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false;
+      throw error;
+    }
+  };
+  if (create()) return true;
+
+  const held = safeReadJson<{ pid?: number; host?: string; at?: number }>(release);
+  const ageMs = held?.at ? Date.now() - held.at : Number.POSITIVE_INFINITY;
+  let ownerGone = false;
+  if (held?.host === mine.host && typeof held.pid === 'number') {
+    // Signal 0 probes liveness without delivering anything.
+    try { process.kill(held.pid, 0); } catch { ownerGone = true; }
+  }
+  if (!ownerGone && ageMs < RELEASE_TOKEN_STALE_MS) return false; // a live peer owns it
+  try { fs.unlinkSync(release); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  // Exactly one reclaimer wins the re-create; the rest see EEXIST and back off.
+  return create();
 }
 
 /** True when the block has already been answered. */
@@ -644,16 +696,17 @@ export function recordMessageReceipt(
   // the agent moved to question N+1 AND that ask was itself claimed, a late
   // acknowledgement for question N found a live claim and resolved the wrong
   // question. `confirmAnswerResolution`'s own compare is what rejects it.
-  if (receipt.status === 'consumed' || receipt.status === 'continued') {
-    if (receipt.generation !== undefined && receipt.attempt !== undefined) {
-      confirmAnswerResolution(blockId, dir, { generation: receipt.generation, answeredAt: receipt.attempt });
-    } else if (block.answer) {
-      // An unbound receipt (queued before the origin fields existed) can only be
-      // read against the current claim, which is the pre-existing behaviour.
-      confirmAnswerResolution(blockId, dir, {
-        generation: blockGeneration(block), answeredAt: block.answer.answeredAt,
-      });
-    }
+  //
+  // An UNBOUND receipt never resolves. It cannot say which ask it acknowledges,
+  // so promoting it against whatever claim happens to be live would resolve the
+  // wrong question -- the exact failure this binding exists to prevent. Its
+  // delivery evidence is still recorded above; the card then clears through the
+  // ordinary session-advance path instead.
+  if ((receipt.status === 'consumed' || receipt.status === 'continued')
+    && receipt.generation !== undefined && block.answer) {
+    confirmAnswerResolution(blockId, dir, {
+      generation: receipt.generation, answeredAt: block.answer.answeredAt,
+    });
   }
 }
 
