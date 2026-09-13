@@ -46,6 +46,9 @@ coverage/
 # Generated test reports (session-tracker scenario recorder, run-report aggregator)
 **/tests/reports/
 
+# Dated HTML from `bun scripts/code-map.ts` (regenerate locally; do not commit)
+/reports/
+
 # Durable agent artifacts (plans, reports, visuals) are committed under
 # .agents/artifacts/<yyyy-mm-dd>/; worktrees and scratch stay local.
 # .agents/artifacts/private/ is the one artifacts subtree that never lands: it

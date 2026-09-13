@@ -1,0 +1,13 @@
+{
+  "v": 1,
+  "slug": "codebase-health-viz",
+  "title": "Sixteen views of codebase health — scenes, not scores",
+  "kind": "visual",
+  "session": null,
+  "agent": "cursor",
+  "host": "fleet-worker",
+  "share_url": null,
+  "ticket": null,
+  "created_at": "2026-09-06",
+  "updated_at": "2026-09-06"
+}
