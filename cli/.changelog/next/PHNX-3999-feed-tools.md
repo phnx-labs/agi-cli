@@ -25,3 +25,5 @@
   dialed every 60 s for two days. After ten consecutive failures the re-dial drops to
   15 minutes, still waking immediately on a device-registry change. Source:
   `cli/src/lib/session/remote/peer-stream.ts`.
+
+- **Setup from the menu uses a real terminal.** `agents setup browser|computer|secrets --terminal` hands interactive onboarding to the existing terminal engine and reports launch errors. Installation and readiness remain separate; only explicit checks run health probes, and concurrent checks share one probe.

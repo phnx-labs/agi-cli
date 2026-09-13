@@ -10,6 +10,7 @@
  */
 
 import type { Command } from 'commander';
+import { openSetupTerminal } from './setup-terminal.js';
 import os from 'node:os';
 import { execFileSync } from 'node:child_process';
 import chalk from 'chalk';
@@ -150,8 +151,10 @@ export function registerSetupComputerCommand(setupCmd: Command): void {
     .command('computer')
     .description('Set up `agents computer` (macOS) — install the signed helper and grant control permissions.')
     .option('--install-only', 'Install the standalone Computer CLI without starting the helper or changing permissions')
-    .action(async (options: { installOnly?: boolean }) => {
+    .option('--terminal [backend]', 'Open interactive setup in a detected or selected terminal')
+    .action(async (options: { installOnly?: boolean; terminal?: boolean | string }) => {
       try {
+        if (options.terminal !== undefined) { await openSetupTerminal('computer', options.terminal, options.installOnly); return; }
         if (options.installOnly) { if (!(await installSetupTool('computer'))) process.exitCode = 1; return; }
         if (!(await runComputerWizard())) process.exitCode = 1;
         await refreshToolSetup('computer');
