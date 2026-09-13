@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { buildSshInvocation, fleetRemotePrelude, markFleetRemote, pwshQuote, wrapRemoteCommand } from './connect.js';
+import { quoteWin32ExecArg } from '../platform/exec.js';
 import { parseArgvJson } from '../../commands/ssh.js';
 import type { DeviceProfile } from './registry.js';
 
@@ -108,10 +109,9 @@ describe('argv mode on a PowerShell device', () => {
     expect(wrapped.startsWith('powershell -NoProfile -EncodedCommand ')).toBe(true);
     const encoded = wrapped.split(' ').pop()!;
     const script = Buffer.from(encoded, 'base64').toString('utf16le');
-    // Each token single-quoted, the embedded quote doubled (pwsh's own escape) —
-    // and led by `&`, without which PowerShell evaluates the quoted program as a
-    // string expression and echoes it instead of running anything.
-    expect(script).toBe("& 'Write-Output' 'two words' 'it''s'");
+    // The PROGRAM is pwsh-quoted (PowerShell resolves it), then `--%` stops
+    // parsing and the ARGUMENTS are Win32-quoted for the callee's own split.
+    expect(script).toBe(`& 'Write-Output' --% ${quoteWin32ExecArg('two words')} ${quoteWin32ExecArg("it's")}`);
   });
 
   it('quotes every byte that would otherwise be pwsh syntax', () => {
@@ -231,8 +231,9 @@ describe('the FULL buildSshInvocation pipeline, not just the quoter', () => {
     expect(script).toContain("$env:AGENTS_FLEET_REMOTE='1';");
     expect(script).not.toContain("'$env:AGENTS_FLEET_REMOTE=");
     // `&` is what makes the quoted program run instead of being echoed.
-    expect(script).toMatch(/; & 'agents' 'browser'/);
-    expect(script).toContain("'--url' 'https://x.test/?a=1&b=2'");
+    expect(script).toMatch(/; & 'agents' --% browser navigate /);
+    // The URL carries `&`; Win32 quoting wraps it rather than losing it.
+    expect(script).toContain(quoteWin32ExecArg('https://x.test/?a=1&b=2'));
   });
 
   it('escapes a quote in a PowerShell provenance value without breaking the statement', () => {
@@ -242,6 +243,7 @@ describe('the FULL buildSshInvocation pipeline, not just the quoter', () => {
     // pwsh doubles an embedded single quote; the statement stays terminated.
     expect(script).toContain("$env:AGENTS_ACTOR_ID='o''brien';");
     expect(script).toContain("$env:AGENTS_ACTOR='Some Name';");
+    // A lone program has no arguments, so no `--%` is emitted for it.
     expect(script.endsWith("& 'prog'")).toBe(true);
   });
 
@@ -254,5 +256,63 @@ describe('the FULL buildSshInvocation pipeline, not just the quoter', () => {
     ).toString('utf16le');
     expect(script).toContain('agents browser status');
     expect(script).not.toContain("& 'agents'");
+  });
+});
+
+describe('PowerShell 5.1 loses arguments unless they are Win32-quoted after --%', () => {
+  /**
+   * Measured on a real Windows peer (win-mini, PowerShell 5.1), NOT inferred:
+   * PowerShell re-serializes arguments when invoking a NATIVE program, and its
+   * serializer drops an empty argument entirely and discards embedded double
+   * quotes. Before this, `['a','','b']` arrived on the peer as two arguments and
+   * `say "hi"` arrived as `say hi` — the callee's argv silently shifted.
+   */
+  function pwshScript(cmd: string[]): string {
+    const wrapped = wrapRemoteCommand(dev({ shell: 'powershell' }), cmd, { argv: true })!;
+    return Buffer.from(wrapped.split(' ').pop()!, 'base64').toString('utf16le');
+  }
+
+  it('emits the stop-parsing token so PowerShell cannot rebuild the line', () => {
+    expect(pwshScript(['prog', 'a'])).toBe(`& 'prog' --% a`);
+  });
+
+  it('represents an EMPTY argument, which PowerShell 5.1 otherwise drops', () => {
+    const script = pwshScript(['prog', 'before', '', 'after']);
+    expect(script).toBe(`& 'prog' --% before "" after`);
+    // The empty token must occupy a position, not vanish.
+    expect(script.split(' ').slice(3)).toHaveLength(3);
+  });
+
+  it('preserves an embedded double quote, which PowerShell 5.1 otherwise eats', () => {
+    expect(pwshScript(['prog', 'say "hi"'])).toBe(`& 'prog' --% "say \\"hi\\""`);
+  });
+
+  it('doubles backslashes only where a closing quote follows them', () => {
+    // A trailing backslash in an UNQUOTED token needs no doubling — nothing
+    // follows it to escape. This is the canonical quoter's rule, not a shortcut.
+    expect(pwshScript(['prog', 'C:\\dir\\'])).toBe(`& 'prog' --% C:\\dir\\`);
+    // Once the token must be quoted, the trailing run doubles before the close.
+    expect(pwshScript(['prog', 'C:\\my dir\\'])).toBe(`& 'prog' --% ${quoteWin32ExecArg('C:\\my dir\\')}`);
+    // A backslash directly before an embedded quote doubles plus escapes it.
+    expect(pwshScript(['prog', 'a\\"b'])).toBe(`& 'prog' --% ${quoteWin32ExecArg('a\\"b')}`);
+  });
+
+  it('leaves a plain token unquoted and quotes one with a metacharacter', () => {
+    expect(pwshScript(['prog', 'simple'])).toBe(`& 'prog' --% simple`);
+    expect(pwshScript(['prog', 'a & b'])).toBe(`& 'prog' --% "a & b"`);
+  });
+
+  it('reuses the canonical Win32 quoter rather than a second implementation', () => {
+    // Same algorithm as the `.cmd` shim path; a divergent copy would drift.
+    for (const token of ['', 'a b', 'say "hi"', 'C:\\dir\\', 'a\\"b', 'plain', 'a|b']) {
+      expect(pwshScript(['prog', token])).toBe(`& 'prog' --% ${quoteWin32ExecArg(token)}`);
+    }
+  });
+
+  it('still quotes the PROGRAM for PowerShell, which resolves it', () => {
+    // The program is not Win32-quoted: PowerShell itself looks it up.
+    expect(pwshScript(['C:\\Program Files\\x\\p.exe', 'arg'])).toBe(
+      `& 'C:\\Program Files\\x\\p.exe' --% arg`,
+    );
   });
 });

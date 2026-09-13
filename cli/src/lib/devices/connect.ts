@@ -19,6 +19,7 @@ import { assertValidSshTarget, shellQuote } from '../ssh-exec.js';
 import { resolveActor, actorEnv } from '../actor.js';
 import { getCliLaunch } from '../cli-entry.js';
 import { encodePwshBase64 } from '../pwsh.js';
+import { quoteWin32ExecArg } from '../platform/exec.js';
 import { homeRemainder, remoteCdPrefix } from '../project-root.js';
 import { getCacheDir } from '../state.js';
 import { hostKeyCheckingOpts } from './known-hosts.js';
@@ -113,15 +114,22 @@ export function wrapRemoteCommand(
     // Quote EACH caller token so the peer receives it byte-for-byte, then prefix
     // the prelude VERBATIM — it is already shell syntax and re-quoting it would
     // break it (see `fleetRemotePrelude`).
-    const quoted = cmd.map((token) => (device.shell === 'powershell' ? pwshQuote(token) : shellQuote(token)));
     if (device.shell === 'powershell') {
-      // `&` is required, not cosmetic: PowerShell evaluates a bare quoted string
-      // as a STRING EXPRESSION and echoes it. Without the call operator
-      // `'prog' 'arg'` runs nothing at all — it prints `prog`. POSIX needs no
-      // equivalent because a quoted first word is still a command word there.
-      script = [...prelude, '&', ...quoted].join(' ');
+      // Three things are load-bearing here, in order:
+      //   `&`   — PowerShell evaluates a bare quoted string as a STRING
+      //           EXPRESSION and echoes it, so without the call operator
+      //           `'prog' 'arg'` prints `prog` and runs nothing.
+      //   `--%` — the stop-parsing token. It makes PowerShell pass the rest of
+      //           the line to the program verbatim instead of re-serializing it,
+      //           which on 5.1 drops empty arguments and eats embedded quotes.
+      //   Win32 quoting — because after `--%` the CALLEE splits the line, so the
+      //           tokens must already be escaped to the rules it will apply.
+      // The program itself is still pwsh-quoted: PowerShell resolves that one.
+      const program = pwshQuote(cmd[0]!);
+      const rest = cmd.slice(1).map(quoteWin32ExecArg);
+      script = [...prelude, '&', program, ...(rest.length > 0 ? ['--%', ...rest] : [])].join(' ');
     } else {
-      script = [...prelude, ...quoted].join(' ');
+      script = [...prelude, ...cmd.map(shellQuote)].join(' ');
     }
   } else {
     // The default joins raw, which is what lets a caller hand the remote shell
@@ -135,14 +143,40 @@ export function wrapRemoteCommand(
 }
 
 /**
- * Single-quote one token for PowerShell. Inside a single-quoted pwsh string the
- * only special character is `'` itself, escaped by doubling — so this is total
- * over every byte, including `$`, backtick and newline, which is exactly what an
- * argv token needs.
+ * Single-quote one token for PowerShell's OWN parser. Inside a single-quoted pwsh
+ * string the only special character is `'`, escaped by doubling.
+ *
+ * This is correct for a value PowerShell itself consumes, and NOT sufficient for
+ * an argument handed on to a native program — see the Win32 note below.
  */
 export function pwshQuote(token: string): string {
   return `'${token.replace(/'/g, "''")}'`;
 }
+
+/**
+ * Why a PowerShell argv needs Win32 quoting plus `--%`.
+ *
+ * Windows has no argv array: a process receives ONE string and splits it itself.
+ * PowerShell 5.1 re-serializes arguments into that string when invoking a native
+ * program, and its serializer is lossy in exactly two ways — both MEASURED against
+ * a real Windows peer, not inferred:
+ *
+ *   - an EMPTY argument is dropped entirely, so the callee's argv silently shifts;
+ *   - an embedded `"` is discarded, so `say "hi"` arrives as `say hi`.
+ *
+ * So the tokens are serialized here to the documented `CommandLineToArgvW` rules
+ * the callee will apply — which `quoteWin32ExecArg` already implements for the
+ * `.cmd` shim path, so it is reused rather than re-derived — and PowerShell is told
+ * to stop parsing (`--%`) so it passes the line through untouched instead of
+ * rebuilding it.
+ *
+ * Residual, stated rather than hidden: after `--%` PowerShell performs cmd-style
+ * `%VAR%` expansion, which double-quoting does not suppress (the same caveat
+ * `quoteWin32ExecArg` documents). A token containing `%FOO%` is substituted on the
+ * peer. `agents ssh --argv` composes the CALLER's own tokens, so that is not a
+ * privilege boundary here; composing an untrusted command line would need a shell
+ * with expansion disabled instead.
+ */
 
 /**
  * True when `cmd` is a browser drive: `agents browser …`, `ag browser …`, or
