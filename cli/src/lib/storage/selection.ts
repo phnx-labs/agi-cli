@@ -13,8 +13,8 @@
  * covers — those differ (share uses an email-handle namespace with public reads
  * and covers; a traces/sessions adapter uses the userId and differs again). Each
  * surface keeps its own DISCRIMINATED, typed adapter that reads this decision and
- * returns its own `kind`-tagged backend. See `lib/share/backend.ts` and
- * `lib/traces/backend.ts` for the two adapters.
+ * returns its own `kind`-tagged backend. See `lib/traces/backend.ts` for a
+ * concrete adapter.
  */
 
 import { readSession, type PhoenixSession } from '../identity/client.js';

@@ -4,7 +4,7 @@ import { setHelpSections } from '../lib/help.js';
 import { readSyncLedger, syncTraces, type SyncFailure } from '../lib/traces/sync.js';
 import { managedTracesBaseUrl, resolveTracesBackend } from '../lib/traces/backend.js';
 import { showUrl } from '../lib/open-url.js';
-import { DEFAULT_CF_BUNDLE, readCloudflareCreds } from '../lib/share/config.js';
+import { DEFAULT_CF_BUNDLE, readCloudflareCreds } from '../lib/cloudflare/creds.js';
 import { PHOENIX_ID_BASE } from '../lib/identity/client.js';
 import { DEFAULT_BUCKET_NAME, DEFAULT_WORKER_NAME } from '../lib/traces/config.js';
 import { DEFAULT_TRACES_DOMAIN } from '../lib/traces/backend.js';

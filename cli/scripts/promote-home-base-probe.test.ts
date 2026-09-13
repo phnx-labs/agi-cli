@@ -110,74 +110,6 @@ describe('promote-home-base-probe.sh', () => {
 });
 
 /**
- * The share-Worker deploy gate (PHNX-3403): with --deploy-worker auto|on the probe
- * ALSO requires the share endpoint be configured here and the cloudflare.com token
- * resolve headlessly, so a Worker-touching release cannot publish and then discover
- * it cannot deploy. `off` skips the gate entirely. The mode rides as the probe's
- * positional arg ($1), so this passes it and drives the failures via a richer
- * `agents` stub keyed by env vars.
- */
-const WORKER_AGENTS_STUB = `#!/usr/bin/env bash
-if [ "$1 $2 $3" = "artifacts share status" ]; then
-  [ "\${STUB_SHARE:-1}" = "1" ] && exit 0 || exit 1
-fi
-if [ "$1 $2" = "secrets exec" ] && [ "$3" = "cloudflare.com" ]; then
-  [ "\${STUB_CF:-1}" = "1" ] && exit 0 || exit 1
-fi
-exit 0
-`;
-
-function runProbeMode(
-  bin: string,
-  mode: string,
-  env: Record<string, string> = {},
-): { status: number | null; out: string } {
-  const r = spawnSync(path.join(bin, 'bash'), [PROBE, mode], {
-    encoding: 'utf-8',
-    env: { PATH: bin, HOME: os.tmpdir(), ...env },
-  });
-  return { status: r.status, out: `${r.stdout}${r.stderr}` };
-}
-
-describe('promote-home-base-probe.sh: --deploy-worker gate (PHNX-3403)', () => {
-  it('off skips the worker gate even when share is unconfigured and CF creds are absent', () => {
-    const bin = stubBin(ALL_TOOLS, { agents: WORKER_AGENTS_STUB });
-    const { status, out } = runProbeMode(bin, 'off', { STUB_SHARE: '0', STUB_CF: '0' });
-    expect(status).toBe(0);
-    expect(out).toContain('promote-ready');
-  });
-
-  it('auto passes when share is configured and the cloudflare.com token resolves', () => {
-    const bin = stubBin(ALL_TOOLS, { agents: WORKER_AGENTS_STUB });
-    const { status, out } = runProbeMode(bin, 'auto', { STUB_SHARE: '1', STUB_CF: '1' });
-    expect(status).toBe(0);
-    expect(out).toContain('promote-ready');
-  });
-
-  it('auto FAILS, before any mutation, when the share endpoint is not configured', () => {
-    const bin = stubBin(ALL_TOOLS, { agents: WORKER_AGENTS_STUB });
-    const { status, out } = runProbeMode(bin, 'auto', { STUB_SHARE: '0', STUB_CF: '1' });
-    expect(status).not.toBe(0);
-    expect(out).toContain('share endpoint not configured');
-    expect(out).toContain('--deploy-worker=off');
-  });
-
-  it('auto FAILS when the cloudflare.com API token is not readable headlessly', () => {
-    const bin = stubBin(ALL_TOOLS, { agents: WORKER_AGENTS_STUB });
-    const { status, out } = runProbeMode(bin, 'auto', { STUB_SHARE: '1', STUB_CF: '0' });
-    expect(status).not.toBe(0);
-    expect(out).toContain('cloudflare.com bundle API token');
-  });
-
-  it('on FAILS the same way as auto when creds are missing', () => {
-    const bin = stubBin(ALL_TOOLS, { agents: WORKER_AGENTS_STUB });
-    const { status, out } = runProbeMode(bin, 'on', { STUB_SHARE: '1', STUB_CF: '0' });
-    expect(status).not.toBe(0);
-    expect(out).toContain('cloudflare.com bundle API token');
-  });
-});
-
-/**
  * Execute the REAL `assert_promote_home_base` function body under the same
  * `set -euo pipefail` release.sh runs with. The static ordering test below
  * proves the call is placed right; this proves the function itself fails LOUD.
@@ -214,9 +146,6 @@ function runAssert(probeExit: 'fail' | 'pass'): { status: number | null; out: st
     'set -euo pipefail',
     'ON_HOME_BASE=true',
     'RELEASE_HOME_BASE=testbox',
-    // release.sh always sets DEPLOY_WORKER at parse (default auto); the function
-    // now forwards it to the probe, so the harness must bind it too (PHNX-3403).
-    'DEPLOY_WORKER=off',
     'bold(){ :; }',
     "phase_ok(){ printf 'PHASE_OK: %s\\n' \"$1\"; }",
     "die(){ printf 'DIE: %s\\n' \"$1\" >&2; exit 1; }",
@@ -244,93 +173,6 @@ describe('release.sh: assert_promote_home_base fails loud under set -e', () => {
     expect(status).toBe(0);
     expect(out).toContain('PHASE_OK:');
     expect(out).not.toContain('DIE:');
-  });
-});
-
-/**
- * assert_promote_home_base MUST forward $DEPLOY_WORKER to the probe as its
- * positional arg (PHNX-3403). Without this, the cloudflare.com/share gate is
- * silently skipped for every release regardless of the mode. The stub probe here
- * ECHOES its $1 so the forwarding is asserted, not assumed.
- */
-function runAssertForwardsMode(mode: string): { status: number | null; out: string } {
-  const lines = fs.readFileSync(RELEASE, 'utf-8').replace(/\r/g, '').split('\n');
-  const start = lines.findIndex((l) => l.startsWith('assert_promote_home_base() {'));
-  const end = lines.findIndex((l, i) => i > start && l === '}');
-  const fnBody = lines.slice(start, end + 1).join('\n');
-
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'assert-promote-forward-'));
-  fs.mkdirSync(path.join(dir, 'scripts'), { recursive: true });
-  // Echo the mode the probe was invoked with, then FAIL — assert_promote_home_base
-  // captures the probe's output into $out and surfaces it only on the die path, so
-  // a failing probe is how the forwarded positional arg becomes observable.
-  fs.writeFileSync(
-    path.join(dir, 'scripts/promote-home-base-probe.sh'),
-    "#!/usr/bin/env bash\nprintf 'PROBE_MODE:%s\\n' \"${1:-<none>}\" >&2\nexit 1\n",
-    { mode: 0o755 },
-  );
-  const harness = [
-    'set -euo pipefail',
-    'ON_HOME_BASE=true',
-    'RELEASE_HOME_BASE=testbox',
-    `DEPLOY_WORKER=${mode}`,
-    'bold(){ :; }',
-    "phase_ok(){ printf 'PHASE_OK: %s\\n' \"$1\"; }",
-    "die(){ printf 'DIE: %s\\n' \"$1\" >&2; exit 1; }",
-    fnBody,
-    'assert_promote_home_base',
-  ].join('\n');
-  const harnessPath = path.join(dir, 'harness.sh');
-  fs.writeFileSync(harnessPath, harness);
-  const r = spawnSync('bash', [harnessPath], { cwd: dir, encoding: 'utf-8' });
-  return { status: r.status, out: `${r.stdout}${r.stderr}` };
-}
-
-describe('release.sh: assert_promote_home_base forwards the deploy-worker mode to the probe', () => {
-  it('passes DEPLOY_WORKER as the probe positional arg (auto)', () => {
-    const { status, out } = runAssertForwardsMode('auto');
-    expect(status).not.toBe(0); // the echo-probe fails, so the die path surfaces $out
-    expect(out).toContain('PROBE_MODE:auto'); // NOT PROBE_MODE:<none> — the forwarding is real
-  });
-
-  it('passes DEPLOY_WORKER as the probe positional arg (off)', () => {
-    const { out } = runAssertForwardsMode('off');
-    expect(out).toContain('PROBE_MODE:off');
-  });
-});
-
-/**
- * The home-base re-exec must carry --deploy-worker (PHNX-3403). `home_base_wt_snippet`
- * emits the tagged-tree program that ends by invoking `release.sh … --home-base-phase`;
- * $DEPLOY_WORKER is expanded into it at emit time. Generate the snippet with the mode
- * bound and assert the flag rides through — otherwise the whole feature is a local-only
- * no-op on the home base.
- */
-function generateHomeBaseSnippet(mode: string): string {
-  const lines = fs.readFileSync(RELEASE, 'utf-8').replace(/\r/g, '').split('\n');
-  const start = lines.findIndex((l) => l.startsWith('home_base_wt_snippet() {'));
-  expect(start, 'home_base_wt_snippet() { not found').toBeGreaterThanOrEqual(0);
-  const end = lines.findIndex((l, i) => i > start && l === '}');
-  const fnBody = lines.slice(start, end + 1).join('\n');
-  // The emitting function only needs $1 (arg), $RELEASE_HOME_BASE and $DEPLOY_WORKER
-  // at cat time; the emitted program's own `set -u` is inside the heredoc.
-  const r = spawnSync('bash', ['-c', `${fnBody}\nhome_base_wt_snippet "1.2.3"`], {
-    encoding: 'utf-8',
-    env: { ...process.env, RELEASE_HOME_BASE: 'testbox', DEPLOY_WORKER: mode },
-  });
-  expect(r.status).toBe(0);
-  return r.stdout;
-}
-
-describe('release.sh: home_base_wt_snippet forwards --deploy-worker to the tagged re-exec', () => {
-  it('embeds --deploy-worker "<mode>" alongside --home-base-phase --device', () => {
-    const snippet = generateHomeBaseSnippet('auto');
-    expect(snippet).toContain('--home-base-phase --device "testbox"');
-    expect(snippet).toContain('--deploy-worker "auto"');
-  });
-
-  it('carries off through unchanged', () => {
-    expect(generateHomeBaseSnippet('off')).toContain('--deploy-worker "off"');
   });
 });
 

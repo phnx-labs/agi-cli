@@ -17,7 +17,7 @@ import { renderStream } from './stream.js';
 import type { CloudProvider, CloudProviderId, CloudTarget, CloudTaskStatus, DispatchOptions, ImageAttachment, SkillRef } from './types.js';
 import { MissingTargetError, MAX_IMAGES_PER_DISPATCH } from './types.js';
 import { emit } from '../feed/events.js';
-import { shareRuntimeEnv } from '../share/config.js';
+import { shareRuntimeEnv } from '../share-runtime.js';
 
 /** Map a supported image file extension to its wire mimeType. Rejects anything else. */
 function imageMimeFromPath(file: string): ImageAttachment['mimeType'] {

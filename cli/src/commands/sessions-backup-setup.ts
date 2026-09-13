@@ -12,7 +12,7 @@
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
-import { DEFAULT_CF_BUNDLE, readCloudflareCreds } from '../lib/share/config.js';
+import { DEFAULT_CF_BUNDLE, readCloudflareCreds } from '../lib/cloudflare/creds.js';
 import { PHOENIX_ID_BASE } from '../lib/identity/client.js';
 import { provisionSessions } from '../lib/session/sync/provision.js';
 import {

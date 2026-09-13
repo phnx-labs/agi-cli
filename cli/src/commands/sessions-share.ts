@@ -1,29 +1,31 @@
 /**
  * `agents sessions share <id>` — publish one session transcript as a link.
  *
- * Composes three pieces that already existed but were never wired together:
- * `renderSessionMarkdownDocument()` (redacted transcript),
- * `renderSessionHtmlDocument()` (self-contained branded page), and
- * `publishFile()` (the R2-backed share Worker). Before this, sharing a session
- * meant three commands and a detour through the external artifacts-cli.
+ * Renders the session locally — `renderSessionMarkdownDocument()` (redacted
+ * transcript) and `renderSessionHtmlDocument()` (self-contained branded page) —
+ * then publishes it through the standalone `artifacts` CLI (`artifacts share`),
+ * the single home for artifact sharing since PHNX-3992. agents-cli holds no
+ * share engine of its own; this command contributes the session-specific
+ * rendering and redaction, and forwards the finished page to `artifacts share`.
  *
- * Unlisted by default, unlike `agents artifacts share`. A transcript carries file
- * paths, command output, error text, and whatever a tool printed — strictly more
- * than a plan does — so it does not belong in the public `/<user>` gallery unless
- * the operator asks for it with `--public`. The URL itself stays world-readable:
- * unlisted is a capability URL, not a secret.
+ * Unlisted by default, unlike `artifacts share` (public by default). A transcript
+ * carries file paths, command output, error text, and whatever a tool printed —
+ * strictly more than a plan does — so it does not belong in the public `/<user>`
+ * gallery unless the operator asks for it with `--public`. The URL itself stays
+ * world-readable: unlisted is a capability URL, not a secret.
  */
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { spawnSync } from 'node:child_process';
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import { setHelpSections } from '../lib/help.js';
-import { knownSecretValuesFromEnv } from '../lib/redact.js';
+import { knownSecretValuesFromEnv, redactEmails } from '../lib/redact.js';
 import { discoverSessions } from '../lib/session/discover.js';
 import { renderSessionHtmlDocument } from '../lib/session/share-html.js';
 import type { SessionMeta } from '../lib/session/types.js';
-import { publishFile, redactEmails, type PublishOptions } from '../lib/share/publish.js';
+import { resolveArtifactsBin, invocation, ArtifactsClientError } from '../lib/artifacts-client.js';
 import { renderSessionMarkdownDocument, type ReasoningMode } from './sessions-render.js';
 import { selectSessions } from './sessions-export.js';
 import { parseAgentFilter } from './sessions.js';
@@ -47,6 +49,17 @@ interface ShareOptions {
   cover?: boolean;
 }
 
+/** The shape `artifacts share --json` prints (`formatSharePublishResult`). */
+interface ArtifactsShareResult {
+  url: string;
+  slug?: string;
+  label?: string;
+  coverUrl?: string;
+  expiresAt?: string | null;
+  visibility?: string;
+  unlisted?: boolean;
+}
+
 function parseReasoning(value: string): ReasoningMode {
   if (value === 'omit' || value === 'fold' || value === 'include') return value;
   throw new Error(`Unknown reasoning mode "${value}". Expected omit, fold, or include.`);
@@ -58,26 +71,33 @@ export function defaultSessionSlug(session: SessionMeta): string {
 }
 
 /**
- * Map the command's flags onto {@link PublishOptions}.
+ * Build the `artifacts share` argv for a session publish.
  *
- * Extracted so the defaults are testable directly. `unlisted` in particular is the
- * security-relevant one — it inverts the parent command's public-by-default
- * behavior, and a test that re-implements this mapping would still pass with it
- * flipped.
+ * Extracted so the mapping is testable directly. The security-relevant default
+ * is `--visibility unlisted` — it inverts `artifacts share`'s public default, and
+ * a test that re-implements this mapping would still pass with it flipped.
  */
-export function buildSharePublishOptions(
+export function buildArtifactsShareArgs(
   session: SessionMeta,
   options: Pick<ShareOptions, 'public' | 'slug' | 'label' | 'expire' | 'force' | 'cover'>,
-): PublishOptions {
-  return {
-    slug: options.slug ?? defaultSessionSlug(session),
-    unlisted: options.public !== true,
-    expire: options.expire,
-    force: options.force === true,
-    cover: options.cover !== false,
-    label: options.label,
-    meta: { kind: 'session' },
-  };
+  file: string,
+): string[] {
+  const args = [
+    'share',
+    file,
+    '--slug',
+    options.slug ?? defaultSessionSlug(session),
+    '--visibility',
+    options.public === true ? 'public' : 'unlisted',
+    '--meta',
+    'kind=session',
+    '--json',
+  ];
+  if (options.expire) args.push('--expire', options.expire);
+  if (options.force === true) args.push('--force');
+  if (options.cover === false) args.push('--no-cover');
+  if (options.label) args.push('--label', options.label);
+  return args;
 }
 
 export function registerSessionsShareCommand(sessionsCmd: Command): void {
@@ -86,7 +106,7 @@ export function registerSessionsShareCommand(sessionsCmd: Command): void {
     .description('Publish one session as a redacted, self-contained web page and print the link.')
     .option('--public', 'List the page in your public share gallery (default: unlisted capability URL)')
     .option('--slug <slug>', 'URL slug under your namespace (default: session-<shortId>)')
-    .option('--label <text>', 'Display title in the gallery and `agents artifacts share list`')
+    .option('--label <text>', 'Display title in the gallery and `artifacts share list`')
     .option('--expire <spec>', 'Auto-expire window: 30d, 12h, a date, or never (default: 30d)')
     .option('--reasoning <mode>', 'Reasoning visibility: omit, fold, or include', 'omit')
     .option('--force', 'Publish despite the sensitive-content scan flagging the transcript')
@@ -104,22 +124,23 @@ agents sessions share a1b2c3d4 --reasoning fold
 
 # A link that does not decay
 agents sessions share a1b2c3d4 --expire never`,
-    notes: `Requires a share endpoint: 'agents artifacts share status' shows it, 'agents artifacts setup'
-provisions one, 'agents artifacts share join <baseUrl>' uses an existing one.
+    notes: `Publishes through the standalone artifacts CLI — install it with
+'npm i -g @phnx-labs/artifacts-cli' (or 'agents clis install artifacts'). Sign in with
+'artifacts auth login' for the managed endpoint (zero Cloudflare setup), or configure
+your own bucket with 'artifacts share setup' / 'artifacts share join <baseUrl>'.
 
 Unlisted by default — the URL is world-readable but the page stays out of your public
-gallery and out of 'agents artifacts share list'. Pass --public to list it.
+gallery and out of 'artifacts share list'. Pass --public to list it.
 
-Secrets are redacted and the same pre-publish scan as 'agents artifacts share' runs on the
-page, so a transcript carrying emails or credential-shaped strings is refused
-unless you pass --force. --no-redact (the sessions-level flag) disables redaction
-and is a bad idea for anything you publish.
+Secrets are redacted and 'artifacts share' runs its own pre-publish scan on the page,
+so a transcript carrying emails or credential-shaped strings is refused unless you pass
+--force. --no-redact (the sessions-level flag) disables redaction and is a bad idea for
+anything you publish.
 
 Re-running with the same session updates the same URL and keeps the prior version
-as a revision ('agents artifacts share revisions <slug>').
+as a revision ('artifacts share revisions <slug>').
 
-Manage published sessions with 'agents artifacts share list' and
-'agents artifacts share delete <slug>'.`,
+Manage published sessions with 'artifacts share list' and 'artifacts share delete <slug>'.`,
   });
 
   cmd.action(async (selector: string, options: ShareOptions, command: Command) => {
@@ -158,27 +179,49 @@ Manage published sessions with 'agents artifacts share list' and
     });
     // Emails on top of what the renderer masks. Almost every real transcript
     // carries a few — git author addresses, `gh api user`, a pasted log — and
-    // publishToEndpoint refuses a body containing any (RUSH-2428). Masking them
-    // means the published page genuinely does not carry them; the alternative,
-    // telling people to pass --force, would train everyone to bypass the gate
-    // that also catches real credentials.
+    // `artifacts share` refuses a body containing any (its own scan). Masking
+    // them means the published page genuinely does not carry them; the
+    // alternative, telling people to pass --force, trains everyone to bypass the
+    // gate that also catches real credentials.
     //
     // Applied to the RENDERED PAGE, not the Markdown, so the text that is masked
-    // is exactly the text `scanShareContent` will scan. Markdown escaping stands
+    // is exactly the text the publish scan will see. Markdown escaping stands
     // between the two: `foo\@example.com` hides from the pattern in the Markdown
     // and reappears as a live address once marked drops the backslash.
     const page = renderSessionHtmlDocument(session, markdown, { redacted: redact });
     const html = redact ? redactEmails(page) : page;
 
-    // A real file on disk is what publishFile() takes, and the OG capturer opens
-    // it in a browser. 0600 + a per-run directory keeps the intermediate off a
-    // world-readable /tmp path while it exists.
+    // A real file on disk is what `artifacts share` takes, and its OG capturer
+    // opens it in a browser. 0600 + a per-run directory keeps the intermediate
+    // off a world-readable /tmp path while it exists.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-session-share-'));
     const file = path.join(dir, `${defaultSessionSlug(session)}.html`);
     try {
       fs.writeFileSync(file, html, { mode: 0o600 });
-      const result = await publishFile(file, buildSharePublishOptions(session, options));
 
+      let bin: string;
+      try {
+        bin = resolveArtifactsBin();
+      } catch (err) {
+        if (err instanceof ArtifactsClientError) {
+          process.stderr.write(chalk.red(err.message + '\n'));
+          process.exitCode = 1;
+          return;
+        }
+        throw err;
+      }
+
+      const { command: execCommand, prefix } = invocation(bin);
+      const args = [...prefix, ...buildArtifactsShareArgs(session, options, file)];
+      const proc = spawnSync(execCommand, args, { encoding: 'utf-8' });
+      if (proc.error) throw proc.error;
+      if (proc.status !== 0) {
+        process.stderr.write(proc.stderr || chalk.red(`artifacts share exited ${proc.status ?? 'with no status'}\n`));
+        process.exitCode = proc.status ?? 1;
+        return;
+      }
+
+      const result = JSON.parse(proc.stdout) as ArtifactsShareResult;
       if (globals.json) {
         process.stdout.write(JSON.stringify({
           session: session.id,
@@ -189,8 +232,9 @@ Manage published sessions with 'agents artifacts share list' and
         return;
       }
       process.stdout.write(`${result.url}\n`);
-      const bits = [result.unlisted ? 'unlisted' : 'public', redact ? 'redacted' : chalk.red('NOT redacted')];
-      if (result.expiresAt) bits.push(`expires ${result.expiresAt.slice(0, 10)}`);
+      const visibility = result.visibility ?? (result.unlisted ? 'unlisted' : options.public ? 'public' : 'unlisted');
+      const bits = [visibility, redact ? 'redacted' : chalk.red('NOT redacted')];
+      if (result.expiresAt) bits.push(`expires ${String(result.expiresAt).slice(0, 10)}`);
       process.stderr.write(chalk.dim(`${bits.join(' · ')}\n`));
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });

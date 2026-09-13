@@ -53,7 +53,7 @@ agents setup status                    # readiness for browser, computer, fleet,
 agents run claude "explain this repo"  # run any agent on your existing subscription
 ```
 
-Everything here — and every other command in this README — is free and needs no account; the optional `agents auth login` unlocks the hosted surfaces — [team spaces](#sign-in) and managed, private-by-default sharing (`agents artifacts share` / `agents traces sync` with no Cloudflare setup). `agents setup` is interactive and idempotent -- safe to re-run on any machine. Once core setup exists, it opens a status-aware menu for browser, computer, secrets, fleet, share, watchdog, and device preferences; each choice delegates to the same wizard available under `agents setup <capability>`. In CI or another non-TTY, bare setup prints the checklist without prompting. The `agi-cli.sh` one-liner installs this same canonical `@phnx-labs/agents-cli` package. Prefer bun? `bun install -g @phnx-labs/agents-cli` works too.
+Everything here — and every other command in this README — is free and needs no account; the optional `agents auth login` unlocks the hosted surfaces — [team spaces](#sign-in) and managed trace sync (`agents traces sync` with no Cloudflare setup). `agents setup` is interactive and idempotent -- safe to re-run on any machine. Once core setup exists, it opens a status-aware menu for browser, computer, secrets, fleet, watchdog, and device preferences; each choice delegates to the same wizard available under `agents setup <capability>`. In CI or another non-TTY, bare setup prints the checklist without prompting. The `agi-cli.sh` one-liner installs this same canonical `@phnx-labs/agents-cli` package. Prefer bun? `bun install -g @phnx-labs/agents-cli` works too.
 
 The command surface teaches setup through `agents setup` and group-level `--help`.
 The durable system model starts at [`cli/docs/README.md`](cli/docs/README.md).
@@ -1150,7 +1150,7 @@ agents browser profiles create cloud \
 
 ## Sign in
 
-Signing in is **optional**. Every local feature — `agents run`, sessions, teams, fleet dispatch, secrets, browser, computer — works with no account. Signing in unlocks the hosted surfaces: **team spaces** (`agents auth space`) and **managed sharing** — `agents artifacts share` and `agents traces sync` publish to our storage with **zero Cloudflare setup**, and a signed-in `agents artifacts share` is **private by default** (`me`, owner-only) unless you pass `--visibility org`/`public`. `agents auth` signs this machine in to **Phoenix ID**, the Phoenix Labs account layer behind these hosted surfaces. Sign-in is Google-only and runs a device-code flow: the CLI shows a code, your browser confirms it, and the CLI picks the session up.
+Signing in is **optional**. Every local feature — `agents run`, sessions, teams, fleet dispatch, secrets, browser, computer — works with no account. Signing in unlocks the hosted surfaces: **team spaces** (`agents auth space`) and **managed trace sync** — `agents traces sync` publishes to our storage with **zero Cloudflare setup**. `agents auth` signs this machine in to **Phoenix ID**, the Phoenix Labs account layer behind these hosted surfaces. Sign-in is Google-only and runs a device-code flow: the CLI shows a code, your browser confirms it, and the CLI picks the session up.
 
 ```bash
 agents auth login                        # shows a code, opens a Phoenix-branded page
@@ -1446,99 +1446,19 @@ Sources: a command's stdout (`--watch` / `--poll`), an HTTP endpoint (`--poll-ht
 
 ## Share
 
-```bash
-# Signed in? Just publish — no Cloudflare setup.
-agents auth login
-agents artifacts share plan.html --visibility unlisted      # → https://share.agents-cli.sh/<handle>/<slug>-<id>
-agents artifacts share secret.html --protected              # → https://share.agents-cli.sh/<handle>/<slug>-<id>?k=<token>
+Publishing an agent's HTML output to a shareable link now lives in the standalone
+`artifacts` CLI (`@phnx-labs/artifacts-cli`), not in `agents`. The `agents artifacts`
+command group was removed (PHNX-3992), the same split as secrets (PHNX-3989) and
+computer (PHNX-4075). Sign in and publish with it directly:
 
-# Or provision your own Cloudflare R2 (~$0).
-agents artifacts setup                                      # once: provision bucket + Worker on your CF
-agents traces setup                                         # provision the private traces Worker + R2 bucket
-agents artifacts share plan.html --slug fleet --expire 30d  # → https://<base>/fleet
-agents artifacts share plan.html --label "Q3 fleet plan" --meta kind=plan   # human title + structured metadata
-agents artifacts share plan.html --json                     # URL object for plan-render hooks
-agents artifacts share list --agent claude                  # public gallery, filterable
-agents artifacts share list --meta kind=plan                # exact, repeatable metadata filters
-agents artifacts share list --all                           # include hidden unlisted/private/me/org pages
-agents artifacts share list --scope me                      # just the owner-only pages
-agents artifacts share edit fleet --label "Final fleet plan" --meta status=final
-agents artifacts share revisions fleet                      # prior versions kept under a slug
-agents artifacts share visibility fleet me                  # re-scope a published page in place (public|unlisted|me|org)
-agents artifacts share open fleet                           # open your page signed in, so its in-page visibility control is live
-agents artifacts share status                               # show the endpoint
-agents artifacts unshare fleet                              # take a published link (+ its OG cover) down
+```bash
+artifacts auth login       # Phoenix ID device-code sign-in
+artifacts share plan.html  # publish the HTML and print the link
 ```
 
-`agents artifacts share` closes the loop: an agent makes work (a plan, a viz, a report),
-publishes it, and you open the link to see it. **Signed-in users** publish to the
-already-live managed endpoint (`share.agents-cli.sh/<handle>/…`) with the Phoenix session — no
-Cloudflare account, bucket, or write token — and `share status` / `list` / `revisions`
-/ `unshare` talk to that same endpoint. The handle is the local-part of the signed-in
-email (`muqsitnawaz@gmail.com` → `muqsitnawaz`); the page slug is readable plus a
-short view-id. HTML is stored as one object: local images are inlined, `file://` TOC
-links become in-page hashes, so the published page is actually viewable. The managed
-Worker lazily renders and caches the branded 1200×630 Open Graph card at `<slug>.png`,
-so publishing from Linux does not require a local Chromium; BYO endpoints keep the
-local screenshot fallback. `--visibility unlisted` (hidden aliases
-`--unlisted` / `--private`) is a capability URL: GET still works, the gallery hides it,
-and the Worker sends `X-Robots-Tag: noindex`. `--protected` (`--visibility private`)
-is token-gated: the published URL carries a secret `?k=` key (`Authorization: Bearer`
-is accepted too) and GET returns 404 without it — treat the whole link as a secret.
-`--visibility me` is visible only to
-you (the signed-in owner); `--visibility org` is visible to anyone at your email
-**domain** — derived from your own address, so it needs a **workspace** Google
-account and is refused on a public-inbox domain (`gmail.com`, `outlook.com`,
-`icloud.com`, …). Both need a Phoenix session and are identity-gated at read time (a
-stranger is redirected to sign in, then 404s). `share visibility <target> <level>`
-re-scopes an **already-published** page in place — the slug/URL is preserved and the
-body is untouched (a metadata-only change, like `share edit`, so no revision) — so you
-can promote a draft to `public` or pull a link back to `me`/`org` without re-publishing
-(`me`/`org` need a Phoenix session; `org` needs a workspace domain). The served page
-also carries an **in-page visibility control** — a chip you can switch right on the page
-— but it is interactive only for the signed-in owner, and a plain link has no login;
-`share open <target>` mints a short-lived, single-use login ticket and opens your page
-with it so the chip becomes a live dropdown. Sign-in is a
-single **Phoenix ID** (Google-only device-code OAuth, `agents auth login`) — see
-[`docs/share.md`](cli/docs/share.md) for the full identity + visibility model.
-**BYO Cloudflare** remains: `setup` reads
-a Cloudflare API token from your `cloudflare.com` secrets bundle (or `--token`), creates
-an R2 bucket, uploads a tiny Worker, and enables the free `*.workers.dev` subdomain (or
-maps `--domain share.example.com` when the token owns the zone). Writes are bearer-gated
-**through** the Worker (Phoenix bearer or static `WRITE_TOKEN`); public and unlisted
-reads are **public** so a link outlives the agent, while `--protected` token-gates
-reads on BYO too. R2 has zero egress + a 10 GB free tier, so BYO is still
-effectively free.
-
-**Fleet mode:** provision one endpoint, then every fleet / cloud / ephemeral agent
-publishes through it with a shared write token — `agents artifacts share join <baseUrl>` uses an
-existing endpoint with no provisioning. `--expire 30d|12h|<date>` auto-expires a link.
-`--json` emits `{ url, coverUrl, expiresAt, visibility, unlisted?, label, labelSource }` so plan-render automation can
-publish the rendered HTML and post the returned link without scraping terminal text.
-
-**Every share carries provenance and a title.** Agent/session/host/repo/date are
-captured automatically from the exec env and git — never invented, only sent when
-present. `--label`/`--title` names a share (else one is derived from the HTML
-`<title>`, frontmatter, or filename, with a nudge — never a blocking prompt); `--meta
-key=value` attaches structured metadata (`kind`, `project`, `ticket`, `status`, ...).
-`agents artifacts share list --agent <name> | --session <id> | --label-contains <substr>
-| --meta <key=value>` filters by provenance, title, or exact structured metadata, so
-the listing is a real "what have I shared" gallery, not just slugs. By default it mirrors
-the public gallery; `--scope unlisted|me|org` (or `--all`) includes your hidden pages and
-marks each row with its visibility so you can tell public from private at a glance.
-`agents artifacts share edit <slug>` changes only the label/arbitrary metadata in place:
-the URL, exact body, HTTP metadata, publication time, visibility, expiry, provenance,
-cover, and revision history stay unchanged.
-Republishing an existing slug keeps the prior version as a revision by default
-(`--no-revision` to skip); `agents artifacts share revisions <slug>` shows the retained
-history, newest first.
-
-`agents artifacts share delete <targets...>` (alias `agents artifacts unshare`) takes a page down — pass a
-full URL, `<user>/<slug>`, or a bare slug (resolved against your own namespace); several
-targets at once are fine. It also deletes the sibling `<slug>.png` OG cover by default
-(`--keep-cover` opts out) and verifies the page actually 404s before reporting success —
-the Worker's delete is idempotent, so `{"ok":true}` alone is never proof.
-See the publication boundary in [observability](cli/docs/observability.md).
+`agents sessions share <id>` stays in this CLI: it renders a session transcript to
+HTML locally, then shells out to `artifacts share` to publish it, so a conversation
+becomes a shareable link the same way any other artifact does.
 
 ---
 
@@ -1777,7 +1697,7 @@ Claude Code, Codex CLI, Antigravity, Grok Build, and others each have their own 
 
 ### Is it free?
 
-Yes — every feature, with no account and no signup. `agents run`, sessions, teams, fleet dispatch, secrets, browser, and computer automation all work the moment you install. The optional `agents auth login` unlocks the hosted surfaces — team spaces (`agents auth space`) and managed, private-by-default sharing (`agents artifacts share` / `agents traces sync`, no Cloudflare setup); there are no paid tiers. This developer tool is entirely free because we believe developers should have the best tools — fast and robust — so they can create the best products for their users.
+Yes — every feature, with no account and no signup. `agents run`, sessions, teams, fleet dispatch, secrets, browser, and computer automation all work the moment you install. The optional `agents auth login` unlocks the hosted surfaces — team spaces (`agents auth space`) and managed trace sync (`agents traces sync`, no Cloudflare setup); there are no paid tiers. This developer tool is entirely free because we believe developers should have the best tools — fast and robust — so they can create the best products for their users.
 
 ### Is this like `nvm` / `mise` / `asdf` for AI agents?
 

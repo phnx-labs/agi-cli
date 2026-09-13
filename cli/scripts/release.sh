@@ -129,16 +129,6 @@ APPLY=false
 WITH_HELPERS=false
 SKIP_TESTS=false
 YES=false
-# --deploy-worker <auto|on|off> (default auto): after publish, redeploy the managed
-# share OG-cover Worker from the JUST-PUBLISHED CLI so the deployed Worker can never
-# drift from the shipped worker-template.ts (the PHNX-2835 recurrence gap). `auto`
-# deploys only when the template changed (a cheap local render+hash check, no-op
-# otherwise); `on` always redeploys; `off` opts out. The deploy runs on the home
-# base (share config + cloudflare.com creds resolve headlessly there) via bundle
-# `cloudflare.com` — the name the home base actually holds, not the CLI default
-# `cloudflare`. Preflight requires those creds unless the mode is `off`.
-DEPLOY_WORKER="auto"
-readonly WORKER_CF_BUNDLE="cloudflare.com"
 # --home-base-phase is an INTERNAL entrypoint, not a user knob: the trigger box
 # ssh's release.sh onto the home base with this flag to run ONLY the privileged
 # publish phase (build + sign + notarize + npm publish + release assets) against
@@ -164,15 +154,11 @@ TARGET=""
 # they read the working-tree file, while the failure is in a different copy.
 DEVICE=""
 expect_device=false
-expect_deploy_worker=false
 for arg in "$@"; do
   if $expect_device; then DEVICE="$arg"; expect_device=false; continue; fi
-  if $expect_deploy_worker; then DEPLOY_WORKER="$arg"; expect_deploy_worker=false; continue; fi
   case "$arg" in
     --apply) APPLY=true ;;
     --skip-tests) SKIP_TESTS=true ;;
-    --deploy-worker) expect_deploy_worker=true ;;
-    --deploy-worker=*) DEPLOY_WORKER="${arg#*=}" ;;
     # Default OFF. An ordinary release publishes the CLI and NOTHING else: helpers
     # live on their own tags now (cli/src/lib/helper-versions.ts), so staging a
     # helper asset onto v$TARGET produces something no client requests, and
@@ -185,7 +171,7 @@ for arg in "$@"; do
     --orchestration-phase) ORCHESTRATION_PHASE=true ;;
     --device|--host) expect_device=true ;;
     --device=*|--host=*) DEVICE="${arg#*=}" ;;
-    -h|--help) printf '%s\n' "usage: scripts/release.sh <version> [--apply] [--with-helpers] [--deploy-worker auto|on|off] [--device <name>] [--skip-tests] [--yes]"; exit 0 ;;
+    -h|--help) printf '%s\n' "usage: scripts/release.sh <version> [--apply] [--with-helpers] [--device <name>] [--skip-tests] [--yes]"; exit 0 ;;
     --*) die "unknown flag: $arg" ;;
     *)
       [[ -z "$TARGET" ]] || die "unexpected argument: $arg"
@@ -194,11 +180,6 @@ for arg in "$@"; do
   esac
 done
 $expect_device && die "--device needs a machine name (e.g. --device zion)"
-$expect_deploy_worker && die "--deploy-worker needs a mode (auto|on|off)"
-case "$DEPLOY_WORKER" in
-  auto|on|off) ;;
-  *) die "--deploy-worker must be auto, on, or off (got: $DEPLOY_WORKER)" ;;
-esac
 [[ -n "$TARGET" ]] || die "usage: scripts/release.sh <version> [--apply]  (e.g. 1.14.2 --apply)"
 [[ "$TARGET" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "version must be MAJOR.MINOR.PATCH (no pre-release tags)"
 
@@ -242,7 +223,6 @@ else
 fi
 gray "  this box:   $THIS_HOST$($ON_HOME_BASE && echo '  (home base)' || echo '')"
 gray "  home base:  $RELEASE_HOME_BASE  (promote attested tgz + reuse helpers + install smoke)"
-gray "  worker:     share OG-cover deploy after publish = $DEPLOY_WORKER$([[ "$DEPLOY_WORKER" == auto ]] && echo '  (deploys only if worker-template.ts changed)' || true)"
 gray "  proof:      exact-tree attestation (tree/toolchain/lock/policy); ordinary P99 <=60s"
 echo
 
@@ -255,47 +235,6 @@ echo
 # the checked-out version == $TARGET, downloads the attested tarball + manifest
 # from the tag (the throwaway worktree has no store), publishes those bytes, and
 # re-attaches the verified helper zip. It does NOT create its own worktree.
-# Redeploy the managed share OG-cover Worker from the JUST-PUBLISHED CLI so the
-# deployed Worker never drifts from the shipped worker-template.ts — the PHNX-2835
-# recurrence gap this closes (PHNX-3403). Runs on the home base only, after publish.
-# Uses the exact published version via a pinned `npx`, never the home base's
-# globally-installed (possibly stale) `agents`, so the deployed Worker matches the
-# released source. `agents secrets exec` self-resolves the file-backed
-# cloudflare.com/share bundles headlessly (the same way the promote probe reads
-# npmjs.com), so no Touch ID and no forwarded passphrase. Idempotent: `auto` skips
-# via a pure local render+hash when the template is unchanged, so it is safe to
-# re-run — which is why the already-published early return below also calls it.
-deploy_share_worker() {
-  if [[ "$DEPLOY_WORKER" == "off" ]]; then
-    gray "share Worker deploy: skipped (--deploy-worker=off)"
-    return 0
-  fi
-  local cli=(npx --yes --package "$PHNX_PKG@$TARGET" -- agents)
-  bold "Deploying the managed share Worker from $PHNX_PKG@$TARGET (mode: $DEPLOY_WORKER)..."
-  if [[ "$DEPLOY_WORKER" == "auto" ]]; then
-    # Change detection is a pure local render+hash and needs no CF creds; skip the
-    # deploy when the shipped template already matches what the endpoint deployed.
-    local check needed
-    # Keep stderr visible: if npx can't yet resolve the just-published version
-    # (registry/CDN propagation lag right after publish), its 404 must show rather
-    # than read as a --check code bug. The Verify phase confirms visibility, so a
-    # re-run of the release finishes the deploy from the already-published path.
-    check="$("${cli[@]}" artifacts share update --bundle "$WORKER_CF_BUNDLE" --check --update-json)" \
-      || die "share Worker change-detection failed on $RELEASE_HOME_BASE (if npx 404'd, the just-published $TARGET may not have propagated yet -- re-run this release to finish the deploy). Or re-run with --deploy-worker=off and deploy manually: agents artifacts share update --bundle $WORKER_CF_BUNDLE --force"
-    needed="$(jq -r '.deployNeeded' <<<"$check" 2>/dev/null || echo "true")"
-    if [[ "$needed" != "true" ]]; then
-      green "share Worker already matches the shipped template -- no deploy needed"
-      return 0
-    fi
-    gray "shipped worker-template.ts differs from the deployed Worker -- deploying"
-  fi
-  local deploy_args=(artifacts share update --bundle "$WORKER_CF_BUNDLE")
-  [[ "$DEPLOY_WORKER" == "on" ]] && deploy_args+=(--force)
-  "${cli[@]}" "${deploy_args[@]}" \
-    || die "share Worker deploy FAILED after publishing $PHNX_PKG@$TARGET -- npm is live but prod still renders the OLD OG cover. Fix the cause and run on $RELEASE_HOME_BASE: agents artifacts share update --bundle $WORKER_CF_BUNDLE --force"
-  green "share Worker deployed -- prod OG cover now matches $PHNX_PKG@$TARGET"
-}
-
 run_home_base_phase() {
   # No platform gate: this phase is promote-only (download attested tgz, verify,
   # install-smoke, npm publish, re-attach the reused helper zip) — nothing here
@@ -316,9 +255,6 @@ run_home_base_phase() {
   # privileged phase is idempotent (the trigger box already handled the tag).
   if npm view "$PHNX_PKG@$TARGET" version >/dev/null 2>&1; then
     green "$PHNX_PKG@$TARGET already on the registry -- nothing to publish"
-    # Still (re)deploy the Worker: a prior run may have published then failed the
-    # deploy. `auto` is a no-op when the template already matches, so this is safe.
-    deploy_share_worker
     return 0
   fi
 
@@ -390,9 +326,6 @@ run_home_base_phase() {
       || die "npm publish failed on $RELEASE_HOME_BASE (tag exists; rerun to retry)"
   fi
   green "Published $PHNX_PKG@$TARGET from attested $tgz"
-
-  deploy_share_worker
-
 
   # The ComputerHelper.app.zip gate that used to live here is GONE, deliberately.
   # It existed because the client downloaded `releases/download/v$CLI_VERSION/
@@ -577,7 +510,7 @@ git -C "\$REPO_ROOT" worktree add --quiet --detach "\$WT" "v$1" \\
 # step here that embeds a provisioning profile, so no recovery is needed.
 mkdir -p "\$WT/\$CLI_DIR/bin"
 cd "\$WT/\$CLI_DIR"
-scripts/release.sh $1 --home-base-phase --device "$RELEASE_HOME_BASE" --deploy-worker "$DEPLOY_WORKER"
+scripts/release.sh $1 --home-base-phase --device "$RELEASE_HOME_BASE"
 SNIPPET
 }
 route_home_base_phase() {
@@ -634,21 +567,17 @@ assert_promote_home_base() {
   # and the die() below would be dead code and the release would abort with no
   # stated reason (the very "fail loud at boundaries" the preflight exists for).
   # The && / || tested context suppresses errexit and preserves the probe's rc.
-  # $DEPLOY_WORKER (auto|on|off, validated at parse) rides to the probe as its
-  # positional arg so a Worker-touching release verifies share config + cloudflare.com
-  # creds on the home base BEFORE the first mutation. It is a fixed enum, so
-  # interpolating it into the remote command string carries no injection risk.
   if $ON_HOME_BASE; then
-    out="$(bash "$probe" "$DEPLOY_WORKER" 2>&1)" && rc=0 || rc=$?
+    out="$(bash "$probe" 2>&1)" && rc=0 || rc=$?
   elif command -v agents >/dev/null 2>&1; then
     # Ship THIS worktree's fresh probe over stdin and run it in the home base's
     # own checkout dir. Piping (bash -s) -- not invoking a remote path -- because
     # the home base's on-disk checkout may predate this script
     # (route_home_base_phase makes the same choice for the same reason).
     # $HOME expands remotely.
-    out="$(agents ssh "$RELEASE_HOME_BASE" -- "cd \$HOME/src/github.com/muqsitnawaz/agents-cli && bash -s -- $DEPLOY_WORKER" < "$probe" 2>&1)" && rc=0 || rc=$?
+    out="$(agents ssh "$RELEASE_HOME_BASE" -- "cd \$HOME/src/github.com/muqsitnawaz/agents-cli && bash -s" < "$probe" 2>&1)" && rc=0 || rc=$?
   else
-    out="$(ssh "$RELEASE_HOME_BASE" "cd \$HOME/src/github.com/muqsitnawaz/agents-cli && bash -s -- $DEPLOY_WORKER" < "$probe" 2>&1)" && rc=0 || rc=$?
+    out="$(ssh "$RELEASE_HOME_BASE" "cd \$HOME/src/github.com/muqsitnawaz/agents-cli && bash -s" < "$probe" 2>&1)" && rc=0 || rc=$?
   fi
   if [[ "$rc" != "0" ]]; then
     printf '%s\n' "$out" | sed 's/^/  /' >&2

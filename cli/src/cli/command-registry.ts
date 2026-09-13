@@ -97,8 +97,6 @@ const loadMessage: ModuleLoader = async () => (await import('../commands/message
 const loadSend: ModuleLoader = async () => (await import('../commands/send.js')).registerSendCommand;
 const loadFeed: ModuleLoader = async () => (await import('../commands/feed.js')).registerFeedCommand;
 const loadMailboxes: ModuleLoader = async () => (await import('../commands/mailboxes.js')).registerMailboxesCommand;
-// Registers the `artifacts` group (`share` + `setup` + nested `unshare`).
-const loadArtifacts: ModuleLoader = async () => (await import('../commands/artifacts.js')).registerArtifactsCommands;
 const loadWebhooks: ModuleLoader = async () => (await import('../commands/webhook.js')).registerWebhooksCommand;
 const loadHumans: ModuleLoader = async () => (await import('../commands/humans.js')).registerHumansCommands;
 const loadAccounts: ModuleLoader = async () => (await import('../commands/accounts.js')).registerAccountsCommand;
@@ -224,7 +222,6 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   feed: [loadFeed],
   mailboxes: [loadMailboxes],
   mailbox: [loadMailboxes],
-  artifacts: [loadArtifacts],
   webhooks: [loadWebhooks],
   humans: [loadHumans],
   daemon: [loadDaemon],

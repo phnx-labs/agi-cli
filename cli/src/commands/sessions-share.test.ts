@@ -1,13 +1,10 @@
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
+import path from 'path';
 import { fileURLToPath } from 'url';
 import { describe, expect, it } from 'vitest';
-import { publishToEndpoint, redactEmails, scanShareContent } from '../lib/share/publish.js';
+import { redactEmails } from '../lib/redact.js';
 import { renderSessionHtmlDocument } from '../lib/session/share-html.js';
 import type { SessionMeta } from '../lib/session/types.js';
-import { renderSessionMarkdownDocument } from './sessions-render.js';
-import { buildSharePublishOptions, defaultSessionSlug } from './sessions-share.js';
+import { buildArtifactsShareArgs, defaultSessionSlug } from './sessions-share.js';
 
 const TESTDATA = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../lib/session/testdata/render');
 
@@ -35,27 +32,51 @@ describe('defaultSessionSlug', () => {
   });
 });
 
-describe('buildSharePublishOptions', () => {
+describe('buildArtifactsShareArgs', () => {
+  const file = '/tmp/x/session-a1b2c3d4.html';
+
   it('is unlisted unless --public — the one default that must not silently invert', () => {
-    expect(buildSharePublishOptions(meta(), {}).unlisted).toBe(true);
-    expect(buildSharePublishOptions(meta(), { public: false }).unlisted).toBe(true);
-    expect(buildSharePublishOptions(meta(), { public: true }).unlisted).toBe(false);
+    // `artifacts share` defaults to PUBLIC; a session transcript must not, so the
+    // command passes --visibility explicitly. A mapping bug here leaks a transcript.
+    expect(buildArtifactsShareArgs(meta(), {}, file)).toContain('unlisted');
+    expect(buildArtifactsShareArgs(meta(), {}, file)).not.toContain('public');
+    expect(buildArtifactsShareArgs(meta(), { public: false }, file)).toContain('unlisted');
+    const pub = buildArtifactsShareArgs(meta(), { public: true }, file);
+    expect(pub).toContain('public');
+    expect(pub).not.toContain('unlisted');
   });
 
-  it('tags the share as a session so `artifacts share list --agent/--session` can find it', () => {
-    expect(buildSharePublishOptions(meta(), {}).meta).toEqual({ kind: 'session' });
+  it('tags the share as a session and requests JSON so the command can parse the URL', () => {
+    const args = buildArtifactsShareArgs(meta(), {}, file);
+    const metaIdx = args.indexOf('--meta');
+    expect(args[metaIdx + 1]).toBe('kind=session');
+    expect(args).toContain('--json');
   });
 
-  it('passes the remaining flags through without inventing values', () => {
-    expect(buildSharePublishOptions(meta(), {})).toMatchObject({
-      slug: 'session-a1b2c3d4',
-      expire: undefined,   // publishToEndpoint applies the 30d default
-      force: false,
-      cover: true,
-      label: undefined,
-    });
-    expect(buildSharePublishOptions(meta(), { slug: 'custom', label: 'Title', expire: 'never', force: true, cover: false }))
-      .toMatchObject({ slug: 'custom', label: 'Title', expire: 'never', force: true, cover: false });
+  it('always leads with `share <file> --slug <default>`', () => {
+    const args = buildArtifactsShareArgs(meta(), {}, file);
+    expect(args.slice(0, 2)).toEqual(['share', file]);
+    const slugIdx = args.indexOf('--slug');
+    expect(args[slugIdx + 1]).toBe('session-a1b2c3d4');
+  });
+
+  it('passes the optional flags through only when set, without inventing values', () => {
+    const bare = buildArtifactsShareArgs(meta(), {}, file);
+    expect(bare).not.toContain('--expire'); // artifacts share applies the 30d default
+    expect(bare).not.toContain('--force');
+    expect(bare).not.toContain('--no-cover');
+    expect(bare).not.toContain('--label');
+
+    const full = buildArtifactsShareArgs(
+      meta(),
+      { slug: 'custom', label: 'Title', expire: 'never', force: true, cover: false },
+      file,
+    );
+    expect(full[full.indexOf('--slug') + 1]).toBe('custom');
+    expect(full[full.indexOf('--expire') + 1]).toBe('never');
+    expect(full[full.indexOf('--label') + 1]).toBe('Title');
+    expect(full).toContain('--force');
+    expect(full).toContain('--no-cover');
   });
 });
 
@@ -63,84 +84,13 @@ describe('email masking runs on the artifact the scanner scans', () => {
   it('catches an address Markdown escaping hid from a Markdown-stage mask', () => {
     // `foo\@example.com` does not match the email pattern in Markdown (the
     // backslash breaks the local part), but marked drops the backslash, so the
-    // published HTML carries a live address the publish scan then refuses.
+    // published HTML carries a live address `artifacts share`'s scan would refuse.
     const markdown = 'contact foo\\@example.com for context';
     const page = renderSessionHtmlDocument(meta(), markdown);
-    expect(page).toContain('foo@example.com');           // survived the Markdown stage
-    expect(scanShareContent(page).some((h) => h.kind === 'email')).toBe(true);
+    expect(page).toContain('foo@example.com'); // survived the Markdown stage
 
     const masked = redactEmails(page);
     expect(masked).not.toContain('foo@example.com');
-    expect(scanShareContent(masked).filter((h) => h.kind === 'email')).toEqual([]);
-  });
-});
-
-/**
- * The publish path the command drives, exercised for real against the endpoint's
- * own DI seams (uploader/username) rather than a mock of it — the request that
- * would go over the wire is inspected exactly as the Worker would receive it.
- */
-describe('publishing a rendered session', () => {
-  function shareSession(session: SessionMeta, opts: { unlisted: boolean }) {
-    const markdown = renderSessionMarkdownDocument(session);
-    const html = renderSessionHtmlDocument(session, markdown);
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-session-share-test-'));
-    const file = path.join(dir, `${defaultSessionSlug(session)}.html`);
-    fs.writeFileSync(file, html, { mode: 0o600 });
-    const sent: { url: string; headers: Record<string, string>; body: Buffer }[] = [];
-    return {
-      file,
-      sent,
-      cleanup: () => fs.rmSync(dir, { recursive: true, force: true }),
-      run: () => publishToEndpoint(file, { baseUrl: 'https://share.example', token: 't' }, {
-        slug: defaultSessionSlug(session),
-        unlisted: opts.unlisted,
-        githubUser: 'octocat',
-        cover: false,
-        analytics: false,
-        uploader: async (url, body, headers) => {
-          sent.push({ url, headers, body });
-          return { ok: true, status: 200, url };
-        },
-      }),
-    };
-  }
-
-  it('publishes unlisted to a session-scoped URL under the user namespace', async () => {
-    const harness = shareSession(meta(), { unlisted: true });
-    try {
-      const result = await harness.run();
-      expect(result.url).toBe('https://share.example/octocat/session-a1b2c3d4');
-      expect(result.unlisted).toBe(true);
-      expect(harness.sent).toHaveLength(1);
-      expect(harness.sent[0].headers['x-share-visibility']).toBe('unlisted');
-      // Default expiry applies, so a forgotten session link decays.
-      expect(result.expiresAt).toBeTruthy();
-    } finally {
-      harness.cleanup();
-    }
-  });
-
-  it('uploads the rendered page itself, not the raw transcript', async () => {
-    const harness = shareSession(meta(), { unlisted: true });
-    try {
-      await harness.run();
-      const body = harness.sent[0].body.toString('utf8');
-      expect(body.startsWith('<!DOCTYPE html>')).toBe(true);
-      expect(body).toContain('agents session');
-    } finally {
-      harness.cleanup();
-    }
-  });
-
-  it('marks the share public only when the operator opts in', async () => {
-    const harness = shareSession(meta(), { unlisted: false });
-    try {
-      const result = await harness.run();
-      expect(result.unlisted).toBeFalsy();
-      expect(harness.sent[0].headers['x-share-visibility']).toBe('public');
-    } finally {
-      harness.cleanup();
-    }
+    expect(masked).toContain('[EMAIL]');
   });
 });

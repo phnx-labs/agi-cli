@@ -9,7 +9,7 @@ const LOADED_COMMAND_NAMES = [
   'tmux', 'watchdog', 'browser', 'computer', 'logs', 'events',
   'ssh', 'devices', 'fleet', 'repos', 'repo', 'setup', 'uninstall', 'upgrade', 'sessions',
   'teams', 'cloud', 'message', 'send', 'notify', 'feed',
-  'mailboxes', 'mailbox', 'artifacts', 'webhooks',
+  'mailboxes', 'mailbox', 'webhooks',
   'humans', 'daemon', 'traces',
 ] as const;
 
@@ -40,15 +40,17 @@ export const KNOWN_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set<string>([
  * name is gone, the spellchecker finds a neighbour, and the CLI runs something
  * the user never asked for instead of saying the command is gone.
  *
- * `set` moved under `agents models`/`agents config` (RUSH-2579); `share` moved
- * under `agents artifacts share` (RUSH-2580). login/logout/budget/bench/mine/
+ * `set` moved under `agents models`/`agents config` (RUSH-2579); `share`,
+ * `unshare`, and the whole `artifacts` group moved OUT to the standalone
+ * `artifacts` CLI (`@phnx-labs/artifacts-cli`, PHNX-3992) — artifact sharing is
+ * no longer an agents-cli surface at all. login/logout/budget/bench/mine/
  * cost/output/profiles/snapshot/cp/resume/roster moved under nested homes
  * (cli-surface-consolidate). `timeline` was removed as a duplicated surface —
  * use `agents feed --filter updates` (RUSH-2692). `status` moved under
  * `agents sync status` (RUSH-2864). `tickets` was removed — use `linear`
  * (linear-cli) (RUSH-2932). `alias` moved under `agents setup alias` (RUSH-2965).
- * `inbox` was a pure alias of `agents feed` (RUSH-2984). `unshare` nested under
- * `agents artifacts unshare` (RUSH-2989). `audit` nested under `agents events audit`.
+ * `inbox` was a pure alias of `agents feed` (RUSH-2984). `audit` nested under
+ * `agents events audit`.
  * `trends` was removed with the insights recipe collapse — the one counter
  * surface is `agents insights mix` (PHNX-3391). `serve` (the
  * read-only local web companion + `--control` anchor) was removed with the
@@ -84,6 +86,7 @@ export const RETIRED_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set([
   'roster',
   'set',
   'share',
+  'artifacts',
   'timeline',
   'status',
   'tickets',
