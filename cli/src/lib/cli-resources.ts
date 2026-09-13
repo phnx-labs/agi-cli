@@ -23,6 +23,7 @@ import * as yaml from 'yaml';
 import { listResources, resolveResource } from './resources.js';
 import { probeCapture } from './probe.js';
 import { composeWin32CommandLine } from './platform/index.js';
+import { execFileShellSpec } from './platform/exec.js';
 import { localBinDir } from './platform/posixpath.js';
 
 // ─── Validation primitives ───────────────────────────────────────────────────
@@ -551,7 +552,8 @@ export function buildInstallCommand(method: InstallMethod): string {
 function runInstallMethod(method: InstallMethod): void {
   if ('npm' in method) {
     assertNpmPackage(method.npm);
-    const r = spawnSync('npm', ['install', '-g', method.npm], { stdio: 'inherit' });
+    const invocation = execFileShellSpec('npm', ['install', '-g', method.npm]);
+    const r = spawnSync(invocation.command, invocation.args, { stdio: 'inherit', shell: invocation.shell });
     if (r.status !== 0) {
       throw new Error(`npm install -g ${method.npm} exited with status ${r.status ?? 'unknown'}`);
     }
