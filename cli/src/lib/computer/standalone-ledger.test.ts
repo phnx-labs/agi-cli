@@ -133,3 +133,60 @@ describe('merging the two ledgers', () => {
     expect(rows[0]!.pid).toBe(11);
   });
 });
+
+describe('the installed producer\'s real record shape', () => {
+  it('attributes a no-host record to the observing machine, not to `unknown`', () => {
+    // Observed on installed computer 0.1.5: the record carries NO host, NO
+    // hostname and NO machineId. `groupIntoComputerRuns` then fell back to
+    // `machine: 'unknown'`, the projected row's device read `unknown`, and the
+    // action vanished under any device filter — while its capture.host correctly
+    // said the observing box. The default belongs at this source, because this
+    // ledger is per-machine by construction.
+    const dir = ledgerDir();
+    fs.writeFileSync(path.join(dir, '2026-09-13.jsonl'),
+      line({ command: 'run', ts: '2026-09-13T15:20:00Z', invocationId: 'inv-real', task: 'read the screen' })
+      + line({ command: 'screenshot', ts: '2026-09-13T15:20:01Z', invocationId: 'inv-real', capture: { kind: 'screenshot', path: '/Users/x/.agents/.cache/computer/window.jpg', name: 'window.jpg', bytes: 6934 } }));
+
+    const actions = listStandaloneComputerActions({ dir, observer: 'zion' });
+    expect(actions.every((action) => action.hostname === 'zion')).toBe(true);
+    // `host` names a genuinely DRIVEN remote box and must stay absent here.
+    expect(actions.every((action) => action.host === undefined)).toBe(true);
+
+    const rows = groupIntoComputerRuns(actions);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.machine).toBe('zion');
+    expect(rows[0]!.machine).not.toBe('unknown');
+    expect(rows[0]!.remoteHost).toBeUndefined();
+    expect(rows[0]!.actions.find((action) => action.verb === 'screenshot')!.capture!.bytes).toBe(6934);
+  });
+
+  it('lets an explicit driven host win over the observer default', () => {
+    const dir = ledgerDir();
+    fs.writeFileSync(path.join(dir, '2026-09-13.jsonl'),
+      line({ command: 'click', ts: '2026-09-13T15:20:01Z', invocationId: 'inv-remote', host: 'win-mini' }));
+    const rows = groupIntoComputerRuns(listStandaloneComputerActions({ dir, observer: 'zion' }));
+    // The invoking machine is still the observer; the DRIVEN one is win-mini.
+    expect(rows[0]!.machine).toBe('zion');
+    expect(rows[0]!.remoteHost).toBe('win-mini');
+  });
+
+  it('keeps a producer-supplied hostname rather than overwriting it', () => {
+    const dir = ledgerDir();
+    fs.writeFileSync(path.join(dir, '2026-09-13.jsonl'),
+      line({ command: 'click', ts: '2026-09-13T15:20:01Z', invocationId: 'inv-x', hostname: 'mark-1' }));
+    expect(listStandaloneComputerActions({ dir, observer: 'zion' })[0]!.hostname).toBe('mark-1');
+  });
+});
+
+describe('the observer threads through the assembler', () => {
+  it('keeps a row\'s device and the reporting scope naming the same box', () => {
+    // Before this the ledger defaulted to `machineId()` while the projection was
+    // handed a caller-supplied scope, so the two could name one machine
+    // differently and a device filter would miss the row.
+    const dir = ledgerDir();
+    fs.writeFileSync(path.join(dir, '2026-09-13.jsonl'),
+      line({ command: 'click', ts: '2026-09-13T15:20:01Z', invocationId: 'inv-s' }));
+    const rows = groupIntoComputerRuns(listStandaloneComputerActions({ dir, observer: 'scope-under-test' }));
+    expect(rows[0]!.machine).toBe('scope-under-test');
+  });
+});
