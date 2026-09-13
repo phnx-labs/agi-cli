@@ -55,6 +55,18 @@ describe('inlineLocalAssets', () => {
     }
   });
 
+  it('still treats a Windows drive-letter path as local, not as a one-letter scheme', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'share-html-'));
+    const page = join(dir, 'page.html');
+    // Absent on this box, so it stays untouched for the "missing" reason, not the "remote" one.
+    const missing = '<img src="C:\\shots\\gone.png">';
+    expect(inlineLocalAssets(missing, page)).toBe(missing);
+    const png = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
+    writeFileSync(join(dir, 'c.png'), png);
+    const out = inlineLocalAssets(`<img src="${join(dir, 'c.png')}">`, page);
+    expect(out).toContain('data:image/png;base64,');
+  });
+
   it('leaves a missing relative src alone (no invented data URI)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'share-html-'));
     const page = join(dir, 'page.html');

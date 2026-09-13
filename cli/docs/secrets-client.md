@@ -107,14 +107,14 @@ operations agents-cli's consumers hit today:
 
 - **bundles**: `readAndResolveBundleEnv` (+`Sync`), `listBundles` (+`Sync`),
   `readBundle` (+`Sync`), `bundleExists` (+`Sync`), `bundleBackend` (+`Sync`),
-  `writeBundle`, `writeBundleWithItems` (+`Sync`), `deleteBundle` (+`Sync`),
+  `writeBundle`, `writeBundleWithItems` (+`Sync`), `deleteBundleSync`,
   `renameBundle` (+`Sync`), `rotateBundleSecret` (+`Sync`), `describeBundle`
-- **agent**: `agentPing` (+`Sync`), `agentStatus`, `agentLock`, `ensureAgentRunning`
+- **agent**: `agentPing`, `agentStatus`
 - **keychain items**: `getKeychainToken` (+`Sync`), `setKeychainToken` (+`Sync`),
   `hasKeychainToken` (+`Sync`), `deleteKeychainToken` (+`Sync`),
   `listKeychainItems`, `keychainUsesFileFallback`
-- **store** (explicit-backend raw item CRUD): `storeGet` (+`Sync`),
-  `storeHas` (+`Sync`), `storeSet`, `storeDelete`
+- **store** (explicit-backend raw item CRUD): `storeGetSync`, `storeHasSync`,
+  `storeSet` (+`Sync`)
 - **remote / push**: `remoteResolveEnv`, `pushBundleToHost`, `pushBundleToHostAsync`
 - **sync** (the `agents sync --secrets` umbrella stage): `listRemoteBundles`, `pullBundle`
 - **rc-hygiene** (the `agents doctor` shell-rc-export advisory): `scanUserRcFiles`

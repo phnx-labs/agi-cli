@@ -40,11 +40,14 @@ export function rewriteFileAnchors(html: string): string {
   );
 }
 
-/** Only a bare relative path or a `file:` URL can name a local asset; every other scheme is left alone. */
+/**
+ * Only a bare path or a `file:` URL can name a local asset; every other scheme
+ * is left alone. A single-letter "scheme" is a Windows drive (`C:\\x.png`), not a URL.
+ */
 function isRemoteOrSpecial(url: string): boolean {
   if (url.startsWith('//') || url.startsWith('#')) return true;
   const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(url)?.[1];
-  return scheme !== undefined && scheme.toLowerCase() !== 'file';
+  return scheme !== undefined && scheme.length > 1 && scheme.toLowerCase() !== 'file';
 }
 
 function localImagePath(url: string, htmlDir: string): { path: string; mime: string } | null {
