@@ -1,1 +1,0 @@
-- Repair session indexes whose schema version is current but whose identity columns are missing, preserving existing session metadata (PHNX-3940).
