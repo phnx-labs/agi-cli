@@ -162,7 +162,7 @@ vitest_suffix() {
 device_addr() {
   command -v agents >/dev/null 2>&1 \
     || die "the 'agents' CLI is not on PATH, so device '$1' cannot be resolved"
-  agents devices list --json 2>/dev/null | python3 -c '
+  agents devices list --json --no-stats 2>/dev/null | python3 -c '
 import json, sys
 want = sys.argv[1]
 for r in json.load(sys.stdin):
