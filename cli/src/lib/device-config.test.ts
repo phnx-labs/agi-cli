@@ -331,6 +331,41 @@ describe('validation', () => {
     expect(() => setConfigValue('agents.max-concurrent', 0)).toThrow(/>= 1/);
     expect(() => setConfigValue('interactive.host', 'has spaces')).toThrow(/Invalid value/);
   });
+
+  it('validates the AGI Menu Headless-runs preferences against real agent ids and device names (PHNX-3999)', async () => {
+    const { setConfigValue, getConfigValue } = await freshModules();
+    // A harness the fleet actually has, and a typo that must never be stored:
+    // the Menu reads this value back as the agent it dispatches.
+    setConfigValue('menubar.menu.headlessAgent', 'claude');
+    expect(getConfigValue('menubar.menu.headlessAgent').value).toBe('claude');
+    expect(() => setConfigValue('menubar.menu.headlessAgent', 'cladue')).toThrow(/must be an agent id/);
+    setConfigValue('menubar.menu.headlessFallbackAgent', 'codex');
+    expect(getConfigValue('menubar.menu.headlessFallbackAgent').value).toBe('codex');
+    expect(() => setConfigValue('menubar.menu.headlessFallbackAgent', 'nope')).toThrow(/must be an agent id/);
+
+    for (const placement of ['auto', 'local', 'interactive', 'yosemite-m1']) {
+      setConfigValue('menubar.menu.headlessPlacement', placement);
+      expect(getConfigValue('menubar.menu.headlessPlacement').value).toBe(placement);
+    }
+    expect(() => setConfigValue('menubar.menu.headlessPlacement', 'the fastest box')).toThrow(/auto \| local \| interactive/);
+    // Unset placement still reads as automatic placement.
+    const { unsetConfigValue } = await import('./device-config.js');
+    unsetConfigValue('menubar.menu.headlessPlacement');
+    expect(getConfigValue('menubar.menu.headlessPlacement').spec.defaultValue).toBe('auto');
+  });
+
+  it('validates the Home session-updates and device-sort preferences', async () => {
+    const { setConfigValue, getConfigValue } = await freshModules();
+    setConfigValue('menubar.menu.sessionUpdates', false);
+    expect(getConfigValue('menubar.menu.sessionUpdates').value).toBe(false);
+    expect(() => setConfigValue('menubar.menu.sessionUpdates', 'off')).toThrow(/expects a boolean/);
+    expect(getConfigValue('menubar.menu.deviceSort').spec.defaultValue).toBe('name');
+    for (const order of ['name', 'role', 'load', 'memory', 'disk']) {
+      setConfigValue('menubar.menu.deviceSort', order);
+      expect(getConfigValue('menubar.menu.deviceSort').value).toBe(order);
+    }
+    expect(() => setConfigValue('menubar.menu.deviceSort', 'fastest')).toThrow(/must be one of/);
+  });
 });
 
 describe('listConfig', () => {
@@ -359,12 +394,17 @@ describe('listConfig', () => {
       'interactive.host',
       'menubar.menu.bannerWhenNeedsYou',
       'menubar.menu.defaultProject',
+      'menubar.menu.deviceSort',
       'menubar.menu.groupBy',
+      'menubar.menu.headlessAgent',
+      'menubar.menu.headlessFallbackAgent',
+      'menubar.menu.headlessPlacement',
       'menubar.menu.hideCompletedMilestones',
       'menubar.menu.includeOtherDeviceRequests',
       'menubar.menu.projectPriorityFilter',
       'menubar.menu.projectScope',
       'menubar.menu.projectSort',
+      'menubar.menu.sessionUpdates',
       'menubar.menu.showPreviews',
       'menubar.menu.showPullRequests',
       'menubar.menu.thenBy',

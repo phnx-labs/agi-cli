@@ -5,7 +5,9 @@ import {
   devicePropertyToConfigName,
   listKnownConfigKeys,
   configKeyStorageHint,
+  MENUBAR_MENU_PROPERTIES,
 } from './config-keys.js';
+import { configKeySpec } from './device-config.js';
 
 describe('config-keys', () => {
   describe('parseConfigKey', () => {
@@ -141,6 +143,22 @@ describe('config-keys', () => {
 
     it('rejects an unknown AGI Menu preference key', () => {
       expect(() => parseConfigKey('menubar.menu.bogus')).toThrow(/Unknown AGI Menu preference/);
+    });
+
+    it('parses the Headless-runs, Home and device-sort preferences (PHNX-3999)', () => {
+      for (const prop of ['sessionUpdates', 'deviceSort', 'headlessAgent', 'headlessFallbackAgent', 'headlessPlacement']) {
+        expect(parseConfigKey(`menubar.menu.${prop}`)).toEqual({ scope: 'menubar', property: prop });
+        expect(listKnownConfigKeys()).toContain(`menubar.menu.${prop}`);
+      }
+    });
+
+    it('every parser-accepted AGI Menu key has a registered store spec', () => {
+      // The allow-set and the store are two files; a key in one and not the other
+      // is either a settable value nothing reads, or a read that can never be set.
+      for (const prop of MENUBAR_MENU_PROPERTIES) {
+        expect(() => configKeySpec(`menubar.menu.${prop}`)).not.toThrow();
+        expect(configKeySpec(`menubar.menu.${prop}`).scope).toBe('user');
+      }
     });
   });
 

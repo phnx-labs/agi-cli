@@ -35,6 +35,11 @@ export const MENUBAR_MENU_PROPERTIES = [
   'projectSort',
   'ticketSort',
   'showPullRequests',
+  'sessionUpdates',
+  'deviceSort',
+  'headlessAgent',
+  'headlessFallbackAgent',
+  'headlessPlacement',
 ] as const;
 
 /** A run-time default key: model, mode, effort, or tier override. */

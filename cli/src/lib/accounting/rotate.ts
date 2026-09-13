@@ -7,7 +7,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import type { AgentId, RunStrategy } from '../types.js';
+import { isAgentId, type AgentId, type RunStrategy } from '../types.js';
 import type { FallbackEntry } from '../exec.js';
 import { PROJECTION_HORIZON_MIN, capacityWeight } from './capacity.js';
 import {
@@ -1562,6 +1562,52 @@ export function rotationFailoverChain(
     if (chain.length >= limit) break;
   }
   return chain;
+}
+
+/**
+ * The permitted alternate harness to launch when EVERY account of the primary
+ * agent is already exhausted at PREFLIGHT (PHNX-3999 F19).
+ *
+ * `runWithFallback` only reaches a `--fallback` entry after the primary has
+ * actually RUN and hit a rate limit. When the primary's accounts are throttled
+ * before the run starts, version resolution reports `exhausted` and the run used
+ * to exit — so the alternate a user configured for exactly this case never fired.
+ * This resolves the first usable alternate from the same `--fallback` spec, and
+ * returns the remainder of the spec so the alternate becomes the primary and is
+ * not also listed as its own fallback.
+ *
+ * Deliberately NOT a second parser: an entry this cannot resolve exactly — a
+ * typo, an alias the canonical parse would fuzzy-match, the primary itself —
+ * makes the WHOLE spec yield `null`, so the run reaches the one canonical
+ * `--fallback` parse and fails (or corrects) there with the message it already
+ * has. `--fallback typoo,codex` must never silently launch codex while dropping
+ * `typoo`.
+ *
+ * Returns `null` when there is no spec, when any entry is not an exact agent id
+ * or names the primary, or when the primary is only sign-in-recoverable rather
+ * than throttled — a logged-out account is fixed by logging in, not by silently
+ * running a different harness.
+ */
+export function preflightFallbackHandoff(
+  spec: string | undefined,
+  primary: AgentId,
+  exhausted: RotateCandidate[],
+): { agent: AgentId; version?: string; remainingSpec?: string } | null {
+  if (!spec) return null;
+  if (exhausted.length === 0) return null;
+  if (signInRecoverableCandidates(exhausted).length > 0) return null;
+  const entries = spec.split(',').map((e) => e.trim()).filter(Boolean);
+  if (entries.length === 0) return null;
+  const parsed = entries.map((entry) => entry.split('@'));
+  // Every entry has to be exactly resolvable, or this defers entirely.
+  if (parsed.some(([name]) => !isAgentId(name) || name === primary)) return null;
+  const [name, version] = parsed[0];
+  const remaining = entries.slice(1);
+  return {
+    agent: name as AgentId,
+    version: version || undefined,
+    remainingSpec: remaining.length > 0 ? remaining.join(',') : undefined,
+  };
 }
 
 /**

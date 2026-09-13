@@ -14,6 +14,9 @@ import {
   resolveDefinedProjectPath,
   projectNameForCwd,
   resolveProjectNameForCwd,
+  confirmedProjectForCwd,
+  listProjectDefsCached,
+  resetProjectDefsCache,
   type ProjectDef,
 } from './projects.js';
 
@@ -265,6 +268,76 @@ describe('projectNameForCwd', () => {
     // ~/src/rush-extra must NOT match ~/src/rush (segment-aware, not string prefix)
     expect(projectNameForCwd(path.join(HOME, 'src/rush-extra/x'), defs)).toBeUndefined();
     expect(projectNameForCwd(undefined, defs)).toBeUndefined();
+  });
+});
+
+/**
+ * PHNX-3999 F08/F09 — what counts as a CONFIRMED project association, and what
+ * must stay Uncategorized. The owner's recording (01:30–01:56) shows sessions
+ * filed under groups nobody created, because the old answer was the basename of
+ * the working directory, which always answers something.
+ */
+describe('confirmedProjectForCwd', () => {
+  it('confirms a registered definition, including a nested one and a worktree', () => {
+    const defs: ProjectDef[] = [
+      { name: 'rush', root: '~/src/rush' },
+      { name: 'rush-web', root: '~/src/rush/apps/web' },
+    ];
+    expect(confirmedProjectForCwd(path.join(HOME, 'src/rush/packages/api'), defs)).toBe('rush');
+    expect(confirmedProjectForCwd(path.join(HOME, 'src/rush/apps/web/x'), defs)).toBe('rush-web');
+    expect(confirmedProjectForCwd(path.join(HOME, 'src/rush/.agents/worktrees/fix'), defs)).toBe('rush');
+  });
+
+  it('leaves an unregistered GIT REPO unconfirmed — repository identity is not project membership', () => {
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'unregistered-repo-'));
+    try {
+      fs.mkdirSync(path.join(repo, '.git'));
+      // resolveProjectNameForCwd answers with the folder name; the confirmed
+      // association deliberately does not.
+      expect(resolveProjectNameForCwd(repo, [])).toBe(path.basename(repo));
+      expect(confirmedProjectForCwd(repo, [])).toBeUndefined();
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves a loose directory and a spoofed worktree-shaped path unconfirmed', () => {
+    const defs: ProjectDef[] = [{ name: 'rush', root: '~/src/rush' }];
+    expect(confirmedProjectForCwd('/tmp/some-loose-dir', defs)).toBeUndefined();
+    // A path that merely LOOKS like a worktree of a project is not membership.
+    expect(confirmedProjectForCwd('/tmp/fake/.agents/worktrees/rush', defs)).toBeUndefined();
+    expect(confirmedProjectForCwd(undefined, defs)).toBeUndefined();
+  });
+});
+
+describe('listProjectDefsCached', () => {
+  it('picks up an IN-PLACE edit of a definition, not only an add or a remove', () => {
+    // The stamp is per FILE (mtime + size): retargeting a project's root rewrites
+    // the file without touching the directory's mtime, and that is exactly the
+    // edit that changes which sessions belong to the project.
+    resetProjectDefsCache();
+    writeProjectDef({ name: 'rush', root: '~/src/rush' });
+    expect(confirmedProjectForCwd(path.join(HOME, 'src/rush/pkg'), listProjectDefsCached())).toBe('rush');
+    expect(confirmedProjectForCwd(path.join(HOME, 'work/rush/pkg'), listProjectDefsCached())).toBeUndefined();
+
+    writeProjectDef({ name: 'rush', root: '~/work/rush' });
+    expect(confirmedProjectForCwd(path.join(HOME, 'work/rush/pkg'), listProjectDefsCached())).toBe('rush');
+    expect(confirmedProjectForCwd(path.join(HOME, 'src/rush/pkg'), listProjectDefsCached())).toBeUndefined();
+  });
+
+  it('returns [] with no projects dir and re-reads once one appears', () => {
+    resetProjectDefsCache();
+    const missing = path.join(dir, 'not-created-yet');
+    process.env.AGENTS_PROJECTS_DIR = missing;
+    try {
+      expect(listProjectDefsCached()).toEqual([]);
+      fs.mkdirSync(missing, { recursive: true });
+      writeProjectDef({ name: 'later', root: '~/src/later' });
+      expect(listProjectDefsCached().map((d) => d.name)).toEqual(['later']);
+    } finally {
+      process.env.AGENTS_PROJECTS_DIR = dir;
+      resetProjectDefsCache();
+    }
   });
 });
 

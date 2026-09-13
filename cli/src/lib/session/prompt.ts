@@ -331,15 +331,46 @@ export function classifyUserPrompt(
 }
 
 /**
- * Collapse a harness-generated session title when it is injected skill
- * scaffolding; otherwise leave the title as the harness wrote it.
+ * A label that is nothing but a control command — `/clear`, `/compact`,
+ * `/model`, `/exit` — with no words of its own after it.
+ *
+ * One rule instead of a per-harness list of control verbs: a title that is a
+ * bare slash token describes an action taken ON the session, never what the
+ * session is about, so whatever it names it is not a headline. A command WITH an
+ * argument (`/continue fix the parser`, `/code:commit the retry fix`) carries
+ * real intent and is kept.
+ *
+ * Skill collapse runs first in {@link cleanGeneratedSessionLabel} and returns
+ * its own `/<skill>` form, so this never swallows that deliberate shape.
+ */
+const BARE_CONTROL_COMMAND_RE = /^\/[\w:-]+$/;
+
+/**
+ * Reduce a harness-generated session title to something worth showing as a
+ * headline, or `undefined` when it is not (PHNX-3999 F26/F27).
  *
  * Claude's `ai-title` and Cursor's `chatMeta.title` are both derived from the
- * first turn, so a session opened with a skill gets named after the injected
- * "Base directory for this skill: …" line. {@link classifyUserPrompt} reports
- * `kind: 'skill'` only for that line, so collapse it to `/<skill>`. Empty or
- * whitespace-only input yields `undefined` so the caller falls through to the
- * first-prompt topic.
+ * FIRST turn of the transcript, so whatever the harness injected there becomes
+ * the session's name: a skill's install-directory preamble, a `!`-prefixed shell
+ * echo wrapped in `<bash-input>`, a `/clear`. The owner's recording shows both
+ * failures — one row titled with shell-command XML wrappers, others reading
+ * `/clear`. Three rungs, in order:
+ *
+ *  1. A skill invocation collapses to `/<skill>` ({@link classifyUserPrompt}
+ *     reports `kind: 'skill'` only for that injected line).
+ *  2. Harness scaffolding is REJECTED, not cleaned: `<bash-input>`,
+ *     `<command-name>`, `<local-command-stdout>`, `<system-reminder>` and the
+ *     rest of {@link isSyntheticUserMessage}'s cross-harness list, plus a title
+ *     that is only tags. Stripping the tags would leave the shell command
+ *     itself as the headline, which is the same wrong answer with tidier
+ *     punctuation.
+ *  3. A bare control command is rejected ({@link BARE_CONTROL_COMMAND_RE}).
+ *
+ * A rejected label returns `undefined`, so the row falls to the next rung of the
+ * canonical ladder — the daemon-generated title, then the user's own first
+ * prompt (`sessionHeadline`, `session/title.ts`). Nothing is deleted: the
+ * original turn stays on the row as `firstUserMessage` / `request`, so the
+ * details view still shows exactly what the agent was told.
  *
  * A user-authored title (Claude `/rename` / `custom-title`) is never passed
  * here — the caller keeps it verbatim.
@@ -348,7 +379,11 @@ export function cleanGeneratedSessionLabel(title: string | undefined): string | 
   const trimmed = title?.trim();
   if (!trimmed) return undefined;
   const classified = classifyUserPrompt(trimmed);
-  return classified.kind === 'skill' ? classified.clean : trimmed;
+  if (classified.kind === 'skill') return classified.clean;
+  if (isSyntheticUserMessage(trimmed)) return undefined;
+  if (!stripXmlLikeTags(trimmed).trim()) return undefined;
+  if (BARE_CONTROL_COMMAND_RE.test(trimmed)) return undefined;
+  return trimmed;
 }
 
 /**

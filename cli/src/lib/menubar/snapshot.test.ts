@@ -122,6 +122,119 @@ describe('menubar snapshot', () => {
 });
 
 /**
+ * PHNX-3999 F25 — Settings shows each device's role and useful hardware specs.
+ *
+ * Two properties matter and both are pinned here: the numbers come from the
+ * fleet-stats CACHE (opening Settings must never probe the fleet — see
+ * docs/menubar.md), and a device nobody has measured reports `stats: null`
+ * rather than zeroes that would render as "idle box, empty disk".
+ */
+describe('computeMenubarSnapshot — device roles and specs (PHNX-3999 F25)', () => {
+  it('projects role, auto-placement eligibility and cached specs, and says nothing about an unmeasured box', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'menubar-specs-home-'));
+    const dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'menubar-specs-db-'));
+    dirs.push(home, dbDir);
+    const prevHome = process.env.HOME;
+    const prevDevicesDir = process.env.AGENTS_DEVICES_DIR;
+    const prevSessionsDb = process.env.AGENTS_SESSIONS_DB;
+    process.env.HOME = home;
+    const devicesDir = path.join(home, '.agents', '.history', 'devices');
+    process.env.AGENTS_DEVICES_DIR = devicesDir;
+    process.env.AGENTS_SESSIONS_DB = path.join(dbDir, 'sessions.db');
+    closeDB();
+    vi.resetModules();
+
+    const now = new Date().toISOString();
+    const device = (name: string, platform: string) => ({
+      name,
+      platform,
+      shell: 'posix',
+      address: { via: 'tailscale', dnsName: `${name}.example.ts.net` },
+      auth: { method: 'key' },
+      createdAt: now,
+      updatedAt: now,
+    });
+    fs.mkdirSync(devicesDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(devicesDir, 'registry.json'),
+      JSON.stringify({
+        laptop: device('laptop', 'macos'),
+        worker: device('worker', 'linux'),
+        unmeasured: device('unmeasured', 'linux'),
+      }),
+    );
+    // Real role marks in the tracked per-device docs — the same store
+    // `--device auto` reads through filterAutoPool.
+    for (const [name, role] of [['laptop', 'personal'], ['worker', 'worker'], ['unmeasured', 'worker']]) {
+      const docDir = path.join(home, '.agents', 'devices', name);
+      fs.mkdirSync(docDir, { recursive: true });
+      fs.writeFileSync(path.join(docDir, 'agents.yaml'), `config:\n  role: ${role}\n  formFactor: ${name === 'laptop' ? 'laptop' : 'server'}\n`);
+    }
+    // A real fleet-stats cache: one fresh reachable row, one unreachable row that
+    // kept its hardware facts from an earlier probe (retainHardwareFacts), and
+    // nothing at all for `unmeasured`.
+    const nowMs = Date.now();
+    fs.mkdirSync(path.join(home, '.agents', '.cache'), { recursive: true });
+    fs.writeFileSync(
+      path.join(home, '.agents', '.cache', '.fleet-stats.json'),
+      JSON.stringify({
+        version: 1,
+        entries: {
+          worker: {
+            host: 'worker', reachable: true, fetchedAt: nowMs,
+            ncpu: 16, loadPercent: 12, memPercent: 40,
+            memTotalBytes: 68719476736, memFreeBytes: 41231686041,
+            diskTotalBytes: 1099511627776, diskFreeBytes: 549755813888, diskUsedPercent: 50,
+          },
+          laptop: {
+            host: 'laptop', reachable: false, fetchedAt: nowMs - 60 * 60_000,
+            ncpu: 10, memTotalBytes: 34359738368, diskTotalBytes: 494384795648,
+            specsFetchedAt: nowMs - 2 * 60 * 60_000,
+          },
+        },
+      }),
+    );
+
+    try {
+      const { computeMenubarSnapshot: compute } = await import('./snapshot.js');
+      const snapshot = await compute();
+      const byName = Object.fromEntries(snapshot.devices.map((d) => [d.name, d]));
+
+      // A `personal` box is never auto-placement capacity, whatever its specs.
+      expect(byName.laptop.role).toBe('personal');
+      expect(byName.laptop.autoEligible).toBe(false);
+      expect(byName.worker.role).toBe('worker');
+      expect(byName.worker.autoEligible).toBe(true);
+
+      // Fresh reachable reading: hardware facts AND current-state numbers.
+      expect(byName.worker.stats).toMatchObject({
+        reachable: true, stale: false, cpus: 16, loadPercent: 12, memPercent: 40,
+        memTotalBytes: 68719476736, diskFreeBytes: 549755813888, diskUsedPercent: 50,
+      });
+      expect(byName.worker.stats!.observedAt).toBe(new Date(nowMs).toISOString());
+
+      // Unreachable and hour-old: the hardware facts survive, the live readings
+      // are explicitly absent, and the row is labelled stale with its own age.
+      expect(byName.laptop.stats).toMatchObject({
+        reachable: false, stale: true, cpus: 10, loadPercent: null, memPercent: null, memFreeBytes: null,
+      });
+      expect(byName.laptop.stats!.specsObservedAt).toBe(new Date(nowMs - 2 * 60 * 60_000).toISOString());
+
+      // Never measured — "unavailable", not zeroes.
+      expect(byName.unmeasured.stats).toBeNull();
+    } finally {
+      const { closeDB: closeFresh } = await import('../session/db.js');
+      closeFresh();
+      closeDB();
+      if (prevHome === undefined) delete process.env.HOME; else process.env.HOME = prevHome;
+      if (prevDevicesDir === undefined) delete process.env.AGENTS_DEVICES_DIR; else process.env.AGENTS_DEVICES_DIR = prevDevicesDir;
+      if (prevSessionsDb === undefined) delete process.env.AGENTS_SESSIONS_DB; else process.env.AGENTS_SESSIONS_DB = prevSessionsDb;
+      vi.resetModules();
+    }
+  });
+});
+
+/**
  * RUSH-2336 — the menubar snapshot must apply the same canonical
  * `isRunningLiveSession` selector the CLI's bare `--active` view does. The
  * daemon warm-tick writer never stamps `machine` on a local row (unlike the
