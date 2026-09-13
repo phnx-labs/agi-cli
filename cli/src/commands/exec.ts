@@ -2410,7 +2410,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         { readAndResolveBundleEnv, describeBundle, remoteResolveEnv },
         { assertRemoteBundleFlagsUnsupported, splitBundleRef, resolveSecretsContextForRun },
         { resolveHostSshTarget },
-        { getConfiguredRunStrategy, normalizeRunStrategy, resolveRunVersion, rotationFailoverChain, DEFAULT_ROTATION_FAILOVER_LIMIT, shouldArmRotationFailover, preflightFallbackHandoff, RUN_STRATEGIES, collectHarnessCandidates, pickHarnessWeighted, classifyHarnessCandidates, formatHarnessPickBanner, formatNoHealthyHarnessError, formatNoHealthyAccountError, formatNoVerifiedUsageError, signInRecoverableCandidates },
+        { getConfiguredRunStrategy, normalizeRunStrategy, resolveRunVersion, rotationFailoverChain, DEFAULT_ROTATION_FAILOVER_LIMIT, shouldArmRotationFailover, preflightFallbackHandoff, preflightHandoffEligible, RUN_STRATEGIES, collectHarnessCandidates, pickHarnessWeighted, classifyHarnessCandidates, formatHarnessPickBanner, formatNoHealthyHarnessError, formatNoHealthyAccountError, formatNoVerifiedUsageError, signInRecoverableCandidates },
         { getGlobalDefault, getVersionHomePath, resolveVersion, resolveVersionAlias, ensureAgentRunnable },
         { buildDiscoveredPlugin, loadPluginManifest, syncPluginToVersion },
         { parseWorkflowFrontmatter, resolveWorkflowRef, resolveAllowedSubagents, pruneStaleWorkflowSubagents, ensureSubagentDispatchTool },
@@ -2977,6 +2977,21 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
       // synthesize a same-agent fallback chain from the other healthy accounts
       // (issue #348). Stays null unless a non-pinned strategy actually rotated.
       let rotationResult: import('../lib/accounting/rotate.js').RotateResult | null = null;
+      /**
+       * The PRIMARY harness's configured run-default mode/effort, carried across a
+       * preflight alternate-harness handoff (PHNX-3999 F19).
+       *
+       * Run defaults are resolved after the harness is known, so without this a
+       * handoff would silently adopt the ALTERNATE's configured defaults — a
+       * primary configured `mode: plan` becoming the alternate's `mode: skip`
+       * escalates a read-only intent into an unattended writable run. The
+       * canonical mid-run cascade keeps the primary's resolved mode for the same
+       * reason (`runWithFallback` forwards `options.mode` and only re-derives the
+       * mode that was never configured at all). An IMPLICIT mode is deliberately
+       * not carried: it is the harness's own safe default, so the alternate's
+       * applies (identical to `modeWasImplicit ? implicitModeFor(agent)`).
+       */
+      let handoffRunDefaults: ResolvedRunDefaults | undefined;
       // Precomputed launchable-signed-in verdict for the ACTUAL launched
       // candidate, fed to the pre-launch `run.launch` event so it need not
       // re-probe. Sourced per resolution branch from the candidate that WON, not
@@ -3074,19 +3089,33 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
                 // alternate becomes the primary and is dropped from the spec, so
                 // the chain that remains never lists the agent now running.
                 //
-                // Only for the run shapes a handoff is actually valid for. A
-                // prompt is what `--fallback` itself requires (it is rejected
-                // without one below); a resume is bound to the session's OWN
-                // harness; and a workflow's tool/MCP scoping is claude-only, so
-                // switching harness would silently drop the declared sandbox —
-                // the same fail-open `runWithFallback` warns about.
-                const handoff = prompt !== undefined && !options.resume && !workflowToolsRestrict && !workflowMcpConfigPath
+                // ONLY for a run shape `--fallback` is valid on. The handoff
+                // consumes the entry it uses, and the canonical --fallback
+                // validation runs later (it rejects interactive/--acp/--loop/
+                // --resume-checkpoint chains and requires a prompt) — so
+                // switching first on an ineligible shape would empty the spec,
+                // leave that guard nothing to reject, and start the alternate
+                // harness on a run the CLI refuses today. An ineligible shape
+                // never switches, so the spec survives and still fails there
+                // with its own message. See preflightHandoffEligible.
+                const handoff = preflightHandoffEligible({
+                  hasPrompt: prompt !== undefined,
+                  interactive: options.interactive === true,
+                  acp: options.acp === true,
+                  loop: options.loop === true,
+                  resumeCheckpoint: !!options.resumeCheckpoint,
+                  resume: !!options.resume,
+                  workflowScoped: !!workflowToolsRestrict || !!workflowMcpConfigPath,
+                })
                   ? preflightFallbackHandoff(options.fallback, agent, resolved.exhausted)
                   : null;
                 if (handoff) {
                   process.stderr.write(chalk.yellow(
                     `[agents] every ${agent} account is exhausted — handing off to ${handoff.agent}${handoff.version ? `@${handoff.version}` : ''}\n`,
                   ));
+                  // Snapshot the PRIMARY's configured defaults BEFORE the switch —
+                  // this is the operator's intent for this run, not the alternate's.
+                  handoffRunDefaults ??= fromProfile ? undefined : resolveRunDefaults(agent, version ?? resolveVersion(agent, cwd), cwd);
                   agent = handoff.agent;
                   // Alias-resolve against the NEW harness's installs, exactly as
                   // the canonical --fallback parse does for its own entries.
@@ -3328,9 +3357,12 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
       // alias for 'skip' (rewritten downstream by normalizeMode in exec.ts).
       let mode = options.mode as ExecMode;
       const modeSource = runCmd.getOptionValueSource('mode');
-      const modeFromRunDefault = modeSource === 'default' && !!runDefaults.mode;
+      // A configured mode carried across a preflight handoff wins over the
+      // alternate harness's own configured default (see handoffRunDefaults).
+      const configuredMode = handoffRunDefaults?.mode ?? runDefaults.mode;
+      const modeFromRunDefault = modeSource === 'default' && !!configuredMode;
       if (modeFromRunDefault) {
-        mode = runDefaults.mode as ExecMode;
+        mode = configuredMode as ExecMode;
       }
       if (!['plan', 'edit', 'auto', 'skip', 'full'].includes(mode)) {
         console.error(chalk.red(`Invalid mode: ${mode}. Use plan, edit, auto, or skip ('full' accepted as alias for skip).`));
@@ -3388,7 +3420,8 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
       }
 
       const effortSource = runCmd.getOptionValueSource('effort');
-      const effort = (effortSource === 'default' && runDefaults.effort ? runDefaults.effort : options.effort) as ExecEffort;
+      const configuredEffort = handoffRunDefaults?.effort ?? runDefaults.effort;
+      const effort = (effortSource === 'default' && configuredEffort ? configuredEffort : options.effort) as ExecEffort;
       if (!['low', 'medium', 'high', 'xhigh', 'max', 'auto'].includes(effort)) {
         console.error(chalk.red(`Invalid effort: ${effort}. Use 'low', 'medium', 'high', 'xhigh', 'max', or 'auto'`));
         process.exit(1);
