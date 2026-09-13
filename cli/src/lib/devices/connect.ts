@@ -115,19 +115,7 @@ export function wrapRemoteCommand(
     // the prelude VERBATIM — it is already shell syntax and re-quoting it would
     // break it (see `fleetRemotePrelude`).
     if (device.shell === 'powershell') {
-      // Three things are load-bearing here, in order:
-      //   `&`   — PowerShell evaluates a bare quoted string as a STRING
-      //           EXPRESSION and echoes it, so without the call operator
-      //           `'prog' 'arg'` prints `prog` and runs nothing.
-      //   `--%` — the stop-parsing token. It makes PowerShell pass the rest of
-      //           the line to the program verbatim instead of re-serializing it,
-      //           which on 5.1 drops empty arguments and eats embedded quotes.
-      //   Win32 quoting — because after `--%` the CALLEE splits the line, so the
-      //           tokens must already be escaped to the rules it will apply.
-      // The program itself is still pwsh-quoted: PowerShell resolves that one.
-      const program = pwshQuote(cmd[0]!);
-      const rest = cmd.slice(1).map(quoteWin32ExecArg);
-      script = [...prelude, '&', program, ...(rest.length > 0 ? ['--%', ...rest] : [])].join(' ');
+      script = pwshExactArgvScript(cmd, prelude);
     } else {
       script = [...prelude, ...cmd.map(shellQuote)].join(' ');
     }
@@ -154,29 +142,66 @@ export function pwshQuote(token: string): string {
 }
 
 /**
- * Why a PowerShell argv needs Win32 quoting plus `--%`.
+ * Emit a PowerShell script that runs `cmd` with EXACT argv, for either kind of
+ * target a Windows peer can name.
  *
  * Windows has no argv array: a process receives ONE string and splits it itself.
- * PowerShell 5.1 re-serializes arguments into that string when invoking a native
- * program, and its serializer is lossy in exactly two ways — both MEASURED against
- * a real Windows peer, not inferred:
+ * PowerShell 5.1 rebuilds that string when it invokes a native program, and its
+ * serializer is lossy — measured on a real peer, an EMPTY argument is dropped and
+ * an embedded `"` is discarded, so the callee's argv silently shifts.
  *
- *   - an EMPTY argument is dropped entirely, so the callee's argv silently shifts;
- *   - an embedded `"` is discarded, so `say "hi"` arrives as `say hi`.
+ * The obvious fix, the `--%` stop-parsing token, is NOT used, because measurement
+ * killed it three ways:
+ *   - it only applies to a NATIVE command, and `agents` on Windows resolves to
+ *     `agents.ps1`, so a script target received `--%` as a literal argument and
+ *     the whole remainder as one string;
+ *   - a token containing a NEWLINE terminates the directive, producing a parser
+ *     error;
+ *   - it performs cmd-style `%VAR%` expansion, so a literal `%PATH%` became six
+ *     arguments — the exact opposite of exact argv.
  *
- * So the tokens are serialized here to the documented `CommandLineToArgvW` rules
- * the callee will apply — which `quoteWin32ExecArg` already implements for the
- * `.cmd` shim path, so it is reused rather than re-derived — and PowerShell is told
- * to stop parsing (`--%`) so it passes the line through untouched instead of
- * rebuilding it.
+ * So the script branches on what the peer's own command discovery finds:
  *
- * Residual, stated rather than hidden: after `--%` PowerShell performs cmd-style
- * `%VAR%` expansion, which double-quoting does not suppress (the same caveat
- * `quoteWin32ExecArg` documents). A token containing `%FOO%` is substituted on the
- * peer. `agents ssh --argv` composes the CALLER's own tokens, so that is not a
- * privilege boundary here; composing an untrusted command line would need a shell
- * with expansion disabled instead.
+ *   - **native executable** — launched through `System.Diagnostics.Process` with a
+ *     pre-built `Arguments` string escaped by {@link quoteWin32ExecArg}. .NET hands
+ *     that string to `CreateProcess` essentially verbatim, so the child's
+ *     `CommandLineToArgvW` reconstructs the tokens exactly; no shell sees it, so
+ *     no `%VAR%` expansion and no newline sensitivity. `UseShellExecute = $false`
+ *     with no redirection leaves the child on the inherited handles, which is what
+ *     lets a binary stdout stream through unchanged.
+ *   - **anything else** (a `.ps1`/`.cmd` launcher, a function, a cmdlet, an alias)
+ *     — invoked with a splatted PowerShell array. That is an in-process call, so
+ *     the native serializer is never involved and every token survives as itself.
+ *
+ * The exit code is propagated in both branches; a script launcher that sets no
+ * `$LASTEXITCODE` is left alone rather than forced to 0.
  */
+function pwshExactArgvScript(cmd: string[], prelude: string[]): string {
+  const program = pwshQuote(cmd[0]!);
+  const rest = cmd.slice(1);
+  const nativeLine = pwshQuote(rest.map(quoteWin32ExecArg).join(' '));
+  const splat = rest.length > 0 ? `@(${rest.map(pwshQuote).join(', ')})` : '@()';
+  return [
+    ...prelude,
+    `$ErrorActionPreference='Stop'`,
+    `$__c = Get-Command -Name ${program} -ErrorAction Stop`,
+    `if ($__c.CommandType -eq 'Application') {`,
+    `  $__psi = New-Object System.Diagnostics.ProcessStartInfo`,
+    `  $__psi.FileName = $__c.Source`,
+    `  $__psi.Arguments = ${nativeLine}`,
+    `  $__psi.UseShellExecute = $false`,
+    `  $__p = [System.Diagnostics.Process]::Start($__psi)`,
+    `  $__p.WaitForExit()`,
+    `  exit $__p.ExitCode`,
+    `}`,
+    // `@__a` SPLATS the array into separate arguments. `& $__c @(...)` on an
+    // array LITERAL does not splat — it passes one array-valued argument, which
+    // a real peer reported back as every token collapsed into one.
+    `$__a = ${splat}`,
+    `& $__c @__a`,
+    `if ($null -ne $LASTEXITCODE) { exit $LASTEXITCODE }`,
+  ].join('\n');
+}
 
 /**
  * True when `cmd` is a browser drive: `agents browser …`, `ag browser …`, or
