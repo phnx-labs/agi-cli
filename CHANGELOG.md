@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Browser setup installs standalone Browser CLI 0.1.3, which preserves a live browser and restores its task when the owning service is replaced.
+- Browser setup selects standalone Browser CLI 0.1.3. A surviving browser can restore its task through an existing debugging port after service replacement; private debugging-pipe handles cannot transfer between services.
 
 - Standalone Browser, Computer and Secrets CLI setup now separates executable installation from health. `agents setup status --tool <name> --json` reads cached metadata; `--refresh` performs a bounded, shared check for that tool. `agents setup <tool> --install-only` installs without starting services or changing permissions. The standalone Browser CLI owns the `browser` executable; Agents CLI retains `agents browser` and no longer installs the conflicting alias.
 

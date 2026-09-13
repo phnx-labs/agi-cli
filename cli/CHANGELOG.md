@@ -93,20 +93,18 @@
 
 - **AGI Menu 1.5.0 adds tool sessions and Setup.** The menu separates Agents, Browser and Computer activity, shows browser controls and recorded computer captures, and reports installation and readiness for Browser, Computer and Secrets CLI. It consumes the shared daemon feed without periodic tool subprocesses. The helper floor selects the signed and notarized `menubar/v1.5.0` release.
 
-- **Replacing the browser daemon no longer kills a live browser (PHNX-3999).** The
-  daemon's startup reaper read "the daemon that launched this has exited" as "everything
-  it recorded is garbage" and SIGTERMed the browser — so activating the menu bar,
-  upgrading, or a daemon crash-restart closed a browser you were looking at, and the
-  runtime record was wiped so the survivor could not even be re-attached. But a live
-  browser outliving its daemon is the normal case: shutdown deliberately closes only
-  CDP, and on macOS the browser is spawned detached. A live local browser is now
-  preserved untouched, a dead record is cleared without signalling anything, and a
-  stale `ssh -L` tunnel — which genuinely cannot outlive its owner — is still reaped,
-  decided separately from the browser instead of sharing one kill path. Ownership of a
-  preserved browser transfers only after an identity-checked attach succeeds — including
-  the restart path that restores your open browser tasks — and that rewrites the
-  owning-daemon pid alone, keeping the original launch's metadata. Source:
-  `cli/src/lib/browser/runtime-state.ts`.
+- **Daemon startup preserves surviving local browsers (PHNX-3999).** The startup
+  reaper keeps a live local browser's runtime and task records when its previous
+  daemon has exited. Dead process records and stale SSH tunnels are handled
+  separately. Ownership changes only after an identity-checked reattach succeeds,
+  preserving the original launch metadata. Reconnection requires an existing
+  debugging port: `--remote-debugging-pipe` handles belong to the original service
+  process and cannot transfer to a replacement daemon. Coordinate release of an
+  active pipe-connected browser before restarting its daemon.
+- **Browser setup selects standalone Browser CLI 0.1.3.** The default package for
+  `agents setup browser --install-only` now includes the browser preservation and
+  task-restoration fixes. Existing installations and configured CLI manifests
+  retain their current behavior.
 
 - **BREAKING — deprecated command shims are deleted; every surface has one spelling.** The hidden and warned aliases that kept "still works this release" paths alive are gone, not tombstoned: a script that still calls one now gets commander's `unknown command` / `unknown option` and exits non-zero. Removed → replacement: `agents notify` → `agents send --to owner` (or `agents feed post --level important` for a milestone that should reach the owner; a `feed.broadcast` sink that spawned `agents notify "{message}"` becomes `channel: owner`); `agents doctor --fix` → `agents sync <agent>@all` (doctor is diagnose-only); `agents accounts connect|name|label|attach|detach|switch|set-default` and the hidden `agents accounts mint` / `agents auth mint` → `agents accounts add <harness> [name]`, `agents accounts login <harness>#<name>`, `agents accounts default <harness> [name]`, `agents accounts rename`, and `agents run <harness>#<name>` (accounts select by name; installation bindings are gone); `agents sessions go` → `agents sessions resume --attach-only`; `agents sessions attach` and `agents reconnect` / `agents sessions reconnect` → `agents sessions resume [id]`; `agents repo refresh` → `agents sync`; `agents mcp register` → `agents sync --mcp`; `agents memory sync` → `agents sync --memory`; `agents plugins sync <name>` → `agents sync --plugin <name>`; `agents skills info` → `agents skills view`; `agents run --smart` → `agents run --device auto`; `agents events --audit` → `agents events audit` or `--include ops`; `agents devices prefer|unprefer <name>` → `agents devices config <name> auto-launch.preferred on|--unset`; `agents devices set-interactive [name]` → `agents config set interactive.host <name>` (or `agents devices config <name> interactive.host <name>`); `agents devices configure|note|set <name>` → `agents devices config <name> <key> <value>`. `agents devices enable|disable <name>` stay as first-class, visible sugar over `auto-launch.enabled` (no deprecation notice). Folding `mcp register` into `agents sync` also closed a gap in the replacement: sync's reconcile stage skipped every HTTP MCP server declared in `agents.yaml` (`refresh.ts` `continue`d on `transport: http`) while the removed command registered it — it now registers HTTP servers through the same `registerMcpToTargets` path (`codex mcp add <name> --url <url>`), and the yaml-resource writer's Codex arm no longer silently no-ops on HTTP either (`installMcpViaCodex`). Source: `cli/src/commands/send.ts`, `doctor.ts`, `accounts.ts`, `auth.ts`, `go.ts`, `sessions.ts`, `repo.ts`, `mcp.ts`, `memory.ts`, `plugins.ts`, `skills.ts`, `exec.ts`, `events.ts`, `ssh.ts`, `cli/src/lib/smart-launch.ts`.
 
