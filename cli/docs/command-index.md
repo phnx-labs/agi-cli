@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_68 command groups · 510 commands._
+_68 command groups · 511 commands._
 
 ## accounts — Browse and manage harness accounts
 
@@ -665,6 +665,7 @@ agents sessions [query]                    Find, browse, and read agent conversa
 agents sessions backfill                   Populate derived session data explicitly.
 agents sessions backfill resources         Derive historical skill/slash-command usage once into the local SQLite index.
 agents sessions backfill tools             Parse historical tool calls once into the local SQLite index.
+agents sessions backup-setup               (operator) Provision the managed session-backup Worker + R2 bucket — NOT a per-user step; signing in with `agents auth login` backs sessions up with zero setup
 agents sessions bookmark [ids...]          Bookmark sessions so they are easy to find again — list them with --bookmarks, or `b` in the browser.
 agents sessions detach <id>                Send a live agent to the background — stop its terminal, keep it working headless
 agents sessions export [selectors...]      Bundle sessions (by id, query, or the parent selection flags like --since/-a) into a portable archive.

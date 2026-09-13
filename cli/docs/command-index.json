@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 68,
-  "commands": 510,
+  "commands": 511,
   "root": {
     "name": "agents",
     "path": "",
@@ -20427,6 +20427,85 @@
               "subcommands": []
             }
           ]
+        },
+        {
+          "name": "backup-setup",
+          "path": "sessions backup-setup",
+          "aliases": [],
+          "description": "(operator) Provision the managed session-backup Worker + R2 bucket — NOT a per-user step; signing in with `agents auth login` backs sessions up with zero setup",
+          "args": [],
+          "options": [
+            {
+              "flags": "--bundle <name>",
+              "description": "secrets bundle holding the Cloudflare API token",
+              "long": "--bundle",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false,
+              "defaultValue": "cloudflare"
+            },
+            {
+              "flags": "--worker <name>",
+              "description": "Worker name",
+              "long": "--worker",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false,
+              "defaultValue": "agents-sessions"
+            },
+            {
+              "flags": "--bucket <name>",
+              "description": "R2 bucket name",
+              "long": "--bucket",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false,
+              "defaultValue": "agents-sessions"
+            },
+            {
+              "flags": "--account <id>",
+              "description": "Cloudflare account id (else read from the bundle / prompt)",
+              "long": "--account",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--token <token>",
+              "description": "Cloudflare API token (else read from the --bundle)",
+              "long": "--token",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--domain <host>",
+              "description": "custom domain to map",
+              "long": "--domain",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false,
+              "defaultValue": "sessions.agents-cli.sh"
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "$ agents secrets exec cloudflare -- agents sessions backup-setup\n  Provision the managed session-backup Worker + R2 bucket (creds from the bundle).\n\n  $ agents sessions backup-setup --account <id> --domain sessions.example.com\n  Provision against a private account service and custom domain.",
+          "subcommands": []
         },
         {
           "name": "bookmark",
