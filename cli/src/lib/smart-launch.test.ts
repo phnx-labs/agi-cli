@@ -333,30 +333,6 @@ describe('applyDeviceAutoToOptions', () => {
     expect(result.banner?.hostLabel).toBe('local');
   });
 
-  it('maps deprecated --smart to --device auto when no host given', async () => {
-    const options: { smart?: boolean; device?: string } = { smart: true };
-    await applyDeviceAutoToOptions(options, {
-      resolve: () => ({
-        host: 'zion',
-        candidates: [{ key: 'zion', loadPercent: 1 }],
-        pickedDeviceKey: 'zion',
-      }),
-    });
-    expect(options.device).toBe('zion');
-  });
-
-  it('does not override an explicit host when --smart is also set', async () => {
-    const options = { smart: true, device: 'gpu-box' as string | undefined };
-    const result = await applyDeviceAutoToOptions(options, {
-      resolve: () => {
-        throw new Error('should not resolve');
-      },
-    });
-    expect(options.device).toBe('gpu-box');
-    expect(result.attempted).toBe(false);
-    expect(result.deprecationSmart).toBe(true);
-  });
-
   it('preserves the auto request and throws on placement failure', async () => {
     const options = { device: 'auto' as string | undefined, balanced: undefined as boolean | undefined };
     await expect(applyDeviceAutoToOptions(options, {

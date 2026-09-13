@@ -406,10 +406,10 @@ describe('doctor target + qualifier survives --device forwarding (issue #2058)',
 
   it('preserves @oldest through --device forwarding', () => {
     const forwarded = stripRoutingFlags(
-      ['doctor', 'claude@oldest', '--device', 'zion', '--fix'],
+      ['doctor', 'claude@oldest', '--device', 'zion', '--diff'],
       HOST_ROUTING_SPECS,
     );
-    expect(forwarded).toEqual(['doctor', 'claude@oldest', '--fix']);
+    expect(forwarded).toEqual(['doctor', 'claude@oldest', '--diff']);
   });
 });
 
@@ -514,35 +514,6 @@ describe('doctor generated hook runtime integration (RUSH-2382)', () => {
     });
   });
 
-});
-
-describe('doctor --fix is a deprecated no-op that points at `agents sync`', () => {
-  // `doctor --fix` moved to `agents sync` (the one fixer, a superset). doctor is
-  // diagnose-only now: the flag must never heal — it errors with a redirect.
-  it('exits non-zero and never runs a heal (no JSON repair payload)', () => {
-    seedHome(['2.0.0'], '2.0.0');
-    const shim = seedGeneratedRuntimeHook('claude', '2.0.0');
-    // A directory at the shim path would be the classic "unrepairable" case the
-    // old --fix would have surfaced. Prove doctor never touches it.
-    fs.mkdirSync(shim, { recursive: true });
-
-    const result = runDoctor('--fix');
-    expect(result.status).toBe(1);
-    const out = result.stdout + result.stderr;
-    expect(out).toContain('agents sync');
-    // Signpost only — no heal ran, so no repair machinery output.
-    expect(out).not.toContain('hookRuntimeRepair');
-    expect(out).not.toContain('Healing');
-    // The broken shim is left exactly as it was found (doctor mutates nothing).
-    expect(fs.statSync(shim).isDirectory()).toBe(true);
-  });
-
-  it('names the given target in the redirect', () => {
-    seedHome(['2.0.0'], '2.0.0');
-    const result = runDoctor('claude', '--fix');
-    expect(result.status).toBe(1);
-    expect(result.stdout + result.stderr).toContain('agents sync claude');
-  });
 });
 
 describe('doctor qualifier resolution via subprocess (issue #2058)', () => {

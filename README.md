@@ -943,8 +943,8 @@ agents plugins add hivemind@https://github.com/activeloopai/hivemind.git
 agents plugins add ./my-plugin
 
 # Apply to one agent (default version) or all supported
-agents plugins sync rush-toolkit claude
-agents plugins sync rush-toolkit
+agents sync --plugin rush-toolkit claude
+agents sync --plugin rush-toolkit
 ```
 
 A plugin is a directory with a manifest:
@@ -972,7 +972,7 @@ agents plugins add hivemind@https://github.com/activeloopai/hivemind.git \
   --allow-exec-surfaces
 
 # Same gate on re-sync (e.g., after upstream updates)
-agents plugins sync hivemind claude --allow-exec-surfaces
+agents sync --plugin hivemind claude --allow-exec-surfaces
 ```
 
 Skills, commands, and subagents are declarative and never trip the gate. The gate is per-plugin, per-install: consenting to hivemind doesn't grant blanket exec-surface trust to anything else.

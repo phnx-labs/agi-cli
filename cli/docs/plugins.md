@@ -29,7 +29,7 @@ For the layered resource model that governs plugin resolution, see [resource-syn
   .user-config.json                   Per-install user config values (runtime, not shipped)
   .source                             Git remote recorded at install time
 
-                                      On agents plugins sync / install
+                                      On agents sync --plugin / install
                                                │
                                                ▼
 <version-home>/.claude/
@@ -53,7 +53,7 @@ For the layered resource model that governs plugin resolution, see [resource-syn
 | `agents plugins install <spec>` | Alias for `add` |
 | `agents install plugin:<spec>` | Same install path (Phase 5 umbrella); same `--allow-exec-surfaces` gate |
 | `agents plugins update [name]` | Re-pull from original source and re-sync (all plugins if no name given) |
-| `agents plugins sync <name> [agent]` | Apply a plugin to the default version of an agent (all supported agents if none given) |
+| `agents sync --plugin <name> [agent]` | Apply a plugin to an agent (all supported agents if none given) |
 | `agents plugins remove [name]` | Unsync from all agent versions; optionally delete source directory |
 
 ### Options
@@ -164,8 +164,8 @@ agents plugins add rush-toolkit@~/Projects/rush-toolkit
 
 ```bash
 # After git pull or manual edits to ~/.agents/plugins/my-plugin/:
-agents plugins sync my-plugin
-agents plugins sync my-plugin claude --allow-exec-surfaces
+agents sync --plugin my-plugin
+agents sync --plugin my-plugin claude --allow-exec-surfaces
 ```
 
 **4. List what is installed and enabled**

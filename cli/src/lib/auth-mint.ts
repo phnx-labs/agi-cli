@@ -700,7 +700,7 @@ async function syncMintedBundles(accountName: string, device: string): Promise<F
     const accountPush = await pushBundleToHost(accountName, device, {
       remoteBackend,
       force: true,
-      operation: 'accounts mint --fleet',
+      operation: 'accounts login --fleet',
       policyNever: true,
       agentOnly: false,
       literalValues: {
@@ -715,7 +715,7 @@ async function syncMintedBundles(accountName: string, device: string): Promise<F
       const authPush = await pushBundleToHost(AUTH_BUNDLE, device, {
         remoteBackend: 'file',
         force: true,
-        operation: 'accounts mint --fleet',
+        operation: 'accounts login --fleet',
         policyNever: true,
         agentOnly: true,
       });

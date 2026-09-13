@@ -294,7 +294,7 @@ export function registerLogsCommand(program: Command): void {
 
   addEventsReadOptions(logsCmd
     .command('audit')
-    .description('Alias for `agents events --audit`'), false)
+    .description('Alias for `agents events audit`'))
     .addHelpText('after', `
 Examples:
   agents logs audit                          Recent activity across everything

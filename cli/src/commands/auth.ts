@@ -22,7 +22,6 @@ import {
 } from '../lib/identity/index.js';
 import { setHelpSections } from '../lib/help.js';
 import { runOrDie } from '../lib/format.js';
-import { registerMintCommand } from './auth-mint.js';
 
 /**
  * `agents auth` — sign in to Phoenix ID, the account layer behind team spaces.
@@ -156,8 +155,6 @@ Harness worker credentials are minted by \`agents accounts add <harness> [name]\
       const json = !!o.json || !!command.optsWithGlobals().json;
       return runOrDie(() => whoami(json), { json });
     });
-
-  registerMintCommand(auth, undefined, { hidden: true });
 
   auth
     .command('logout')

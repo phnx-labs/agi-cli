@@ -237,7 +237,7 @@ export async function resolveDeviceAuto(
   if (eligiblePool.length === 0) {
     throw new Error(formatNoHealthyDeviceError(pool, signals, agent));
   }
-  // `agents devices prefer <name>` boosts a device in the ranking — resolved
+  // `agents devices config <name> auto-launch.preferred on` boosts a device in the ranking — resolved
   // over the same pool so a fleet default reaches a doc-less box.
   const preferred = opts.preferred ?? autoLaunchPreferredSet(pool, { roster: pool });
   const picked = pickBestDevice(eligiblePool, [], { signals, agentLabel: agent, preferred });
@@ -335,8 +335,6 @@ type DeviceAutoHostOptions = {
   device?: string;
   on?: string;
   computer?: string;
-  /** @deprecated Hidden alias for `--device auto`. */
-  smart?: boolean;
   balanced?: boolean;
   strategy?: string;
 };
@@ -344,8 +342,6 @@ type DeviceAutoHostOptions = {
 export type DeviceAutoApplyResult = {
   /** True when automatic placement ran successfully. */
   attempted: boolean;
-  /** True when deprecated `--smart` was seen. */
-  deprecationSmart: boolean;
   /** Present when affinity resolved without error. */
   banner?: {
     hostLabel: string;
@@ -355,7 +351,7 @@ export type DeviceAutoApplyResult = {
 };
 
 /**
- * Apply `--device auto` (and deprecated `--smart`) onto run options.
+ * Apply `--device auto` onto run options.
  * Mutates `options` in place. Placement failures propagate without rewriting
  * `auto`, so callers fail loud instead of silently launching locally.
  */
@@ -367,19 +363,9 @@ export async function applyDeviceAutoToOptions(
     accountPickerRequested?: boolean;
   } = {},
 ): Promise<DeviceAutoApplyResult> {
-  let deprecationSmart = false;
-
-  if (options.smart) {
-    const anyHost = HOST_SLOTS.some(
-      (k) => typeof options[k] === 'string' && options[k]!.trim() !== '',
-    );
-    if (!anyHost) options.device = 'auto';
-    deprecationSmart = true;
-  }
-
   const hasAuto = HOST_SLOTS.some((k) => isDeviceAuto(options[k]));
   if (!hasAuto) {
-    return { attempted: false, deprecationSmart };
+    return { attempted: false };
   }
 
   const accountPickerRequested = deps.accountPickerRequested ?? false;
@@ -403,7 +389,6 @@ export async function applyDeviceAutoToOptions(
   const acctNote = accountPickerRequested ? 'accounts=picker' : 'accounts=balanced';
   return {
     attempted: true,
-    deprecationSmart,
     banner: { hostLabel, deviceHint, acctNote },
   };
 }

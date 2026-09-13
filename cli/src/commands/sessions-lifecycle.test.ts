@@ -21,9 +21,11 @@ describe('sessions lifecycle verbs are grouped under `sessions`', () => {
   const sessions = sessionsGroup();
   const names = sessions.commands.map((c) => c.name());
 
-  it('hosts detach and attach as `sessions` subcommands (not top-level)', () => {
+  it('hosts detach as a `sessions` subcommand (not top-level)', () => {
     expect(names).toContain('detach');
-    expect(names).toContain('attach');
+    expect(names).not.toContain('attach');
+    expect(names).not.toContain('go');
+    expect(names).not.toContain('reconnect');
   });
 
   it('keeps them alongside the sibling lifecycle verbs', () => {

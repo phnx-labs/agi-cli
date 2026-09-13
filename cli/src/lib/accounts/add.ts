@@ -19,8 +19,7 @@ export { LOGIN_INVOCATIONS };
 
 /**
  * `agents accounts add <harness> [name]` / `agents accounts login <harness>#<name>`
- * — the account onboarding front door (PHNX-3940, track T4; successor of the
- * `connect` module, kept as the `runConnect` alias for one release).
+ * — the account onboarding front door (PHNX-3940, track T4).
  *
  * An account is a credential SLOT, not an installation: the harness has ONE
  * managed installation (`ensureHarnessInstallation`, label `main`); every
@@ -673,12 +672,6 @@ async function _runLoginLocked(
     warnings,
   };
 }
-
-/** Back-compat alias for the retired `connect` module surface (one release). */
-export const runConnect = runAdd;
-export const connectSupported = addSupported;
-export const connectRefusal = addRefusal;
-export const connectWorkerRefusal = addWorkerRefusal;
 
 /** Real runners: the install engine, an inherited-stdio login spawn, identity read, and the mint drive. */
 async function defaultAddRunners(): Promise<AddRunners> {

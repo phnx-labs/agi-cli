@@ -87,12 +87,9 @@ import { registerSessionsResumeCommand } from './sessions-resume.js';
 import { registerSessionsForkCommand } from './fork.js';
 import { registerSessionsBookmarkCommand } from './sessions-bookmark.js';
 import { isBookmarked, listBookmarks } from '../lib/session/bookmarks.js';
-import { registerGoCommand } from './go.js';
 import { registerFocusCommand } from './focus.js';
-import { registerReconnectCommand } from './reconnect.js';
 import { registerDetachCommand } from './detach.js';
 import { registerSessionsStopCommand } from './sessions-stop.js';
-import { registerAttachCommand } from './attach.js';
 import { registerSessionsInjectCommand } from './sessions-inject.js';
 import { registerSessionsExportCommand } from './sessions-export.js';
 import { registerSessionsRenderCommand } from './sessions-render.js';
@@ -4523,7 +4520,7 @@ async function resumeOnOwnerIfRemote(session: SessionMeta): Promise<boolean> {
 export async function resumeSessionInPlace(session: SessionMeta): Promise<void> {
   // This function is the LOCAL takeover, and every caller is responsible for
   // routing a peer-owned session before it gets here (the picker above,
-  // `agents sessions resume`, `sessions attach`). Reaching it with one anyway means a
+  // `agents sessions resume`). Reaching it with one anyway means a
   // caller skipped that step, so refuse rather than start the harness against
   // state this box does not have — the `fs.existsSync(session.cwd)` fallback
   // just below is exactly how that used to pass unnoticed, quietly swapping in
@@ -6088,7 +6085,6 @@ export function registerSessionsCommands(program: Command): void {
         resume <id> --attach-only  attach only; never fork a copy
         resume                  multi-select history -> open tabs
         detach <id>             the other direction: interactive -> headless
-        (retired, still working for one release: sessions attach, sessions go, reconnect)
       - The interactive listing and every live-status flag fold in your other online machines automatically (live over SSH, no sync) — each row is labelled by host, this machine first. Use --local to skip the fan-out; single-id lookups stay local.
       - --all is not a device flag: it widens historical directory and time filters. Fleet collection is already the default. A status flag (--working/--idle/--waiting/--orphan/--crashed/--closed/--abandoned/--queued/--unknown) implies --active; combine status flags for a union.
       - --version <version> requires --agent and is equivalent to --agent <agent@version>.
@@ -6191,12 +6187,9 @@ export function registerSessionsCommands(program: Command): void {
   registerSessionsResumeCommand(sessionsCmd);
   registerSessionsForkCommand(sessionsCmd);
   registerSessionsBookmarkCommand(sessionsCmd);
-  registerGoCommand(sessionsCmd);
   registerFocusCommand(sessionsCmd);
-  registerReconnectCommand(sessionsCmd);
   registerDetachCommand(sessionsCmd);
   registerSessionsStopCommand(sessionsCmd);
-  registerAttachCommand(sessionsCmd);
   registerSessionsInjectCommand(sessionsCmd);
   registerSessionsExportCommand(sessionsCmd);
   registerSessionsRenderCommand(sessionsCmd);

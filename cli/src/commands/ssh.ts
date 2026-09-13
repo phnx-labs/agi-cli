@@ -39,7 +39,6 @@ import {
   removeIgnored,
   upsertDevice,
   writeReachability,
-  type DeviceAuthMethod,
   type DevicePlatform,
   type DeviceProfile,
   type DeviceRegistry,
@@ -1320,7 +1319,8 @@ function registerDevicesCommands(program: Command): void {
         agents devices config mac-mini notes "runs the releases"
         agents devices config win-mini ssh.auth password
         agents devices config worker ssh.identity-file ~/.ssh/worker_ed25519
-        agents devices config mac-mini auto-launch.enabled off
+        agents devices disable mac-mini                       # leave the auto-placement pool (auto-launch.enabled off)
+        agents devices enable mac-mini                        # rejoin it
         agents devices describe mark-1 "gpu box — cuda 12.4"  # one-line purpose, shown in the list
         agents devices config mac-mini interactive.host zion # where agents show YOU artifacts
         agents devices render --write  # write ~/.ssh/config.d/agents include
@@ -1970,166 +1970,6 @@ function registerDevicesCommands(program: Command): void {
     `,
   });
 
-  /** Deprecation notice for a retired subcommand — STDERR only, so a --json consumer's stdout stays parseable. */
-  const configTombstoneNotice = (retired: string, replacement: string): void => {
-    console.error(chalk.yellow(`Deprecated: "agents devices ${retired}" is now "agents devices ${replacement}". Running that for you.\n`));
-  };
-
-  devicesCmd
-    .command('enable <name>', { hidden: true })
-    .action(async (name: string) => {
-      try {
-        configTombstoneNotice('enable <name>', 'config <name> auto-launch.enabled on');
-        await mustGetDevice(name);
-        // Back to the default (enabled) = remove the key.
-        await runDevicesConfig(name, 'auto-launch.enabled', [], { unset: true, quiet: true });
-        console.log(chalk.green(`Enabled '${name}'`) + chalk.gray(' for AGI EXT auto-launch.'));
-      } catch (err: any) {
-        console.error(chalk.red(err.message));
-        process.exit(1);
-      }
-    });
-
-  devicesCmd
-    .command('disable <name>', { hidden: true })
-    .action(async (name: string) => {
-      try {
-        configTombstoneNotice('disable <name>', 'config <name> auto-launch.enabled off');
-        await mustGetDevice(name);
-        await runDevicesConfig(name, 'auto-launch.enabled', ['off'], { quiet: true });
-        console.log(chalk.green(`Disabled '${name}'`) + chalk.gray(' for AGI EXT auto-launch.'));
-      } catch (err: any) {
-        console.error(chalk.red(err.message));
-        process.exit(1);
-      }
-    });
-
-  devicesCmd
-    .command('prefer <name>', { hidden: true })
-    .action(async (name: string) => {
-      try {
-        configTombstoneNotice('prefer <name>', 'config <name> auto-launch.preferred on');
-        await mustGetDevice(name);
-        await runDevicesConfig(name, 'auto-launch.preferred', ['on'], { quiet: true });
-        console.log(chalk.green(`Preferred '${name}'`) + chalk.gray(' for AGI EXT auto-launch.'));
-      } catch (err: any) {
-        console.error(chalk.red(err.message));
-        process.exit(1);
-      }
-    });
-
-  devicesCmd
-    .command('unprefer <name>', { hidden: true })
-    .action(async (name: string) => {
-      try {
-        configTombstoneNotice('unprefer <name>', 'config <name> auto-launch.preferred off');
-        await mustGetDevice(name);
-        // Back to the default (not preferred) = remove the key.
-        await runDevicesConfig(name, 'auto-launch.preferred', [], { unset: true, quiet: true });
-        console.log(chalk.green(`No longer preferring '${name}'`) + chalk.gray(' for AGI EXT auto-launch.'));
-      } catch (err: any) {
-        console.error(chalk.red(err.message));
-        process.exit(1);
-      }
-    });
-
-  devicesCmd
-    .command('set-interactive [name]', { hidden: true })
-    .option('--unset', 'clear the interactive host')
-    .option('--json', 'output machine-readable JSON')
-    .action(async (name: string | undefined, opts: { unset?: boolean; json?: boolean }) => {
-      try {
-        configTombstoneNotice('set-interactive [name]', 'config <name> interactive.host <name>');
-        if (opts.unset) {
-          unsetConfigValue('interactive.host');
-          if (opts.json) writeJson({ interactiveHost: null });
-          else console.log(chalk.green('Cleared the interactive host.'));
-          return;
-        }
-        if (name) {
-          await mustGetDevice(name);
-          setConfigValue('interactive.host', name);
-          if (opts.json) writeJson({ interactiveHost: name });
-          else console.log(chalk.green(`Interactive host: '${name}'`) + chalk.gray(' — agents show you artifacts there. Clear with --unset.'));
-          return;
-        }
-        const current = getConfigValue('interactive.host').value as string | undefined;
-        if (opts.json) {
-          writeJson({ interactiveHost: current ?? null });
-        } else if (current) {
-          console.log(`${chalk.bold('Interactive host:')} ${chalk.cyan(current)}`);
-        } else {
-          console.log(chalk.gray("No interactive host set. Set one with 'agents devices config <name> interactive.host <name>'."));
-        }
-      } catch (err: any) {
-        console.error(chalk.red(err.message));
-        process.exit(1);
-      }
-    });
-
-  devicesCmd
-    .command('configure <name>', { hidden: true })
-    .option('--max-agents <n>', 'cap concurrent agents')
-    .option('--scheduler <on|off>', 'allow the routines scheduler (daemon) to fire on this device')
-    .option('--json', 'output machine-readable JSON')
-    .action(async (name: string, opts: { maxAgents?: string; scheduler?: string; inherited?: boolean; json?: boolean }) => {
-      try {
-        configTombstoneNotice('configure <name> [--max-agents N] [--scheduler on|off]', 'config <name> <key> <value>');
-        await mustGetDevice(name);
-        const writes: Array<[string, string]> = [];
-        if (opts.maxAgents !== undefined) writes.push(['agents.max-concurrent', opts.maxAgents]);
-        if (opts.scheduler !== undefined) {
-          if (opts.scheduler !== 'on' && opts.scheduler !== 'off') {
-            throw new Error(`--scheduler expects 'on' or 'off', got '${opts.scheduler}'.`);
-          }
-          writes.push(['scheduler.enabled', opts.scheduler]);
-        }
-        for (const [key, value] of writes) {
-          await runDevicesConfig(name, key, [value], { quiet: Boolean(opts.json) });
-        }
-        if (opts.json) printDevicesConfig(name, true);
-        else if (writes.length === 0) printDevicesConfig(name, false);
-      } catch (err: any) {
-        console.error(chalk.red(err.message));
-        process.exit(1);
-      }
-    });
-
-  devicesCmd
-    .command('note <name> [text...]', { hidden: true })
-    .option('--clear', 'remove all notes from the device')
-    .option('--json', 'output machine-readable JSON')
-    .action(async (name: string, text: string[], opts: { clear?: boolean; json?: boolean }) => {
-      try {
-        configTombstoneNotice('note <name> [text...]', 'config <name> notes <text>');
-        await mustGetDevice(name);
-        if (opts.clear) {
-          await runDevicesConfig(name, 'notes', [], { unset: true, quiet: true });
-          if (opts.json) writeJson({ device: name, notes: [] });
-          else console.log(chalk.green(`Cleared notes on '${name}'.`));
-          return;
-        }
-        if (text.length > 0) {
-          await runDevicesConfig(name, 'notes', text, { quiet: true });
-          const notes = (getConfigValue('notes', { device: name }).value as string[] | undefined) ?? [];
-          if (opts.json) writeJson({ device: name, notes });
-          else console.log(chalk.green(`Noted on '${name}':`) + ` ${text.join(' ')}`);
-          return;
-        }
-        const notes = (getConfigValue('notes', { device: name }).value as string[] | undefined) ?? [];
-        if (opts.json) {
-          writeJson({ device: name, notes });
-        } else if (notes.length > 0) {
-          console.log(chalk.bold(`Notes for '${name}'`));
-          for (const n of notes) console.log(`  ${chalk.gray('•')} ${n}`);
-        } else {
-          console.log(chalk.gray(`No notes on '${name}'. Add one with 'agents devices config ${name} notes "..."'.`));
-        }
-      } catch (err: any) {
-        console.error(chalk.red(err.message));
-        process.exit(1);
-      }
-    });
 
   const runList = async (opts: { json?: boolean; stats?: boolean; full?: boolean; refresh?: boolean; live?: boolean; all?: boolean } = {}) => {
     const reg = await loadDevices();
@@ -2217,6 +2057,34 @@ function registerDevicesCommands(program: Command): void {
   };
 
   devicesCmd.action(runList);
+
+  devicesCmd
+    .command('enable <name>')
+    .description('Put a device back in the automatic-placement pool (clears auto-launch.enabled)')
+    .action(async (name: string) => {
+      try {
+        await mustGetDevice(name);
+        await runDevicesConfig(name, 'auto-launch.enabled', [], { unset: true, quiet: true });
+        console.log(chalk.green(`Enabled '${name}'`) + chalk.gray(' for automatic placement.'));
+      } catch (err: any) {
+        console.error(chalk.red(err.message));
+        process.exit(1);
+      }
+    });
+
+  devicesCmd
+    .command('disable <name>')
+    .description('Drop a device from every automatic-placement path (sets auto-launch.enabled off)')
+    .action(async (name: string) => {
+      try {
+        await mustGetDevice(name);
+        await runDevicesConfig(name, 'auto-launch.enabled', ['off'], { quiet: true });
+        console.log(chalk.green(`Disabled '${name}'`) + chalk.gray(' for automatic placement.'));
+      } catch (err: any) {
+        console.error(chalk.red(err.message));
+        process.exit(1);
+      }
+    });
 
   devicesCmd
     .command('list')
@@ -2419,45 +2287,6 @@ email) into a single row. Use \`agents devices harnesses\` for the per-install v
       }
     });
 
-  devicesCmd
-    .command('set <name>', { hidden: true })
-    .option('--platform <platform>', 'windows | linux | macos')
-    .option('--user <user>', 'login user')
-    .option('--auth <method>', 'key | password')
-    .option('--bundle <bundle>', 'secrets bundle holding the password (for --auth password)')
-    .option('--bundle-key <key>', "key within the bundle (default 'password')")
-    .option('--identity-file <path>', 'private-key path for --auth key')
-    .option('--clear-identity-file', 'return key auth to ssh-agent/default-key discovery')
-    .action(async (name: string, opts: { platform?: string; user?: string; auth?: string; bundle?: string; bundleKey?: string; identityFile?: string; clearIdentityFile?: boolean }) => {
-      try {
-        configTombstoneNotice('set <name> [--platform|--user|--auth|--bundle|--bundle-key|--identity-file …]', 'config <name> <ssh.*|platform> <value>');
-        const existing = await mustGetDevice(name);
-        const nextMethod = (opts.auth as DeviceAuthMethod | undefined) ?? resolveDeviceProfile(existing).auth.method;
-        if (opts.identityFile && nextMethod !== 'key') {
-          throw new Error('--identity-file requires key auth; pass --auth key in the same command.');
-        }
-        const writes: Array<{ key: string; value?: string }> = [];
-        if (opts.platform) writes.push({ key: 'platform', value: opts.platform });
-        if (opts.user) writes.push({ key: 'ssh.user', value: opts.user });
-        if (opts.auth) writes.push({ key: 'ssh.auth', value: opts.auth });
-        if (opts.bundle) writes.push({ key: 'ssh.bundle', value: opts.bundle });
-        if (opts.bundleKey) writes.push({ key: 'ssh.bundle-key', value: opts.bundleKey });
-        if (opts.identityFile) writes.push({ key: 'ssh.identity-file', value: opts.identityFile });
-        if (opts.clearIdentityFile) writes.push({ key: 'ssh.identity-file' }); // unset
-        if (writes.length === 0) {
-          printDevicesConfig(name, false);
-          return;
-        }
-        for (const w of writes) {
-          await runDevicesConfig(name, w.key, w.value !== undefined ? [w.value] : [], { unset: w.value === undefined, quiet: true });
-        }
-        const d = resolveDeviceProfile((await mustGetDevice(name)));
-        console.log(chalk.green(`Updated device '${name}'`) + chalk.gray(` (auth: ${d.auth.method}${d.auth.bundle ? ` via ${d.auth.bundle}` : ''})`));
-      } catch (err: any) {
-        console.error(chalk.red(err.message));
-        process.exit(1);
-      }
-    });
 
   devicesCmd
     .command('remove <name>')

@@ -6,8 +6,7 @@
  * The reconcile stage behind `agents sync` (the umbrella `--local` path calls
  * this; see sync-umbrella.ts) and any other caller that needs to re-derive local
  * state from declared configuration. Does NOT do any git operations — that lives
- * in `agents repo pull`. (Also still reachable via the deprecated, hidden
- * `agents repo refresh` alias.)
+ * in `agents repo pull`.
  */
 
 import * as fs from 'fs';

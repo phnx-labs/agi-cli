@@ -191,7 +191,7 @@ engine:
 - **Credential transport is gated on the SSH host-key pin.**
   `cli/src/lib/hosts/credential-transport.ts` holds
   `assertCredentialTransportHostPinned` and `resolveHostSshTarget`; `accounts
-  sync`, `accounts mint --fleet`, and the reserved-auth sync check the pin and
+  sync`, the `accounts add`/`login` mint step with `--fleet`, and the reserved-auth sync check the pin and
   only then hand the bundle to the client's `pushBundleToHost`.
 
 ## Testing

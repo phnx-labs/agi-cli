@@ -533,8 +533,7 @@ never receives the laptop's `.credentials.json`.
 
 The setup-token is not a file you hand-copy; a worker gets one because the laptop
 **minted** it — the worker-credential step of `agents accounts add claude <name>`
-(re-run by `agents accounts login claude#<name>`; the hidden `agents accounts mint`
-/ `agents auth mint` still work and print the pointer) drives `claude setup-token` through its
+(re-run by `agents accounts login claude#<name>`) drives `claude setup-token` through its
 device-code OAuth flow and seeds the result as a named account (`driveSetupTokenMint`, [`auth-mint.ts`](../src/lib/auth-mint.ts), PHNX-2364).
 The *authorize* step still needs a browser pointed at the right account: the fleet's
 logins accumulate in **browser profiles** (`agents browser profiles logins`), so

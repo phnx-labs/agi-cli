@@ -293,8 +293,7 @@ last few narration headlines (§Session request + timeline above) — forcing st
 JSON and returning `undefined` (→ `skipped`) on any error.
 
 Owner-addressed delivery is policy fan-out, not primary/fallback selection.
-`agents send --to owner`, deprecated `agents notify`, and an important feed's
-`channel: owner` sink resolve every addressable id in
+`agents send --to owner` and an important feed's `channel: owner` sink resolve every addressable id in
 `humans.yaml`'s `owner.policy.normal`, in policy order. Each destination is
 attempted independently; a partial failure is reported alongside successful
 deliveries. Rush-backed destinations that cannot deliver on the originating
@@ -338,8 +337,7 @@ line**:
 An **important** post (and every `--blocked` post) fires a best-effort background
 `agents traces sync` (`fireTraceSyncInBackground`, `run-trace-sync.ts`, gated
 exactly like the run-exit arm) so that console page exists when a Slack crumb is
-tapped. **`agents notify` / `agents send --to owner` route through this same
-composer** (`ownerMessageComposer`/`composeOwnerMessage`, `owner-message.ts`): the
+tapped. **`agents send --to owner` routes through this same composer** (`ownerMessageComposer`/`composeOwnerMessage`, `owner-message.ts`): the
 owner fan-out re-renders the body per destination — plain for iMessage/rush, mrkdwn
 for a Slack owner channel — rather than dumping the raw body or sending one plain
 string to every channel (PHNX-3698). A non-owner `agents send` (explicit
@@ -923,7 +921,7 @@ writing a remediation string.** `agents sync <agent>` targets
 only the default/sole installed version (`commands/sync.ts:8`), so a row collapsed
 across versions uses the `@all` selector — `agents sync <agent>@all --yes`. A fleet
 resource gap is absent from that box's *central repos*, so the central-to-home
-`agents doctor --fix` cannot close it — and neither `agents repo pull` nor the sync
+`agents sync` cannot close it — and neither `agents repo pull` nor the sync
 umbrella touches the **system** repo (`commands/repo.ts:1186`,
 `lib/sync-umbrella.ts:104`), which moves with the npm package instead, so that row
 names both paths rather than one command that quietly covers half the cases. A
@@ -1267,12 +1265,12 @@ modulate that SAME `filterAutoPool` pool — one placement rule, not a second on
 box from the pool the same way a `personal`/`desktop` role does, so it leaves
 EVERY automatic-placement path (`run`, `teams`, `ssh auto`, the AGI EXT launch
 commands) at once; `agents devices enable <name>` (the default) restores it.
-`agents devices prefer <name>` sets `auto-launch.preferred` = true, which does NOT
+`agents devices config <name> auto-launch.preferred on` sets `auto-launch.preferred` = true, which does NOT
 narrow the pool — it BOOSTS the box in the ranker: `autoLaunchPreferredSet`
 (`pool.ts`) feeds `pickBestDevice` (`teams/scheduler.ts`), which ranks a preferred
 device ahead of its load-equal peers, after the signed-in tier and before load, so
 the boost overrides load-based ordering without overriding hard health;
-`agents devices unprefer <name>` removes it. Both flags are **shared** device-scope
+`agents devices config <name> auto-launch.preferred --unset` removes it. Both flags are **shared** device-scope
 keys living in `devices/<name>/agents.yaml` `config.autoLaunch{Enabled,Preferred}`
 (a fleet-wide default rides `fleet.defaults.config`, set with `--fleet`), so they
 sync with `agents repo push/pull`. The four verbs are task-shaped forwarding
@@ -1305,14 +1303,13 @@ tracked `fleet.ignored` block that `agents devices ignore` writes and
 are hidden so a dismissed box is never silently absent; `agents devices unignore
 <name>` puts one back (RUSH-3062).
 
-Native-account names (set at `agents accounts add <harness> <name>`; the hidden
-`accounts label` still writes them) are the same kind of fleet-wide
+Native-account names (set at `agents accounts add <harness> <name>`) are the same kind of fleet-wide
 fact: they bind to a stable `(agent, identityKey)` (email / org key), not a
 device or a version. They live on the central `accounts.native` rows in
 `~/.agents/agents.yaml` — already classified `central` and synced by
 `agents repo push/pull` — so `codex#personal` selects the same login on every
 box. A git merge of two independently labeled boxes can union two UUID rows for
-one identity; `accounts remove` / `rename` / `label` operate on every matching
+one identity; `accounts remove` / `rename` operate on every matching
 row so a sibling cannot silently survive.
 
 **A label name is unique per HARNESS, not globally (PHNX-3887).** One human
@@ -1578,9 +1575,7 @@ quietly resumed in `process.cwd()` (RUSH-2022, PHNX-3481).
 ([`src/lib/session/resume-owner.ts`](src/lib/session/resume-owner.ts)) is the one
 answer to "may this resume run here?". Every path that starts a harness from a picked
 row consults it first: `agents sessions resume` and the `agents sessions` picker hop to the
-owner, and `sessions attach` hops as an **attach** (its detach record and the
-headless process it stops are both on the owner — hopping as a bare resume would
-skip the stop and leave two processes on one transcript). The batch
+owner. The batch
 `sessions resume` mostly inherits it for free: every TAB it opens runs the
 canonical `agents sessions resume <id>` (`lib/session/resume-command.ts`), whose docblock
 already promised source-device routing — this is what makes that true. Its

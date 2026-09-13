@@ -545,7 +545,7 @@ describe.skipIf(process.platform === 'win32')('generateSystemdUnit', () => {
     // systemd/launchd pin PATH and never source ~/.profile, so a login-shell
     // install at ~/.rush/bin/rush is invisible to the daemon. The notify
     // preflight (`which rush` in providers/rush.ts) then fails forever while
-    // `agents notify --dry-run` from a login shell reports ok. Reproduce that
+    // `agents send --to owner --dry-run` from a login shell reports ok. Reproduce that
     // split against the generated unit PATH, not a mocked lookup.
     const sandboxHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agd-3075-path-'));
     const prevHome = process.env.HOME;

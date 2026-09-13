@@ -257,7 +257,7 @@ SSH access (§7); rendering sessions that no harness produced.
   added a LOCAL-only gate ahead of any fleet call: a live tmux alias, or a bare
   8-hex naming exactly one live LOCAL pane, attaches with zero SSH
   (`lib/session/local-tmux-attach.ts`, `attachLocalLiveSelector`) before
-  `sessions resume`/`sessions attach`/`sessions focus` ever reach this
+  `sessions resume`/`sessions focus` ever reach this
   resolver.
 - **SES-9b (MUST).** An ID-shaped selector that misses the local transcript index
   but names a session the LOCAL live registry (`getActiveSessions`, the source
@@ -1771,12 +1771,6 @@ Claude 2.1.218 is installed on the origin device; When the session recovers;
 Then the target is `claude@2.1.218` in `/continue` mode, never native resume and
 never another harness (`lib/session/recovery.test.ts`).
 
-**GWT-16 — A cross-device attach stops the origin continuation.**
-Given a detached session indexed on another device; When `agents sessions attach
-<id>` runs; Then the whole attach command executes on the indexed origin before
-it reads the detach record, stops the headless PID, or invokes recovery
-(`commands/attach.ts`; `commands/attach.test.ts`).
-
 **GWT-17 — Claude native resume uses the project-key cwd.**
 Given a healthy Claude origin home owns a transcript whose attachment envelope
 records cwd A before its first user turn records cwd B; When the session recovers;
@@ -2038,8 +2032,7 @@ Credential account selection adds three requirements to that funnel:
   a distinct, device-local native identity (`commands/accounts.ts`).
   Claude's shareable setup-token is minted by the mint step of
   `agents accounts add <harness> [name]` and re-minted by
-  `agents accounts login <harness>#<name>` (`lib/auth-mint.ts`; the hidden
-  `agents accounts mint` / `agents auth mint` alias still works this release):
+  `agents accounts login <harness>#<name>` (`lib/auth-mint.ts`):
   the command MUST capture only a well-formed `sk-ant-oat01-…` token (refusing
   a TTY-banner blob, #1767) and MUST seed both the named provider account and
   the reserved FILE-BASED `auth` bundle keyed per-account email

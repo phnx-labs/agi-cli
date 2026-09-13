@@ -485,17 +485,17 @@ agents run <agent> ["<task>"] --device <device>
 > reached the host **and** held the pane for at least 10 seconds). A clean detach
 > (`Ctrl-b d`, exit 0) or a real agent exit (any non-255 code) is left alone, and
 > `--raw`/no-tmux runs are not retried (they don't survive a drop). If every attempt
-> fails the CLI prints the manual **`agents reconnect <id>`** to get back in once the
+> fails the CLI prints the manual **`agents sessions resume <id>`** to get back in once the
 > link is back.
 >
-> **`agents reconnect [session-id]`** is the manual companion — one verb that always
+> **`agents sessions resume [session-id]`** is the manual companion — one verb that always
 > tries hardest to put you back into a dropped agent terminal: attach the live pane
 > if it survived, else resume the session (best-effort: live pane > resumed copy > a
 > clear message about what was lost). Use it after the auto-loop above gave up on a
 > sustained outage, or when a VS Code terminal tab closed with the dead ssh client.
 > With no id it reconnects the most recent session started from the current
 > directory — the terminal that most likely just dropped — not the full fleet
-> picker. It is also spelled `agents sessions reconnect`.
+> picker.
 >
 > The remote `agents sessions focus --local` invocation the reattach
 > drives is wrapped so that whatever exit code it decides on, a 255 is remapped to
