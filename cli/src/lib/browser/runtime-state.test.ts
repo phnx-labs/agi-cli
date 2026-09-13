@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import { execFileSync } from 'child_process';
+import { execFileSync, spawn } from 'child_process';
 import {
   writeProfileRuntime,
   readProfileRuntime,
@@ -13,6 +13,7 @@ import {
   listAllProfileSnapshots,
   isProcessAlive,
   reapOrphanedProcesses,
+  adoptProfileRuntimeOwner,
   isProfileInUse,
   planProfilePrune,
 } from './runtime-state.js';
@@ -225,6 +226,162 @@ describe('reapOrphanedProcesses', () => {
     reapOrphanedProcesses();
     // Cleanup should have removed the orphan's runtime files even if the
     // recorded pid was already gone.
+    expect(readProfileRuntimeMeta(name)).toBeNull();
+  });
+});
+
+describe('reapOrphanedProcesses preserves a live browser across daemon replacement', () => {
+  /**
+   * A REAL long-lived child, recorded the way a launched browser is.
+   *
+   * Not a mock and not a stand-in for CDP: the reaper's whole decision is
+   * "is this pid alive and does it still run the command we recorded", so a real
+   * process with a real recorded command is the faithful subject. The CDP/tab-target
+   * half of the contract is covered by the live-browser suite.
+   */
+  function spawnRecorded(name: string, extra: Partial<Parameters<typeof writeProfileRuntime>[1]> = {}) {
+    // `sleep` outlives the test and matches its own recorded command.
+    const child = spawn('sleep', ['300'], { stdio: 'ignore' });
+    writeProfileRuntime(name, {
+      pid: child.pid!,
+      port: 9222,
+      command: 'sleep',
+      daemonPid: 999997, // a dead daemon: the replacement case
+      ...extra,
+    });
+    return child;
+  }
+
+  it('does NOT signal a live local browser, and leaves its record intact', async () => {
+    const name = uniq('live');
+    const child = spawnRecorded(name);
+    try {
+      const before = readProfileRuntimeMeta(name)!;
+      const result = reapOrphanedProcesses();
+
+      // The process is untouched — this is the bug: it used to be SIGTERMed.
+      expect(isProcessAlive(child.pid!, 'sleep')).toBe(true);
+      expect(result.reaped).toBe(0);
+      expect(result.details.join(' ')).toContain(`preserved live browser ${child.pid}`);
+
+      // The record survives whole, so the next attach can still find the port.
+      const after = readProfileRuntimeMeta(name)!;
+      expect(after).toEqual(before);
+      // Ownership is deliberately NOT adopted here: only a proven attach may.
+      expect(after.daemonPid).toBe(999997);
+    } finally { child.kill('SIGKILL'); }
+  });
+
+  it('is idempotent — a second replacement still preserves it', async () => {
+    const name = uniq('live-twice');
+    const child = spawnRecorded(name);
+    try {
+      reapOrphanedProcesses();
+      reapOrphanedProcesses();
+      expect(isProcessAlive(child.pid!, 'sleep')).toBe(true);
+      expect(readProfileRuntimeMeta(name)).not.toBeNull();
+    } finally { child.kill('SIGKILL'); }
+  });
+
+  it('still clears a DEAD browser record, without signalling anything', () => {
+    const name = uniq('dead');
+    const dir = getProfileRuntimeDir(name);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({
+      pid: 999998, port: 9222, command: 'node', daemonPid: 999997,
+    }));
+    const result = reapOrphanedProcesses();
+    expect(readProfileRuntimeMeta(name)).toBeNull();
+    // Nothing was alive, so nothing was reaped — the record was merely stale.
+    expect(result.reaped).toBe(0);
+    expect(result.details.join(' ')).toContain('cleared dead browser record 999998');
+  });
+
+  it('treats a recycled pid as dead, because the command no longer matches', () => {
+    const name = uniq('recycled');
+    const child = spawn('sleep', ['300'], { stdio: 'ignore' });
+    try {
+      // Alive pid, but recorded as a DIFFERENT command — not our browser.
+      writeProfileRuntime(name, { pid: child.pid!, port: 9222, command: 'definitely-not-sleep', daemonPid: 999997 });
+      reapOrphanedProcesses();
+      // Cleared as stale, and crucially the unrelated process is left running.
+      expect(readProfileRuntimeMeta(name)).toBeNull();
+      expect(isProcessAlive(child.pid!, 'sleep')).toBe(true);
+    } finally { child.kill('SIGKILL'); }
+  });
+
+  it('reaps a stale tunnel — that IS an orphan — and clears only that record', async () => {
+    const name = uniq('tunnel');
+    const tunnel = spawn('sleep', ['300'], { stdio: 'ignore' });
+    writeProfileRuntime(name, {
+      pid: 0,                 // a tunnel record's `pid` is the REMOTE browser
+      port: 9222,
+      command: 'sleep',
+      kind: 'tunnel',
+      tunnelPid: tunnel.pid!,
+      daemonPid: 999997,
+    });
+    const result = reapOrphanedProcesses();
+    expect(result.details.join(' ')).toContain(`reaped tunnel ${tunnel.pid}`);
+    expect(result.reaped).toBe(1);
+    // A local ssh -L cannot outlive its purpose, so it really is signalled.
+    await vi.waitFor(() => expect(isProcessAlive(tunnel.pid!, 'sleep')).toBe(false), { timeout: 5_000 });
+    expect(readProfileRuntimeMeta(name)).toBeNull();
+  });
+
+  it('reaps a stale tunnel WITHOUT touching the live browser beside it', async () => {
+    // The old code shared one kill path for both, which is how a live browser got
+    // caught by tunnel cleanup.
+    const name = uniq('both');
+    const browser = spawn('sleep', ['300'], { stdio: 'ignore' });
+    const tunnel = spawn('sleep', ['300'], { stdio: 'ignore' });
+    try {
+      writeProfileRuntime(name, {
+        pid: browser.pid!, port: 9222, command: 'sleep',
+        kind: 'browser', tunnelPid: tunnel.pid!, daemonPid: 999997,
+      });
+      reapOrphanedProcesses();
+      await vi.waitFor(() => expect(isProcessAlive(tunnel.pid!, 'sleep')).toBe(false), { timeout: 5_000 });
+      expect(isProcessAlive(browser.pid!, 'sleep')).toBe(true);
+      // The browser record survives so it remains re-attachable.
+      expect(readProfileRuntimeMeta(name)).not.toBeNull();
+    } finally { browser.kill('SIGKILL'); tunnel.kill('SIGKILL'); }
+  });
+});
+
+describe('adoptProfileRuntimeOwner', () => {
+  it('rewrites daemonPid ALONE, retaining the original launch metadata', () => {
+    const name = uniq('adopt');
+    const child = spawn('sleep', ['300'], { stdio: 'ignore' });
+    try {
+      writeProfileRuntime(name, {
+        pid: child.pid!, port: 9333, command: 'sleep',
+        userDataDir: '/tmp/udd-original', kind: 'browser',
+        spawnedAt: 1_700_000_000_000, daemonPid: 999997,
+      });
+      const before = readProfileRuntimeMeta(name)!;
+
+      expect(adoptProfileRuntimeOwner(name, 4242)).toBe(true);
+
+      const after = readProfileRuntimeMeta(name)!;
+      expect(after.daemonPid).toBe(4242);
+      // Everything else is the ORIGINAL launch's provenance and must be intact —
+      // the reaper and the hygiene pass both read these.
+      expect({ ...after, daemonPid: undefined }).toEqual({ ...before, daemonPid: undefined });
+    } finally { child.kill('SIGKILL'); }
+  });
+
+  it('is a no-op when this daemon already owns it', () => {
+    const name = uniq('adopt-own');
+    writeProfileRuntime(name, { pid: 1, port: 9334, command: 'sleep' });
+    expect(readProfileRuntimeMeta(name)!.daemonPid).toBe(process.pid);
+    expect(adoptProfileRuntimeOwner(name)).toBe(true);
+    expect(readProfileRuntimeMeta(name)!.daemonPid).toBe(process.pid);
+  });
+
+  it('does not recreate a record that has since disappeared', () => {
+    const name = uniq('adopt-gone');
+    expect(adoptProfileRuntimeOwner(name)).toBe(false);
     expect(readProfileRuntimeMeta(name)).toBeNull();
   });
 });

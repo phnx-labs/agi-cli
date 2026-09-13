@@ -29,7 +29,7 @@ import {
   shouldForkProfile,
   type DeviceProbe,
 } from './resolve-target.js';
-import { clearProfileRuntime, listProfileCacheDirs, readProfileRuntimeMeta, isProcessAlive } from './runtime-state.js';
+import { adoptProfileRuntimeOwner, clearProfileRuntime, listProfileCacheDirs, readProfileRuntimeMeta, isProcessAlive } from './runtime-state.js';
 import { resolveDomainSkill, type ResolvedDomainSkill } from './domain-skills.js';
 import {
   generateTaskId,
@@ -3432,6 +3432,13 @@ export class BrowserService {
         await this.enableDomains(cdp);
 
         const tasks = this.loadTaskState(key);
+
+        // The attach is now PROVEN: the stored port answered /json/version and
+        // `verifyBrowserIdentity` matched the profile's browser family. Only here
+        // may this service claim a browser the startup reaper deliberately left
+        // alone — it rewrites `daemonPid` only, keeping the original launch's
+        // metadata. An ambiguous identity throws above and adopts nothing.
+        adoptProfileRuntimeOwner(key);
 
         return {
           backend: 'cdp',

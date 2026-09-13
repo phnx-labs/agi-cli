@@ -331,6 +331,39 @@ function readTaskCount(dir: string): number {
  * alone — we'd rather leak than wrongly kill a user-owned process that
  * happens to share metadata.
  */
+/**
+ * Clean up what a DEAD daemon genuinely left behind — which is not the browser.
+ *
+ * A live local browser outliving its daemon is the NORMAL case, not an orphan.
+ * `BrowserService.shutdown` deliberately closes only CDP and leaves the browser
+ * running, and on macOS the spawn is detached so the daemon's own positive-pid
+ * `killTree` reaches the daemon alone. This reaper used to read "the recorded
+ * `daemonPid` has exited" as "everything it recorded is garbage" and SIGTERM the
+ * browser — so replacing the daemon (a menubar activation, an upgrade, a crash
+ * restart) killed a browser the user was looking at, and `clearProfileRuntime`
+ * then removed the `port`/meta that {@link readProfileRuntime} needs, so even a
+ * survivor could not be re-attached and a second browser would launch beside it.
+ *
+ * The three cases are now decided independently:
+ *
+ * - **A live local browser/electron is preserved untouched** — not signalled, not
+ *   cleared, and its `daemonPid` deliberately NOT rewritten. Ownership is adopted
+ *   only after an identity-checked attach succeeds (`adoptProfileRuntimeOwner`,
+ *   called from the reuse branch in `BrowserService.connectProfile`), so nothing
+ *   claims a browser it has not proven it can talk to. Re-running this is a no-op.
+ * - **A dead browser record is cleared**, with no signal sent: there is nothing
+ *   alive to signal, and the stale pid/port would otherwise mislead the next
+ *   attach.
+ * - **A stale tunnel IS reaped.** A local `ssh -L` cannot outlive its purpose, so
+ *   a dead owner does make it an orphan. This is the one thing the old code was
+ *   right about; it just shared a code path with the browser.
+ *
+ * The accepted trade: a genuinely leaked browser from a long-dead daemon is no
+ * longer force-killed here. Idle/abandoned cleanup has its own owner in
+ * `browser/hygiene.ts` (session-dead + idle), which the daemon's periodic tick and
+ * `agents browser prune` both call — that is the right place for it, because it can
+ * tell "idle and abandoned" from "in use right now" and this function cannot.
+ */
 export function reapOrphanedProcesses(): { reaped: number; details: string[] } {
   const root = getBrowserRuntimeDir();
   if (!fs.existsSync(root)) return { reaped: 0, details: [] };
@@ -346,26 +379,75 @@ export function reapOrphanedProcesses(): { reaped: number; details: string[] } {
     // Owning daemon still alive — leave its kids alone.
     if (isProcessAlive(meta.daemonPid)) continue;
 
-    // Kill what the dead daemon left behind. Best-effort.
-    const kill = (pid?: number, label?: string): void => {
-      if (!pid || pid === 0) return;
-      // Only kill if it matches the recorded command — guards against
-      // pid reuse handing us an unrelated process to murder.
-      if (meta.command && !matchesCommand(pid, meta.command) &&
-          !matchesCommand(pid, 'ssh')) return;
-      try {
-        process.kill(pid, 'SIGTERM');
-        reaped++;
-        details.push(`reaped ${label ?? 'pid'} ${pid} (profile ${profileName})`);
-      } catch { /* already gone */ }
-    };
+    // A local `ssh -L` whose owner is gone is genuinely orphaned: nothing is
+    // driving it and it cannot be re-adopted, so it is the one process to signal.
+    // Matched against the recorded command (or `ssh`) so a recycled pid is not
+    // mistaken for our tunnel.
+    if (meta.tunnelPid && meta.tunnelPid !== 0) {
+      const cmdOk = !meta.command
+        || matchesCommand(meta.tunnelPid, meta.command)
+        || matchesCommand(meta.tunnelPid, 'ssh');
+      if (cmdOk) {
+        try {
+          process.kill(meta.tunnelPid, 'SIGTERM');
+          reaped++;
+          details.push(`reaped tunnel ${meta.tunnelPid} (profile ${profileName})`);
+        } catch { /* already gone */ }
+      }
+    }
 
-    kill(meta.pid, 'browser');
-    kill(meta.tunnelPid, 'tunnel');
+    // A tunnel-kind record has no local browser of its own, so clearing it is the
+    // whole cleanup. `pid` on such a record is the REMOTE browser (normally 0) and
+    // is never ours to signal.
+    if (meta.kind === 'tunnel') {
+      clearProfileRuntime(profileName);
+      continue;
+    }
+
+    // `isProcessAlive` re-checks the recorded command, so a recycled pid does not
+    // read as our browser. A record with no pid at all is stale by definition.
+    const liveBrowser = !!meta.pid && meta.pid !== 0 && isProcessAlive(meta.pid, meta.command);
+    if (liveBrowser) {
+      details.push(`preserved live browser ${meta.pid} (profile ${profileName})`);
+      continue;
+    }
+
+    // Dead browser: clear the stale record. No signal — there is nothing there.
     clearProfileRuntime(profileName);
+    if (meta.pid) details.push(`cleared dead browser record ${meta.pid} (profile ${profileName})`);
   }
 
   return { reaped, details };
+}
+
+/**
+ * Take ownership of a runtime record after an identity-checked attach succeeded.
+ *
+ * Called from the reuse branch in `BrowserService.connectProfile`, which has just
+ * probed `/json/version` and run `verifyBrowserIdentity` against the profile's
+ * expected browser family — so by this point the process on the recorded port is
+ * proven to be ours. Only then may a new service claim it.
+ *
+ * Rewrites `daemonPid` ALONE. Every other field — `pid`, `port`, `command`,
+ * `userDataDir`, `spawnedAt`, `kind`, `tunnelPid` — is the original launch's
+ * metadata and stays exactly as recorded: this is an ownership handover, not a
+ * re-registration, and rewriting the rest would lose the provenance the reaper and
+ * the hygiene pass both read. A record that has since disappeared is left alone
+ * rather than recreated from a partial view.
+ */
+export function adoptProfileRuntimeOwner(profileName: string, daemonPid = process.pid): boolean {
+  const meta = readProfileRuntimeMeta(profileName);
+  if (!meta) return false;
+  if (meta.daemonPid === daemonPid) return true;
+  const dir = getProfileRuntimeDir(profileName);
+  try {
+    fs.writeFileSync(path.join(dir, META_FILE), JSON.stringify({ ...meta, daemonPid }));
+    return true;
+  } catch {
+    // Losing the handover is not worth failing an otherwise good attach; the next
+    // startup simply preserves the browser again and re-attaches.
+    return false;
+  }
 }
 
 /**
