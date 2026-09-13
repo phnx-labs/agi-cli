@@ -19,7 +19,7 @@ import { logAndContinueOnLockCompromised } from './lock-compromise.js';
 import { machineId } from './session/sync/config.js';
 import { getDaemonDir, getUserAgentsDir } from './state.js';
 
-const FLEET_SHARED_REPO_SYNC_DEADLINE_MS = 45_000;
+export const FLEET_SHARED_REPO_SYNC_DEADLINE_MS = 45_000;
 const FLEET_SHARED_REPO_KILL_GRACE_MS = 250;
 export const FLEET_SHARED_REPO_OUTPUT_MAX_BYTES = 1024 * 1024;
 const FLEET_SHARED_REPO_PUSH_ATTEMPTS = 3;

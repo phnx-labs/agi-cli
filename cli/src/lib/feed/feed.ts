@@ -294,7 +294,7 @@ export function deriveBlockState(block: OpenBlock): AttentionState {
  * answer / continue / clear paths BEFORE the open-block view is removed, so the
  * reconciler always has the tombstone by the time the block file is gone.
  */
-function recordResolution(resolution: AttentionResolution, root?: string): void {
+export function recordResolution(resolution: AttentionResolution, root?: string): void {
   const dir = resolutionDir(root ?? getFeedDir());
   ensureDir(dir);
   atomicWriteJsonSync(path.join(dir, `${resolution.blockId}.json`), resolution);

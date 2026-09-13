@@ -199,6 +199,11 @@ export function setActiveSessionsSnapshotPathForTest(p: string | null): string |
   return prev;
 }
 
+/** Test seam: isolate process-local entries between fixtures. */
+export function clearActiveSnapshotMemoryForTest(): void {
+  activeSnapshotMemory.clear();
+}
+
 /** Test seam: redirect the immutable-memo file. Returns the previous override. */
 export function setImmutableMemoPathForTest(p: string | null): string | null {
   const prev = immutablePathOverride;

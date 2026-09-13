@@ -1259,7 +1259,7 @@ export function mergeLocalFirst(sessions: SessionMeta[], localMachine: string): 
 /** The intentionally small metadata contract emitted by `sessions --resolve`.
  * It includes only launch identity needed to route/resume. Transcript paths,
  * extracted plans, costs, and content stay on the machine that owns them. */
-function serializeResolvedSessionsJson(sessions: SessionMeta[]): string {
+export function serializeResolvedSessionsJson(sessions: SessionMeta[]): string {
   const safe = sessions.map((session) => ({
     id: session.id,
     shortId: session.shortId,

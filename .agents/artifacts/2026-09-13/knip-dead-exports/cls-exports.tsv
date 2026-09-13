@@ -113,7 +113,7 @@ cli/src/commands/sessions-resume.ts	resumeSelectorInPlace	export	0	0	a
 cli/src/commands/sessions-stop.ts	stopSessionAction	export	0	1	b
 cli/src/commands/sessions-trace.ts	configureTraceCommand	export	0	2	b
 cli/src/commands/sessions.ts	backfillActiveRowsFromIndex	export	5	2	c
-cli/src/commands/sessions.ts	serializeResolvedSessionsJson	export	0	2	b
+cli/src/commands/sessions.ts	serializeResolvedSessionsJson	export	1	2	c
 cli/src/commands/sessions.ts	gatherRemoteComputerSessionRows	export	0	1	b
 cli/src/commands/sessions.ts	isBareBrowserListing	export	0	3	b
 cli/src/commands/sessions.ts	selectRoutineTarget	export	0	2	b
@@ -333,7 +333,7 @@ cli/src/lib/feed/events.ts	timeAsync	export	0	1	b
 cli/src/lib/feed/events.ts	withTiming	export	0	2	b
 cli/src/lib/feed/events.ts	emitError	export	0	0	a
 cli/src/lib/feed/events.ts	getTimingStats	export	0	0	a
-cli/src/lib/feed/feed.ts	recordResolution	export	0	4	b
+cli/src/lib/feed/feed.ts	recordResolution	export	1	4	c
 cli/src/lib/feed/feed.ts	listResolutions	export	0	0	a
 cli/src/lib/feed/feed.ts	recordTerminalAnswer	export	0	0	a
 cli/src/lib/feed/feed.ts	clearBlockLifecycle	export	0	1	b
@@ -347,7 +347,7 @@ cli/src/lib/feed/pr-status.ts	projectPullRequestBoard	export	0	0	a
 cli/src/lib/feed/watch.ts	FEED_WATCH_VERSION	export	0	0	a
 cli/src/lib/fleet-cache.ts	readFleetStatus	export	11	1	c
 cli/src/lib/fleet-cache.ts	readAccountUsage	export	0	0	a
-cli/src/lib/fleet-shared-repo-sync.ts	FLEET_SHARED_REPO_SYNC_DEADLINE_MS	export	0	1	b
+cli/src/lib/fleet-shared-repo-sync.ts	FLEET_SHARED_REPO_SYNC_DEADLINE_MS	export	1	1	c
 cli/src/lib/fleet-shared-repo-sync.ts	FLEET_SHARED_REPO_KILL_GRACE_MS	export	0	2	b
 cli/src/lib/fleet-shared-repo-sync.ts	runBoundedProcess	export	2	1	c
 cli/src/lib/fleet/apply.ts	reconcileDevice	export	0	2	b
@@ -589,7 +589,7 @@ cli/src/lib/session/remote/watch.ts	previousSessionWatchRowKey	export	0	5	b
 cli/src/lib/session/remote/watch.ts	readPreviousSessionsForWatch	export	4	1	c
 cli/src/lib/session/render.ts	displayPath	export	1	4	c
 cli/src/lib/session/render.ts	VALID_ROLE_VALUES	export	0	5	b
-cli/src/lib/session/session-cache.ts	clearActiveSnapshotMemoryForTest	export	0	0	a
+cli/src/lib/session/session-cache.ts	clearActiveSnapshotMemoryForTest	export	1	0	c
 cli/src/lib/session/session-cache.ts	setActiveSessionsJournalPathForTest	export	0	0	a
 cli/src/lib/session/session-cache.ts	ACTIVE_SESSIONS_READER_TRANSITION_POLL_MS	export	0	2	b
 cli/src/lib/session/session-cache.ts	mergeSessionSummary	export	0	2	b
