@@ -1,10 +1,6 @@
 /**
- * `agents sessions go [id]` — DEPRECATED alias for `agents sessions focus --attach-only`.
- *
- * `go` was "attach or refuse" (never fork/resume). `focus --attach-only` is exactly
- * that behavior, so `go` now prints a deprecation notice and delegates to `focusAction`.
- *
- * This file still owns the shared reach engine that `focus` imports:
+ * The shared live-session reach engine that `sessions focus` / `resume --attach-only`
+ * import ("attach or refuse", never fork/resume):
  *   - `gatherLiveTargets` / `pickLiveTarget` / `buildLivePool` — live-session discovery + picker
  *   - `jumpTo` — the side-effecting jump: attach the already-running terminal
  *       local tmux    -> attach (switch-client when already inside tmux)
@@ -13,8 +9,6 @@
  *       otherwise     -> hand off to the `UnreachableFallback` (attach-only refuses; focus resumes)
  *   - `refuseFallback` — the attach-only fallback (remote -> login shell; local -> refuse)
  */
-
-import type { Command } from 'commander';
 import chalk from 'chalk';
 import path from 'path';
 import { execFile } from 'child_process';
@@ -39,7 +33,6 @@ import {
 import { buildPreview } from './sessions-picker.js';
 import { multiItemPicker } from '../lib/picker.js';
 import { isPromptCancelled } from './utils.js';
-import { focusAction } from './focus.js';
 import { machineId } from '../lib/session/sync/config.js';
 import { attachTmux, runTmux } from '../lib/tmux/binary.js';
 import { ensureSessionHookRepaired, paneExitStatus, teardownIfAgentExited } from '../lib/tmux/session.js';
@@ -50,19 +43,6 @@ import { enumerateGhosttyTabs, assignGhosttyTabs } from '../lib/session/ghostty-
 import { addressabilityRecoveryHint } from '../lib/terminal/resolve.js';
 
 const execFileAsync = promisify(execFile);
-
-export function registerGoCommand(program: Command): void {
-  program
-    .command('go', { hidden: true })
-    .argument('[id]', 'Short/full session id to jump to; omit for an interactive picker')
-    .option('--local', 'Only this machine (skip the cross-host sweep)')
-    .description('Deprecated — use `agents sessions resume --attach-only` instead.')
-    .action(async (id: string | undefined, opts: { local?: boolean }) => {
-      console.warn(chalk.yellow('`agents sessions go` is deprecated — use `agents sessions resume --attach-only` instead:'));
-      console.warn(chalk.gray(`  agents sessions resume ${id ?? '<id>'} --attach-only`));
-      await focusAction(id, { local: opts.local, attachOnly: true });
-    });
-}
 
 /**
  * Scope a live-session pool by device and live status. Pure so the `focus`

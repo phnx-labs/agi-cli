@@ -70,7 +70,7 @@ flowchart LR
    and verifies that build, swaps it atomically at the same path and identity
    (bundle id + Team, so the Accessibility grant survives), and restarts the
    helper. Two triggers: the daemon's periodic self-heal check `menubar-helper`
-   (every six hours; `agents doctor` shows it, `agents doctor --fix` runs it)
+   (every six hours; `agents doctor` shows it, `agents sync` runs it)
    and the end of `agents upgrade`. A local-build install, an opted-out Mac and
    a Mac that never enabled the menu bar are left alone; the multi-install
    ownership contest still applies. The floor bump in step 2 is therefore the

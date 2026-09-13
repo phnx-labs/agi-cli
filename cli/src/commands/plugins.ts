@@ -90,7 +90,7 @@ Examples:
   agents plugins view rush-toolkit
 
   # Sync a plugin to specific agents
-  agents plugins sync rush-toolkit claude
+  agents sync --plugin rush-toolkit claude
 
   # Remove a plugin from all agents and delete its source
   agents plugins remove rush-toolkit
@@ -356,100 +356,6 @@ Examples:
       console.log();
     });
 
-  // Deprecated: superseded by `agents sync --plugin <name>`. Kept as a warned,
-  // functional alias so old muscle-memory and scripts don't break.
-  pluginsCmd
-    .command('sync <name> [agent]', { hidden: true })
-    .description('Deprecated — use `agents sync --plugin <name>` instead.')
-    .option('--allow-exec-surfaces', 'Enable the plugin even when it ships hooks/, .mcp.json, bin/, scripts/, settings.json, or permissions/')
-    .addHelpText('after', `
-Examples:
-  # Sync a plugin to every installed version of an agent
-  agents plugins sync rush-toolkit claude
-
-  # Sync to one specific version (parity with 'agents sync')
-  agents plugins sync rush-toolkit claude@2.1.142
-
-  # Sync to all supported agents (every installed version of each)
-  agents plugins sync rush-toolkit
-
-  # Re-affirm consent for a hooks-bearing plugin
-  agents plugins sync hivemind claude --allow-exec-surfaces
-`)
-    .action(async (name: string, agentArg: string | undefined, options: { allowExecSurfaces?: boolean }) => {
-      console.warn(chalk.yellow('`agents plugins sync` is deprecated — use `agents sync --plugin` instead:'));
-      console.warn(chalk.gray(`  agents sync --plugin ${name}`));
-      const plugin = getPlugin(name);
-      if (!plugin) {
-        console.log(chalk.red(`Plugin '${name}' not found`));
-        process.exit(1);
-      }
-
-      // Accept the same "agent@version" form as `agents sync`. Splitting here
-      // also means an unknown spec is reported cleanly rather than crashing
-      // isCapable() with a bare "claude@2.1.168".
-      let versionArg: string | undefined;
-      let agentName: string | undefined = agentArg;
-      if (agentArg && agentArg.includes('@')) {
-        const at = agentArg.lastIndexOf('@');
-        agentName = agentArg.slice(0, at);
-        versionArg = agentArg.slice(at + 1);
-      }
-
-      // Determine target agents
-      let targetAgents: AgentId[];
-      if (agentName) {
-        const agentId = agentName as AgentId;
-        if (!isCapable(agentId, 'plugins')) {
-          console.log(chalk.red(`Agent '${agentName}' does not support plugins`));
-          process.exit(1);
-        }
-        if (!pluginSupportsAgent(plugin, agentId)) {
-          console.log(chalk.red(`Plugin '${name}' does not support ${agentLabel(agentId)}`));
-          process.exit(1);
-        }
-        targetAgents = [agentId];
-      } else {
-        if (versionArg) {
-          console.log(chalk.red(`A version (@${versionArg}) requires naming the agent, e.g. claude@${versionArg}`));
-          process.exit(1);
-        }
-        targetAgents = capableAgents('plugins').filter(a => pluginSupportsAgent(plugin, a));
-      }
-
-      const allowExec = options.allowExecSurfaces === true;
-
-      for (const agentId of targetAgents) {
-        const versions = listInstalledVersions(agentId);
-        if (versions.length === 0) continue;
-
-        // Default to EVERY installed version. The previous behaviour synced only
-        // the global default, which silently skipped non-default versions used
-        // by balanced rotation -- so a rotated version would lack the plugin's
-        // slash commands. An explicit agent@version narrows back to one.
-        let targetVersions: string[];
-        if (versionArg) {
-          if (!versions.includes(versionArg)) {
-            console.log(chalk.red(`${agentLabel(agentId)} has no installed version ${versionArg} (installed: ${versions.join(', ')})`));
-            process.exit(1);
-          }
-          targetVersions = [versionArg];
-        } else {
-          targetVersions = versions;
-        }
-
-        for (const version of targetVersions) {
-          const didSync = allowExec
-            ? syncPluginToVersion(plugin, agentId, getVersionHomePath(agentId, version), { allowExecSurfaces: true, version }).success
-            : syncResourcesToVersion(agentId, version, { plugins: [name] }).plugins.length > 0;
-          if (didSync) {
-            console.log(chalk.green(`Synced ${name} to ${agentLabel(agentId)}@${version}${allowExec ? ' (exec surfaces enabled)' : ''}`));
-          } else {
-            console.log(chalk.gray(`${name} already synced to ${agentLabel(agentId)}@${version}`));
-          }
-        }
-      }
-    });
 
   // agents plugins remove [name]
   withAliases(pluginsCmd

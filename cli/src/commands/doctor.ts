@@ -18,9 +18,8 @@
  * Read-only always: doctor diagnoses, it never mutates. To fix the gaps it
  * finds — install missing resources, repair Claude-invalid plugin manifests,
  * refresh stale plugins, reconcile drift, repair hook runtime shims — run
- * `agents sync <agent>@all` (the one fixer, a superset of the old `doctor
- * --fix`). Run `agents prune cleanup` to act on orphan readouts. `--fix` is a
- * deprecated no-op that now errors with a pointer to `agents sync`.
+ * `agents sync <agent>@all` (the one fixer). Run `agents prune cleanup` to act
+ * on orphan readouts.
  */
 import type { Command } from 'commander';
 import { IsolationBoundaryError } from '../lib/installations/shims.js';
@@ -103,7 +102,6 @@ interface DoctorOptions {
   diff?: boolean;
   kind?: string;
   cwd?: string;
-  fix?: boolean;
   adopt?: string;
   release?: string;
   device?: string;
@@ -1480,7 +1478,6 @@ export function registerDoctorCommand(program: Command): void {
     .description('Diagnose CLI availability, sync status, and resource divergence (optionally for a specific agent[@version]).')
     .option('--json', 'Output machine-readable JSON')
     .option('--diff', 'In target mode, include unified diffs for divergent files')
-    .option('--fix', '(deprecated) doctor is diagnose-only — this errors with a pointer to `agents sync`, the one fixer')
     .option('--kind <kinds>', 'Restrict to comma-separated resource kinds (commands,skills,hooks,rules,mcp,permissions,subagents,plugins,workflows,memory)')
     .option('--cwd <path>', 'Resolution cwd for project layer detection (default: process.cwd())')
     .option('--adopt <agent>', "Take over the agent's native launcher that shadows the shim (symlink it to the version-managed shim; reversible with --release)")
@@ -1604,17 +1601,6 @@ export function registerDoctorCommand(program: Command): void {
           console.log(chalk.yellow(`Could not adopt ${AGENTS[agent].cliCommand} (${result.reason}).`));
         }
         return;
-      }
-
-      // `doctor --fix` moved to `agents sync` — doctor is diagnose-only now.
-      // Keep the flag for one release as a signpost: it never heals, it points at
-      // the one fixer and exits non-zero so scripts and muscle memory get a clear
-      // redirect instead of a silent no-op.
-      if (opts.fix) {
-        const where = target ? `agents sync ${target}` : 'agents sync <agent>@all';
-        console.error(chalk.yellow('`agents doctor --fix` has moved to `agents sync`.'));
-        console.error(chalk.gray(`  doctor now only diagnoses. To fix, run: ${where}`));
-        process.exit(1);
       }
 
       if (!target) {

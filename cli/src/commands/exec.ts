@@ -83,7 +83,6 @@ interface ExecCommandActionOptions {
    * @deprecated Hidden alias for `--device auto`. Resolved before host dispatch.
    * Remove after one release.
    */
-  smart?: boolean;
   acp?: boolean;
   yes?: boolean;
   loop?: boolean;
@@ -948,10 +947,6 @@ export function registerRunCommand(program: Command): void {
   // `--on` and `--computer` are hidden aliases of `--device` — same behavior.
   runCmd.addOption(new Option('--on <name>', 'Alias of --device.').hideHelp());
   runCmd.addOption(new Option('--computer <name>', 'Alias of --device.').hideHelp());
-  // Deprecated one-release alias: `agents run … --smart` → treat as `--device auto`.
-  runCmd.addOption(
-    new Option('--smart', 'Deprecated: use --device auto (affinity host pick).').hideHelp(),
-  );
 
   // Internal: the `--device` dispatch forwards this so the REMOTE run prints its
   // resolved session id as a one-line stdout sentinel (hosts/session-marker.ts),
@@ -1567,7 +1562,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
       );
       if (defaultPlacement) options.device = 'auto';
 
-      // --device auto (and deprecated --smart): live fleet pick.
+      // --device auto: live fleet pick.
       // Harness is always the agent the user typed — never auto-picked.
       // Placement failure propagates; an automatic request never becomes local.
       {
@@ -1592,11 +1587,6 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
             `Run here instead: agents run ${runBaseAgentName} --device ${machineId()}`,
           ));
           process.exit(1);
-        }
-        if (!options.quiet && result.deprecationSmart) {
-          process.stderr.write(
-            chalk.yellow('[agents] --smart is deprecated; use --device auto\n'),
-          );
         }
         if (!options.quiet && result.banner) {
           const { hostLabel, deviceHint, acctNote } = result.banner;

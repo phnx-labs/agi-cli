@@ -380,21 +380,20 @@ describe('devices auto-launch preferences (per-device doc store)', () => {
 
     const off = run(['devices', 'disable', 'zion'], devicesEnv());
     expect(off.status).toBe(0);
-    expect(off.stderr).toContain('Deprecated'); // tombstone notice
     expect(deviceDoc('zion')).toContain('autoLaunchEnabled: false');
 
     expect(run(['devices', 'enable', 'zion'], devicesEnv()).status).toBe(0);
     expect(deviceDoc('zion')).not.toContain('autoLaunchEnabled');
   });
 
-  it('prefer and unprefer persist through the CLI into the per-device doc', () => {
+  it('auto-launch.preferred persists through `devices config` into the per-device doc', () => {
     guardedHome();
     registerDevice('mac-mini');
 
-    expect(run(['devices', 'prefer', 'mac-mini'], devicesEnv()).status).toBe(0);
+    expect(run(['devices', 'config', 'mac-mini', 'auto-launch.preferred', 'on'], devicesEnv()).status).toBe(0);
     expect(deviceDoc('mac-mini')).toContain('autoLaunchPreferred: true');
 
-    expect(run(['devices', 'unprefer', 'mac-mini'], devicesEnv()).status).toBe(0);
+    expect(run(['devices', 'config', 'mac-mini', 'auto-launch.preferred', '--unset'], devicesEnv()).status).toBe(0);
     expect(deviceDoc('mac-mini')).not.toContain('autoLaunchPreferred');
   });
 

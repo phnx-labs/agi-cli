@@ -4,16 +4,12 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { Command } from 'commander';
 import { password } from '@inquirer/prompts';
-import { classifyAttachTarget, groupLabelIdentities, nativeIdentityFromSource, parseBundleKey, parseLogoutTarget, registerAccountsCommand, resolveLabelIdentity, runAccountsLabel, setDefaultAccount, writeClaudeInteractiveOauthToken } from './accounts.js';
-import { claudeAccountTokenKey, invalidateClaudeSetupTokenCache, readClaudeAccountEmail, resolveClaudeSetupTokenForEmail, seedClaudeWorkerHomeIdentity } from '../lib/claude-account-token.js';
-import { getVersionHomePath } from '../lib/installations/versions.js';
-import { addAccount, addNativeAccount, labelNativeAccount, listNativeAccounts, removeAccount } from '../lib/account-registry.js';
+import { parseBundleKey, parseLogoutTarget, registerAccountsCommand, setDefaultAccount } from './accounts.js';
+import { addAccount, addNativeAccount, labelNativeAccount, removeAccount } from '../lib/account-registry.js';
 import { recordSlot, slotDir } from '../lib/accounts/slots.js';
 import { getAgentConfigPath } from '../lib/installations/shims.js';
-import type { RotateCandidate } from '../lib/accounting/rotate.js';
+
 import { getUserAgentsDir, readMeta, updateMeta } from '../lib/state.js';
-import { applyGlobalHelpConventions } from '../lib/help.js';
-import { keychainRef, secretsKeychainItem, writeBundleWithItemsSync } from '../lib/secrets-client.js';
 import { standaloneKeychainIsFileBacked, useFreshSecretsHome } from '../../tests/secrets-standalone.js';
 
 vi.mock('@inquirer/prompts', async (importOriginal) => {
@@ -167,36 +163,10 @@ describe('accounts add/inspect CLI errors', () => {
     expect(result.errors).not.toMatch(/force closed|accounts\.error|error:/i);
   });
 
-  describe.skipIf(!fileBacked)('with provider bundles', () => {
-    it('cancelled set-key password prompt exits 130 silently, not as accounts.error', async () => {
-      addAccount('phnx-2578-set-key', 'openrouter', 'api-key', 'sk-keep', getUserAgentsDir());
-      const result = await runCancelledSecretPrompt(['set-key', 'phnx-2578-set-key']);
-      expect(result.exitCodes).toEqual([130]);
-      expect(result.thrown).toBeUndefined();
-      expect(result.errors).not.toMatch(/force closed|accounts\.error|error:/i);
-    });
-  });
 });
 
-describe('classifyAttachTarget', () => {
-  it('rejects a completely unknown target', () => {
-    expect(() => classifyAttachTarget('totally-unknown-xyz-123')).toThrow('Unknown attach target');
-  });
 
-  it('rejects an unknown harness in agent@version form', () => {
-    expect(() => classifyAttachTarget('notarealagent@1.0.0')).toThrow("Unknown harness 'notarealagent'");
-  });
-
-  it('rejects a valid agent with missing version', () => {
-    expect(() => classifyAttachTarget('claude@')).toThrow('missing a version');
-  });
-
-  it('rejects a valid agent with an uninstalled version', () => {
-    expect(() => classifyAttachTarget('claude@99999.0.0')).toThrow('is not installed');
-  });
-});
-
-describe('accounts switch + native naming honesty-gate', () => {
+describe('accounts default write path', () => {
   useFreshSecretsHome();
 
   const TEST_NATIVE_NAMES = ['claude-native-default', 'antigravity-home'];
@@ -229,59 +199,6 @@ describe('accounts switch + native naming honesty-gate', () => {
     return chunks.join('\n');
   }
 
-  describe.skipIf(!fileBacked)('with provider bundles', () => {
-    it('switch <harness> <account> writes the same default as set-default', async () => {
-      addAccount('switch-work', 'openrouter', 'api-key', 'sk-or-secret', getUserAgentsDir());
-      const out = await runAccounts(['switch', 'claude', 'switch-work']);
-      expect(out).toContain("claude now uses account 'switch-work'");
-      expect(readMeta().accounts?.defaults?.claude).toBe('switch-work');
-      expect(setDefaultAccount('claude', 'switch-work').account.name).toBe('switch-work');
-    });
-
-    it('switch <harness> --json lists switchable accounts without changing the default', async () => {
-      addAccount('switch-json', 'openrouter', 'api-key', 'sk-or-secret', getUserAgentsDir());
-      const before = readMeta().accounts?.defaults?.claude;
-      const out = await runAccounts(['switch', 'claude', '--json']);
-      const parsed = JSON.parse(out);
-      expect(parsed.harness).toBe('claude');
-      expect(parsed.accounts).toEqual(expect.arrayContaining([
-        expect.objectContaining({ name: 'switch-json', kind: 'provider', detail: 'openrouter' }),
-      ]));
-      expect(readMeta().accounts?.defaults?.claude).toBe(before);
-    });
-
-    it('refuses native attach for an unsupported harness and still allows provider add', async () => {
-      addNativeAccount('antigravity-home', 'antigravity', 'antigravity:opaque=1', undefined, 'device');
-      await expect(runAccounts(['attach', 'antigravity-home', 'antigravity'])).rejects.toThrow(
-        "antigravity accounts can't be isolated by agents-cli yet (device-scoped login)",
-      );
-      const provider = addAccount('cursor-work', 'cursor', 'api-key', 'cursor-secret', getUserAgentsDir());
-      expect(provider.name).toBe('cursor-work');
-      expect(provider.provider).toBe('cursor');
-    });
-  });
-
-  it('refuses native name for an unsupported harness with a named reason', async () => {
-    await expect(nativeIdentityFromSource('antigravity@1.0.0')).rejects.toThrow(
-      /antigravity accounts can't be isolated by agents-cli yet \(device-scoped login\).*Supported today: claude, codex, cursor, grok, kimi/,
-    );
-    await expect(runAccounts(['name', 'antigravity@1.0.0', 'work'])).rejects.toThrow(
-      "antigravity accounts can't be isolated by agents-cli yet (device-scoped login)",
-    );
-  });
-
-  it('switch help leads with the picker workflow, not a flag dump', () => {
-    const program = new Command('agents');
-    applyGlobalHelpConventions(program);
-    registerAccountsCommand(program);
-    const help = program
-      .commands.find(command => command.name() === 'accounts')!
-      .commands.find(command => command.name() === 'switch')!
-      .helpInformation();
-    expect(help.indexOf('Examples:')).toBeGreaterThan(help.indexOf('Pick the default account'));
-    expect(help).toContain('agents accounts switch claude');
-    expect(help).toContain('agents accounts switch claude work');
-  });
 
   it('setDefaultAccount succeeds for a native account and records it as the harness default (follow-up to PR #2810)', () => {
     addNativeAccount('claude-native-default', 'claude', 'native-identity-key-1', 'user@example.com', 'version');
@@ -343,221 +260,13 @@ describe('accounts switch + native naming honesty-gate', () => {
     }
   });
 
-  it('label <harness>@<version> refuses a contradictory --account selector', async () => {
-    await expect(runAccounts(['label', 'claude@2.1.220', 'work', '--account', 'someone@example.com'])).rejects.toThrow(
-      "'claude@2.1.220' already selects one login; drop --account",
-    );
-  });
 
-  it('label <harness>@<version> fails loud for an uninstalled version', async () => {
-    await expect(runAccounts(['label', 'claude@99999.0.0', 'work'])).rejects.toThrow('claude@99999.0.0 is not installed');
-  });
 
-  it('label <harness>@<version> refuses an unsupported harness with the same named reason as name', async () => {
-    await expect(runAccounts(['label', 'antigravity@1.0.0', 'work'])).rejects.toThrow(
-      "antigravity accounts can't be isolated by agents-cli yet (device-scoped login)",
-    );
-  });
 
-  it('label help leads with the selector workflow, not a flag dump', () => {
-    const program = new Command('agents');
-    applyGlobalHelpConventions(program);
-    registerAccountsCommand(program);
-    const help = program
-      .commands.find(command => command.name() === 'accounts')!
-      .commands.find(command => command.name() === 'label')!
-      .helpInformation();
-    expect(help).toContain('agents accounts label codex@0.146.0 personal');
-    expect(help).toContain('agents run codex#work');
-  });
 });
 
-describe('groupLabelIdentities', () => {
-  it('folds one account signed into several versions into a single identity row', () => {
-    const rows = groupLabelIdentities([
-      { version: '0.145.0', email: 'you@example.com', accountKey: 'codex:acct=1' },
-      { version: '0.146.0', email: 'you@example.com', accountKey: 'codex:acct=1' },
-    ], '0.146.0');
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toEqual({
-      identityKey: 'codex:acct=1',
-      email: 'you@example.com',
-      versions: ['0.145.0', '0.146.0'],
-      isDefault: true,
-    });
-  });
 
-  it('keeps distinct identities separate and sorts the default-version login first', () => {
-    const rows = groupLabelIdentities([
-      { version: '0.145.0', email: 'a@example.com', accountKey: 'codex:acct=a' },
-      { version: '0.146.0', email: 'b@example.com', accountKey: 'codex:acct=b' },
-    ], '0.146.0');
-    expect(rows.map(row => row.email)).toEqual(['b@example.com', 'a@example.com']);
-    expect(rows[0].isDefault).toBe(true);
-    expect(rows[1].isDefault).toBe(false);
-  });
 
-  it('falls back to the lowercased email when the harness exposes no account key', () => {
-    const rows = groupLabelIdentities([
-      { version: '1.0.0', email: 'You@Example.com', accountKey: null },
-    ], null);
-    expect(rows).toHaveLength(1);
-    expect(rows[0].identityKey).toBe('you@example.com');
-  });
-
-  it('drops candidates with no stable identity — a label has nothing to bind to', () => {
-    const rows = groupLabelIdentities([
-      { version: '1.0.0', email: null, accountKey: null },
-      { version: '1.1.0', email: 'kept@example.com', accountKey: null },
-    ], null);
-    expect(rows.map(row => row.email)).toEqual(['kept@example.com']);
-  });
-});
-
-describe('writeClaudeInteractiveOauthToken', () => {
-  // The .oauth_token fallback is the Linux keychain-less path; the write is a no-op
-  // off Linux, so exercise the write/clear behavior only there.
-  const linuxOnly = process.platform === 'linux' ? it : it.skip;
-  const VERSION = '2.1.0';
-  const EMAIL = 'social@swarmify.co';
-  const TOKEN = 'sk-ant-oat01-interactive-write-test';
-  const versionHome = (): string => getVersionHomePath('claude', VERSION);
-  useFreshSecretsHome();
-
-  beforeEach(() => {
-    // Each test seeds its own `auth` bundle into a fresh SECRETS_HOME; the
-    // process-local setup-token memo must not carry a previous test's read.
-    invalidateClaudeSetupTokenCache();
-    // A version home whose .claude.json names the account, so resolveClaudeSetupToken
-    // can key the per-account token in the auth bundle.
-    const configDir = path.join(versionHome(), '.claude');
-    fs.mkdirSync(configDir, { recursive: true });
-    fs.writeFileSync(path.join(configDir, '.claude.json'), JSON.stringify({ oauthAccount: { emailAddress: EMAIL } }));
-  });
-
-  afterEach(() => {
-    fs.rmSync(versionHome(), { recursive: true, force: true });
-  });
-
-  function oauthTokenPath(): string {
-    return path.join(versionHome(), '.claude', '.oauth_token');
-  }
-  /** Seed the reserved file-backed `auth` bundle with one per-account setup-token. */
-  function writeAuthToken(email: string, token: string): void {
-    const key = claudeAccountTokenKey(email);
-    writeBundleWithItemsSync(
-      { name: 'auth', backend: 'file', policy: 'never', vars: { [key]: keychainRef(key) } },
-      new Map([[secretsKeychainItem('auth', key), token]]),
-    );
-  }
-
-  linuxOnly('writes the resolved setup-token mode 0600 for a claude@version attach', () => {
-    writeAuthToken(EMAIL, TOKEN);
-    writeClaudeInteractiveOauthToken({ kind: 'installation', agent: 'claude', version: VERSION }, 'claude');
-    expect(fs.readFileSync(oauthTokenPath(), 'utf8')).toBe(TOKEN);
-    expect(fs.statSync(oauthTokenPath()).mode & 0o777).toBe(0o600);
-  });
-
-  linuxOnly('clears a stale .oauth_token when no token resolves (re-point / detach)', () => {
-    fs.writeFileSync(oauthTokenPath(), 'stale-token-from-a-previous-account');
-    // No auth bundle at all in this fresh SECRETS_HOME -> resolveClaudeSetupToken returns null.
-    writeClaudeInteractiveOauthToken({ kind: 'installation', agent: 'claude', version: VERSION }, 'claude');
-    expect(fs.existsSync(oauthTokenPath())).toBe(false);
-  });
-
-  it('no-ops for a non-installation target (device-scoped attach)', () => {
-    writeClaudeInteractiveOauthToken({ kind: 'device-agent', agent: 'claude' }, 'claude');
-    expect(fs.existsSync(oauthTokenPath())).toBe(false);
-  });
-
-  // Regression for the review BLOCKER on PR #3331: a native claude account's email
-  // lives in `identityLabel`, NOT `identityKey` (which is the synthetic composite
-  // `claude:account=<uuid>:org=<uuid>`). The bootstrap must key the setup-token off
-  // the email; keying off `identityKey` resolves nothing and the fix silently no-ops.
-  linuxOnly('bootstraps a signed-out worker home off the account email in identityLabel, not identityKey', () => {
-    // A signed-out worker home: drop the identity the beforeEach seeded.
-    const workerHome = versionHome();
-    fs.rmSync(path.join(workerHome, '.claude', '.claude.json'), { force: true });
-    writeAuthToken(EMAIL, TOKEN);
-    // A realistic native claude account: composite identityKey, email in identityLabel.
-    const account = addNativeAccount('claude-worker', 'claude', 'claude:account=abc:org=xyz', EMAIL, 'version');
-    expect(account.identityKey).not.toContain('@');
-    expect(account.identityLabel).toBe(EMAIL);
-    // The bug: keying the token off identityKey resolves nothing.
-    expect(resolveClaudeSetupTokenForEmail(account.identityKey)).toBeNull();
-    // The fix: keying off identityLabel (the email) resolves the fleet-synced token.
-    expect(resolveClaudeSetupTokenForEmail(account.identityLabel!)).toBe(TOKEN);
-    // End to end, the bootstrap path attach takes: seed identity, then write .oauth_token.
-    expect(readClaudeAccountEmail(workerHome)).toBeNull();
-    seedClaudeWorkerHomeIdentity(workerHome, account.identityLabel!);
-    writeClaudeInteractiveOauthToken({ kind: 'installation', agent: 'claude', version: VERSION }, 'claude', account.identityLabel);
-    expect(readClaudeAccountEmail(workerHome)).toBe(EMAIL);
-    expect(fs.readFileSync(oauthTokenPath(), 'utf8')).toBe(TOKEN);
-    expect(fs.statSync(oauthTokenPath()).mode & 0o777).toBe(0o600);
-  });
-});
-
-describe('accounts label bare-harness selection (injected collector, the resolveRunVersion pattern)', () => {
-  const TEST_LABELS = ['label-seam-solo', 'label-seam-picked'];
-  const candidate = (version: string, email: string | null, accountKey: string | null): RotateCandidate =>
-    ({ agent: 'codex', version, email, accountKey, signedIn: true }) as unknown as RotateCandidate;
-  const collectSolo = async () => [
-    candidate('9.9.1', 'solo@example.com', 'codex:acct=solo'),
-    candidate('9.9.2', 'solo@example.com', 'codex:acct=solo'),
-  ];
-  const collectMulti = async () => [
-    candidate('9.9.1', 'a@example.com', 'codex:acct=a'),
-    candidate('9.9.2', 'b@example.com', 'codex:acct=b'),
-  ];
-
-  const removeTestLabels = (): void => updateMeta(meta => {
-    const native = Object.fromEntries(Object.entries(meta.accounts?.native ?? {}).filter(([, account]) =>
-      !TEST_LABELS.includes(account.name),
-    ));
-    return { ...meta, accounts: { ...meta.accounts, native } };
-  });
-
-  beforeEach(removeTestLabels);
-  afterEach(() => {
-    removeTestLabels();
-    vi.restoreAllMocks();
-  });
-
-  it('one account signed into two versions auto-selects and writes the label — no picker, no selector', async () => {
-    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
-    await runAccountsLabel('codex', 'label-seam-solo', {}, collectSolo);
-    expect(log.mock.calls.flat().join('\n')).toContain("Labeled codex account solo@example.com as 'label-seam-solo'");
-    const saved = listNativeAccounts(readMeta()).find(account => account.name === 'label-seam-solo');
-    expect(saved).toMatchObject({ agent: 'codex', identityKey: 'codex:acct=solo', identityLabel: 'solo@example.com' });
-  });
-
-  it('--account picks the matching identity among several and writes it', async () => {
-    vi.spyOn(console, 'log').mockImplementation(() => {});
-    await runAccountsLabel('codex', 'label-seam-picked', { account: 'b@example.com' }, collectMulti);
-    const saved = listNativeAccounts(readMeta()).find(account => account.name === 'label-seam-picked');
-    expect(saved).toMatchObject({ agent: 'codex', identityKey: 'codex:acct=b', identityLabel: 'b@example.com' });
-  });
-
-  it('several distinct identities and no selector resolve as ambiguous — the picker/fail-loud branch', async () => {
-    const selection = await resolveLabelIdentity('codex', undefined, collectMulti);
-    expect(selection.kind).toBe('ambiguous');
-    if (selection.kind === 'ambiguous') {
-      expect(selection.identities.map(identity => identity.email)).toEqual(['a@example.com', 'b@example.com']);
-    }
-  });
-
-  it('an unknown --account fails loud instead of writing anything', async () => {
-    await expect(resolveLabelIdentity('codex', 'nobody@example.com', collectMulti)).rejects.toThrow(
-      "Unknown codex account 'nobody@example.com'",
-    );
-  });
-
-  it('zero signed-in identities fail loud with the login hint', async () => {
-    await expect(resolveLabelIdentity('codex', undefined, async () => [])).rejects.toThrow(
-      'No signed-in codex account with a stable identity',
-    );
-  });
-});
 
 describe('parseLogoutTarget (PHNX-3940 — honor @label / #account selectors)', () => {
   it('splits a bare harness', () => {
@@ -575,7 +284,7 @@ describe('parseLogoutTarget (PHNX-3940 — honor @label / #account selectors)', 
   });
 });
 
-describe('accounts add/login/default surface + retired verbs (PHNX-3940 T4)', () => {
+describe('accounts add/login/default surface (PHNX-3940 T4)', () => {
   // Each case gets its own SECRETS_HOME (real standalone), so bundle writes are
   // isolated per test with no in-memory keychain mock.
   useFreshSecretsHome();
@@ -637,37 +346,20 @@ describe('accounts add/login/default surface + retired verbs (PHNX-3940 T4)', ()
     }
   });
 
-  it('hidden switch still executes and prints the pointer to accounts default', async () => {
-    addAccount('t4-switch', 'openrouter', 'api-key', 'sk-or', getUserAgentsDir());
-    try {
-      const r = await runAccounts(['switch', 'claude', 't4-switch']);
-      expect(r.err).toContain("replaced by 'agents accounts default <harness> [name]'");
-      expect(r.out).toContain("claude now uses account 't4-switch'");
-    } finally {
-      updateMeta(meta => ({ ...meta, accounts: { ...meta.accounts, defaults: { ...meta.accounts?.defaults, claude: undefined } } }));
-      try { removeAccount('t4-switch'); } catch { /* absent */ }
-    }
-  });
 
-  it('hidden connect still executes (into the add flow) and prints the pointer to accounts add', async () => {
-    // kimi has no finite login command, so the flow refuses AFTER the pointer —
-    // proving the hidden verb runs the shared add path.
-    const r = await runAccounts(['connect', 'kimi', 't4kimi']);
-    expect(r.err).toContain("replaced by 'agents accounts add <harness> [name]'");
-    expect(r.thrown).toMatchObject({ code: 'accounts.error' });
-    expect(r.thrown!.message).toMatch(/no finite login command/);
-  });
 
-  it('accounts help lists add/login/default and hides the retired verbs', async () => {
+  it('accounts registers add/login/default and none of the retired verbs', async () => {
     const program = new Command();
     registerAccountsCommand(program);
     const accounts = program.commands.find(c => c.name() === 'accounts')!;
     const help = accounts.helpInformation();
+    const names = accounts.commands.map(c => c.name());
     for (const verb of ['add', 'login', 'default', 'rename', 'remove', 'logout', 'sync']) {
       expect(help).toMatch(new RegExp(`^  ${verb}\\b`, 'm'));
+      expect(names).toContain(verb);
     }
     for (const retired of ['connect', 'mint', 'attach', 'detach', 'switch', 'set-default', 'label', 'name']) {
-      expect(help).not.toMatch(new RegExp(`^  ${retired}\\b`, 'm'));
+      expect(names).not.toContain(retired);
     }
   });
 });

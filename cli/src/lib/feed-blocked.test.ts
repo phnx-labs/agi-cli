@@ -94,11 +94,11 @@ describe('blockBroadcastContext', () => {
   // wiring, publishBlock never reached the broadcast layer at all.
   it('reaches an important-gated sink, with the ask in the message', () => {
     const planned = planFeedBroadcast(
-      { owner: { command: ['agents', 'notify', '{message}'], minLevel: 'important' } },
+      { owner: { channel: 'owner', minLevel: 'important' } },
       blockBroadcastContext(block, { project: 'agents-cli' }),
     );
     expect(planned).toHaveLength(1);
-    const message = planned[0].argv[2];
+    const message = planned[0].text!;
     // Title/body when extras provide them; footer names the box + session.
     expect(message).toContain('npm token expired, cannot publish');
     expect(message).toContain('Sent from');

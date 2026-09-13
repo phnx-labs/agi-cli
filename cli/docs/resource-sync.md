@@ -517,7 +517,7 @@ Behavior rules, per `src/lib/plugins.ts:379` and `src/lib/plugin-marketplace.ts`
    (`plugin-marketplace.ts:196`) short-circuits without flipping
    `enabledPlugins[<name>@agents-cli]` to `true`. The user-facing flag is
    `--allow-exec-surfaces` on both `agents plugins add` and
-   `agents plugins sync`. The gate's purpose is to prevent unattended sync
+   `agents sync --plugin`. The gate's purpose is to prevent unattended sync
    flows (e.g., `agents use claude@<v>`) from silently arming third-party
    code on every session.
 
