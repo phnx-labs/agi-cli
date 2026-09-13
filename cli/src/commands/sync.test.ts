@@ -14,6 +14,7 @@ import { Command } from 'commander';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { registerSyncCommand } from './sync.js';
 import { addSelectorOptions } from './sync.js';
@@ -609,5 +610,148 @@ describe('bare interactive `agents sync <agent>@<version>` repairs a broken shim
 
     // The interactive early-return branch repaired the shim it would previously skip.
     expect(fs.existsSync(shim)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PHNX-3923: the umbrella verb (bare `agents sync`) must REFUSE `--dry-run`
+// before touching anything. Before this fix `runUmbrella` ignored `opts.dryRun`
+// entirely — it ran the full reconcile + browser-profile eviction + repair, so
+// `agents sync --dry-run --yes --local --json` MUTATED every installed version
+// home despite the preview flag. The umbrella composes only mutating stages
+// (repo pull, refresh reconcile, device sync, repairAfterSync) and has no
+// non-mutating preview, so it now fails LOUD and points at the scoped path
+// (`agents sync <agent> --dry-run`), which honors it. Real command, temp home,
+// no mocks; a byte fingerprint of the native homes proves zero mutation.
+// ---------------------------------------------------------------------------
+
+/** Recursive content fingerprint: relpath → sha256 (files) / target (links) /
+ *  'dir' (dirs). Two equal maps mean the subtree is byte-for-byte unchanged. */
+function fingerprint(dir: string): Map<string, string> {
+  const out = new Map<string, string>();
+  const walk = (d: string) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const full = path.join(d, e.name);
+      const rel = path.relative(dir, full);
+      if (e.isSymbolicLink()) {
+        out.set(rel, 'link:' + fs.readlinkSync(full));
+      } else if (e.isDirectory()) {
+        out.set(rel + '/', 'dir');
+        walk(full);
+      } else {
+        out.set(rel, crypto.createHash('sha256').update(fs.readFileSync(full)).digest('hex'));
+      }
+    }
+  };
+  if (fs.existsSync(dir)) walk(dir);
+  return out;
+}
+
+/** Human-readable added/removed/changed set between two fingerprints. */
+function fpDiff(before: Map<string, string>, after: Map<string, string>): string[] {
+  const changes: string[] = [];
+  for (const [k, v] of after) {
+    if (!before.has(k)) changes.push(`+ ${k}`);
+    else if (before.get(k) !== v) changes.push(`~ ${k}`);
+  }
+  for (const k of before.keys()) if (!after.has(k)) changes.push(`- ${k}`);
+  return changes.sort();
+}
+
+describe('agents sync --dry-run on the umbrella verb (PHNX-3923)', () => {
+  /** claude@2.0.0 installed, set as the global default (so the umbrella
+   *  reconcile actually reaches it), with a source command + managed hook whose
+   *  runtime shim is not yet generated — i.e. a real, non-empty reconcile. */
+  function seedDefaultedVersion(): { home: string; shim: string; versionsDir: string } {
+    const { home, shim } = seedHookVersion();
+    const use = spawnSync('bun', [INDEX, 'use', 'claude@2.0.0'], {
+      encoding: 'utf-8',
+      env: { ...process.env, ...hookEnv(home) },
+    });
+    expect(use.status, use.stderr).toBe(0);
+    const versionsDir = path.join(home, '.agents', '.history', 'versions');
+    return { home, shim, versionsDir };
+  }
+
+  it('CONTROL: a real umbrella sync (no --dry-run) DOES mutate the version home', () => {
+    const { home, shim, versionsDir } = seedDefaultedVersion();
+    const before = fingerprint(versionsDir);
+
+    const r = runHooked(['sync', '--local', '--json', '--yes'], home);
+    const payload = JSON.parse(r.stdout.trim());
+    expect(payload.mode).toBe('umbrella');
+    expect(payload.reconciled).toBe(true);
+
+    // The reconcile wrote resources into the home and generated the hook shim.
+    const after = fingerprint(versionsDir);
+    expect(fpDiff(before, after).length, 'a real sync must change the version home').toBeGreaterThan(0);
+    expect(fs.existsSync(shim), 'a real sync generates the hook runtime shim').toBe(true);
+  });
+
+  it('--local: refuses, exits non-zero, and mutates NOTHING (the PHNX-3923 bug)', () => {
+    const { home, shim } = seedDefaultedVersion();
+    const agentsTree = path.join(home, '.agents');
+    const before = fingerprint(agentsTree);
+
+    const r = runHooked(['sync', '--local', '--json', '--dry-run', '--yes'], home);
+
+    // Structured refusal on stdout — one JSON object, ok:false, umbrella/dryRun.
+    const payload = JSON.parse(r.stdout.trim());
+    expect(payload).toMatchObject({ ok: false, mode: 'umbrella', dryRun: true });
+    expect(payload.error).toContain('umbrella');
+    expect(payload.hint).toContain('agents sync');
+    expect(payload.hint).toContain('--dry-run');
+    expect(payload.installedAgents, 'the installed agent is named for the pointer').toContain('claude');
+    expect(r.status, 'a refusal is a non-zero exit').not.toBe(0);
+
+    // Zero mutation: the whole native-home tree is byte-identical, and none of
+    // the reconcile/repair side effects (shim, evicted profiles) happened.
+    const after = fingerprint(agentsTree);
+    expect(fpDiff(before, after), 'dry-run must not write to any native home').toEqual([]);
+    expect(fs.existsSync(shim), 'dry-run must not generate the hook shim').toBe(false);
+  });
+
+  it('default (non-local) path: also refuses before any repo pull, mutating NOTHING', () => {
+    // The bare umbrella plan additionally fetches repos. The guard must fire
+    // BEFORE that stage too — proven here by the absence of any fetch (offline
+    // temp home, no remote) AND an unchanged tree.
+    const { home, shim } = seedDefaultedVersion();
+    const agentsTree = path.join(home, '.agents');
+    const before = fingerprint(agentsTree);
+
+    const r = runHooked(['sync', '--json', '--dry-run', '--yes'], home);
+    const payload = JSON.parse(r.stdout.trim());
+    expect(payload).toMatchObject({ ok: false, mode: 'umbrella', dryRun: true });
+    expect(r.status).not.toBe(0);
+
+    const after = fingerprint(agentsTree);
+    expect(fpDiff(before, after)).toEqual([]);
+    expect(fs.existsSync(shim)).toBe(false);
+  });
+
+  it('human (non-JSON) path: prints the error + scoped hint to stderr, no mutation', () => {
+    const { home, shim } = seedDefaultedVersion();
+    const agentsTree = path.join(home, '.agents');
+    const before = fingerprint(agentsTree);
+
+    const r = runHooked(['sync', '--local', '--dry-run', '--yes'], home);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('agents sync claude --dry-run');
+    expect(fpDiff(before, fingerprint(agentsTree))).toEqual([]);
+    expect(fs.existsSync(shim)).toBe(false);
+  });
+
+  it('the scoped preview it points at is real and non-destructive (agents sync claude --dry-run)', () => {
+    // The refusal is only honest if the alternative it names actually works and
+    // writes nothing. Prove the pointer: the scoped dry-run previews and leaves
+    // the version home untouched.
+    const { home, versionsDir } = seedDefaultedVersion();
+    const before = fingerprint(versionsDir);
+
+    const r = runHooked(['sync', 'claude', '--dry-run', '--json', '--yes'], home);
+    const payload = JSON.parse(r.stdout.trim());
+    expect(payload.mode).toBe('dry-run');
+    expect(payload.ok).toBe(true);
+    expect(fpDiff(before, fingerprint(versionsDir)), 'scoped dry-run writes nothing').toEqual([]);
   });
 });

@@ -279,7 +279,7 @@ export function registerSyncCommand(program: Command): void {
     .option('-y, --yes', 'Skip the interactive preview and auto-sync all detected resources', false)
     .option('--force', 'Re-sync even if no changes are detected since the last sync', false)
     .option('--quiet', 'Suppress all output (exit code indicates success)', false)
-    .option('--dry-run', 'Show what would be synced without making any changes', false)
+    .option('--dry-run', 'Show what would be synced without making any changes — requires an agent scope (e.g. agents sync claude --dry-run); the umbrella verb refuses it', false)
     .option('--allow-exec-surfaces', 'Allow syncing plugin exec surfaces (scripts, binaries) — off by default for safety', false)
     .option('--json', 'Emit machine-readable JSON (also accepted so fleet fan-out via --device all can parse each peer)', false)
     // Umbrella verb (no agent given): make this machine current.
@@ -600,6 +600,35 @@ async function runUmbrella(
   errLog: (msg: string) => void,
   json = false,
 ): Promise<void> {
+  // `--dry-run` on the umbrella verb is NOT supported and must fail LOUD before
+  // touching anything (PHNX-3923). The umbrella composes stages that only exist
+  // as mutating operations — repo `git pull`, a full `refresh()` reconcile into
+  // every installed version home, central browser-profile eviction, device sync,
+  // and `repairAfterSync` — none of which carry a non-mutating preview mode. The
+  // old code ignored `opts.dryRun` entirely, ran `runUmbrellaSync` + evict +
+  // repair, and so MUTATED every native home despite `--dry-run`. Rather than
+  // ship a partial preview that silently skips the stages it cannot model (a
+  // lying "would sync" that contradicts the flag's promise), refuse here and
+  // point at the scoped path, which DOES honor `--dry-run` non-destructively.
+  if (opts.dryRun) {
+    const installed = MANAGED_AGENT_IDS.filter((id) => listInstalledVersions(id).length > 0);
+    const example = installed[0] ?? 'claude';
+    const error =
+      '`agents sync --dry-run` has no umbrella preview: the machine-wide sync pulls repos, ' +
+      'reconciles every installed version, syncs devices, and repairs homes — stages that ' +
+      'cannot be previewed without making changes.';
+    const hint = `Preview one agent instead (this is non-destructive): agents sync ${example} --dry-run [--repo <repo>]`;
+    if (json) {
+      emitJson({ ok: false, mode: 'umbrella', dryRun: true, error, hint, installedAgents: installed });
+    } else {
+      errLog(chalk.red(error));
+      errLog(chalk.gray(hint));
+      if (installed.length > 0) errLog(chalk.gray(`Installed agents: ${installed.join(', ')}`));
+    }
+    process.exitCode = 1;
+    return;
+  }
+
   // Interactive bare `agents sync` (a TTY, no --yes, no scope flag) drops into
   // the two-checklist picker: which repos to sync from, which agents to sync
   // into. Any explicit flag, --yes, or --json keeps the non-interactive path.
