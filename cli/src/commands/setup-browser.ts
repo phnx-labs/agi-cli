@@ -25,6 +25,7 @@ import { DEFAULT_VIEWPORT } from '../lib/browser/devices.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { defaultBrowserChoice } from './setup-preferences.js';
 import { installSetupTool } from '../lib/setup-tool-install.js';
+import { refreshToolSetup } from '../lib/setup-tool-status.js';
 
 const INSTALL_HINT =
   'Install one of: Google Chrome, Brave, Microsoft Edge, Chromium, Comet, or Arc, then re-run `agents setup browser`.\n' +
@@ -157,7 +158,8 @@ export function registerSetupBrowserCommand(setupCmd: Command): void {
       try {
         if (options.terminal !== undefined) { await openSetupTerminal('browser', options.terminal, options.installOnly); return; }
         if (options.installOnly) { if (!(await installSetupTool('browser'))) process.exitCode = 1; return; }
-        await runBrowserWizard();
+        if (!(await runBrowserWizard())) process.exitCode = 1;
+        await refreshToolSetup('browser');
       } catch (err) {
         if (isPromptCancelled(err)) {
           console.log(chalk.yellow('\nCancelled'));
