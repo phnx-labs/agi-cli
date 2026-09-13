@@ -431,26 +431,30 @@ function installMcpViaClaude(binaryPath: string, server: InstalledMcpServer, ver
  * Uses: codex mcp add <name> -- <cmd> [args...]
  */
 function installMcpViaCodex(binaryPath: string, server: InstalledMcpServer, versionHome: string): void {
-  if (server.config.transport === 'stdio') {
+  let args: string[];
+  if (server.config.transport === 'http') {
+    if (!server.config.url) throw new Error(`HTTP MCP '${server.name}' has no url`);
+    // codex mcp add <name> --url <url>
+    args = ['mcp', 'add', server.name, '--url', server.config.url];
+  } else {
     // codex mcp add -- <name> <cmd> [args...]
-    const args = [
+    args = [
       'mcp', 'add',
       '--',
       server.name,
       server.config.command!,
       ...(server.config.args || [])
     ];
-
-    // RUSH-1752: user-controlled MCP command/args must not reach cmd.exe unquoted.
-    const spec = execFileShellSpec(binaryPath, args);
-    execFileSync(spec.command, spec.args, {
-      stdio: 'pipe',
-      timeout: 30000,
-      env: { ...process.env, HOME: versionHome },
-      shell: spec.shell,
-    });
   }
-  // Note: Codex may not support HTTP MCPs
+
+  // RUSH-1752: user-controlled MCP command/args must not reach cmd.exe unquoted.
+  const spec = execFileShellSpec(binaryPath, args);
+  execFileSync(spec.command, spec.args, {
+    stdio: 'pipe',
+    timeout: 30000,
+    env: { ...process.env, HOME: versionHome },
+    shell: spec.shell,
+  });
 }
 
 export async function registerMcpCommandToTargets(
