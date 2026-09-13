@@ -17,6 +17,7 @@ import { getHistoryDir } from '../lib/state.js';
 import { resolveSecretsBin, invocation, SecretsClientError, _resetSecretsClientForTest } from '../lib/secrets-client.js';
 import { installCli, resolveCliManifest } from '../lib/cli-resources.js';
 import { SECRETS_CLI_SPEC } from '../lib/secrets-cli.js';
+import { refreshToolSetup } from '../lib/setup-tool-status.js';
 
 // Re-exported for back-compat; the canonical pin lives in `secrets-cli.ts` so a
 // version bump touches ONE place (PHNX-3989 consolidation).
@@ -98,7 +99,9 @@ export function registerSetupSecretsCommand(setupCmd: Command): void {
   setupCmd
     .command('secrets')
     .description('Install the standalone `secrets` CLI if missing, then run its `secrets migrate` onboarding.')
-    .action(async () => {
-      if (!(await runSecretsSetupWizard())) process.exitCode = 1;
+    .option('--install-only', 'Install the standalone Secrets CLI without migrating or unlocking secrets')
+    .action(async (options: { installOnly?: boolean }) => {
+      if (!(options.installOnly ? installSecretsCli() : await runSecretsSetupWizard())) process.exitCode = 1;
+      await refreshToolSetup('secrets');
     });
 }

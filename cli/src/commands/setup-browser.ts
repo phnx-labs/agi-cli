@@ -23,6 +23,7 @@ import {
 import { DEFAULT_VIEWPORT } from '../lib/browser/devices.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { defaultBrowserChoice } from './setup-preferences.js';
+import { installSetupTool } from '../lib/setup-tool-install.js';
 
 const INSTALL_HINT =
   'Install one of: Google Chrome, Brave, Microsoft Edge, Chromium, Comet, or Arc, then re-run `agents setup browser`.\n' +
@@ -149,8 +150,10 @@ export function registerSetupBrowserCommand(setupCmd: Command): void {
   setupCmd
     .command('browser')
     .description('Set up `agents browser` — detect an installed browser and create the default profile.')
-    .action(async () => {
+    .option('--install-only', 'Install the standalone Browser CLI without changing profiles or starting a browser')
+    .action(async (options: { installOnly?: boolean }) => {
       try {
+        if (options.installOnly) { if (!(await installSetupTool('browser'))) process.exitCode = 1; return; }
         await runBrowserWizard();
       } catch (err) {
         if (isPromptCancelled(err)) {
