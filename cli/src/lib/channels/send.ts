@@ -1,5 +1,5 @@
 /**
- * Delivery envelope for `agents send` / `agents notify`.
+ * Delivery envelope for `agents send`.
  *
  * One primitive: resolve a destination (channel + target), compose text + urls +
  * attachments, hand off to a channel provider. `notify` is the same path with
@@ -51,7 +51,7 @@ export interface ResolveSendInput {
   from?: string;
   dryRun?: boolean;
   /**
-   * When true (`agents notify`), missing channel/to default to `notify.owner`.
+   * When true (a feed owner sink), missing channel/to default to `notify.owner`.
    * Explicit flags still win.
    */
   ownerMode?: boolean;

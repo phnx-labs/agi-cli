@@ -9,7 +9,7 @@
 // ENOTEMPTY the sweep exists to prevent, and nothing runs `agents upgrade` to
 // trigger that sweep in the meantime. Periodic cadence closes that gap
 // fleet-wide (via the daemon's self-heal service) and on demand via
-// `agents doctor --fix`.
+// `agents sync`.
 //
 // The age guard is load-bearing: a staging dir can be legitimately mid-write
 // by a CONCURRENT upgrade this instant. Only a dir older than the guard is

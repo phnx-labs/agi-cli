@@ -10,7 +10,7 @@
 // when `ctx.dryRun`), mirroring the existing resource heal (heal.ts) which computes
 // and applies together. `mode` gates how aggressive a repair may be: 'safe' (the
 // daemon default) fixes only low-risk drift and merely reports risky conditions;
-// 'full' (`agents doctor --fix`) applies everything.
+// 'full' (`agents sync`) applies everything.
 
 export type HealCheckId =
   | 'resources'
@@ -26,7 +26,7 @@ export type HealCheckId =
 export type HealCadence = 'startup' | 'frequent' | 'periodic';
 
 export interface HealCtx {
-  /** 'safe' = daemon (low-risk only); 'full' = doctor --fix (everything). */
+  /** 'safe' = daemon (low-risk only); 'full' = agents sync (everything). */
   mode: 'safe' | 'full';
   /** Detect only — never write. Powers `agents doctor` (read-only) and previews. */
   dryRun: boolean;

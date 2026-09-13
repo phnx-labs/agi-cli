@@ -1,6 +1,6 @@
 /**
  * Compose an owner-bound phone ping through the SAME shaper `agents feed post`
- * uses, so `agents notify` / `agents send --to owner` stop shipping a raw body
+ * uses, so `agents send --to owner` stop shipping a raw body
  * dump (PHNX-3698).
  *
  * Before this, an owner send delivered the body verbatim: a long wall of prose,
@@ -71,7 +71,7 @@ export function composeOwnerMessage(rawText: string, opts: OwnerMessageOptions =
 
 /**
  * A per-format composer bound to ONE resolved context — the shape the owner
- * fan-out wants (PHNX-3698). `agents notify` / `agents send --to owner` build
+ * fan-out wants (PHNX-3698). `agents send --to owner` build
  * this once, use `compose('plain')` for the envelope's display body, and hand
  * `compose` to `sendToOwner` so each policy destination re-renders in its own
  * format without re-walking the pid registry.
