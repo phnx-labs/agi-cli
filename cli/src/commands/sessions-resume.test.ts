@@ -10,7 +10,7 @@ import {
   isDirectResumeSelector,
   partitionResumableSelections,
   resolveResumePacking,
-  resolveSelectedResumeCwd,
+  buildSelectedResumeSurface,
   resumeHostMismatch,
   resumeUsesLifecycleDispatch,
   sessionsResumeAction,
@@ -231,101 +231,55 @@ describe('selected resume argv', () => {
   });
 });
 
-describe('selected resume command — real shell/backend round trip (PHNX-3940)', () => {
-  // Every terminal backend (iterm/ghostty/tmux/terminal-app) joins `command`
-  // with a bare space and hands it to a login shell via loginExec/execOnly
-  // (lib/terminal/shell.ts), exactly like run-surface.ts's buildRunCommand. If
-  // the selected-resume command is not pre-quoted per-word the same way,
-  // opening a picked session with a multiword prompt splits it into several
-  // CLI arguments, and a literal `$(...)`/backtick in it is executed by the
-  // shell instead of riding through as text.
-  const tricky = `finish it's done — run $(whoami) and \`id\` now`;
+describe('selected resume terminal surface', () => {
+  const session = (cwd?: string): SessionMeta => ({ id: 'abc12345', shortId: 'abc12345', cwd } as SessionMeta);
 
-  function runThroughRealShell(command: string[], binDir: string): string[] {
-    const script = execOnly(command);
-    const out = execFileSync('sh', ['-c', script], {
-      cwd: binDir,
-      env: { ...process.env, PATH: `${binDir}:${process.env.PATH ?? ''}` },
-      encoding: 'utf8',
-    });
-    return out.split('\n').filter((l) => l.length > 0);
-  }
-
-  function withFakeAgentsOnPath(fn: (binDir: string) => void): void {
-    const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-resume-quote-'));
-    try {
-      const fakeAgents = path.join(binDir, 'agents');
-      // Prints each argv it received on its own line — the cheapest possible
-      // probe for "did the shell see this as one argument or several".
-      fs.writeFileSync(fakeAgents, '#!/bin/sh\nfor a in "$@"; do printf \'%s\\n\' "$a"; done\n');
-      fs.chmodSync(fakeAgents, 0o755);
-      fn(binDir);
-    } finally {
-      fs.rmSync(binDir, { recursive: true, force: true });
-    }
-  }
-
-  it('reproduces the bug: unquoted argv corrupts the shell line (apostrophe breaks syntax; no quoting splits the rest)', () => {
-    withFakeAgentsOnPath((binDir) => {
-      // This is the OLD sessions-resume.ts line, before the fix:
-      //   const command = ['agents', ...buildSelectedResumeArgs(s.id, prompt, options)];
-      const unquotedCommand = ['agents', ...buildSelectedResumeArgs('abc12345', tricky, {})];
-      // The apostrophe in the prompt opens an unterminated shell string — the
-      // command isn't just mis-split, it doesn't even parse. That is the bug:
-      // production code handed raw, unescaped user text straight to a shell.
-      expect(() => runThroughRealShell(unquotedCommand, binDir)).toThrow(/Unterminated quoted string|unexpected EOF/);
-
-      // A prompt with no special shell characters still gets split on
-      // whitespace into several argv entries instead of arriving as one.
-      const plainPrompt = 'finish the tests now please';
-      const splitCommand = ['agents', ...buildSelectedResumeArgs('abc12345', plainPrompt, {})];
-      const received = runThroughRealShell(splitCommand, binDir);
-      expect(received).not.toEqual(['sessions', 'resume', 'abc12345', plainPrompt]);
-      expect(received).toEqual(['sessions', 'resume', 'abc12345', ...plainPrompt.split(' ')]);
-    });
+  it.each([
+    'finish the tests now please',
+    "finish it's done: literal $(whoami), `id`, and a\nsecond line",
+  ])('preserves prompt argv through the production surface and a real shell: %j', (prompt) => {
+    const surface = buildSelectedResumeSurface(session(), prompt, { headless: true });
+    // Use Node as an argv probe, preserving the surface's actual argument words.
+    const command = [
+      shellQuote(process.execPath), '-e',
+      shellQuote('process.stdout.write(JSON.stringify(process.argv.slice(1)))'),
+      ...surface.command.slice(1),
+    ];
+    const received = JSON.parse(execFileSync('sh', ['-c', execOnly(command)], { encoding: 'utf8' }));
+    expect(received).toEqual(['sessions', 'resume', 'abc12345', prompt, '--headless']);
   });
 
-  it('fix: the production command (shell-quoted per word) survives the same round trip intact', () => {
-    withFakeAgentsOnPath((binDir) => {
-      // This is the production sessions-resume.ts line verbatim.
-      const command = ['agents', ...buildSelectedResumeArgs('abc12345', tricky, {})].map(shellQuote);
-      const received = runThroughRealShell(command, binDir);
-      expect(received).toEqual(['sessions', 'resume', 'abc12345', tricky]);
-    });
+  it('keeps raw run-picker argv until the terminal boundary', () => {
+    const prompt = "finish it's done";
+    const options = { runArgs: ['run', 'claude', prompt, '--resume'], headless: true };
+    const surface = buildSelectedResumeSurface(session(), undefined, options);
+    const command = [shellQuote(process.execPath), '-e', shellQuote('process.stdout.write(JSON.stringify(process.argv.slice(1)))'), ...surface.command.slice(1)];
+    expect(JSON.parse(execFileSync('sh', ['-c', execOnly(command)], { encoding: 'utf8' })))
+      .toEqual(['run', 'claude', prompt, '--resume', 'abc12345']);
+    expect(options.runArgs).toEqual(['run', 'claude', prompt, '--resume']);
   });
 
-  it('an apostrophe-only prompt also survives quoting (the single-quote escape path)', () => {
-    withFakeAgentsOnPath((binDir) => {
-      const prompt = "it's a trap";
-      const command = ['agents', ...buildSelectedResumeArgs('abc12345', prompt, {})].map(shellQuote);
-      const received = runThroughRealShell(command, binDir);
-      expect(received).toEqual(['sessions', 'resume', 'abc12345', prompt]);
-    });
-  });
-});
-
-describe('resolveSelectedResumeCwd — a --device surface trusts the origin cwd', () => {
-  it('uses the local existence guard with no --device (unaffected by the fix)', () => {
+  it('checks local and --here directories while leaving origin directories to the peer', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-resume-cwd-'));
     try {
-      expect(resolveSelectedResumeCwd({ cwd: root }, {})).toBe(root);
-      const missing = path.join(root, 'does-not-exist-locally');
-      expect(resolveSelectedResumeCwd({ cwd: missing }, {})).toBe(process.cwd());
+      const missing = path.join(root, 'only-on-the-origin');
+      expect(buildSelectedResumeSurface(session(root), undefined, {}).cwd).toBe(root);
+      expect(buildSelectedResumeSurface(session(missing), undefined, { here: true }).cwd).toBe(process.cwd());
+      expect(buildSelectedResumeSurface(session(missing), undefined, { device: 'worker' }).cwd).toBe(missing);
+      expect(buildSelectedResumeSurface(session(missing), undefined, { device: 'worker', here: true }).cwd).toBe(missing);
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
 
-  it('trusts the recorded origin cwd under --device even when it is not a local path', () => {
-    // A real /home path from a remote Linux origin will never exist on a local
-    // /Users checkout — fs.existsSync(remoteCwd) is always false here, which is
-    // exactly the bug: it silently swapped in this box's cwd instead of letting
-    // the selected origin device validate its own path.
-    const remoteCwd = '/home/remote-user/repo';
-    expect(fs.existsSync(remoteCwd)).toBe(false);
-    expect(resolveSelectedResumeCwd({ cwd: remoteCwd }, { device: 'worker-1' })).toBe(remoteCwd);
+  it('opens a remote surface in the explicit cwd even when the recorded directory is gone', () => {
+    const surface = buildSelectedResumeSurface(session('/old/repo'), undefined, { device: 'worker', cwd: '/new/repo' });
+    expect(surface.cwd).toBe('/new/repo');
+    expect(surface.command.slice(-2)).toEqual(['--cwd', '/new/repo'].map(shellQuote));
   });
 
-  it('falls back to process.cwd() under --device only when the session recorded no cwd at all', () => {
-    expect(resolveSelectedResumeCwd({ cwd: undefined }, { device: 'worker-1' })).toBe(process.cwd());
+  it("refuses a remote surface with no cwd instead of sending this machine's path", () => {
+    expect(() => buildSelectedResumeSurface(session(), undefined, { device: 'worker' }))
+      .toThrow('without a recorded working directory. Pass --cwd <path>.');
+    expect(buildSelectedResumeSurface(session(), undefined, { device: 'worker', cwd: '/repo' }).cwd).toBe('/repo');
   });
 });
 
