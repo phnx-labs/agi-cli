@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.22.111
+
+- **Remote session resume accepts the resolver’s launch metadata (PHNX-3940).** A reachable peer’s valid session row could be rejected because it included a mode or custom harness, leaving the session undiscoverable. The reader now accepts both fields while keeping private transcript paths out of the resolver contract. Malformed responses are reported as invalid data instead of an unreachable device.
+
 ## 1.22.110
 
 - **Session rows are named by what YOU asked for, not by the agent's latest
