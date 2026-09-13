@@ -1289,6 +1289,8 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           throw new Error('--resume cannot be combined with --session-id, --loop, --fallback, --resume-checkpoint, or --lease.');
         }
         const { sessionsResumeAction } = await import('./sessions-resume.js');
+        const { toRemotePortable } = await import('../lib/project-root.js');
+        const device = options.host || options.device || options.on || options.computer;
         await sessionsResumeAction(undefined, prompt, {
           agent: normalizedAgentSpec.split('#')[0] === RUN_AUTO_KEYWORD ? undefined : normalizedAgentSpec.split('#')[0],
           account: options.account,
@@ -1296,9 +1298,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           mode: command.getOptionValueSource('mode') === 'default' ? undefined : options.mode,
           interactive: options.interactive,
           headless: options.headless,
-          cwd: options.cwd,
+          cwd: device ? options.remoteCwd ?? (options.cwd ? toRemotePortable(options.cwd) : undefined) : options.cwd,
           quiet: options.quiet,
-          device: options.host || options.device || options.on || options.computer,
+          device,
           runArgs: rawArgs.slice(2),
         });
         return;

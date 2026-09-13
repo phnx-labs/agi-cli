@@ -1565,7 +1565,10 @@ working directory. Like `buildRunCommand`, it quotes shell words once before
 passing them to a terminal backend; `spawnCliInPlace` still receives raw argv.
 For `--device`, the selected origin validates its own filesystem. The surface
 uses `--cwd` when supplied, otherwise the recorded directory, and refuses a
-remote launch with neither rather than sending this machine's path.
+remote launch with neither rather than sending this machine's path. Run pickers
+keep the normal `--remote-cwd` precedence and make local home paths portable.
+The terminal engine resolves home-relative directories on the target before
+building the backend command; terminal APIs do not expand shell home syntax.
 
 The hop uses `runOnPeer` ([`src/lib/session/remote/remote-list.ts`](src/lib/session/remote/remote-list.ts)),
 not the `--device` passthrough. Two reasons: the passthrough re-discovers locally and

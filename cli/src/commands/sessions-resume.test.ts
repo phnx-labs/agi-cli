@@ -204,7 +204,7 @@ describe('selected resume argv', () => {
   it.each([['-D', 'worker'], ['-Dworker'], ['--on', 'worker'], ['--computer=worker']])('consumes placement alias %j and applies remote cwd', (...placement) => {
     const runArgs = ['run', 'claude', '--resume', ...placement, '--cwd', '/local', '--remote-cwd', '/srv/repo', '--', '--verbose'];
     expect(buildSelectedResumeArgs('abc12345', undefined, { device: 'worker', runArgs })).toEqual([
-      'run', 'claude', '--resume', 'abc12345', '--cwd', '/local', '--cwd', '/srv/repo', '--', '--verbose',
+      'run', 'claude', '--resume', 'abc12345', '--cwd', '/srv/repo', '--', '--verbose',
     ]);
   });
 
@@ -268,6 +268,19 @@ describe('selected resume terminal surface', () => {
       expect(buildSelectedResumeSurface(session(missing), undefined, { device: 'worker' }).cwd).toBe(missing);
       expect(buildSelectedResumeSurface(session(missing), undefined, { device: 'worker', here: true }).cwd).toBe(missing);
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it("uses the run picker's effective remote cwd for both the terminal and the resumed command", () => {
+    const runArgs = ['run', 'claude', '--resume', '--device', 'worker', '--cwd', '/local', '--remote-cwd', '/srv/repo'];
+    const surface = buildSelectedResumeSurface(session(), undefined, { device: 'worker', cwd: '/srv/repo', runArgs });
+    expect(surface.cwd).toBe('/srv/repo');
+    expect(surface.command).toEqual(['agents', 'run', 'claude', '--resume', 'abc12345', '--cwd', '/srv/repo'].map(shellQuote));
+  });
+
+  it('makes run cwd portable once and leaves native passthrough arguments unchanged', () => {
+    const runArgs = ['run', 'claude', '--resume', '--device=worker', '--cwd=' + path.join(os.homedir(), 'repo'), '--', '--cwd', '/native'];
+    expect(buildSelectedResumeArgs('abc12345', undefined, { device: 'worker', runArgs }))
+      .toEqual(['run', 'claude', '--resume', 'abc12345', '--cwd', '~/repo', '--', '--cwd', '/native']);
   });
 
   it('opens a remote surface in the explicit cwd even when the recorded directory is gone', () => {
