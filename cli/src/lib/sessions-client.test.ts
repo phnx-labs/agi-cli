@@ -33,8 +33,7 @@ describe('isReadQuery', () => {
     expect(isReadQuery(['--all'])).toBe(false);
     expect(isReadQuery(['--project', 'agents-cli'])).toBe(false);
     expect(isReadQuery(['migrations'])).toBe(false);
-    expect(isReadQuery(['go'])).toBe(false);
-    expect(isReadQuery(['reconnect'])).toBe(false);
+    expect(isReadQuery(['detach'])).toBe(false);
     expect(isReadQuery(['--help'])).toBe(false);
     expect(isReadQuery(['--agent', 'claude', '--version', '2.1.181'])).toBe(false);
   });

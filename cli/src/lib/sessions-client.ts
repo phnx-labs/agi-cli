@@ -78,12 +78,9 @@ const ENGINE_VERBS = new Set([
   'tail',
   'watch',
   'preview',
-  'attach',
   'focus',
   'render',
   'stats',
-  'go',
-  'reconnect',
   'migrations',
   'export',
 ]);
