@@ -537,6 +537,40 @@ CREATE TABLE IF NOT EXISTS computer_sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_computer_sessions_session ON computer_sessions(session_id);
 CREATE INDEX IF NOT EXISTS idx_computer_sessions_started ON computer_sessions(started_at DESC);
+
+-- Durable requester-side cache for a REMOTE session's preview envelope
+-- (PHNX-3999). Keyed on (normalized owning device, full session id, schema
+-- version) rather than transcript bytes, since this box never reads the peer's
+-- transcript directly -- it only holds the last envelope one bounded
+-- 'sessions preview <id> --local --json' hop returned FROM that device. Content
+-- freshness (this row) is deliberately independent of live status, which is
+-- never cached here and always re-read from the live registry when available.
+-- ok=1 rows carry the last successful envelope_json; ok=0 rows carry no payload,
+-- only a failure_reason, so a session that was resolvable once but is now
+-- offline still degrades to the last GOOD payload (read separately, ok=1 only)
+-- annotated stale rather than losing it to a later failed attempt overwriting it.
+CREATE TABLE IF NOT EXISTS session_remote_preview_cache (
+  device TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  schema_version INTEGER NOT NULL,
+  fetched_at INTEGER NOT NULL,
+  ok INTEGER NOT NULL,
+  envelope_json TEXT,
+  envelope_bytes INTEGER NOT NULL DEFAULT 0,
+  failure_reason TEXT,
+  consecutive_failures INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at INTEGER NOT NULL DEFAULT 0,
+  -- The caller's OWN last-supplied --revision cursor (opaque: an epoch-ms
+  -- string, an ISO stamp, whatever the caller's own activity feed hands us) --
+  -- deliberately NOT compared to the envelope's own details.sourceRevision,
+  -- since a caller's revision format (e.g. a feed's lastActivityMs) need not
+  -- match the envelope's own (an ISO session.lastActivity). Equality is
+  -- against THIS column only: same value back => caller has independently
+  -- confirmed nothing changed.
+  last_caller_revision TEXT,
+  PRIMARY KEY (device, session_id, schema_version)
+);
+CREATE INDEX IF NOT EXISTS idx_remote_preview_cache_fetched ON session_remote_preview_cache(fetched_at DESC);
 `;
 
 /**
@@ -552,7 +586,7 @@ export const SESSION_TOPIC_EXTRACTOR_VERSION = 2;
 // Bumped to 2 (PHNX-2973): the digest now carries `changedFiles` (per-file
 // paths). Bumping invalidates v1 cache rows so a fresh recompute populates the
 // new field instead of serving a stale digest that predates it.
-const PREVIEW_EXTRACTOR_VERSION = 2;
+const PREVIEW_EXTRACTOR_VERSION = 3;
 /** Bump when classifyPhenotype's output changes so cached phenotypes recompute (PHNX-3327 v1). */
 export const SESSION_PHENOTYPE_EXTRACTOR_VERSION = 1;
 /** Bump when the summarizer output shape changes so cached summaries recompute (PHNX-3939 v1). */
@@ -1606,7 +1640,7 @@ function backfillClaudeAccounts(
 }
 
 /** Open (or return the cached) sessions database, applying migrations as needed. */
-export function getDB(): Database.Database {
+export function getDB(initialBusyTimeoutMs = 30_000): Database.Database {
   if (dbInstance) return dbInstance;
   fs.mkdirSync(SESSIONS_DIR, { recursive: true });
   const db = new Database(DB_PATH);
@@ -1617,133 +1651,161 @@ export function getDB(): Database.Database {
   // a new version home can take longer than 10s; concurrent callers need enough
   // headroom to wait. The ledger-recheck in upsertSessionsBatch makes
   // subsequent writers near-instant, so 30s is a rarely-reached safety net.
-  db.pragma('busy_timeout = 30000');
-  db.pragma('journal_mode = WAL');
-  db.pragma('synchronous = NORMAL');
-  db.pragma('temp_store = MEMORY');
-  db.exec(SCHEMA);
+  try {
+    db.pragma(`busy_timeout = ${Math.max(0, Math.trunc(initialBusyTimeoutMs))}`);
+    db.pragma('journal_mode = WAL');
+    db.pragma('synchronous = NORMAL');
+    db.pragma('temp_store = MEMORY');
+    db.exec(SCHEMA);
 
-  const readSchemaVersion = (): number | undefined => {
-    const row = db.prepare(`SELECT value FROM meta WHERE key = 'schema_version'`).get() as { value: string } | undefined;
-    return row ? parseInt(row.value, 10) : undefined;
-  };
-  const currentVersion = readSchemaVersion();
-
-  if (currentVersion === undefined) {
-    db.prepare(`INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)`).run(String(SCHEMA_VERSION));
-  } else if (currentVersion < SCHEMA_VERSION) {
-    // Re-read after BEGIN IMMEDIATE acquires the writer lock. A second process
-    // may have completed the migration while this connection was waiting.
-    const migrate = db.transaction(() => {
-      const lockedVersion = readSchemaVersion();
-      if (lockedVersion === undefined || lockedVersion >= SCHEMA_VERSION) return;
-      migrateSchema(db, lockedVersion);
-      db.prepare(`INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', ?)`).run(String(SCHEMA_VERSION));
-    });
-    migrate();
-  }
-
-  // Index last_activity only after the column is guaranteed to exist — fresh DBs
-  // get it from CREATE TABLE above, existing pre-v8 DBs from the migration just
-  // run. It must NOT live in SCHEMA (executed before migration) or an existing
-  // DB would fail the index build on a column it doesn't have yet.
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_last_activity ON sessions(last_activity DESC)`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_origin ON sessions(origin)`);
-  // Same fresh-vs-migrated rule: the column is guaranteed above (fresh from
-  // CREATE TABLE, existing from migration v46), so index the mirror pruner's
-  // scan column here rather than in SCHEMA (PHNX-3792).
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_mirror_synced ON sessions(mirror_synced_at)`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_routine_run_id ON sessions(routine_run_id)`);
-  const sessionColumns = db.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>;
-  if (['account_id', 'phoenix_id'].some(name => !sessionColumns.some(column => column.name === name))) {
-    // Partial upgrades can stamp the current version before every column exists.
-    // Recheck under the writer lock so concurrent openers cannot add it twice.
-    db.transaction(() => {
-      const columns = db.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>;
-      if (!columns.some(column => column.name === 'account_id')) db.exec('ALTER TABLE sessions ADD COLUMN account_id TEXT');
-      if (!columns.some(column => column.name === 'phoenix_id')) db.exec('ALTER TABLE sessions ADD COLUMN phoenix_id TEXT');
-    })();
-  }
-
-  // Account attribution repair. Two ways a Claude row ends up wrong even at v33:
-  // an older CLI (whose INSERT does not name the column) writes NULL, and a DB
-  // migrated by a build that predates the "clear the stale email on a dark row" fix
-  // keeps a known-wrong address. The v33 migration cannot fix either — it never runs
-  // again. Cheap guard first so the common case is one indexed lookup, then repair.
-  // Same shape as the `machine` repair below, for the same reason.
-  {
-    // Column guard FIRST, like the `machine` repair below. schema_version can be
-    // stamped at SCHEMA_VERSION without the column existing — getDB writes the marker
-    // for any DB whose meta has no row (a hand-built or partially-created index), and
-    // migrateSchema never runs in that path. Querying account_key unguarded would
-    // then throw "no such column" and take down every command that opens the index.
-    const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
-    if (cols.some((c) => c.name === 'account_key') && cols.some((c) => c.name === 'account_org')) {
-      const needsRepair = db.prepare(`
-        SELECT 1 FROM sessions
-        WHERE agent = 'claude'
-          AND (account_key IS NULL
-               OR (account_key LIKE 'unattributed:%' AND account IS NOT NULL))
-        LIMIT 1
-      `).get();
-      if (needsRepair) db.transaction(() => backfillClaudeAccounts(db, 'unresolved'))();
+    // `session_remote_preview_cache` is a lazy cache table (like the others
+    // below), independent of SCHEMA_VERSION — but it shipped once already
+    // without `last_caller_revision` before this column was added, so a DB
+    // that already ran that earlier version has the table WITHOUT the column,
+    // and `CREATE TABLE IF NOT EXISTS` above is a no-op against it. Guard with
+    // the same PRAGMA-table_info pattern the versioned `sessions` migrations
+    // use, so an existing cache DB gains the column instead of every read/write
+    // throwing "no such column".
+    const remotePreviewCacheCols = db.prepare(`PRAGMA table_info(session_remote_preview_cache)`).all() as Array<{ name: string }>;
+    if (!remotePreviewCacheCols.some(c => c.name === 'last_caller_revision')) {
+      db.exec(`ALTER TABLE session_remote_preview_cache ADD COLUMN last_caller_revision TEXT`);
     }
-  }
 
-  // machine column + indexes: only after the column is guaranteed present.
-  // Fresh SCHEMA (v17) includes the column; older DBs get it from migrate v17.
-  // If a partial upgrade left schema_version ahead of the column, repair here.
-  {
-    const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
-    if (!cols.some((c) => c.name === 'machine')) {
-      db.exec(`ALTER TABLE sessions ADD COLUMN machine TEXT`);
-      const rows = db
-        .prepare(`SELECT id, agent, file_path FROM sessions WHERE machine IS NULL OR machine = ''`)
-        .all() as Array<{ id: string; agent: string; file_path: string }>;
-      const upd = db.prepare(`UPDATE sessions SET machine = ? WHERE id = ?`);
-      const txn = db.transaction((items: typeof rows) => {
-        for (const r of items) {
-          upd.run(machineForSessionFile(r.file_path, r.agent), r.id);
-        }
+    const readSchemaVersion = (): number | undefined => {
+      const row = db.prepare(`SELECT value FROM meta WHERE key = 'schema_version'`).get() as { value: string } | undefined;
+      return row ? parseInt(row.value, 10) : undefined;
+    };
+    const currentVersion = readSchemaVersion();
+
+    if (currentVersion === undefined) {
+      db.prepare(`INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)`).run(String(SCHEMA_VERSION));
+    } else if (currentVersion < SCHEMA_VERSION) {
+      // Re-read after BEGIN IMMEDIATE acquires the writer lock. A second process
+      // may have completed the migration while this connection was waiting.
+      const migrate = db.transaction(() => {
+        const lockedVersion = readSchemaVersion();
+        if (lockedVersion === undefined || lockedVersion >= SCHEMA_VERSION) return;
+        migrateSchema(db, lockedVersion);
+        db.prepare(`INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', ?)`).run(String(SCHEMA_VERSION));
       });
-      txn(rows);
+      migrate();
     }
-    db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_machine_ts ON sessions(machine, timestamp DESC)`);
-    db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_agent_ts ON sessions(agent, timestamp DESC)`);
-  }
 
-  // harness column: only after the column is guaranteed present.
-  // Fresh SCHEMA (v41) includes the column; older DBs get it from migrate v41.
-  // schema_version can be stamped at SCHEMA_VERSION without the column existing
-  // — getDB writes the marker for any DB whose meta has no row (a hand-built
-  // or partially-created index), and migrateSchema never runs in that path
-  // (`currentVersion === undefined`). If a partial upgrade left schema_version
-  // ahead of the column, repair here so the next upsertSession INSERT naming
-  // `harness` does not throw (PHNX-2935). Same shape as the `machine` repair
-  // above, for the same reason.
-  {
-    const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
-    if (!cols.some((c) => c.name === 'harness')) {
-      db.exec(`ALTER TABLE sessions ADD COLUMN harness TEXT`);
+    // Index last_activity only after the column is guaranteed to exist — fresh DBs
+    // get it from CREATE TABLE above, existing pre-v8 DBs from the migration just
+    // run. It must NOT live in SCHEMA (executed before migration) or an existing
+    // DB would fail the index build on a column it doesn't have yet.
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_last_activity ON sessions(last_activity DESC)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_origin ON sessions(origin)`);
+    // Same fresh-vs-migrated rule: the column is guaranteed above (fresh from
+    // CREATE TABLE, existing from migration v46), so index the mirror pruner's
+    // scan column here rather than in SCHEMA (PHNX-3792).
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_mirror_synced ON sessions(mirror_synced_at)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_routine_run_id ON sessions(routine_run_id)`);
+    const sessionColumns = db.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>;
+    if (['account_id', 'phoenix_id'].some(name => !sessionColumns.some(column => column.name === name))) {
+      // Partial upgrades can stamp the current version before every column exists.
+      // Recheck under the writer lock so concurrent openers cannot add it twice.
+      db.transaction(() => {
+        const columns = db.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>;
+        if (!columns.some(column => column.name === 'account_id')) db.exec('ALTER TABLE sessions ADD COLUMN account_id TEXT');
+        if (!columns.some(column => column.name === 'phoenix_id')) db.exec('ALTER TABLE sessions ADD COLUMN phoenix_id TEXT');
+      })();
     }
-  }
 
-  // One-shot cleanup of the pre-SQLite JSONL indexes. Safe — nothing reads
-  // them anymore. Guarded by a meta flag so we only try once.
-  const cleaned = db.prepare(`SELECT value FROM meta WHERE key = 'legacy_indexes_removed'`).get() as { value: string } | undefined;
-  if (!cleaned) {
-    for (const p of [
-      path.join(SESSIONS_DIR, 'index.jsonl'),
-      path.join(SESSIONS_DIR, 'content_index.jsonl'),
-      path.join(SESSIONS_DIR, 'index.jsonl.bak'),
-    ]) {
-      try { if (fs.existsSync(p)) fs.unlinkSync(p); } catch { /* ignore */ }
+    // Account attribution repair. Two ways a Claude row ends up wrong even at v33:
+    // an older CLI (whose INSERT does not name the column) writes NULL, and a DB
+    // migrated by a build that predates the "clear the stale email on a dark row" fix
+    // keeps a known-wrong address. The v33 migration cannot fix either — it never runs
+    // again. Cheap guard first so the common case is one indexed lookup, then repair.
+    // Same shape as the `machine` repair below, for the same reason.
+    {
+      // Column guard FIRST, like the `machine` repair below. schema_version can be
+      // stamped at SCHEMA_VERSION without the column existing — getDB writes the marker
+      // for any DB whose meta has no row (a hand-built or partially-created index), and
+      // migrateSchema never runs in that path. Querying account_key unguarded would
+      // then throw "no such column" and take down every command that opens the index.
+      const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
+      if (cols.some((c) => c.name === 'account_key') && cols.some((c) => c.name === 'account_org')) {
+        const needsRepair = db.prepare(`
+          SELECT 1 FROM sessions
+          WHERE agent = 'claude'
+            AND (account_key IS NULL
+                 OR (account_key LIKE 'unattributed:%' AND account IS NOT NULL))
+          LIMIT 1
+        `).get();
+        if (needsRepair) db.transaction(() => backfillClaudeAccounts(db, 'unresolved'))();
+      }
     }
-    db.prepare(`INSERT OR IGNORE INTO meta(key, value) VALUES ('legacy_indexes_removed', '1')`).run();
-  }
 
-  dbInstance = db;
-  return db;
+    // machine column + indexes: only after the column is guaranteed present.
+    // Fresh SCHEMA (v17) includes the column; older DBs get it from migrate v17.
+    // If a partial upgrade left schema_version ahead of the column, repair here.
+    {
+      const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
+      if (!cols.some((c) => c.name === 'machine')) {
+        db.exec(`ALTER TABLE sessions ADD COLUMN machine TEXT`);
+        const rows = db
+          .prepare(`SELECT id, agent, file_path FROM sessions WHERE machine IS NULL OR machine = ''`)
+          .all() as Array<{ id: string; agent: string; file_path: string }>;
+        const upd = db.prepare(`UPDATE sessions SET machine = ? WHERE id = ?`);
+        const txn = db.transaction((items: typeof rows) => {
+          for (const r of items) {
+            upd.run(machineForSessionFile(r.file_path, r.agent), r.id);
+          }
+        });
+        txn(rows);
+      }
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_machine_ts ON sessions(machine, timestamp DESC)`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_agent_ts ON sessions(agent, timestamp DESC)`);
+    }
+
+    // harness column: only after the column is guaranteed present.
+    // Fresh SCHEMA (v41) includes the column; older DBs get it from migrate v41.
+    // schema_version can be stamped at SCHEMA_VERSION without the column existing
+    // — getDB writes the marker for any DB whose meta has no row (a hand-built
+    // or partially-created index), and migrateSchema never runs in that path
+    // (`currentVersion === undefined`). If a partial upgrade left schema_version
+    // ahead of the column, repair here so the next upsertSession INSERT naming
+    // `harness` does not throw (PHNX-2935). Same shape as the `machine` repair
+    // above, for the same reason.
+    {
+      const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
+      if (!cols.some((c) => c.name === 'harness')) {
+        db.exec(`ALTER TABLE sessions ADD COLUMN harness TEXT`);
+      }
+    }
+
+    // One-shot cleanup of the pre-SQLite JSONL indexes. Safe — nothing reads
+    // them anymore. Guarded by a meta flag so we only try once.
+    const cleaned = db.prepare(`SELECT value FROM meta WHERE key = 'legacy_indexes_removed'`).get() as { value: string } | undefined;
+    if (!cleaned) {
+      for (const p of [
+        path.join(SESSIONS_DIR, 'index.jsonl'),
+        path.join(SESSIONS_DIR, 'content_index.jsonl'),
+        path.join(SESSIONS_DIR, 'index.jsonl.bak'),
+      ]) {
+        try { if (fs.existsSync(p)) fs.unlinkSync(p); } catch { /* ignore */ }
+      }
+      db.prepare(`INSERT OR IGNORE INTO meta(key, value) VALUES ('legacy_indexes_removed', '1')`).run();
+    }
+
+    db.pragma('busy_timeout = 30000');
+    dbInstance = db;
+    return db;
+  } catch (error) {
+    db.close();
+    throw error;
+  }
+}
+
+/** Bound synchronous cache contention without changing other database callers. */
+export function withSessionDBTimeout<T>(timeoutMs: number, operation: () => T): T {
+  const db = getDB(timeoutMs);
+  const previous = (db.prepare('PRAGMA busy_timeout').get() as { timeout: number }).timeout;
+  db.pragma(`busy_timeout = ${Math.max(0, Math.trunc(timeoutMs))}`);
+  try { return operation(); }
+  finally { db.pragma(`busy_timeout = ${previous}`); }
 }
 
 /** Close the cached database connection. */
@@ -3914,6 +3976,243 @@ export function writeSessionPreviewCache<T>(entry: {
   );
 }
 
+/** Bump when the cached remote preview envelope shape changes so cached rows recompute (PHNX-3999 v1). */
+export const REMOTE_PREVIEW_SCHEMA_VERSION = 1;
+
+/** Cap on distinct (device, sessionId) rows this cache holds — a requester box
+ * previews many peers' sessions over a long uptime, so this bounds growth the
+ * same way the fleet session mirror bounds itself to 200 rows (db.ts, PHNX-3792):
+ * oldest-by-last-fetch is evicted first. Row count alone is not a real bound —
+ * every field the cached envelope carries is already bounded (digest fields,
+ * `detail.messages` <= 8 x 4000 chars, `detail.timeline` <= 8 steps, etc.), but
+ * 500 rows x an unbounded per-row size is still unbounded storage, so this is
+ * paired with a total-byte budget below. */
+const REMOTE_PREVIEW_CACHE_MAX_ROWS = 500;
+
+/**
+ * Total on-disk budget for `envelope_json` across every cached row, enforced
+ * ALONGSIDE the row cap (whichever evicts more aggressively wins). At the
+ * 500-row cap this is a ~32 KiB/row average, which comfortably fits the
+ * bounded envelope shape above — a single row is refused entry above
+ * {@link REMOTE_PREVIEW_ENVELOPE_MAX_BYTES} rather than being allowed to
+ * consume the whole budget by itself.
+ */
+const REMOTE_PREVIEW_CACHE_MAX_TOTAL_BYTES = 16 * 1024 * 1024;
+
+/**
+ * Per-envelope cache-write cap. The bounded fields above make a well-formed
+ * envelope small; this exists to refuse an outlier (a version-skewed peer, or
+ * a future field that forgets to bound itself) rather than let ONE session
+ * blow the total budget. A refused write is NOT an error — the caller still
+ * gets the live envelope for this call, it simply is not persisted, so the
+ * next call re-fetches instead of silently caching a giant blob.
+ */
+export const REMOTE_PREVIEW_ENVELOPE_MAX_BYTES = 512 * 1024;
+
+export interface RemotePreviewCacheRow {
+  /** When the envelope currently stored here (if `ok`) was fetched. */
+  fetchedAt: number;
+  /** Whether `envelope` is a real, successfully-fetched payload. */
+  ok: boolean;
+  envelope?: unknown;
+  failureReason?: string;
+  consecutiveFailures: number;
+  /** Epoch ms before which a fresh fetch attempt should be skipped (negative backoff). */
+  nextAttemptAt: number;
+  /** The caller's own last-observed `--revision` cursor, or undefined if no
+   * caller has ever supplied one for this (device, sessionId) pair. */
+  lastCallerRevision?: string;
+}
+
+/** Read the durable cached remote preview row for one (device, sessionId) pair,
+ * regardless of whether it currently holds a successful envelope. Undefined
+ * means this box has never attempted (or recorded) a fetch for that pair. */
+export function readRemotePreviewCache(device: string, sessionId: string): RemotePreviewCacheRow | undefined {
+  const row = getDB().prepare(`
+    SELECT fetched_at AS fetchedAt, ok, envelope_json AS envelopeJson, failure_reason AS failureReason,
+           consecutive_failures AS consecutiveFailures, next_attempt_at AS nextAttemptAt,
+           last_caller_revision AS lastCallerRevision
+    FROM session_remote_preview_cache
+    WHERE device = ? AND session_id = ? AND schema_version = ?
+  `).get(device, sessionId, REMOTE_PREVIEW_SCHEMA_VERSION) as {
+    fetchedAt: number;
+    ok: number;
+    envelopeJson: string | null;
+    failureReason: string | null;
+    consecutiveFailures: number;
+    nextAttemptAt: number;
+    lastCallerRevision: string | null;
+  } | undefined;
+  if (!row) return undefined;
+  let envelope: unknown;
+  if (row.envelopeJson) {
+    try {
+      envelope = JSON.parse(row.envelopeJson);
+    } catch {
+      // Corrupt cache row: treat as no payload rather than throwing.
+    }
+  }
+  return {
+    fetchedAt: row.fetchedAt,
+    ok: row.ok === 1 && envelope !== undefined,
+    envelope,
+    failureReason: row.failureReason ?? undefined,
+    consecutiveFailures: row.consecutiveFailures,
+    nextAttemptAt: row.nextAttemptAt,
+    lastCallerRevision: row.lastCallerRevision ?? undefined,
+  };
+}
+
+/**
+ * Record the caller's own `--revision` cursor for one (device, sessionId)
+ * pair, independent of any fetch. A no-op if no row exists yet (nothing to
+ * compare against on a session this box has never fetched). This is what lets
+ * "same revision as last time" serve the durable cache with zero SSH
+ * indefinitely — the comparison is against THIS value, never against the
+ * envelope's own `details.sourceRevision` (which may be a different format).
+ */
+export function writeRemotePreviewCallerRevision(device: string, sessionId: string, revision: string): void {
+  getDB().prepare(`
+    UPDATE session_remote_preview_cache
+    SET last_caller_revision = ?
+    WHERE device = ? AND session_id = ? AND schema_version = ?
+  `).run(revision, device, sessionId, REMOTE_PREVIEW_SCHEMA_VERSION);
+}
+
+function pruneRemotePreviewCache(maxRows: number = REMOTE_PREVIEW_CACHE_MAX_ROWS): void {
+  const db = getDB();
+  db.prepare(`
+    DELETE FROM session_remote_preview_cache
+    WHERE rowid NOT IN (
+      SELECT rowid FROM session_remote_preview_cache ORDER BY fetched_at DESC LIMIT ?
+    )
+  `).run(maxRows);
+  // Total-byte budget, independent of row count: walk newest-first, keep
+  // rows until the running total would exceed the budget, drop the rest.
+  const rows = db.prepare(`
+    SELECT rowid AS rowid,
+           envelope_bytes + length(CAST(COALESCE(failure_reason, '') AS BLOB))
+             + length(CAST(COALESCE(last_caller_revision, '') AS BLOB)) AS envelopeBytes
+    FROM session_remote_preview_cache
+    ORDER BY fetched_at DESC
+  `).all() as Array<{ rowid: number; envelopeBytes: number }>;
+  let total = 0;
+  const evict: number[] = [];
+  for (const row of rows) {
+    total += row.envelopeBytes;
+    if (total > REMOTE_PREVIEW_CACHE_MAX_TOTAL_BYTES) evict.push(row.rowid);
+  }
+  if (evict.length > 0) {
+    const placeholders = evict.map(() => '?').join(',');
+    db.prepare(`DELETE FROM session_remote_preview_cache WHERE rowid IN (${placeholders})`).run(...evict);
+  }
+}
+
+/**
+ * Record a successful remote fetch: replaces the payload and resets backoff.
+ * An envelope over {@link REMOTE_PREVIEW_ENVELOPE_MAX_BYTES} is refused —
+ * this is a write-path bound, not a request failure: the caller already has
+ * the live envelope for this call from the fetch that produced it, this only
+ * decides whether it is worth persisting.
+ */
+export function writeRemotePreviewCacheSuccess(
+  device: string,
+  sessionId: string,
+  envelope: unknown,
+  fetchedAt: number = Date.now(),
+  revision?: string,
+): void {
+  const envelopeJson = JSON.stringify(envelope);
+  const envelopeBytes = Buffer.byteLength(envelopeJson, 'utf8');
+  if (envelopeBytes > REMOTE_PREVIEW_ENVELOPE_MAX_BYTES) return;
+  const db = getDB();
+  const write = db.transaction(() => {
+    db.prepare(`
+      INSERT INTO session_remote_preview_cache
+        (device, session_id, schema_version, fetched_at, ok, envelope_json, envelope_bytes, failure_reason, consecutive_failures, next_attempt_at, last_caller_revision)
+      VALUES (?, ?, ?, ?, 1, ?, ?, NULL, 0, 0, ?)
+      ON CONFLICT(device, session_id, schema_version) DO UPDATE SET
+        fetched_at = excluded.fetched_at,
+        ok = 1,
+        envelope_json = excluded.envelope_json,
+        envelope_bytes = excluded.envelope_bytes,
+        failure_reason = NULL,
+        consecutive_failures = 0,
+        next_attempt_at = 0,
+        last_caller_revision = excluded.last_caller_revision
+    `).run(device, sessionId, REMOTE_PREVIEW_SCHEMA_VERSION, fetchedAt, envelopeJson, envelopeBytes, revision ?? null);
+    pruneRemotePreviewCache();
+  });
+  write();
+}
+
+/** Cap on a stored `failure_reason` string. Some reasons interpolate
+ * peer-controlled content (`validateEnvelope`'s mismatched-id message
+ * embeds the peer's own claimed session id) — bound it so a misbehaving or
+ * malicious peer can't inflate a cache row's stored text unboundedly. */
+const REMOTE_PREVIEW_FAILURE_REASON_MAX_CHARS = 300;
+
+function boundFailureReason(reason: string): string {
+  return reason.length > REMOTE_PREVIEW_FAILURE_REASON_MAX_CHARS
+    ? reason.slice(0, REMOTE_PREVIEW_FAILURE_REASON_MAX_CHARS) + '…'
+    : reason;
+}
+
+/**
+ * Record a failed remote fetch attempt with exponential backoff, WITHOUT
+ * discarding a prior good envelope — a session that answered once and is now
+ * offline still degrades to that last-good payload (read back via
+ * {@link readRemotePreviewCache}'s `ok`/`envelope`), annotated stale by the
+ * caller, rather than losing it the moment one attempt fails.
+ */
+export function writeRemotePreviewCacheFailure(
+  device: string,
+  sessionId: string,
+  reason: string,
+  backoffMs: (consecutiveFailures: number) => number,
+  now: number = Date.now(),
+): void {
+  const boundedReason = boundFailureReason(reason);
+  const db = getDB();
+  const write = db.transaction(() => {
+    const existing = readRemotePreviewCache(device, sessionId);
+    const consecutiveFailures = (existing?.consecutiveFailures ?? 0) + 1;
+    const nextAttemptAt = now + backoffMs(consecutiveFailures);
+    const keepOk = existing?.ok ? 1 : 0;
+    const envelopeJson = existing?.ok ? JSON.stringify(existing.envelope) : null;
+    const envelopeBytes = envelopeJson ? Buffer.byteLength(envelopeJson, 'utf8') : 0;
+    db.prepare(`
+      INSERT INTO session_remote_preview_cache
+        (device, session_id, schema_version, fetched_at, ok, envelope_json, envelope_bytes, failure_reason, consecutive_failures, next_attempt_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(device, session_id, schema_version) DO UPDATE SET
+        ok = excluded.ok,
+        envelope_json = excluded.envelope_json,
+        envelope_bytes = excluded.envelope_bytes,
+        failure_reason = excluded.failure_reason,
+        consecutive_failures = excluded.consecutive_failures,
+        next_attempt_at = excluded.next_attempt_at
+    `).run(
+      device,
+      sessionId,
+      REMOTE_PREVIEW_SCHEMA_VERSION,
+      existing?.fetchedAt ?? now,
+      keepOk,
+      envelopeJson,
+      envelopeBytes,
+      boundedReason,
+      consecutiveFailures,
+      nextAttemptAt,
+    );
+    // A failure-only row still occupies a slot in the row/byte-bounded cache —
+    // it must be pruned like any other write, or a persistently-offline peer's
+    // failure rows accumulate without bound (they were previously exempt from
+    // this call entirely).
+    pruneRemotePreviewCache();
+  });
+  write();
+}
+
 /**
  * The session's durable user-turn text, as stored in the `session_text` FTS
  * `content` column at scan time (all harnesses, keyed by session_id). This is
@@ -4101,12 +4400,17 @@ export function readSessionTimelineEntry(id: string): SessionTimelineCacheRow | 
  * read path. Deliberately does NOT parse the resume state: a live row needs the
  * 8 steps and the request, never the fold's bookkeeping.
  */
-export function readSessionTimelineAny(id: string): SessionTimelineProjection | undefined {
+export function readSessionTimelineAny(
+  id: string,
+  stamp?: { fileMtimeMs: number; fileSize: number },
+): SessionTimelineProjection | undefined {
   const row = getDB().prepare(`
     SELECT projection_json AS projectionJson
     FROM session_timelines
     WHERE session_id = ? AND extractor_version = ?
-  `).get(id, TIMELINE_EXTRACTOR_VERSION) as { projectionJson: string } | undefined;
+      AND (? IS NULL OR (file_mtime_ms = ? AND file_size = ?))
+  `).get(id, TIMELINE_EXTRACTOR_VERSION, stamp?.fileMtimeMs ?? null,
+    stamp?.fileMtimeMs ?? null, stamp?.fileSize ?? null) as { projectionJson: string } | undefined;
   if (!row) return undefined;
   return parseTimelineProjection(row.projectionJson);
 }
