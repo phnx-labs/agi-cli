@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "command": "agents",
-  "groups": 67,
-  "commands": 499,
+  "groups": 66,
+  "commands": 485,
   "root": {
     "name": "agents",
     "path": "",
@@ -20470,7 +20470,7 @@
             }
           ],
           "examples": "# Share a session — prints an unlisted, redacted link\nagents sessions share a1b2c3d4\n\n# Put it in your public gallery at share.getrush.ai/<you>\nagents sessions share a1b2c3d4 --public --label \"How the retry bug got fixed\"\n\n# Keep the model's reasoning in collapsible sections\nagents sessions share a1b2c3d4 --reasoning fold\n\n# A link that does not decay\nagents sessions share a1b2c3d4 --expire never",
-          "notes": "Publishes through the standalone artifacts CLI — install it with\n'npm i -g @phnx-labs/artifacts-cli' (or 'agents clis install artifacts'). Sign in with\n'artifacts auth login' for the managed endpoint (zero Cloudflare setup), or configure\nyour own bucket with 'artifacts share setup' / 'artifacts share join <baseUrl>'.\n\nUnlisted by default — the URL is world-readable but the page stays out of your public\ngallery and out of 'artifacts share list'. Pass --public to list it.\n\nSecrets are redacted and 'artifacts share' runs its own pre-publish scan on the page,\nso a transcript carrying emails or credential-shaped strings is refused unless you pass\n--force. --no-redact (the sessions-level flag) disables redaction and is a bad idea for\nanything you publish.\n\nRe-running with the same session updates the same URL and keeps the prior version\nas a revision ('artifacts share revisions <slug>').\n\nManage published sessions with 'artifacts share list' and 'artifacts share delete <slug>'.",
+          "notes": "Publishes through the standalone artifacts CLI — install it with\n'npm i -g @phnx-labs/artifacts-cli'. Sign in with\n'artifacts auth login' for the managed endpoint (zero Cloudflare setup), or configure\nyour own bucket with 'artifacts share setup' / 'artifacts share join <baseUrl>'.\n\nUnlisted by default — the URL is world-readable but the page stays out of your public\ngallery and out of 'artifacts share list'. Pass --public to list it.\n\nSecrets are redacted and 'artifacts share' runs its own pre-publish scan on the page,\nso a transcript carrying emails or credential-shaped strings is refused unless you pass\n--force. --no-redact (the sessions-level flag) disables redaction and is a bad idea for\nanything you publish.\n\nRe-running with the same session updates the same URL and keeps the prior version\nas a revision ('artifacts share revisions <slug>').\n\nManage published sessions with 'artifacts share list' and 'artifacts share delete <slug>'.",
           "subcommands": []
         },
         {
