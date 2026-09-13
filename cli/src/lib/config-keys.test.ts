@@ -122,6 +122,26 @@ describe('config-keys', () => {
     it('rejects unknown device property', () => {
       expect(() => parseConfigKey('devices.mac-mini.unknown')).toThrow(/Invalid device config key/);
     });
+
+    it('parses the device formFactor key', () => {
+      expect(parseConfigKey('devices.zion.formFactor')).toEqual({
+        scope: 'device',
+        device: 'zion',
+        property: 'formFactor',
+      });
+    });
+
+    it('parses AGI Menu preference keys', () => {
+      expect(parseConfigKey('menubar.menu.defaultProject')).toEqual({ scope: 'menubar', property: 'defaultProject' });
+      expect(parseConfigKey('menubar.menu.workingRowsShown')).toEqual({ scope: 'menubar', property: 'workingRowsShown' });
+      expect(parseConfigKey('menubar.menu.showPullRequests')).toEqual({ scope: 'menubar', property: 'showPullRequests' });
+      expect(configKeyStorageHint(parseConfigKey('menubar.menu.groupBy'))).toContain('central agents.yaml');
+      expect(listKnownConfigKeys()).toContain('menubar.menu.ticketSort');
+    });
+
+    it('rejects an unknown AGI Menu preference key', () => {
+      expect(() => parseConfigKey('menubar.menu.bogus')).toThrow(/Unknown AGI Menu preference/);
+    });
   });
 
   describe('formatConfigKey', () => {
@@ -133,6 +153,9 @@ describe('config-keys', () => {
         'browser.profile',
         'devices.mac-mini.max-agents',
         'devices.mac-mini.tmux',
+        'devices.zion.formFactor',
+        'menubar.menu.projectScope',
+        'menubar.menu.showPreviews',
       ]) {
         expect(formatConfigKey(parseConfigKey(key))).toBe(key);
       }

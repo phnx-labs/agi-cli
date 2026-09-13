@@ -1,5 +1,5 @@
 // Cloudflare orchestration for the private agents-traces store. The generic
-// request primitives live in share/provision; only the isolated traces resource
+// request primitives live in cloudflare/provision; only the isolated traces resource
 // choices and Worker template belong here.
 
 import { randomBytes } from 'node:crypto';
@@ -11,7 +11,7 @@ import {
   findZoneId,
   putWorkerSecret,
   type CloudflareRequester,
-} from '../share/provision.js';
+} from '../cloudflare/provision.js';
 import { DEFAULT_TRACES_DOMAIN } from './backend.js';
 import { renderTracesWorkerScript } from './worker-template.js';
 

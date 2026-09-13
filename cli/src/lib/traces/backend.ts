@@ -6,8 +6,7 @@
  * `traces.agents-cli.sh` Worker. Zero Cloudflare setup.
  *
  * BYO path (future): TRACES_BASE_URL + TRACES_WRITE_TOKEN env vars. Not
- * exposed in the CLI for M1 — follow-on milestone, same pattern as
- * `agents artifacts setup`.
+ * exposed in the CLI for M1 — follow-on milestone.
  */
 
 import { readSession } from '../identity/client.js';

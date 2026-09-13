@@ -40,6 +40,12 @@ export interface BlockQuestion {
   header?: string;
   options?: BlockOption[];
   multiSelect?: boolean;
+  /**
+   * Preceding report/explanation for a prose question — the context that came
+   * BEFORE the trailing ask, Markdown + newlines preserved (PHNX-3999). The
+   * operator UI renders it under the question; absent for a structured question.
+   */
+  context?: string;
 }
 
 export interface MessageReceipt {

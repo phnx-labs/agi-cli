@@ -16,6 +16,7 @@ import {
   extractTodoProgress,
   extractTodoProgressFromEvents,
   extractRecentDirectoriesTouched,
+  extractProseQuestion,
 } from './state.js';
 
 const now = Date.now();
@@ -31,6 +32,104 @@ function tool(toolName: string, args: Record<string, any> = {}, command?: string
 function toolResult(toolName: string, output: string): SessionEvent {
   return { type: 'tool_result', agent: 'claude', timestamp: '', tool: toolName, success: true, output };
 }
+
+describe('extractProseQuestion — question / context separation (PHNX-3999)', () => {
+  it('report + trailing question in separate paragraphs ⇒ context is the report, text is the ask', () => {
+    const content = [
+      "I've landed the auth refactor and the suite is green.",
+      'The migration touched three files and one config key.',
+      '',
+      'Should I open the PR now?',
+    ].join('\n');
+    const q = extractProseQuestion(content)!;
+    expect(q.text).toBe('Should I open the PR now?');
+    expect(q.context).toContain('auth refactor');
+    expect(q.context).toContain('three files');
+    // Newlines in the context are preserved, not flattened.
+    expect(q.context).toContain('\n');
+  });
+
+  it('report and question in the SAME paragraph ⇒ leading sentences peel into context', () => {
+    const q = extractProseQuestion('I finished the wiring and tests pass. Should I deploy it?')!;
+    expect(q.text).toBe('Should I deploy it?');
+    expect(q.context).toBe('I finished the wiring and tests pass.');
+  });
+
+  it('multiple / multiline related asks are kept together, never dropped', () => {
+    const content = [
+      'Two things before I continue:',
+      '- Should I bump the minor version?',
+      '- Or hold for the batch?',
+    ].join('\n');
+    const q = extractProseQuestion(content)!;
+    expect(q.text).toContain('Should I bump the minor version?');
+    expect(q.text).toContain('hold for the batch?');
+    expect(q.text).toContain('\n');
+    expect(q.context).toBeUndefined();
+  });
+
+  it('a bare question with no preceding prose ⇒ no context', () => {
+    const q = extractProseQuestion('Which option do you prefer?')!;
+    expect(q.text).toBe('Which option do you prefer?');
+    expect(q.context).toBeUndefined();
+  });
+
+  it('keeps wrapped questions complete while separating preceding report sentences', () => {
+    expect(extractProseQuestion('Which project should\nreceive this task?')).toEqual({ text: 'Which project should\nreceive this task?', context: undefined });
+    expect(extractProseQuestion('Tests pass.\nWhich project should\nreceive this task?')).toEqual({ text: 'Which project should\nreceive this task?', context: 'Tests pass.' });
+  });
+
+  it('does not split sentences inside inline Markdown', () => {
+    for (const question of ['Run `printf hi! there`?', 'Use [the docs! here](https://example.com)?', 'Keep **this! entire phrase**?']) {
+      expect(extractProseQuestion(question)).toEqual({ text: question, context: undefined });
+    }
+  });
+
+  it('requires a matching fence marker and sufficient closing length', () => {
+    expect(extractProseQuestion('````markdown\n~~~\nCan I deploy?\n```\n````')).toBeUndefined();
+    expect(extractProseQuestion('~~~markdown\n```\nCan I deploy?\n~~~')).toBeUndefined();
+  });
+
+  it('a "?" only inside a fenced code block is NOT the question', () => {
+    const content = ['Here is the snippet:', '```go', 'if x == nil ? a : b', '```'].join('\n');
+    expect(extractProseQuestion(content)).toBeUndefined();
+  });
+
+  it('a "?" only inside inline code / a blockquote is NOT the question', () => {
+    expect(extractProseQuestion('Ran `git status?` and it printed nothing.')).toBeUndefined();
+    expect(extractProseQuestion('Summary done.\n> did it work?')).toBeUndefined();
+  });
+
+  it('finds the real trailing question above a trailing code block', () => {
+    const content = ['Should I proceed?', '', '```', 'x == nil?', '```'].join('\n');
+    const q = extractProseQuestion(content)!;
+    expect(q.text).toBe('Should I proceed?');
+    expect(q.context).toBe('```\nx == nil?\n```');
+  });
+
+  it('a statement (no ask) ⇒ undefined', () => {
+    expect(extractProseQuestion('Done — tests pass and the PR is open.')).toBeUndefined();
+    expect(extractProseQuestion('')).toBeUndefined();
+  });
+});
+
+describe('inferActivity — prose question surfaces separated context (PHNX-3999)', () => {
+  it('a fresh report-then-question surfaces the ask as text and the report as context', () => {
+    const content = 'I implemented X and Y.\n\nShould I merge it?';
+    const s = inferActivity([msg('assistant', content)], { pidAlive: true, mtimeMs: stale });
+    expect(s.activity).toBe('waiting_input');
+    expect(s.question?.text).toBe('Should I merge it?');
+    expect(s.question?.context).toBe('I implemented X and Y.');
+  });
+
+  it('freshness still governs: an hours-old report+question does NOT fire', () => {
+    const ancient = now - 2 * 60 * 60_000;
+    const content = 'I implemented X and Y.\n\nShould I merge it?';
+    const s = inferActivity([msg('assistant', content)], { pidAlive: true, mtimeMs: ancient });
+    expect(s.activity).toBe('idle');
+    expect(s.question).toBeUndefined();
+  });
+});
 
 describe('inferActivity — waiting signals', () => {
   it('ExitPlanMode as the last event ⇒ waiting / plan_review', () => {
