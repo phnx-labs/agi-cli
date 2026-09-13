@@ -16,13 +16,15 @@ describe('cross-version peer envelopes', () => {
     const older = { v: 1, type: 'reset', streamId: 'peer', sequence: 1, scope: 'worker', capturedAt: 1, agents: [], attention: [] } as unknown as FeedWatchEnvelope;
     const normalized = normalizePeerEnvelope(older);
     expect(normalized.type === 'reset' && normalized.tools).toEqual([]);
+    // Same for `setup`, added in the same protocol-v1 extension.
+    expect(normalized.type === 'reset' && normalized.setup).toEqual([]);
     expect(() => new FeedSessionProjection().apply(normalized)).not.toThrow();
   });
 
   it('leaves an envelope that already carries tools untouched', () => {
     const state = new FeedWatchState('peer');
     const tool = { kind: 'browser', rowKey: 't1', scope: 'worker', device: 'worker', live: true, task: 'post', profile: 'work', linkStatus: 'unlinked', startedAtMs: 1, updatedAtMs: 2, captures: [], captureCounts: {} } as const;
-    const event = state.emit({ type: 'reset', scope: 'worker', capturedAt: 1, agents: [], attention: [], tools: [tool] });
+    const event = state.emit({ type: 'reset', scope: 'worker', capturedAt: 1, agents: [], attention: [], tools: [tool], setup: [] });
     expect(normalizePeerEnvelope(event)).toBe(event);
   });
 });
@@ -102,7 +104,7 @@ describe('fleet feed shares canonical session ownership', () => {
     const state = new FeedWatchState();
     const live = toSessionWatchRow('worker', session('same'));
     const history = { ...live, rowKey: 'history', previous: true };
-    projection.apply(state.emit({ type: 'reset', scope: 'worker', capturedAt: 1, agents: [live, history], attention: [], tools: [] }));
+    projection.apply(state.emit({ type: 'reset', scope: 'worker', capturedAt: 1, agents: [live, history], attention: [], tools: [], setup: [] }));
     expect(projection.apply(state.emit({ type: 'agent.upsert', scope: 'worker', rowKey: history.rowKey, agent: { ...history, preview: 'new historical text' } }))).toEqual([]);
     expect(projection.apply(state.emit({ type: 'attention.remove', scope: 'worker', rowKey: history.rowKey }))).toEqual([]);
     expect(projection.apply(state.emit({ type: 'attention.remove', scope: 'worker', rowKey: live.rowKey }))).toEqual([]);
@@ -128,5 +130,63 @@ describe('fleet feed shares canonical session ownership', () => {
     expect(attention!.sequence).toBeGreaterThan(upsert!.sequence);
     expect(await project(owner.reset('worker', []))).toMatchObject([{ type: 'reset', scope: 'worker', agents: [], attention: [] }]);
     expect(await project(launcher.reset('desktop', [session('same', { machine: 'worker' })]))).toMatchObject([{ type: 'reset', scope: 'desktop', agents: [], attention: [] }]);
+  });
+});
+
+describe('tool-setup rows ride the local stream', () => {
+  it('carries the setup cache on reset and republishes it on change, with no probe', async () => {
+    const { watchLocalFeed } = await import('./watch.js');
+    const rows = (readiness: 'ready' | 'stopped') => ([
+      { tool: 'browser' as const, installed: true, readiness, detail: `browser ${readiness}`, checkedAtMs: 1 },
+      { tool: 'computer' as const, installed: false, readiness: 'needs-setup' as const, detail: 'not installed', checkedAtMs: 1 },
+      { tool: 'secrets' as const, installed: null, readiness: 'unknown' as const, detail: 'uninspectable', checkedAtMs: null },
+    ]);
+    let current = rows('stopped');
+    let notify: ((next: typeof current) => void) | undefined;
+    let reads = 0;
+    const controller = new AbortController();
+    const events: FeedWatchEnvelope[] = [];
+    const journal = `${(await import('node:os')).tmpdir()}/feed-setup-${process.pid}.jsonl`;
+
+    const run = watchLocalFeed({
+      scope: 'm1', signal: controller.signal, emit: (event) => events.push(event),
+      activityPollMs: 20,
+      sessions: { readCache: () => ({ sessions: [] }) as never, readPrevious: () => [], journalPath: journal, journalPollMs: 50 },
+      tools: { roots: [], sources: { browserRows: () => [], computerRows: () => [], bindings: () => [], liveTasks: () => [] } },
+      setup: {
+        read: () => { reads += 1; return current; },
+        subscribe: (listener) => { notify = listener; return () => { notify = undefined; }; },
+      },
+    });
+
+    // The reset is projected through a promise chain, so give it a turn to land.
+    const deadline = Date.now() + 4_000;
+    while (!events.some((event) => event.type === 'reset') && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    const reset = events.find((event) => event.type === 'reset');
+    expect(reset?.type === 'reset' && reset.setup.map((row) => [row.tool, row.readiness])).toEqual([
+      ['browser', 'stopped'], ['computer', 'needs-setup'], ['secrets', 'unknown'],
+    ]);
+    // Publication reads the CACHE once; it never triggers a health probe.
+    expect(reads).toBe(1);
+
+    current = rows('ready');
+    notify!(current);
+    while (!events.some((event) => event.type === 'setup.snapshot') && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    const snapshot = events.find((event) => event.type === 'setup.snapshot');
+    expect(snapshot?.type === 'setup.snapshot' && snapshot.setup[0]!.readiness).toBe('ready');
+
+    // An identical notification is not a change and publishes nothing.
+    const before = events.length;
+    notify!(rows('ready'));
+    expect(events).toHaveLength(before);
+
+    controller.abort();
+    await run;
+    // The subscription is released with the stream.
+    expect(notify).toBeUndefined();
   });
 });
