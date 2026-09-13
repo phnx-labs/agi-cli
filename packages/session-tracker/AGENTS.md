@@ -54,4 +54,4 @@ tests/scenarios/     cold-spawn (50×, ≥99%) + kill-restart (20×, stale-entry
   kill-restart test guard this; the live id from the hook is preferred over any
   cached spawn-time id.
 - **`install-hook.ts` is idempotent** — it strips prior `session-tracker/src/hook.sh`
-  registrations before adding, so re-running never duplicates the hook.
+  registrations and the retired builtin `session-tracker.sh` before adding, so re-running never duplicates the sidecar writer. Codex registration trusts both the origin path and the relocated runtime home through the CLI hook bridge.

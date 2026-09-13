@@ -20,6 +20,28 @@ afterEach(() => {
 });
 
 describe('session tracker hook installation', () => {
+  it.each(['claude', 'codex', 'droid'] as const)('replaces only managed legacy %s trackers', async (agent) => {
+    const root = tmpHome();
+    const dir = agent === 'droid' ? '.factory' : `.${agent}`;
+    const file = path.join(root, dir, agent === 'codex' ? 'hooks.json' : 'settings.json');
+    const current = '/installed/session-tracker/dist/hook.sh';
+    const legacy = `${root}/.agents/.cache/shims/builtin-hooks/session-tracker.sh`;
+    const unrelated = `${root}/user-hooks/session-tracker.sh`;
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ hooks: { SessionStart: [{ matcher: '', hooks: [
+      { type: 'command', command: legacy },
+      { type: 'command', command: '/obsolete/session-tracker/src/hook.sh ' + agent },
+      { type: 'command', command: unrelated },
+    ] }] } }));
+    for (let pass = 0; pass < 2; pass++) {
+      const result = await installHookFor(agent, { home: root, hookPathOverride: current });
+      expect(result.installed, result.error).toBe(true);
+      const commands = JSON.parse(fs.readFileSync(file, 'utf8')).hooks.SessionStart
+        .flatMap((group: { hooks: { command: string }[] }) => group.hooks.map((hook) => hook.command));
+      expect(commands).toEqual([unrelated, `${current} ${agent}`]);
+    }
+  });
+
   it('registers Droid and Kimi SessionStart hooks in their native config formats', () => {
     const root = tmpHome();
     const result = spawnSync('bunx', ['tsx', 'src/install-hook.ts', 'droid', 'kimi'], {

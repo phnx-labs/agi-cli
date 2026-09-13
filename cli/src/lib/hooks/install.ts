@@ -19,8 +19,9 @@ import { promisify } from 'util';
 import { fileURLToPath } from 'url';
 import { AGENTS, ALL_AGENT_IDS, agentConfigDirName, isAgentHardDeprecated } from '../agents.js';
 import { supports, explainSkip, capableAgents } from '../capabilities.js';
-import { getAgentsDir, getHooksDir as getSystemHooksDir, getUserHooksDir, getUserAgentsDir, getSystemAgentsDir, getProjectAgentsDir, getTrashHooksDir, getEnabledExtraRepos, getResolvedRulesDir, getUserRulesDir, getPerfDir } from '../state.js';
+import { getAgentsDir, getHooksDir as getSystemHooksDir, getUserHooksDir, getUserAgentsDir, getSystemAgentsDir, getProjectAgentsDir, getTrashHooksDir, getEnabledExtraRepos, getResolvedRulesDir, getUserRulesDir, getPerfDir, getHistoryDir } from '../state.js';
 import { collectSubruleHooksFromState } from '../rules/compose.js';
+import { codexShortKey, resolveCodexHome } from '../codex-home.js';
 
 function getCentralHooksDir(): string { return getUserHooksDir(); }
 
@@ -2614,6 +2615,7 @@ export function pruneVersionHomeHookEntriesFromSettings(
 }
 
 function trustCodexHooks(hooksPath: string): void {
+  const hookPaths = [...new Set([hooksPath, path.join(fs.realpathSync(path.dirname(hooksPath)), 'hooks.json')])];
   const configPath = path.join(path.dirname(hooksPath), 'config.toml');
   const hooksFile = JSON.parse(fs.readFileSync(hooksPath, 'utf-8')) as CodexHooksFile;
   let tomlConfig: Record<string, unknown> = {};
@@ -2652,7 +2654,7 @@ function trustCodexHooks(hooksPath: string): void {
       if (!group.hooks) return;
       group.hooks.forEach((handler, handlerIdx) => {
         if (handler.type !== 'command') return;
-        const key = `${hooksPath}:${eventKeyLabel}:${groupIdx}:${handlerIdx}`;
+        const keys = hookPaths.map((file) => `${file}:${eventKeyLabel}:${groupIdx}:${handlerIdx}`);
         const trustedHash = computeCodexHookTrustHash(
           eventKeyLabel,
           handler.command,
@@ -2661,12 +2663,11 @@ function trustCodexHooks(hooksPath: string): void {
         );
         // Preserve a user's explicit `enabled = false` for this exact hook;
         // only (re)write the trust hash.
-        const prior = existingState[key];
         const entry: { enabled?: boolean; trusted_hash?: string } = { trusted_hash: trustedHash };
-        if (prior && prior.enabled === false) {
+        if (keys.some((key) => existingState[key]?.enabled === false)) {
           entry.enabled = false;
         }
-        hookState[key] = entry;
+        for (const key of keys) hookState[key] = entry;
       });
     });
   }
@@ -3813,8 +3814,8 @@ export async function installSessionTrackerHook(
   if (!invocation) {
     return { installed: false, error: 'session-tracker not built and tsx is unavailable' };
   }
-  const env = sessionTrackerInstallEnv(agent, version, home);
   try {
+    const env = sessionTrackerInstallEnv(agent, version, home);
     await execFileAsync(invocation.command, invocation.args, {
       env,
       encoding: 'utf8',
@@ -3861,8 +3862,8 @@ export function installSessionTrackerHookSync(
   if (!invocation) {
     return { installed: false, error: 'session-tracker not built and tsx is unavailable' };
   }
-  const env = sessionTrackerInstallEnv(agent, version, home);
   try {
+    const env = sessionTrackerInstallEnv(agent, version, home);
     execFileSync(invocation.command, invocation.args, {
       env,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -3878,5 +3879,10 @@ export function installSessionTrackerHookSync(
 /** The hook installer must target this account, not the current global home. */
 function sessionTrackerInstallEnv(agent: AgentId, version?: string, home?: string): NodeJS.ProcessEnv {
   const target = home ?? (version ? getVersionHomePath(agent, version) : undefined);
+  if (agent === 'codex' && target && version) {
+    const originHome = path.join(target, '.codex');
+    const historyDir = getHistoryDir();
+    resolveCodexHome(originHome, path.dirname(historyDir), codexShortKey(originHome, version, historyDir));
+  }
   return target ? { ...process.env, HOME: target, USERPROFILE: target } : { ...process.env };
 }
