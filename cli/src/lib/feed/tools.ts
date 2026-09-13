@@ -341,7 +341,7 @@ export function projectBrowserToolRow(
     ...(launchId ? { launchId } : {}),
     ...(row.linkedSession?.agent ? { agent: row.linkedSession.agent } : {}),
     ...(owner ? { owner } : {}),
-    linkStatus: row.linkStatus,
+    linkStatus: row.linkedSession ? 'linked' : sessionId ? 'unresolved' : 'unlinked',
     startedAtMs,
     updatedAtMs,
     captures,
