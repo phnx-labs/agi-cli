@@ -1,1 +1,0 @@
-- **Session resume preserves device and picker filters (PHNX-3940).** `sessions resume --device <host> <id>` and the equivalent device-after-ID form now open on the selected origin device. Agent, account, directory, time, and limit filters reach the shared picker; an unspecified limit remains 200. Repeated different devices produce an error.
