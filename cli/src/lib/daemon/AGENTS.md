@@ -72,7 +72,11 @@ record of `null` for it.
   `device-probe` (`device-probe-service.ts`), `self-heal`
   (`self-heal-service.ts`), and
   `state-dir-check` (`state-dir-check-service.ts`), `session-state`
-  (`session-state-service.ts`), and `webhook-receiver`
+  (`session-state-service.ts`), `feed-stream` (`feed-stream-service.ts`: owns the
+  ONE fleet feed fan-out and serves it to every reader over a socket, so N
+  consumers cost one ssh per peer instead of N — PHNX-3999; the socket binds on
+  start but the fan-out itself is demand-gated on a connected reader), and
+  `webhook-receiver`
   (`webhook-receiver-service.ts`), `daemon-heartbeat`
   (`heartbeat-service.ts`), `tmux-reap` (`tmux-reap-service.ts`), and
   `browser-task-reap` (`browser-task-reap-service.ts`), and `auth-sync`

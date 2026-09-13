@@ -291,7 +291,7 @@ agents events stats         Show aggregate event statistics
 agents feed                         Operator inbox + agent status posts. Default is needs-you; agent progress = --filter updates
 agents feed answer <attention-key>  Atomically claim and deliver one answer to an open attention item
 agents feed post <text...>          Post a status update to the fleet activity stream (for agents)
-agents feed watch                   Stream the canonical agent, attention, and activity projection as NDJSON
+agents feed watch                   Stream the canonical agent, attention, tool, and activity projection as NDJSON
 ```
 
 ## feedback — Open a pre-filled feedback Discussion or bug report

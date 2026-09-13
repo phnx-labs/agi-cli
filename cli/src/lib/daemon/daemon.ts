@@ -913,6 +913,7 @@ export async function runDaemon(): Promise<void> {
     { UsageSyncService },
     { StateDirCheckService },
     { SessionStateService },
+    { FeedStreamService },
     { AttentionNotifyService },
     { WebhookReceiverService },
     { HeartbeatService },
@@ -936,6 +937,7 @@ export async function runDaemon(): Promise<void> {
     import('./usage-sync-service.js'),
     import('./state-dir-check-service.js'),
     import('./session-state-service.js'),
+    import('./feed-stream-service.js'),
     import('./attention-notify-service.js'),
     import('./webhook-receiver-service.js'),
     import('./heartbeat-service.js'),
@@ -1061,6 +1063,12 @@ export async function runDaemon(): Promise<void> {
   if (isEnabled('session-state')) {
     supervisor.register(new SessionStateService(() => supervisor.runNow('session-state')));
   } else log('INFO', 'Live session-state service disabled');
+
+  // The shared feed fan-out. Registered even when disabled at boot so a later
+  // `agents daemon services enable feed-stream` brings it up over SIGHUP, the
+  // same live-transition shape browser IPC uses.
+  supervisor.register(new FeedStreamService(), { enabled: isEnabled('feed-stream') });
+  if (!isEnabled('feed-stream')) log('INFO', 'Shared feed stream service disabled');
 
   const monitorEngineSvc = new MonitorEngineService();
   if (isEnabled('monitors')) supervisor.register(monitorEngineSvc);
