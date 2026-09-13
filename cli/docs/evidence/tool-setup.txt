@@ -1,0 +1,3 @@
+Captured 2026-09-13 on macOS, from the feature worktree.
+$ node --import tsx src/index.ts setup status --tool all --json
+[{"tool":"browser","installed":false,"readiness":"needs-setup","detail":"CLI is not installed.","checkedAtMs":null},{"tool":"computer","installed":true,"executable":"/opt/homebrew/lib/node_modules/@phnx-labs/computer-cli/bin/computer.cjs","version":"0.1.2","readiness":"ready","detail":"Helper is running and Accessibility is granted. Screen Recording is checked when capturing.","checkedAtMs":1789310480270},{"tool":"secrets","installed":true,"executable":"/opt/homebrew/lib/node_modules/@phnx-labs/secrets-cli/dist/index.js","version":"0.1.4","readiness":"unknown","detail":"Installed. Health has not been checked.","checkedAtMs":null}]
