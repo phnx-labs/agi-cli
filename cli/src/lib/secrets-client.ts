@@ -558,14 +558,9 @@ export function secretsRequestSync<T = unknown>(
   return serveOnceSync(op, args, context) as T;
 }
 
-/** Drop the memoized executable so the next resolve re-walks PATH / `$SECRETS_BIN`. */
-export function forgetResolvedSecretsBin(): void {
-  cachedBin = undefined;
-}
-
 /** Test hook: forget the cached binary so a new env is re-resolved. */
 export function _resetSecretsClientForTest(): void {
-  forgetResolvedSecretsBin();
+  cachedBin = undefined;
   requestCounter = 0;
   syncServeTimeoutMs = SYNC_SERVE_TIMEOUT_MS;
 }
