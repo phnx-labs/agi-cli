@@ -1,0 +1,25 @@
+# knip-dead-exports verification — 2026-09-13T09:49:02Z
+
+## tsc --noEmit --noUnusedLocals: new TS6133 vs main
+main: 187  branch: 186  new: 0
+
+## classification counts (exports)
+  97 a
+ 391 b
+ 165 c
+ 102 excluded
+## classification counts (types)
+  16 a
+ 713 b
+ 109 c
+  76 excluded
+
+## local vitest (hand-edited files)
+
+ Test Files  3 passed (3)
+      Tests  42 passed (42)
+   Start at  09:42:43
+   Duration  17.94s (transform 17.49s, setup 412ms, import 20.11s, tests 1.65s, environment 0ms)
+
+
+[exited with code 0]
