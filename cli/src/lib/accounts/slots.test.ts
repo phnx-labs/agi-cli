@@ -8,6 +8,7 @@ import * as TOML from 'smol-toml';
 import { addNativeAccount, readSlots, removeAccount } from '../account-registry.js';
 import { getGlobalDefault, getVersionHomePath, listInstalledVersions } from '../installations/store.js';
 import { computeCodexHookTrustHash } from '../hooks/install.js';
+import { codexShortKey, resolveCodexHome } from '../codex-home.js';
 import { getHistoryDir, readMeta, updateMeta } from '../state.js';
 import { ensureSlot, projectAccountSlots, recordSlot, slotDir } from './slots.js';
 
@@ -206,7 +207,7 @@ describe('projectAccountSlots (PHNX-3940: slots follow the version home)', () =>
     }
   });
 
-  it('registers the tracker in new Codex slots and replaces stale registrations during sync', () => {
+  it.each([false, true])('registers one trusted tracker across repeated Codex slot syncs (relocated: %s)', (relocated) => {
     const fromHome = getVersionHomePath('codex', VERSION);
     const previousDefault = readMeta().agents?.codex;
     fs.mkdirSync(path.join(fromHome, '.codex'), { recursive: true });
@@ -214,7 +215,13 @@ describe('projectAccountSlots (PHNX-3940: slots follow the version home)', () =>
     const created = addNativeAccount('tracker', 'codex', 'codex:account=slot-tracker', 'tracker@example.com', VERSION);
     const slot = ensureSlot('codex', created.id);
     recordSlot(created.id, slot);
-    const hooksFile = path.join(slot.slotDir, '.codex', 'hooks.json');
+    const originHome = path.join(slot.slotDir, '.codex');
+    const runtimeHome = relocated
+      ? resolveCodexHome(originHome, path.dirname(getHistoryDir()), codexShortKey(originHome, VERSION, getHistoryDir()), 'darwin')
+      : fs.realpathSync(originHome);
+    const hooksFile = path.join(originHome, 'hooks.json');
+    const runtimeHooksFile = path.join(runtimeHome, 'hooks.json');
+    if (relocated) expect(runtimeHome).not.toBe(originHome);
     const sessionId = randomUUID();
     const sidecar = path.join(getHistoryDir(), 'by-session', `${sessionId}.json`);
     const commands = (): string[] => JSON.parse(fs.readFileSync(hooksFile, 'utf8')).hooks.SessionStart
@@ -222,19 +229,22 @@ describe('projectAccountSlots (PHNX-3940: slots follow the version home)', () =>
     try {
       expect(commands().filter((command) => command.includes('session-tracker'))).toHaveLength(1);
       const old = '/obsolete/session-tracker/dist/hook.sh codex';
+      const legacy = path.join(os.homedir(), '.agents/.cache/shims/builtin-hooks/session-tracker.sh');
       const unrelated = 'echo unrelated-user-hook';
       fs.writeFileSync(hooksFile, JSON.stringify({ hooks: { SessionStart: [{ matcher: '', hooks: [
-        { type: 'command', command: old }, { type: 'command', command: unrelated },
+        { type: 'command', command: old }, { type: 'command', command: legacy }, { type: 'command', command: unrelated },
       ] }] } }));
       const credentials = path.join(slot.slotDir, '.codex', 'auth.json');
       const credentialBytes = '{"fixture":"account-local credential sentinel"}\n';
       fs.writeFileSync(credentials, credentialBytes);
       const configPath = path.join(slot.slotDir, '.codex', 'config.toml');
       const trackerKey = `${hooksFile}:session_start:0:1`;
+      const runtimeTrackerKey = `${runtimeHooksFile}:session_start:0:1`;
       fs.writeFileSync(configPath, TOML.stringify({
         model: 'fixture-model', features: { hooks: false },
         hooks: { state: {
           [trackerKey]: { enabled: false, trusted_hash: 'old-tracker-hash' },
+          [runtimeTrackerKey]: { enabled: false, trusted_hash: 'stale-runtime-hash' },
           'unrelated-state': { enabled: false, trusted_hash: 'unrelated-hash' },
         } },
       }));
@@ -242,6 +252,7 @@ describe('projectAccountSlots (PHNX-3940: slots follow the version home)', () =>
         projectAccountSlots('codex');
         const registered = commands();
         expect(registered).not.toContain(old);
+        expect(registered).not.toContain(legacy);
         expect(registered).toContain(unrelated);
         expect(registered.filter((command) => command.includes('session-tracker'))).toHaveLength(1);
         expect(fs.readFileSync(credentials, 'utf8')).toBe(credentialBytes);
@@ -251,13 +262,16 @@ describe('projectAccountSlots (PHNX-3940: slots follow the version home)', () =>
         expect(config.features.hooks).toBe(true);
         expect(config.model).toBe('fixture-model');
         expect(config.hooks.state[trackerKey].enabled).toBe(false);
+        expect(config.hooks.state[runtimeTrackerKey].enabled).toBe(false);
         expect(config.hooks.state['unrelated-state']).toEqual({ enabled: false, trusted_hash: 'unrelated-hash' });
         const groups = JSON.parse(fs.readFileSync(hooksFile, 'utf8')).hooks.SessionStart;
         groups.forEach((group: { matcher?: string; hooks: { command: string; timeout: number }[] }, groupIndex: number) => {
           group.hooks.forEach((hook, hookIndex) => {
             if (!hook.command.includes('session-tracker')) return;
-            expect(config.hooks.state[`${hooksFile}:session_start:${groupIndex}:${hookIndex}`].trusted_hash)
-              .toBe(computeCodexHookTrustHash('session_start', hook.command, hook.timeout, group.matcher));
+            for (const file of new Set([hooksFile, runtimeHooksFile])) {
+              expect(config.hooks.state[`${file}:session_start:${groupIndex}:${hookIndex}`].trusted_hash)
+                .toBe(computeCodexHookTrustHash('session_start', hook.command, hook.timeout, group.matcher));
+            }
           });
         });
       }
@@ -271,6 +285,7 @@ describe('projectAccountSlots (PHNX-3940: slots follow the version home)', () =>
     } finally {
       fs.rmSync(sidecar, { force: true });
       removeAccount('tracker');
+      if (runtimeHome !== originHome) fs.rmSync(path.dirname(runtimeHome), { recursive: true, force: true });
       fs.rmSync(slot.slotDir, { recursive: true, force: true });
       fs.rmSync(fromHome, { recursive: true, force: true });
       updateMeta((m) => ({ ...m, agents: { ...m.agents, codex: previousDefault } }));

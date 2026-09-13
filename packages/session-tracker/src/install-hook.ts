@@ -38,11 +38,11 @@ function hookCommand(agent: AgentId, opts: InstallOptions): string {
   return `${hook} ${agent}`;
 }
 
-/** True when a stored command string is a prior registration of this package's
- *  `hook.sh` (src or dist). Used for idempotency when stripping old entries. */
+/** Recognize current registrations and the retired builtin sidecar writer. */
 function isOwnHookCommand(command: string): boolean {
   const first = command.trim().split(/\s+/)[0];
-  return first.endsWith('hook.sh') && first.includes('session-tracker');
+  return (first.endsWith('hook.sh') && first.includes('session-tracker'))
+    || first.endsWith('/.agents/.cache/shims/builtin-hooks/session-tracker.sh');
 }
 
 async function readJson(p: string): Promise<any> {
@@ -156,7 +156,7 @@ async function installDroid(opts: InstallOptions): Promise<InstallResult> {
   for (const entry of cfg.hooks.SessionStart) {
     if (!entry || !Array.isArray(entry.hooks)) continue;
     entry.hooks = entry.hooks.filter(
-      (hook: any) => !(hook?.command && String(hook.command).includes('packages/session-tracker/src/hook.sh')),
+      (hook: any) => !(hook?.command && isOwnHookCommand(String(hook.command))),
     );
   }
   let group = cfg.hooks.SessionStart.find((entry: any) => entry?.matcher === '');
