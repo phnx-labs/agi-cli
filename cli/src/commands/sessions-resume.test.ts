@@ -248,13 +248,24 @@ describe('partitionResumableSelections — the picker drops what recovery would 
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
 
-  it('skips a path-less live-registry row and a peer mirror stub, exactly as recovery refuses them', () => {
+  it('skips a path-less live-registry row and a mirror explicitly requested here', () => {
     const { resumable, skipped } = partitionResumableSelections([
       meta({ filePath: '' }),
-      meta({ shortId: 'bbbbbbbb', filePath: '', mirrorSyncedAt: Date.parse('2026-09-12T17:00:00.000Z'), mirrorSource: 'offline-worker' }),
-    ]);
+      meta({ shortId: 'bbbbbbbb', machine: 'peer-worker', filePath: '', mirrorSyncedAt: Date.parse('2026-09-12T17:00:00.000Z'), mirrorSource: 'peer-worker' }),
+    ], { here: true });
     expect(resumable).toHaveLength(0);
     expect(skipped.map(s => s.shortId)).toEqual(['14567b8a', 'bbbbbbbb']);
+  });
+
+  it('defers peer transcripts and mirrored rows to their owner instead of checking local files', () => {
+    const peer = meta({ machine: 'peer-worker', filePath: '/peer-only/session.jsonl' });
+    const mirror = meta({ shortId: 'bbbbbbbb', machine: 'peer-worker', filePath: '', mirrorSource: 'peer-worker', mirrorSyncedAt: Date.now() });
+    expect(partitionResumableSelections([peer, mirror])).toEqual({ resumable: [peer, mirror], skipped: [] });
+    expect(partitionResumableSelections([peer, mirror], { here: true })).toEqual({ resumable: [], skipped: [peer, mirror] });
+    expect(partitionResumableSelections([peer, mirror], { here: true, device: 'peer-worker' }))
+      .toEqual({ resumable: [peer, mirror], skipped: [] });
+    const local = meta({ machine: 'localhost', filePath: '' });
+    expect(partitionResumableSelections([local])).toEqual({ resumable: [], skipped: [local] });
   });
 
   it('partitions a mixed batch without reordering either side', () => {
