@@ -12,6 +12,7 @@ import {
 } from './remote-agents-json.js';
 import { REMOTE_STDOUT_MAX_BYTES } from './ssh-exec.js';
 import { parseRemoteListPayload } from './session/remote-list.js';
+import { decodeRenderedPowershell } from './hosts/remote-cmd.test-fixture.js';
 
 /**
  * A fake `ssh` child: an EventEmitter for the process-level `error`/`close`
@@ -36,10 +37,12 @@ describe('remoteAgentsJsonCommand', () => {
 
   it('guards a Windows peer through its PowerShell environment', () => {
     const command = remoteAgentsJsonCommand(['feed', '--json'], 'AGENTS_FEED_LOCAL', 'windows');
-    const encoded = command.split(' ').at(-1)!;
-    const script = decodePowershell(encoded);
+    const script = decodeRenderedPowershell(command);
     expect(script).toContain("$env:AGENTS_FEED_LOCAL = '1'");
-    expect(script).toContain("& 'agents' 'feed' '--json'");
+    // The npm `agents.ps1` shim is bypassed: it splats `$args` into native
+    // node.exe, where PowerShell 5.1 drops empty args and eats embedded quotes.
+    expect(script).not.toContain("& 'agents'");
+    expect(script).toMatch(/\$zi\.Arguments\s*=\s*\$zr\s*\+\s*'feed --json'/);
   });
 });
 

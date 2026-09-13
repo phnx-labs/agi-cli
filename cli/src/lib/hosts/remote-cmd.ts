@@ -9,6 +9,9 @@
  */
 
 import { shellQuote } from '../ssh-exec.js';
+import { pwshLiteral, pwshNativeExecStatements } from '../pwsh.js';
+import { quoteWin32ExecArg } from '../platform/exec.js';
+import * as zlib from 'node:zlib';
 
 /** A flag to strip from a forwarded argv, with whether it consumes a value. */
 export interface StripSpec {
@@ -355,15 +358,88 @@ export function stripClixml(stdout: string): string {
     .trim();
 }
 
+/**
+ * Statements that run the Agents CLI on a Windows peer with EXACT argv, leaving the
+ * child's exit code in `$__code`.
+ *
+ * `& agents …` cannot be used, and the reason is not our quoting. On Windows
+ * `agents` is an npm-generated `agents.ps1`, whose body ends in
+ *
+ *     & "node$exe" --no-warnings=… "$basedir/node_modules/@phnx-labs/agents-cli/dist/index.js" $args
+ *
+ * — `$args` splatted into a NATIVE program, which is the PowerShell 5.1 lossy
+ * serializer. So the loss happens INSIDE the user's shim, after our tokens were
+ * already correct: measured on a real peer, `no-such-"menu"-proof` reached the
+ * Agents parser as `no-such-menu-proof`. Quoting harder upstream cannot fix that,
+ * and rewriting a user's npm shim is not ours to do.
+ *
+ * Instead the shim is bypassed the same way `getCliLaunch` (`lib/cli-entry.ts`)
+ * resolves a launch locally: a node-script entry becomes `<node> <entry> …args`.
+ * The entry and runtime are resolved ON THE PEER from the launcher's own location —
+ * the identical two-step the shim itself performs — and executed through .NET with
+ * a `CommandLineToArgvW`-escaped argument string.
+ *
+ * A peer whose `agents` is already a native executable is used directly. A peer
+ * where neither resolves FAILS LOUD: falling back to `& agents` would silently
+ * restore the argument loss, which is worse than an error naming what is missing.
+ *
+ * The entry comes from the package's DECLARED `bin` rather than a literal
+ * `dist/index.js`, so it follows the package instead of needing to be kept in sync
+ * with it.
+ */
+export function windowsAgentsInvocation(args: string[], binName: 'agents' | 'ag' = 'agents'): string {
+  const escaped = pwshLiteral(args.map(quoteWin32ExecArg).join(' '));
+  return [
+    // Set before any resolution: a non-terminating failure below would otherwise
+    // leave the exit code null, and `exit $null` reports 0.
+    `$ErrorActionPreference = 'Stop'`,
+    `$zc = Get-Command ${powershellQuote(binName)} -ErrorAction Stop`,
+    `$ze = $zc.Source`,
+    `$zr = ''`,
+    // A real native executable needs no interpreter prefix. `CommandType` alone is
+    // NOT that test: `Get-Command` reports `Application` for `agents.cmd` too, and
+    // a .cmd launcher re-parses through cmd.exe with the same argument loss as the
+    // .ps1 one — so a cmd-only install must not bypass this either.
+    `if ($zc.CommandType -ne 'Application' -or $ze -match '\\.(cmd|bat)$') {`,
+    `  $zb = Split-Path $ze`,
+    `  $zk = Join-Path $zb 'node_modules\\@phnx-labs\\agents-cli'`,
+    // The package's DECLARED bin, so the entry follows the package rather than a
+    // hand-synced `dist/index.js` literal that would rot on upgrade. One check
+    // covers a missing bin AND the single-string `bin` form (which yields $null).
+    `  $zl = (Get-Content -Raw (Join-Path $zk 'package.json') | ConvertFrom-Json).bin.${binName}`,
+    `  if (-not $zl) { throw "agents package at $zk declares no bin.${binName}" }`,
+    `  $zt = Join-Path $zk $zl`,
+    `  if (-not [IO.File]::Exists($zt)) { throw "agents CLI entry not found at $zt" }`,
+    // The npm shim prefers a node.exe beside itself before PATH; match that.
+    `  $zd = Join-Path $zb 'node.exe'`,
+    `  $ze = if ([IO.File]::Exists($zd)) { $zd } else { 'node' }`,
+    // A Windows path cannot contain `"`, so wrapping is sufficient escaping here.
+    `  $zr = '--no-warnings=ExperimentalWarning "' + $zt + '" '`,
+    `}`,
+    ...pwshNativeExecStatements('$ze', `$zr + ${escaped}`),
+    // Reported through a plain variable rather than by assigning the automatic
+    // $LASTEXITCODE, which nothing set here since no PowerShell command ran.
+    `$zq = $zp.ExitCode`,
+    // Never let an unknown outcome read as success.
+    `if ($null -eq $zq) { $zq = 1 }`,
+  // NEWLINE-joined, and that is required rather than stylistic: the caller joins
+  // its parts with `'; '`, which between a closing `}` and `else`/an indented block
+  // would produce invalid PowerShell.
+  ].join('\n');
+}
+
 export function windowsAgentsScript(cmd: WindowsAgentsCommand): string {
   const { args, env, cwd, propagateExit = true, remapExit255 = false } = cmd;
-  const parts: string[] = [POWERSHELL_PROGRESS_SILENCE];
+  // `Stop` FIRST, before the env assignments and the Set-Location: a failing
+  // `Set-Location` (a cwd that does not exist on the peer) must abort rather than
+  // continue into the launcher and run the command in the wrong directory.
+  const parts: string[] = [POWERSHELL_PROGRESS_SILENCE, `$ErrorActionPreference = 'Stop'`];
   if (env) for (const [k, v] of Object.entries(env)) parts.push(`$env:${k} = ${powershellQuote(v)}`);
   if (cwd) parts.push(`Set-Location -LiteralPath ${powershellQuote(cwd)}`);
-  parts.push(`& ${['agents', ...args].map(powershellQuote).join(' ')}`);
+  parts.push(windowsAgentsInvocation(args));
   if (propagateExit) {
-    if (remapExit255) parts.push('$agentsExit = $LASTEXITCODE', 'if ($agentsExit -eq 255) { exit 254 }', 'exit $agentsExit');
-    else parts.push('exit $LASTEXITCODE');
+    if (remapExit255) parts.push('if ($zq -eq 255) { exit 254 }', 'exit $zq');
+    else parts.push('exit $zq');
   }
   return parts.join('; ');
 }
@@ -373,8 +449,56 @@ export function windowsAgentsScript(cmd: WindowsAgentsCommand): string {
  * Windows remote: a `powershell -NoProfile -EncodedCommand <base64>` call. The
  * Windows counterpart of `bash -lc '<...>'`, shared by every `--device` site.
  */
+/**
+ * Render a PowerShell script as the single command string ssh sends to a Windows
+ * peer, compressing it when that is genuinely shorter.
+ *
+ * The plain route is `-EncodedCommand <base64 of UTF-16LE>`, which inflates the
+ * script by ~2.67x. That matters because OpenSSH-for-Windows caps the whole remote
+ * command far below cmd.exe's 8191 — bisected against a live peer, 2934 characters
+ * succeed and 3102 fail — so a longer script eats the headroom a caller's
+ * arguments, `--remote-cwd` and forwarded env need.
+ *
+ * The alternative is to deflate the UTF-8 script and emit a small fixed bootstrap
+ * that inflates it back. That trades ~2.67x for ~1.33x on the compressible part,
+ * which on scripts of this shape is a large net win. The bootstrap itself still
+ * rides the ordinary `-EncodedCommand` route, so the transport, quoting and stdin
+ * behaviour are untouched — only the payload representation changes.
+ *
+ * Applied ONLY when the result is actually shorter: for a small script the fixed
+ * bootstrap costs more than it saves, so picking the shorter of the two keeps the
+ * plain form in play for every small caller and is obviously correct either way.
+ */
+export function renderPowershellCommand(script: string): string {
+  const plain = `powershell -NoProfile -EncodedCommand ${encodePowershell(script)}`;
+  // Raw DEFLATE (RFC 1951) — what .NET's `DeflateStream` reads. `deflateSync`
+  // would prepend a zlib header that `DeflateStream` rejects.
+  // Raw DEFLATE (RFC 1951) — what .NET's `DeflateStream` reads. `deflateSync`
+  // would prepend a zlib header that `DeflateStream` rejects.
+  const packed = zlib.deflateRawSync(Buffer.from(script, 'utf-8'), { level: 9 }).toString('base64');
+  // The blob is embedded DIRECTLY in a `-Command` string rather than wrapped in a
+  // second `-EncodedCommand`: routing an already-base64 payload through the encoded
+  // form would inflate it by another 2.67x and cancel most of the compression.
+  //
+  // The bootstrap is deliberately VARIABLE-FREE — one nested expression, no `$`
+  // anywhere. A `$b = …` form is unsafe here: OpenSSH-for-Windows may have
+  // PowerShell as its `DefaultShell`, in which case the outer double-quoted string
+  // is parsed by PowerShell first and `$b` would be expanded before our script ever
+  // runs. With no `$`, no `%`, no backtick and no cmd metacharacter — base64's
+  // alphabet is `A-Za-z0-9+/=` and the rest is ASCII punctuation neither shell
+  // touches inside quotes — the same text survives either default shell. stdin is
+  // untouched by both routes.
+  const bootstrap = 'iex ([IO.StreamReader]::new([IO.Compression.DeflateStream]::new('
+    + `[IO.MemoryStream]::new([Convert]::FromBase64String('${packed}')),`
+    + '[IO.Compression.CompressionMode]::Decompress),[Text.Encoding]::UTF8).ReadToEnd())';
+  const compressed = `powershell -NoProfile -Command "${bootstrap}"`;
+  // Only when genuinely shorter: for a small script the fixed bootstrap costs more
+  // than it saves, so this keeps the plain form in play for every small caller.
+  return compressed.length < plain.length ? compressed : plain;
+}
+
 export function buildWindowsAgentsCommand(cmd: WindowsAgentsCommand): string {
-  return `powershell -NoProfile -EncodedCommand ${encodePowershell(windowsAgentsScript(cmd))}`;
+  return renderPowershellCommand(windowsAgentsScript(cmd));
 }
 
 /**

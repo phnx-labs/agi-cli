@@ -16,15 +16,12 @@ import {
   type ReadyProbe,
 } from './ready.js';
 import { decodePowershell } from './remote-cmd.js';
+import { decodeRenderedPowershell } from './remote-cmd.test-fixture.js';
 
 const MARK = '@@AGENTS_READY@@';
 
 /** Decode the PowerShell script off a `-EncodedCommand` remote command. */
-function decodeWindows(cmd: string): string {
-  const m = cmd.match(/^powershell -NoProfile -EncodedCommand (\S+)$/);
-  expect(m, `not an encoded PowerShell command: ${cmd}`).not.toBeNull();
-  return decodePowershell(m![1]);
-}
+const decodeWindows = decodeRenderedPowershell;
 
 describe('ReadyProbe.timedOut — timeout vs unreachable distinction', () => {
   it('timedOut is absent on a successful probe', () => {
@@ -350,7 +347,12 @@ describe('ready commands — Windows branch speaks PowerShell', () => {
   });
 
   it('version probe runs `agents --version` via PowerShell', () => {
-    expect(decodeWindows(buildRemoteVersionCommand('windows'))).toBe("$ProgressPreference = 'SilentlyContinue'; & 'agents' '--version'; exit $LASTEXITCODE");
+    const script = decodeWindows(buildRemoteVersionCommand('windows'));
+    // The npm `agents.ps1` shim is bypassed — it splats `$args` into native
+    // node.exe, which is where PowerShell 5.1 loses arguments.
+    expect(script).not.toContain("& 'agents'");
+    expect(script).toMatch(/\$zi\.Arguments\s*=\s*\$zr\s*\+\s*'--version'/);
+    expect(script).toContain('exit $zq');
   });
 
   it('readyProbe emits the sentinel with Write-Output and branches on $LASTEXITCODE', () => {

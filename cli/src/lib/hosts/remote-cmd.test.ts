@@ -1,19 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'child_process';
-import {
-  stripRoutingFlags,
-  buildRemoteAgentsInvocation,
-  buildWindowsAgentsCommand,
-  buildWindowsStdinImportCommand,
-  buildWindowsStdinAgentsCommand,
-  posixEnvExports,
-  remoteShellFor,
-  powershellQuote,
-  decodePowershell,
-  stripClixml,
-  HOST_ROUTING_SPECS,
-  type StripSpec,
-} from './remote-cmd.js';
+import { stripRoutingFlags, buildRemoteAgentsInvocation, buildWindowsAgentsCommand, buildWindowsStdinImportCommand, buildWindowsStdinAgentsCommand, posixEnvExports, remoteShellFor, powershellQuote, decodePowershell, stripClixml, HOST_ROUTING_SPECS, type StripSpec } from './remote-cmd.js';
+import { decodeRenderedPowershell } from './remote-cmd.test-fixture.js';
 
 describe('stripClixml', () => {
   // The exact banner + progress element a live win-mini (PowerShell 5.1) emits
@@ -73,11 +61,7 @@ describe('stripClixml', () => {
 /** Decode the PowerShell script a Windows `--device` invocation ships, by pulling
  * the base64 payload off `powershell -NoProfile -EncodedCommand <b64>` and
  * reversing the UTF-16LE encoding — the exact bytes the remote PowerShell runs. */
-function decodeWindows(cmd: string): string {
-  const m = cmd.match(/^powershell -NoProfile -EncodedCommand (\S+)$/);
-  expect(m, `not an encoded PowerShell command: ${cmd}`).not.toBeNull();
-  return decodePowershell(m![1]);
-}
+const decodeWindows = decodeRenderedPowershell;
 
 const SPECS: StripSpec[] = [...HOST_ROUTING_SPECS, { long: 'no-tty', takesValue: false }];
 
@@ -203,7 +187,9 @@ describe('secrets export --device push command (cross-platform)', () => {
   it('Windows target: PowerShell EncodedCommand runs the same import (no bash, no /dev/stdin)', () => {
     const cmd = buildRemoteAgentsInvocation(importArgs, undefined, 'windows');
     const script = decodeWindows(cmd);
-    expect(script).toBe(`$ProgressPreference = 'SilentlyContinue'; & 'agents' 'secrets' 'import' 'mybundle' '--from' '-'; exit $LASTEXITCODE`);
+    expect(script.startsWith(`$ProgressPreference = 'SilentlyContinue'; `)).toBe(true);
+    expect(launcherArgs(script)).toBe('secrets import mybundle --from -');
+    expect(script.endsWith('exit $zq')).toBe(true);
     expect(script).not.toContain('/dev/stdin');
     expect(script).not.toContain('|| true');
     expect(script).not.toContain('bash');
@@ -265,12 +251,34 @@ describe('buildRemoteAgentsInvocation — POSIX targets stay byte-identical', ()
   });
 });
 
+/**
+ * The Win32-escaped argument string the emitted launcher hands to .NET.
+ *
+ * Asserted instead of the whole script text: the launcher resolves the peer's
+ * package entry at runtime, so the script is necessarily multi-statement, and
+ * pinning it verbatim would test the prose rather than the argv the Agents parser
+ * actually receives.
+ */
+function launcherArgs(script: string): string {
+  // Match the single-quoted literal, allowing PowerShell's doubled `''` escape.
+  const m = /\$zi\.Arguments\s*=\s*\$zr\s*\+\s*'((?:[^']|'')*)'/.exec(script);
+  if (!m) throw new Error(`no launcher Arguments in: ${script}`);
+  return m[1]!.replace(/''/g, "'");
+}
+
 describe('buildRemoteAgentsInvocation — Windows targets speak PowerShell', () => {
   it('emits powershell -EncodedCommand instead of bash -lc', () => {
     const cmd = buildRemoteAgentsInvocation(['view', 'claude'], undefined, 'windows');
-    expect(cmd.startsWith('powershell -NoProfile -EncodedCommand ')).toBe(true);
+    // Either render route is a PowerShell command; `renderPowershellCommand` picks
+    // the shorter of `-EncodedCommand` and the deflated `-Command` bootstrap.
+    expect(cmd.startsWith('powershell -NoProfile -')).toBe(true);
     expect(cmd).not.toContain('bash -lc');
-    expect(decodeWindows(cmd)).toBe("$ProgressPreference = 'SilentlyContinue'; & 'agents' 'view' 'claude'; exit $LASTEXITCODE");
+    const script = decodeWindows(cmd);
+    expect(launcherArgs(script)).toBe('view claude');
+    expect(script.endsWith('exit $zq')).toBe(true);
+    // The npm `agents.ps1` shim is bypassed: it splats `$args` into native
+    // node.exe, which is where PowerShell 5.1 drops empty args and eats quotes.
+    expect(script).not.toContain("& 'agents'");
   });
 
   it('suppresses CLIXML by silencing the progress stream (PowerShell 5.1 serializes it on a redirected pipe)', () => {
@@ -282,12 +290,22 @@ describe('buildRemoteAgentsInvocation — Windows targets speak PowerShell', () 
 
   it('prefixes Set-Location for --remote-cwd', () => {
     const cmd = buildRemoteAgentsInvocation(['view'], 'C:\\srv\\app', 'windows');
-    expect(decodeWindows(cmd)).toBe("$ProgressPreference = 'SilentlyContinue'; Set-Location -LiteralPath 'C:\\srv\\app'; & 'agents' 'view'; exit $LASTEXITCODE");
+    const script = decodeWindows(cmd);
+    expect(script).toContain("Set-Location -LiteralPath 'C:\\srv\\app'");
+    // `Set-Location` moves the SHELL's location without updating the .NET
+    // process's OS working directory, so the child needs it passed explicitly or
+    // `--remote-cwd` is silently ignored.
+    expect(script).toMatch(/\$zi\.WorkingDirectory\s*=\s*\(Get-Location\)\.ProviderPath/);
+    expect(launcherArgs(script)).toBe('view');
   });
 
   it('neutralizes injection — metacharacters are literal inside single quotes', () => {
     const cmd = buildRemoteAgentsInvocation(['view', '$(whoami); rm -rf /', '--json'], undefined, 'windows');
-    expect(decodeWindows(cmd)).toBe("$ProgressPreference = 'SilentlyContinue'; & 'agents' 'view' '$(whoami); rm -rf /' '--json'; exit $LASTEXITCODE");
+    const script = decodeWindows(cmd);
+    // One Win32-quoted token, so the peer's argv parse yields it whole; nothing
+    // reaches a shell that could interpret `$(…)` or `;`.
+    expect(launcherArgs(script)).toBe('view "$(whoami); rm -rf /" --json');
+    expect(script).not.toContain('Invoke-Expression');
   });
 
   it('carries env vars through buildRemoteAgentsInvocation on Windows', () => {
@@ -297,9 +315,9 @@ describe('buildRemoteAgentsInvocation — Windows targets speak PowerShell', () 
       'windows',
       { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' },
     );
-    expect(decodeWindows(cmd)).toBe(
-      "$ProgressPreference = 'SilentlyContinue'; $env:PATH = '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH'; & 'agents' 'teams' 'doctor' '--json'; exit $LASTEXITCODE",
-    );
+    const script = decodeWindows(cmd);
+    expect(script).toContain("$env:PATH = '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH'");
+    expect(launcherArgs(script)).toBe('teams doctor --json');
   });
 
   it('carries env vars as $env: assignments (buildWindowsAgentsCommand)', () => {
@@ -307,22 +325,25 @@ describe('buildRemoteAgentsInvocation — Windows targets speak PowerShell', () 
       args: ['sessions', '--active', '--json'],
       env: { AGENTS_SESSIONS_LOCAL: '1', COLUMNS: '120' },
     });
-    expect(decodeWindows(cmd)).toBe(
-      "$ProgressPreference = 'SilentlyContinue'; $env:AGENTS_SESSIONS_LOCAL = '1'; $env:COLUMNS = '120'; & 'agents' 'sessions' '--active' '--json'; exit $LASTEXITCODE",
-    );
+    const script = decodeWindows(cmd);
+    expect(script).toContain("$env:AGENTS_SESSIONS_LOCAL = '1'");
+    expect(script).toContain("$env:COLUMNS = '120'");
+    expect(launcherArgs(script)).toBe('sessions --active --json');
   });
 
   it('can drop the exit-code propagation for sentinel-based probes', () => {
     const cmd = buildWindowsAgentsCommand({ args: ['--version'], propagateExit: false });
-    expect(decodeWindows(cmd)).toBe("$ProgressPreference = 'SilentlyContinue'; & 'agents' '--version'");
+    const script = decodeWindows(cmd);
+    expect(launcherArgs(script)).toBe('--version');
+    // No propagation appended, so a sentinel-based probe reads the output not the code.
+    expect(script).not.toContain('exit $zq');
   });
 
   it('remaps a reached agents exit 255 so SSH transport failure stays unambiguous', () => {
     const cmd = buildWindowsAgentsCommand({ args: ['sessions', 'resume', 'abc'], remapExit255: true });
     const script = decodeWindows(cmd);
-    expect(script).toContain('$agentsExit = $LASTEXITCODE');
-    expect(script).toContain('if ($agentsExit -eq 255) { exit 254 }');
-    expect(script).toContain('exit $agentsExit');
+    expect(script).toContain("if ($zq -eq 255) { exit 254 }");
+    expect(script).toContain('exit $zq');
   });
 });
 
@@ -417,5 +438,26 @@ describe('posixEnvExports — actor values are shell-literal, PATH still expands
     // $HOME expanded (no literal "$HOME" left) and the shim dir is present.
     expect(res.stdout).toContain('/.agents/.cache/shims:');
     expect(res.stdout).not.toContain('$HOME');
+  });
+});
+
+describe('the Windows remote command stays well inside the peer length limit', () => {
+  it('leaves real call-site payloads comfortably inside the ceiling', () => {
+    // These are the shapes the ten `buildWindowsAgentsCommand` callers actually
+    // emit; a regression that inflates the fixed script would show up here first.
+    const sizes = [
+      buildWindowsAgentsCommand({ args: ['feed', '--json'], env: { AGENTS_NO_FANOUT: '1' } }),
+      buildWindowsAgentsCommand({ args: ['sessions', '--active', '--json'], env: { AGENTS_SESSIONS_LOCAL: '1', COLUMNS: '120' } }),
+      buildWindowsAgentsCommand({ args: ['feed', 'watch', '--json', '--local'] }),
+      buildWindowsAgentsCommand({ args: ['secrets', 'import', 'apple.com', '--from', '-'] }),
+      buildWindowsAgentsCommand({ args: ['sessions', 'resume', '1234abcd-5678-90ef-1234-567890abcdef'], cwd: 'C:\\Users\\me\\src\\some\\deep\\project' }),
+      buildWindowsAgentsCommand({ args: ['sessions', 'resume', 'x'.repeat(500)] }),
+    ].map((c) => c.length);
+    // Bisected on a live peer: 2934 characters succeed, 3102 fail. Compression is
+    // what buys the headroom back — before it the heavy case was 3314 and failed
+    // with the peer's opaque `The command line is too long.`
+    for (const size of sizes) expect(size).toBeLessThan(2934);
+    // A real margin, so a future addition cannot quietly exhaust it.
+    expect(Math.max(...sizes)).toBeLessThan(2000);
   });
 });

@@ -4,6 +4,7 @@ import { buildSshInvocation, fleetRemotePrelude, markFleetRemote, pwshQuote, wra
 import { quoteWin32ExecArg } from '../platform/exec.js';
 import { parseArgvJson } from '../../commands/ssh.js';
 import type { DeviceProfile } from './registry.js';
+import { decodeRenderedPowershell } from '../hosts/remote-cmd.test-fixture.js';
 
 function dev(extra: Partial<DeviceProfile> = {}): DeviceProfile {
   // `address` is required by `buildSshInvocation` (via `sshTargetFor`), so the
@@ -106,20 +107,22 @@ describe('argv mode delivers exact tokens through a real shell', () => {
 describe('argv mode on a PowerShell device', () => {
   it('dispatches on the peer\'s command type instead of assuming a native exe', () => {
     const wrapped = wrapRemoteCommand(dev({ shell: 'powershell' }), ['Write-Output', 'two words', "it's"], { argv: true })!;
-    expect(wrapped.startsWith('powershell -NoProfile -EncodedCommand ')).toBe(true);
-    const script = Buffer.from(wrapped.split(' ').pop()!, 'base64').toString('utf16le');
+    // Either render route is valid:  picks the shorter of
+    // -EncodedCommand and the deflated -Command bootstrap.
+    expect(wrapped.startsWith('powershell -NoProfile -')).toBe(true);
+    const script = decodeRenderedPowershell(wrapped);
     // `agents` on Windows is `agents.ps1`, so the target kind cannot be assumed.
     expect(script).toContain("$__c = Get-Command -Name 'Write-Output' -ErrorAction Stop");
     expect(script).toContain("if ($__c.CommandType -eq 'Application') {");
     // Native branch: .NET Process with a CommandLineToArgvW-escaped string.
-    expect(script).toContain('System.Diagnostics.ProcessStartInfo');
-    expect(script).toContain('$__psi.UseShellExecute = $false');
-    expect(script).toContain(`$__psi.Arguments = ${pwshQuote([quoteWin32ExecArg('two words'), quoteWin32ExecArg("it's")].join(' '))}`);
+    expect(script).toContain('Diagnostics.ProcessStartInfo');
+    expect(script).toContain('$zi.UseShellExecute=$false');
+    expect(script).toContain(`$zi.Arguments=${pwshQuote([quoteWin32ExecArg('two words'), quoteWin32ExecArg("it's")].join(' '))}`);
     // Script branch: a SPLATTED array, which never touches the native serializer.
     expect(script).toContain(`$__a = @('two words', 'it''s')`);
     expect(script).toContain('& $__c @__a');
     // Exit codes propagate from both branches.
-    expect(script).toContain('exit $__p.ExitCode');
+    expect(script).toContain('exit $zp.ExitCode');
     expect(script).toContain('if ($null -ne $LASTEXITCODE) { exit $LASTEXITCODE }');
     // The stop-parsing token is deliberately NOT used — see the module docblock.
     expect(script).not.toContain('--%');
@@ -237,39 +240,39 @@ describe('the FULL buildSshInvocation pipeline, not just the quoter', () => {
 
   it('emits an EXECUTABLE PowerShell script: call operator plus unquoted prelude', () => {
     const remote = remoteCommandFrom(dev({ shell: 'powershell' }), ['agents', 'browser', 'navigate', '--url', 'https://x.test/?a=1&b=2'], true);
-    const script = Buffer.from(remote.split(' ').pop()!, 'base64').toString('utf16le');
+    const script = decodeRenderedPowershell(remote);
     // The prelude must be live pwsh STATEMENTS, not quoted strings.
     expect(script).toContain("$env:AGENTS_FLEET_REMOTE='1';");
     expect(script).not.toContain("'$env:AGENTS_FLEET_REMOTE=");
-    // The prelude ends, then the dispatching script begins.
-    expect(script).toContain("$__c = Get-Command -Name 'agents' -ErrorAction Stop");
-    // The URL carries `&`: Win32-escaped for the native branch, pwsh-quoted for
-    // the script branch. Both must carry it whole.
+    // `agents` routes to the canonical launcher rather than the generic dispatch:
+    // the npm `agents.ps1` shim splats `$args` into native node.exe, so even a
+    // correctly splatted call into that script loses a quote one layer deeper.
+    expect(script).toContain("$zc = Get-Command 'agents' -ErrorAction Stop");
+    expect(script).toMatch(/\$zi\.Arguments\s*=\s*\$zr/);
+    // The URL carries `&`; Win32 quoting keeps it whole for the real parser.
     expect(script).toContain(quoteWin32ExecArg('https://x.test/?a=1&b=2'));
-    expect(script).toContain(pwshQuote('https://x.test/?a=1&b=2'));
+    // The shim is bypassed entirely.
+    expect(script).not.toContain("& 'agents'");
   });
 
   it('escapes a quote in a PowerShell provenance value without breaking the statement', () => {
     const prelude = fleetRemotePrelude(dev({ shell: 'powershell' }), actor);
     const remote = wrapRemoteCommand(dev({ shell: 'powershell' }), ['prog'], { argv: true, prelude })!;
-    const script = Buffer.from(remote.split(' ').pop()!, 'base64').toString('utf16le');
+    const script = decodeRenderedPowershell(remote);
     // pwsh doubles an embedded single quote; the statement stays terminated.
     expect(script).toContain("$env:AGENTS_ACTOR_ID='o''brien';");
     expect(script).toContain("$env:AGENTS_ACTOR='Some Name';");
     // The prelude sits ABOVE the dispatching script, as live statements.
     expect(script.indexOf("$env:AGENTS_ACTOR=")).toBeLessThan(script.indexOf('$__c = Get-Command'));
     // A lone program still runs, with empty arguments in both branches.
-    expect(script).toContain("$__psi.Arguments = ''");
+    expect(script).toContain("$zi.Arguments=''");
     expect(script).toContain('$__a = @()');
   });
 
   it('leaves a NON-argv powershell drive as an unquoted command, as before', () => {
     // The default mode must keep working: the program is a bare word there, so it
     // needs no call operator and must not gain one.
-    const script = Buffer.from(
-      remoteCommandFrom(dev({ shell: 'powershell' }), ['agents', 'browser', 'status'], false).split(' ').pop()!,
-      'base64',
-    ).toString('utf16le');
+    const script = decodeRenderedPowershell(remoteCommandFrom(dev({ shell: 'powershell' }), ['agents', 'browser', 'status'], false));
     expect(script).toContain('agents browser status');
     expect(script).not.toContain("& 'agents'");
   });
@@ -285,12 +288,12 @@ describe('PowerShell 5.1 loses arguments, so neither branch uses its serializer'
    */
   function pwshScript(cmd: string[]): string {
     const wrapped = wrapRemoteCommand(dev({ shell: 'powershell' }), cmd, { argv: true })!;
-    return Buffer.from(wrapped.split(' ').pop()!, 'base64').toString('utf16le');
+    return decodeRenderedPowershell(wrapped);
   }
   /** The `Arguments` string the native branch hands to CreateProcess. */
   function nativeArgs(cmd: string[]): string {
-    const line = pwshScript(cmd).split('\n').find((l) => l.includes('$__psi.Arguments = '))!;
-    const quoted = line.slice(line.indexOf('= ') + 2);
+    const line = pwshScript(cmd).split('\n').find((l) => l.includes('$zi.Arguments='))!;
+    const quoted = line.slice(line.indexOf('=') + 1);
     // Undo the pwsh single-quoting to read the literal string.
     return quoted.slice(1, -1).replace(/''/g, "'");
   }
@@ -324,7 +327,7 @@ describe('PowerShell 5.1 loses arguments, so neither branch uses its serializer'
     // The script is line-joined, so a newline-bearing token spans lines; read the
     // whole emitted script rather than one line for this case.
     const script = pwshScript(['prog', 'line1\nline2']);
-    expect(script).toContain(`$__psi.Arguments = ${pwshQuote(quoteWin32ExecArg('line1\nline2'))}`);
+    expect(script).toContain(`$zi.Arguments=${pwshQuote(quoteWin32ExecArg('line1\nline2'))}`);
     expect(script).toContain(`$__a = @(${pwshQuote('line1\nline2')})`);
   });
 
@@ -344,7 +347,7 @@ describe('PowerShell 5.1 loses arguments, so neither branch uses its serializer'
 
   it('handles a program with no arguments in both branches', () => {
     const script = pwshScript(['prog']);
-    expect(script).toContain("$__psi.Arguments = ''");
+    expect(script).toContain("$zi.Arguments=''");
     expect(script).toContain('$__a = @()');
   });
 });
