@@ -51,9 +51,54 @@ export type ToolLinkStatus = 'linked' | 'unresolved' | 'unlinked';
 export interface ToolCapture {
   kind: ArtifactKind;
   name: string;
+  /**
+   * Absolute path ON {@link ToolCapture.host}. A capture lives on the machine
+   * whose browser produced it, so a fleet reader on another box must not treat
+   * this as a local path — it has to open it through that host. Carrying the host
+   * per capture is what makes the path meaningful off-box at all.
+   */
   path: string;
+  /** The device that holds this file. */
+  host: string;
   bytes?: number;
   atMs: number;
+}
+
+/**
+ * One tab a browser task has open, with the id the task itself addresses it by.
+ *
+ * `id` is the task's SHORT tab id (the key of `Task.tabs`), not the underlying
+ * CDP target id: the short id is what `agents browser show --tab <id>` accepts
+ * and what stays stable for the life of the tab, while the target id is an
+ * engine-internal handle that a reconnect can change.
+ */
+export interface ToolTab {
+  id: string;
+  url?: string;
+  title?: string;
+  /** The tab URL-less verbs act on. */
+  current?: boolean;
+  /**
+   * The task drives this tab but did not open it, so no close path touches it.
+   * Surfaced so a UI does not offer to close someone else's tab.
+   */
+  borrowed?: boolean;
+}
+
+/**
+ * An argv a consumer may run verbatim, plus the device it must run ON.
+ *
+ * `runOn` is load-bearing and is NOT a `--device` flag. A browser task is bound
+ * to its device at `start`, and every later verb resolves that binding from the
+ * local task index — `agents browser done --task x --device y` is explicitly
+ * REJECTED (`browser/task-index.ts` `REJECT_DEVICE_MESSAGE`). So the way to act
+ * on a task observed from another box is to run the plain argv on the host that
+ * holds the binding, which is what this names.
+ */
+export interface ToolCommand {
+  command: 'agents';
+  args: string[];
+  runOn: string;
 }
 
 /** The agent session that drove the tool, as a click-through target. */
@@ -93,11 +138,23 @@ export interface BrowserToolRow extends ToolRowBase {
   /** Redacted by {@link redactToolUrl}; absent when the binding recorded none. */
   url?: string;
   /**
+   * Tabs the task has open, newest-known first. Absent — not empty — when this
+   * host holds no live task record to read them from (a task bound to another
+   * device, or one whose run already ended leaving only captures). Absent means
+   * "unknown here", `[]` means "genuinely none".
+   */
+  tabs?: ToolTab[];
+  /**
+   * Focus one of this task's tabs. Present only while `live` and only for a tab
+   * the task actually owns.
+   */
+  showCommand?: ToolCommand;
+  /**
    * The command that closes this task. Present ONLY while `live` — a task the
    * index no longer binds has nothing left to close, and offering the command
    * anyway would fail loud at the operator instead of at this boundary.
    */
-  closeCommand?: { command: 'agents'; args: string[] };
+  closeCommand?: ToolCommand;
 }
 
 export interface ComputerToolRow extends ToolRowBase {
@@ -113,6 +170,25 @@ export interface ComputerToolRow extends ToolRowBase {
 }
 
 export type ToolRow = BrowserToolRow | ComputerToolRow;
+
+/**
+ * A task the local browser holds LIVE state for, read from its `tasks.json`.
+ *
+ * This is the only authority on a task's tabs: `tasks.json` is rewritten from
+ * the live task map, so an entry here means the task exists right now, and its
+ * `tabs` map is what `agents browser show --tab` addresses. A task whose run has
+ * ended is absent even though its captures remain, which is exactly the
+ * distinction `live` on a row reports.
+ */
+export interface LiveBrowserTask {
+  task: string;
+  profile?: string;
+  label?: string;
+  tabs?: ToolTab[];
+  startedAtMs?: number;
+  sessionId?: string;
+  launchId?: string;
+}
 
 /** Stable identity for one tool row within one device scope. */
 export function toolRowKey(scope: string, kind: ToolKind, identity: string): string {
@@ -166,6 +242,25 @@ function countBy<T>(items: T[], key: (item: T) => string): Record<string, number
 }
 
 /**
+ * A browser task the task index binds but that has produced no capture yet.
+ *
+ * `buildBrowserSessionRows` derives its rows from captures on disk, so a task
+ * that was just opened — bound, live, drivable, closable — had no row at all
+ * until its first screenshot landed. That is the window an operator most wants
+ * to see, and it is exactly when a Sessions pane showed nothing. This
+ * synthesizes the zero-capture row so it goes through the SAME projection rather
+ * than a second parallel one.
+ */
+export function boundBrowserRow(task: string, binding: { profile?: string }): BrowserSessionRow {
+  return {
+    kind: 'task', task, profile: binding.profile ?? '',
+    linkStatus: 'unlinked', artifacts: [],
+    counts: { screenshot: 0, pdf: 0, recording: 0, download: 0 },
+    latestMtimeMs: 0,
+  };
+}
+
+/**
  * One browser task (or a profile's downloads bucket) as a tool row. Pure: the
  * liveness verdict is passed in, because only the machine running the browser
  * daemon holds the task index that answers it.
@@ -173,35 +268,62 @@ function countBy<T>(items: T[], key: (item: T) => string): Record<string, number
 export function projectBrowserToolRow(
   scope: string,
   row: BrowserSessionRow,
-  binding?: { device?: string; url?: string; createdAt?: number },
+  binding?: { device?: string; profile?: string; url?: string; createdAt?: number; sessionId?: string; launchId?: string },
+  live?: LiveBrowserTask,
 ): BrowserToolRow {
   const host = normalizeHost(scope);
-  const live = Boolean(row.task) && binding !== undefined;
+  // Live means the task still EXISTS: either this host's browser holds a live
+  // record for it, or the task index still routes it (which is the case for a
+  // task whose browser runs on another device).
+  const isLive = Boolean(row.task) && (live !== undefined || binding !== undefined);
   const captures = row.artifacts.slice(0, TOOL_CAPTURE_LIMIT).map((artifact) => ({
-    kind: artifact.kind, name: artifact.name, path: artifact.path, bytes: artifact.bytes, atMs: artifact.mtimeMs,
+    kind: artifact.kind, name: artifact.name, path: artifact.path, host, bytes: artifact.bytes, atMs: artifact.mtimeMs,
   }));
   const oldest = row.artifacts.length > 0 ? row.artifacts[row.artifacts.length - 1]!.mtimeMs : row.latestMtimeMs;
   const url = redactToolUrl(binding?.url);
   const owner = ownerOf(row, host);
+  // Tabs are only knowable from a LIVE task record on THIS host; a row projected
+  // from captures alone, or from a binding pointing at another device, genuinely
+  // does not know them and says so by omitting the field.
+  const tabs = live?.tabs;
+  const showTab = tabs?.find((tab) => tab.current && !tab.borrowed)?.id
+    ?? tabs?.find((tab) => !tab.borrowed)?.id;
+  const startedAtMs = live?.startedAtMs ?? binding?.createdAt ?? oldest;
+  // A task with no captures has no capture mtime to sort by; its own start is
+  // the only honest age it has. Reporting 0 would sort a brand-new live task to
+  // the very bottom of a newest-first list.
+  const updatedAtMs = row.latestMtimeMs || startedAtMs;
   return {
     kind: 'browser',
-    rowKey: toolRowKey(host, 'browser', `${row.profile}\0${row.kind}\0${row.task ?? ''}`),
+    // Keyed on the TASK, never on the profile. A task with no captures yet is
+    // discovered from the task index, where the profile may not be recorded, so
+    // folding the profile into the identity would give the same task two
+    // different keys and render it twice the moment its first capture landed.
+    // Task names are unique within a machine's task index, which is the scope
+    // this key is already qualified by. The downloads bucket has no task, so it
+    // keys on its profile — one such row per profile, which is what it is.
+    rowKey: toolRowKey(host, 'browser', row.task ? `task\0${row.task}` : `downloads\0${row.profile}`),
     scope: host,
     device: normalizeHost(binding?.device ?? host),
-    live,
+    live: isLive,
     ...(row.task ? { task: row.task } : {}),
-    ...(row.sessionId ? { sessionId: row.sessionId } : {}),
-    ...(row.launchId ? { launchId: row.launchId } : {}),
+    ...(row.sessionId ?? live?.sessionId ?? binding?.sessionId ? { sessionId: row.sessionId ?? live?.sessionId ?? binding?.sessionId } : {}),
+    ...(row.launchId ?? live?.launchId ?? binding?.launchId ? { launchId: row.launchId ?? live?.launchId ?? binding?.launchId } : {}),
     ...(row.linkedSession?.agent ? { agent: row.linkedSession.agent } : {}),
     ...(owner ? { owner } : {}),
     linkStatus: row.linkStatus,
-    startedAtMs: binding?.createdAt ?? oldest,
-    updatedAtMs: row.latestMtimeMs,
+    startedAtMs,
+    updatedAtMs,
     captures,
     captureCounts: countBy(row.artifacts, (artifact) => artifact.kind),
-    profile: row.profile,
+    profile: row.profile || live?.profile || '',
     ...(url ? { url } : {}),
-    ...(live ? { closeCommand: { command: 'agents' as const, args: ['browser', 'done', '--task', row.task!] } } : {}),
+    ...(tabs ? { tabs } : {}),
+    // `runOn` is the OBSERVING host, not `device`: the binding that resolves the
+    // task's device lives here, and passing `--device` to a later verb is
+    // refused outright. See {@link ToolCommand}.
+    ...(isLive && showTab ? { showCommand: { command: 'agents' as const, args: ['browser', 'show', '--task', row.task!, '--tab', showTab], runOn: host } } : {}),
+    ...(isLive ? { closeCommand: { command: 'agents' as const, args: ['browser', 'done', '--task', row.task!], runOn: host } } : {}),
   };
 }
 
@@ -213,6 +335,23 @@ export function projectComputerToolRow(scope: string, row: ComputerRunRow): Comp
   const host = normalizeHost(scope);
   const owner = ownerOf(row, host);
   const agent = row.agent ?? row.linkedSession?.agent;
+  // Captures come ONLY from a `capture` the producer recorded after the file was
+  // written. A screenshot action from before the producer carried that field has
+  // no path to report, and this deliberately reports none rather than guessing one
+  // from an output flag — a fabricated path is worse than an honest absence.
+  const captures: ToolCapture[] = [];
+  const captureCounts: Record<string, number> = {};
+  for (const action of row.actions) {
+    if (!action.capture) continue;
+    captureCounts[action.capture.kind] = (captureCounts[action.capture.kind] ?? 0) + 1;
+    if (captures.length >= TOOL_CAPTURE_LIMIT) continue;
+    captures.push({
+      kind: action.capture.kind, name: action.capture.name, path: action.capture.path,
+      host: normalizeHost(row.remoteHost ?? row.machine ?? scope),
+      ...(action.capture.bytes !== undefined ? { bytes: action.capture.bytes } : {}),
+      atMs: action.tsMs,
+    });
+  }
   const actions = row.actions.slice(0, TOOL_ACTION_LIMIT).map((action) => ({
     verb: action.verb, atMs: action.tsMs,
     ...(action.host ? { host: action.host } : {}),
@@ -232,12 +371,8 @@ export function projectComputerToolRow(scope: string, row: ComputerRunRow): Comp
     linkStatus: row.linkStatus,
     startedAtMs: row.startMs,
     updatedAtMs: row.endMs,
-    // A computer run's artifacts live in the engine's own output paths, which
-    // the ledger does not record; screenshots taken through `agents computer`
-    // land under the browser capture tree only when a task requested a file.
-    // Left empty rather than guessed — a wrong path is worse than none.
-    captures: [],
-    captureCounts: {},
+    captures,
+    captureCounts,
     ...(row.bundle ? { bundle: row.bundle } : {}),
     actions,
     actionCounts: { ...row.counts },

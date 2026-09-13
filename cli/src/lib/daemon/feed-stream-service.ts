@@ -18,6 +18,7 @@ import { BaseDaemonService, type DaemonContext } from './service.js';
 import type { DaemonServiceId } from '../daemon-services.js';
 import { FeedHub } from '../feed/hub.js';
 import { FeedHubServer } from '../feed/hub-server.js';
+import { sharedLocalFeedHub, watchFleetFeed } from '../feed/watch.js';
 
 export class FeedStreamService extends BaseDaemonService {
   readonly id: DaemonServiceId = 'feed-stream';
@@ -25,8 +26,13 @@ export class FeedStreamService extends BaseDaemonService {
   private server: FeedHubServer | null = null;
 
   protected async onStart(ctx: DaemonContext): Promise<void> {
-    const hub = new FeedHub();
-    this.server = new FeedHubServer(hub);
+    // Two collectors, one socket. The fleet hub holds one ssh child per peer plus
+    // this box's rows; the local hub is this box ONLY and cannot fan out, so a
+    // reader that wants just this machine never causes a peer dial. They are
+    // separate hubs rather than one filtered stream because demand must be
+    // separate too: a local-only reader must not start the fleet fan-out.
+    const fleet = new FeedHub({ watch: watchFleetFeed });
+    this.server = new FeedHubServer(fleet, undefined, sharedLocalFeedHub());
     await this.server.start();
     ctx.log('INFO', 'Feed stream hub listening (fan-out starts on first reader)');
   }

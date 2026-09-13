@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
+import * as net from 'node:net';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { FeedHub } from './hub.js';
-import { FeedHubServer, streamFeedFromHub } from './hub-server.js';
-import { FeedWatchState, type FeedWatchEnvelope } from './watch.js';
+import { FeedHubServer, streamFeedFromHub, waitForHub, HUB_CLIENT_BACKLOG_LIMIT } from './hub-server.js';
+import { FeedWatchState, type FeedWatchEnvelope } from './envelope.js';
 import type { SessionWatchRow } from '../session/watch.js';
 
 const roots: string[] = [];
@@ -38,11 +39,11 @@ function hubWithControllableFanOut() {
   const starts: AbortSignal[] = [];
   let publish: ((event: FeedWatchEnvelope) => void) | undefined;
   const hub = new FeedHub({
-    watch: (async (options: { signal: AbortSignal; emit: (event: FeedWatchEnvelope) => void }) => {
+    watch: async (options) => {
       starts.push(options.signal);
       publish = options.emit;
       await new Promise<void>((resolve) => options.signal.addEventListener('abort', () => resolve(), { once: true }));
-    }) as unknown as typeof import('./watch.js').watchFleetFeed,
+    },
   });
   return { hub, starts, publish: (event: FeedWatchEnvelope) => publish!(event) };
 }
@@ -72,7 +73,7 @@ describe('shared feed hub over a real unix socket', () => {
     expect(hub.readerCount).toBe(2);
 
     const upstream = new FeedWatchState();
-    publish(upstream.emit({ type: 'reset', scope: 'zion', capturedAt: 10, agents: [agentRow('a1', 'zion')], attention: [], tools: [] }));
+    publish(upstream.emit({ type: 'reset', scope: 'zion', capturedAt: 10, agents: [agentRow('a1', 'zion')], attention: [], tools: [], setup: [] }));
     publish(upstream.emit({ type: 'agent.upsert', scope: 'zion', rowKey: 'a2', agent: agentRow('a2', 'zion') }));
     await until('both readers to receive both envelopes', () => first.length >= 2 && second.length >= 2);
     expect(first.map((event) => event.type)).toEqual(['reset', 'agent.upsert']);
@@ -102,7 +103,7 @@ describe('shared feed hub over a real unix socket', () => {
     const earlyDone = streamFeedFromHub({ signal: earlyController.signal, emit: (event) => early.push(event), endpoint });
     await until('the early reader to attach', () => server.clientCount === 1);
     const upstream = new FeedWatchState();
-    publish(upstream.emit({ type: 'reset', scope: 'zion', capturedAt: 10, agents: [agentRow('a1', 'zion')], attention: [], tools: [] }));
+    publish(upstream.emit({ type: 'reset', scope: 'zion', capturedAt: 10, agents: [agentRow('a1', 'zion')], attention: [], tools: [], setup: [] }));
     await until('the early reader to receive the reset', () => early.length >= 1);
 
     const late: FeedWatchEnvelope[] = [];
@@ -138,6 +139,146 @@ describe('shared feed hub over a real unix socket', () => {
     await until('a reader to attach to the rebound socket', () => server.clientCount === 1);
     controller.abort();
     await done;
+    await server.stop();
+  });
+});
+
+describe('local and fleet readers share their own collectors', () => {
+  it('serves two local plus two fleet readers from exactly one collector each', async () => {
+    const endpoint = socketPath();
+    const fleet = hubWithControllableFanOut();
+    const local = hubWithControllableFanOut();
+    const server = new FeedHubServer(fleet.hub, endpoint, local.hub);
+    await server.start();
+
+    // Nothing is dialed until somebody asks — for EITHER collector.
+    expect(fleet.starts).toHaveLength(0);
+    expect(local.starts).toHaveLength(0);
+
+    const seen = { fleet: [] as FeedWatchEnvelope[], local: [] as FeedWatchEnvelope[] };
+    const controllers = [0, 1, 2, 3].map(() => new AbortController());
+    const readers = [
+      streamFeedFromHub({ signal: controllers[0]!.signal, emit: (event) => seen.fleet.push(event), endpoint, scope: 'fleet' }),
+      streamFeedFromHub({ signal: controllers[1]!.signal, emit: (event) => seen.fleet.push(event), endpoint, scope: 'fleet' }),
+      streamFeedFromHub({ signal: controllers[2]!.signal, emit: (event) => seen.local.push(event), endpoint, scope: 'local' }),
+      streamFeedFromHub({ signal: controllers[3]!.signal, emit: (event) => seen.local.push(event), endpoint, scope: 'local' }),
+    ];
+    await until('all four readers to attach', () => server.clientCount === 4);
+    await until('both collectors to start', () => fleet.starts.length === 1 && local.starts.length === 1);
+
+    // Four readers, two collectors — one per topic, not one per reader.
+    expect(fleet.starts).toHaveLength(1);
+    expect(local.starts).toHaveLength(1);
+    expect(fleet.hub.readerCount).toBe(2);
+    expect(local.hub.readerCount).toBe(2);
+
+    const upstream = new FeedWatchState();
+    local.publish(upstream.emit({ type: 'reset', scope: 'this-box', capturedAt: 1, agents: [agentRow('local-1', 'this-box')], attention: [], tools: [], setup: [] }));
+    await until('both local readers to receive it', () => seen.local.length >= 2);
+    // A local reader must never be served fleet traffic, and vice versa.
+    expect(seen.local.every((event) => event.scope === 'this-box')).toBe(true);
+    expect(seen.fleet).toEqual([]);
+
+    fleet.publish(upstream.emit({ type: 'reset', scope: 'peer-a', capturedAt: 2, agents: [], attention: [], tools: [], setup: [] }));
+    await until('both fleet readers to receive it', () => seen.fleet.length >= 2);
+    expect(seen.fleet.every((event) => event.scope === 'peer-a')).toBe(true);
+
+    // Dropping the local readers releases ONLY the local collector.
+    controllers[2]!.abort(); controllers[3]!.abort();
+    await until('the local collector to be released', () => !local.hub.active);
+    expect(fleet.hub.active).toBe(true);
+
+    for (const controller of controllers) controller.abort();
+    await Promise.all(readers);
+    await server.stop();
+  });
+
+  it('defaults a reader that sends no scope line to the fleet collector', async () => {
+    const endpoint = socketPath();
+    const fleet = hubWithControllableFanOut();
+    const local = hubWithControllableFanOut();
+    const server = new FeedHubServer(fleet.hub, endpoint, local.hub);
+    await server.start();
+    // A pre-handshake client: connect, send nothing, expect the fleet stream.
+    const socket = net.createConnection(endpoint);
+    await new Promise((resolve) => socket.once('connect', resolve));
+    await until('the silent reader to be attached to the fleet hub', () => fleet.hub.readerCount === 1);
+    expect(local.hub.readerCount).toBe(0);
+    socket.destroy();
+    await server.stop();
+  });
+});
+
+describe('a stalled reader cannot grow the daemon without bound', () => {
+  it('drops a reader whose backlog exceeds the budget', async () => {
+    const endpoint = socketPath();
+    const { hub, publish } = hubWithControllableFanOut();
+    const server = new FeedHubServer(hub, endpoint);
+    await server.start();
+
+    // A raw socket that connects, asks for the stream, and then NEVER reads.
+    const socket = net.createConnection(endpoint);
+    await new Promise((resolve) => socket.once('connect', resolve));
+    socket.write(`${JSON.stringify({ v: 1, scope: 'fleet' })}\n`);
+    socket.pause();
+    await until('the stalled reader to attach', () => server.clientCount === 1);
+
+    // A row big enough that a bounded number of envelopes exceeds the budget.
+    const upstream = new FeedWatchState();
+    const fat = { ...agentRow('fat', 'zion'), preview: 'x'.repeat(256 * 1024) } as typeof agentRow extends never ? never : ReturnType<typeof agentRow>;
+    for (let i = 0; i < 64 && server.clientCount > 0; i++) {
+      publish(upstream.emit({ type: 'agent.upsert', scope: 'zion', rowKey: `fat-${i}`, agent: fat }));
+    }
+    await until('the stalled reader to be dropped', () => server.droppedForBacklog > 0);
+    // `destroy()` detaches on the socket's 'close', which lands a tick later.
+    await until('the dropped reader to be detached', () => server.clientCount === 0);
+    // The collector is released with it, so a wedged reader cannot pin the fleet.
+    await until('the collector to be released', () => !hub.active);
+    expect(HUB_CLIENT_BACKLOG_LIMIT).toBeGreaterThan(0);
+
+    socket.destroy();
+    await server.stop();
+  });
+});
+
+describe('startup readiness', () => {
+  it('waits for a hub that binds slightly late instead of failing the first probe', async () => {
+    const endpoint = socketPath();
+    const { hub } = hubWithControllableFanOut();
+    const server = new FeedHubServer(hub, endpoint);
+    // Nothing is listening yet: the immediate probe must fail...
+    expect(await waitForHub(endpoint, 0, 5)).toBe(false);
+    // ...and the bounded wait must succeed once the bind lands, which is the
+    // race `ensureDaemonStarted()` + an immediate retry used to lose.
+    const late = setTimeout(() => { void server.start(); }, 150);
+    expect(await waitForHub(endpoint, 5_000, 25)).toBe(true);
+    clearTimeout(late);
+    await server.stop();
+  });
+
+  it('gives up after the deadline rather than waiting forever', async () => {
+    const started = Date.now();
+    expect(await waitForHub(socketPath(), 120, 20)).toBe(false);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(100);
+    expect(Date.now() - started).toBeLessThan(4_000);
+  });
+});
+
+describe('a collector that cannot start is reported to its readers', () => {
+  it('tells the reader and ends the connection instead of going silent', async () => {
+    const endpoint = socketPath();
+    const hub = new FeedHub({ watch: async () => { throw new Error('device registry unreadable'); } });
+    const server = new FeedHubServer(hub, endpoint);
+    await server.start();
+    const lines: string[] = [];
+    const socket = net.createConnection(endpoint);
+    socket.setEncoding('utf-8');
+    socket.on('data', (chunk: string) => lines.push(chunk));
+    await new Promise((resolve) => socket.once('connect', resolve));
+    socket.write(`${JSON.stringify({ v: 1, scope: 'fleet' })}\n`);
+    await until('the failure to reach the reader', () => lines.join('').includes('device registry unreadable'));
+    expect(lines.join('')).toContain('"type":"error"');
+    socket.destroy();
     await server.stop();
   });
 });
