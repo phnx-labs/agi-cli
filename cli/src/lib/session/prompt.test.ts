@@ -227,7 +227,7 @@ describe('cleanSessionPrompt', () => {
 
   it('strips deeply nested tag fragments without input-size amplification', () => {
     const depth = 32_000;
-    const raw = `<scr${'<a>'.repeat(depth)}ipt>alert(1)</script>`;
+    const raw = `<scr${'<a'.repeat(depth)}${'>'.repeat(depth)}ipt>alert(1)</script>`;
     expect(cleanSessionPrompt(raw)).toBe('alert(1)');
   }, 1_000);
 
