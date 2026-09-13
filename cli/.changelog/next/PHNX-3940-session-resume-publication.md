@@ -1,0 +1,1 @@
+- Publishes the session-resume fixes from the unshipped 1.22.108 candidate: account homes refresh their session tracker, Codex hook trust follows registration, empty local picks are skipped, and remote picks are validated on their origin device. The 1.22.108 tag is preserved; npm publication resumes with this patch after correcting its release notes.
