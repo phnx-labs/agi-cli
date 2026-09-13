@@ -38,3 +38,5 @@ agents setup secrets --install-only
 The existing `agents setup browser`, `agents setup computer` and
 `agents setup secrets` commands remain the guided onboarding paths. Remote checks
 and actions target only the selected device through `agents ssh <device>`.
+
+From a GUI, `agents setup browser --terminal`, `agents setup computer --terminal`, or `agents setup secrets --terminal` opens the wizard using the existing terminal engine. An optional backend selects the terminal explicitly. The command reports terminal launch errors; the wizard runs interactively in that terminal and publishes its readiness through the setup cache. `--terminal` and `--install-only` are separate modes.

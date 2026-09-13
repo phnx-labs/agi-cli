@@ -21069,6 +21069,24 @@
           "args": [],
           "options": [
             {
+              "flags": "--install-only",
+              "description": "Install the standalone Browser CLI without changing profiles or starting a browser",
+              "long": "--install-only",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--terminal [backend]",
+              "description": "Open interactive setup in a detected or selected terminal",
+              "long": "--terminal",
+              "required": false,
+              "optional": true,
+              "variadic": false,
+              "negate": false
+            },
+            {
               "flags": "-h, --help",
               "description": "Show help",
               "short": "-h",
@@ -21088,6 +21106,24 @@
           "description": "Set up `agents computer` (macOS) — install the signed helper and grant control permissions.",
           "args": [],
           "options": [
+            {
+              "flags": "--install-only",
+              "description": "Install the standalone Computer CLI without starting the helper or changing permissions",
+              "long": "--install-only",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--terminal [backend]",
+              "description": "Open interactive setup in a detected or selected terminal",
+              "long": "--terminal",
+              "required": false,
+              "optional": true,
+              "variadic": false,
+              "negate": false
+            },
             {
               "flags": "-h, --help",
               "description": "Show help",
@@ -21400,6 +21436,24 @@
           "args": [],
           "options": [
             {
+              "flags": "--install-only",
+              "description": "Install the standalone Secrets CLI without migrating or unlocking secrets",
+              "long": "--install-only",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--terminal [backend]",
+              "description": "Open interactive setup in a detected or selected terminal",
+              "long": "--terminal",
+              "required": false,
+              "optional": true,
+              "variadic": false,
+              "negate": false
+            },
+            {
               "flags": "-h, --help",
               "description": "Show help",
               "short": "-h",
@@ -21423,6 +21477,24 @@
               "flags": "--json",
               "description": "print machine-readable JSON",
               "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--tool <name>",
+              "description": "Read cached standalone tool status: browser, computer, secrets, or all",
+              "long": "--tool",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--refresh",
+              "description": "Explicitly refresh only the selected standalone tool health checks",
+              "long": "--refresh",
               "required": false,
               "optional": false,
               "variadic": false,
