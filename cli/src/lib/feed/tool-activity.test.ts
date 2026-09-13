@@ -106,14 +106,16 @@ describe('tool activity collection over real directories', () => {
       liveTasks: () => [],
     };
     const initial = collectToolRows('m1', sources).rows;
-    const collectedAfterSeed = collected;
     const watch = watchToolActivity({
       scope: 'm1', signal: controller.signal, roots: [browserDir, eventsDir],
       sweepMs: 30, sources, initial, onDiff: (diff) => diffs.push(diff),
     });
     try {
       expect(watch.armed()).toBe(true);
-      // Many ticks pass with nothing written: the collector must not read.
+      // macOS can deliver directory-creation events after fs.watch returns.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const collectedAfterSeed = collected;
+      // Once warm, untouched roots must not cause another projection.
       await new Promise((resolve) => setTimeout(resolve, 300));
       expect(collected).toBe(collectedAfterSeed);
       expect(diffs).toEqual([]);
@@ -286,7 +288,7 @@ describe('live browser tasks read from real tasks.json files', () => {
     expect([row.kind, row.task, row.live]).toEqual(['browser', 'fresh', true]);
     expect(row.captures).toEqual([]);
     expect(row.kind === 'browser' && row.tabs?.map((tab) => tab.id)).toEqual(['a']);
-    expect(row.kind === 'browser' && row.showCommand?.args).toEqual(['browser', 'show', '--task', 'fresh', '--tab', 'a']);
+    expect(row.kind === 'browser' && row.showCommand?.args).toEqual(['browser', 'tab', 'focus', 'a', '--task', 'fresh']);
   });
 
   it('does not duplicate a task that has BOTH a live record and captures', () => {
