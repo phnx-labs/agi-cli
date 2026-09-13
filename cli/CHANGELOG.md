@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.22.112
+
+- **Runs expand portable home paths on the executing device (PHNX-3940).** A remote resume terminal could open successfully while its child failed to start because `--cwd '$HOME'` was treated as a literal directory. The shared run path now expands `$HOME` and `~` locally, while preserving those anchors until remote dispatch reaches its target. This fixes direct runs and resumed conversations alike.
+
 ## 1.22.111
 
 - **Remote session resume accepts the resolver’s launch metadata (PHNX-3940).** A reachable peer’s valid session row could be rejected because it included a mode or custom harness, leaving the session undiscoverable. The reader now accepts both fields while keeping private transcript paths out of the resolver contract. Malformed responses are reported as invalid data instead of an unreachable device.
