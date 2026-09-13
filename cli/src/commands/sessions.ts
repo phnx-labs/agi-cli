@@ -2333,10 +2333,19 @@ export interface SessionDetailMessage {
  * `partial`/`reason` say when this happened (`daemon-pending: on-demand
  * bounded fold`) versus a session with no transcript at all.
  */
+function sessionTranscriptStamp(session: SessionMeta): { fileMtimeMs: number; fileSize: number } | undefined {
+  try {
+    if (!session.filePath) return undefined;
+    const stat = fs.statSync(session.filePath);
+    return { fileMtimeMs: stat.mtimeMs, fileSize: stat.size };
+  } catch { return undefined; }
+}
+
 export function buildSessionDetailBlock(
   session: SessionMeta,
   digest: SessionPreviewDigest | undefined,
   events: SessionEvent[],
+  sourceStamp?: { fileMtimeMs: number; fileSize: number },
 ): {
   request: unknown;
   timeline: unknown;
@@ -2347,7 +2356,9 @@ export function buildSessionDetailBlock(
   reason: string | null;
 } {
   const bound = (text: string): string => redactSecrets(sanitizeForTerminal(text)).slice(0, SESSION_DETAIL_MESSAGE_MAX_CHARS);
-  const daemonProjection = readSessionTimelineAny(session.id);
+  const stamp = sourceStamp ?? sessionTranscriptStamp(session);
+  const canDateEvents = sourceStamp !== undefined || events.length === 0;
+  const daemonProjection = stamp ? readSessionTimelineAny(session.id, stamp) : undefined;
 
   // A bounded tail read backs `messages` on EVERY warm cache hit (no fresh
   // parse this call), REGARDLESS of whether the daemon projection is already
@@ -2386,7 +2397,10 @@ export function buildSessionDetailBlock(
     if (digest?.lastAssistant) messages.push({ role: 'assistant', text: bound(digest.lastAssistant), at: session.lastActivity ?? null });
   }
 
-  const partial = Boolean(digest?.partial) || !daemonProjection;
+  const endStamp = sessionTranscriptStamp(session);
+  const unchanged = canDateEvents && stamp !== undefined && endStamp !== undefined
+    && stamp.fileMtimeMs === endStamp.fileMtimeMs && stamp.fileSize === endStamp.fileSize;
+  const partial = Boolean(digest?.partial) || !daemonProjection || !unchanged;
   const reason = digest?.partialReason
     ?? (onDemand
       ? 'background timeline pass has not reached this session yet; request/timeline/files below are an on-demand bounded fold, not the full-history daemon projection'
@@ -2397,7 +2411,7 @@ export function buildSessionDetailBlock(
     timeline: projection?.timeline ?? null,
     files: projection?.files ?? null,
     messages,
-    sourceRevision: session.lastActivity ?? session.timestamp ?? null,
+    sourceRevision: unchanged ? new Date(stamp.fileMtimeMs).toISOString() : null,
     partial,
     reason,
   };
@@ -2535,6 +2549,7 @@ export async function renderSessionPreview(
     live = indexActiveBySessionId(loaded.sessions).get(session.id);
   } catch { /* plain preview on any probe failure */ }
   if (scope.json) {
+    const sourceStamp = sessionTranscriptStamp(session);
     const { digest, error, events } = loadSessionPreviewDigest(session);
     console.log(JSON.stringify({
       schemaVersion: 1,
@@ -2571,7 +2586,7 @@ export async function renderSessionPreview(
       } : null,
       preview: digest ?? null,
       error: error ?? null,
-      details: buildSessionDetailBlock(session, digest, events),
+      details: buildSessionDetailBlock(session, digest, events, sourceStamp),
     }));
     return;
   }

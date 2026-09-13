@@ -86,4 +86,18 @@ describe('buildSessionDetailBlock on-demand bounded materialization (PHNX-3999)'
     expect(detail.partial).toBe(true);
     expect(detail.reason).toMatch(/no transcript available/);
   });
+
+  it('does not label previously read events with the timestamp of an appended transcript', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-detail-race-'));
+    try {
+      const filePath = claudeFixture(dir);
+      const before = fs.statSync(filePath);
+      const events = parseSession(filePath, 'claude');
+      fs.appendFileSync(filePath, JSON.stringify({ type: 'user', message: { role: 'user', content: 'A newer request' } }) + '\n');
+      const detail = buildSessionDetailBlock(meta({ filePath }), undefined, events,
+        { fileMtimeMs: before.mtimeMs, fileSize: before.size });
+      expect(detail.sourceRevision).toBeNull();
+      expect(detail.partial).toBe(true);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
 });

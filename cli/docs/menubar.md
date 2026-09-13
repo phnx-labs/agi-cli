@@ -140,3 +140,36 @@ helper polls. Full flag reference: [command-index.md](command-index.md#menubar--
 
 The helper's own state files (`~/.agents/.history/menubar/…`, the feed
 notification ledger, the screenshot OCR index) are documented in agi-menu.
+
+## Session detail previews
+
+The Menu requests `agents sessions preview <full-id> --device <owner> --json`
+only for an expanded session. The CLI owns transport and the durable requester
+cache; the Menu never reads a peer's files directly. A known owner means one
+peer request, without fleet discovery.
+
+`--revision <cursor>` carries the caller's observed activity revision. A
+successful copy with the same cursor can be reused indefinitely. A changed
+cursor requests new content, subject to failure backoff; `--refresh` explicitly
+retries. Concurrent requests share a lease. Failed refreshes preserve the last
+successful content and cursor, mark the copy stale, and back off. Metadata-only
+or malformed responses cannot become indefinitely fresh copies.
+
+The additive `cache` object contains `source`, `fetchedAt`, `stale`, `state`,
+`device`, and `reason`. `fetchedAt` records retrieval time, never content order.
+The additive `details` object contains `request`, `timeline`, `files`, `messages`,
+`sourceRevision`, `partial`, and `reason`. `sourceRevision` is the ISO timestamp
+of the transcript's observed file modification time, or null when unavailable.
+The daemon projection is reused only when its modification time and byte count
+match that file; otherwise the canonical fold processes bounded recent events.
+`request` is the latest genuine user request; `preview.firstUser` is the opening
+request. A bounded copy is marked partial. Consumers must not replace newer
+feed content with an older or undated detail projection.
+
+The requester cache holds at most 500 entries and 16 MiB of payload metadata,
+with a 512 KiB envelope limit. Ordinary copies are fresh for 45 seconds when no
+activity cursor is supplied. Failures use exponential backoff. A shared
+10-second budget covers lock waiting, one transport attempt, and cache writes;
+SQLite contention is limited to 250 milliseconds per cache operation. A cache
+write failure preserves the returned content and reports that offline storage
+failed. Cached results omit live activity, which remains owned by the feed.

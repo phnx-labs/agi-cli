@@ -30,6 +30,7 @@ function runScript(script: string): { status: number | null; stdout: string; std
       cwd: repoRoot,
       env: { ...process.env, HOME: tempHome, USERPROFILE: tempHome },
       encoding: 'utf8',
+      timeout: 15_000,
     });
     return { status: result.status, stdout: result.stdout, stderr: result.stderr };
   } finally {
@@ -148,7 +149,7 @@ describe('getRemoteSessionPreview (remote-preview-cache.ts)', () => {
     const script = [
       "const cache = await import('./src/lib/session/remote-preview-cache.ts');",
       "let calls = 0;",
-      "const okEnvelope = { schemaVersion: 1, session: { id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' }, details: { sourceRevision: 'rev-1' } };",
+      "const okEnvelope = { schemaVersion: 1, session: { machine: 'zion', id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' }, preview: { firstUser: 'request' }, details: { sourceRevision: 'rev-1' } };",
       "const deps = { fetchEnvelope: async () => { calls++; return { ok: true, envelope: okEnvelope }; } };",
       "const id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';",
       "const first = await cache.getRemoteSessionPreview(id, 'zion', { now: 1000 }, deps);",
@@ -169,7 +170,7 @@ describe('getRemoteSessionPreview (remote-preview-cache.ts)', () => {
       "const cache = await import('./src/lib/session/remote-preview-cache.ts');",
       "let calls = 0;",
       "const id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';",
-      "const deps = { fetchEnvelope: async () => { calls++; return { ok: true, envelope: { schemaVersion: 1, session: { id }, details: { sourceRevision: '2026-01-01T00:00:00.000Z' } } }; } };",
+      "const deps = { fetchEnvelope: async () => { calls++; return { ok: true, envelope: { schemaVersion: 1, session: { id, machine: 'zion' }, preview: { firstUser: 'request' }, details: { sourceRevision: '2026-01-01T00:00:00.000Z' } } }; } };",
       // First call ever with revision '42' -- no prior recorded caller
       // revision to compare against, so this fetches once and then records
       // '42' as the observed caller revision.
@@ -194,7 +195,7 @@ describe('getRemoteSessionPreview (remote-preview-cache.ts)', () => {
       "const cache = await import('./src/lib/session/remote-preview-cache.ts');",
       "let calls = 0;",
       "const id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';",
-      "const deps = { fetchEnvelope: async () => { calls++; return { ok: true, envelope: { schemaVersion: 1, session: { id }, details: { sourceRevision: 'rev-' + calls } } }; } };",
+      "const deps = { fetchEnvelope: async () => { calls++; return { ok: true, envelope: { schemaVersion: 1, session: { id, machine: 'zion' }, preview: { firstUser: 'request' }, details: { sourceRevision: 'rev-' + calls } } }; } };",
       "await cache.getRemoteSessionPreview(id, 'zion', { now: 1000, revision: '1' }, deps);",
       "const changed = await cache.getRemoteSessionPreview(id, 'zion', { now: 1000 + 999_999, revision: '2' }, deps);",
       "const db = await import('./src/lib/session/db.ts'); db.closeDB();",
@@ -247,7 +248,7 @@ describe('getRemoteSessionPreview (remote-preview-cache.ts)', () => {
       "const cache = await import('./src/lib/session/remote-preview-cache.ts');",
       "let calls = 0;",
       "const kimiId = 'session_aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';",
-      "const deps = { fetchEnvelope: async () => { calls++; return { ok: true, envelope: { schemaVersion: 1, session: { id: kimiId } } }; } };",
+      "const deps = { fetchEnvelope: async () => { calls++; return { ok: true, envelope: { schemaVersion: 1, session: { machine: 'zion', id: kimiId }, preview: { firstUser: 'request' } } }; } };",
       "const shortId = await cache.getRemoteSessionPreview('d3470b57', 'zion', {}, deps);",
       "const kimi = await cache.getRemoteSessionPreview(kimiId, 'zion', { now: 1000 }, deps);",
       "const db = await import('./src/lib/session/db.ts'); db.closeDB();",
@@ -269,7 +270,7 @@ describe('getRemoteSessionPreview (remote-preview-cache.ts)', () => {
       // A real, human-observable delay on the fake transport so the two
       // requests below are DEFINITELY still in flight together, not
       // accidentally serialized by the event loop.
-      "const deps = { fetchEnvelope: async () => { calls++; await new Promise(r => setTimeout(r, 300)); return { ok: true, envelope: { schemaVersion: 1, session: { id } } }; } };",
+      "const deps = { fetchEnvelope: async () => { calls++; await new Promise(r => setTimeout(r, 300)); return { ok: true, envelope: { schemaVersion: 1, session: { id, machine: 'zion' }, preview: { firstUser: 'request' } } }; } };",
       "const [a, b] = await Promise.all([",
       "  cache.getRemoteSessionPreview(id, 'zion', { now: 1000 }, deps),",
       "  cache.getRemoteSessionPreview(id, 'zion', { now: 1000 }, deps),",
@@ -292,8 +293,8 @@ describe('getRemoteSessionPreview (remote-preview-cache.ts)', () => {
       "const id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';",
       // Seed a real prior good cache entry so the oversized-response case has
       // a stale copy to fall back to.
-      "db0.writeRemotePreviewCacheSuccess('zion', id, { schemaVersion: 1, session: { id }, preview: { firstUser: 'good copy' } }, 100);",
-      "const huge = { schemaVersion: 1, session: { id }, preview: { blob: 'x'.repeat(db0.REMOTE_PREVIEW_ENVELOPE_MAX_BYTES + 1) } };",
+      "db0.writeRemotePreviewCacheSuccess('zion', id, { schemaVersion: 1, session: { id, machine: 'zion' }, preview: { firstUser: 'good copy' } }, 100);",
+      "const huge = { schemaVersion: 1, session: { id, machine: 'zion' }, preview: { firstUser: 'x'.repeat(db0.REMOTE_PREVIEW_ENVELOPE_MAX_BYTES + 1) } };",
       "const deps = { fetchEnvelope: async () => ({ ok: true, envelope: huge }) };",
       "const result = await cache.getRemoteSessionPreview(id, 'zion', { now: 999_999, refresh: true }, deps);",
       "const cachedAfter = db0.readRemotePreviewCache('zion', id);",
@@ -319,8 +320,8 @@ describe('getRemoteSessionPreview (remote-preview-cache.ts)', () => {
       "const cache = await import('./src/lib/session/remote-preview-cache.ts');",
       "const idA = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';",
       "const idB = 'cccccccc-bbbb-cccc-dddd-eeeeeeeeeeee';",
-      "const wrongId = { fetchEnvelope: async () => ({ ok: true, envelope: { schemaVersion: 1, session: { id: 'bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee' } } }) };",
-      "const wrongSchema = { fetchEnvelope: async () => ({ ok: true, envelope: { schemaVersion: 2, session: { id: idB } } }) };",
+      "const wrongId = { fetchEnvelope: async () => ({ ok: true, envelope: { schemaVersion: 1, session: { machine: 'zion', id: 'bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee' } } }) };",
+      "const wrongSchema = { fetchEnvelope: async () => ({ ok: true, envelope: { schemaVersion: 2, session: { machine: 'zion', id: idB } } }) };",
       "const a = await cache.getRemoteSessionPreview(idA, 'zion', { now: 1000 }, wrongId);",
       "const b = await cache.getRemoteSessionPreview(idB, 'zion', { now: 1000 }, wrongSchema);",
       "const db = await import('./src/lib/session/db.ts');",
@@ -333,11 +334,123 @@ describe('getRemoteSessionPreview (remote-preview-cache.ts)', () => {
     expect(result.status, result.stderr).toBe(0);
     const { a, b, stillCachedA, stillCachedB } = JSON.parse(result.stdout);
     expect(a.state).toBe('no-cache-error');
-    expect(a.reason).toMatch(/did not match the requested id/);
+    expect(a.reason).toMatch(/different or missing session ID/);
     expect(b.state).toBe('no-cache-error');
-    expect(b.reason).toMatch(/schemaVersion/);
+    expect(b.reason).toMatch(/schema/i);
     // Neither invalid response was ever persisted as a successful entry.
     expect(stillCachedA?.ok ?? false).toBe(false);
     expect(stillCachedB?.ok ?? false).toBe(false);
+  });
+
+  it('coalesces failed explicit refreshes while retaining the last good copy and its cursor', () => {
+    const result = runScript(`
+      const db = await import('./src/lib/session/db.ts');
+      const cache = await import('./src/lib/session/remote-preview-cache.ts');
+      const id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+      db.writeRemotePreviewCacheSuccess('zion', id, { schemaVersion: 1, session: { id, machine: 'zion' }, preview: { firstUser: 'kept' } }, 100, '42');
+      let calls = 0;
+      const deps = { fetchEnvelope: async () => { calls++; await new Promise(r => setTimeout(r, 100)); return { ok: false, reason: 'unreachable' }; } };
+      const outcomes = await Promise.all([1,2].map(() => cache.getRemoteSessionPreview(id, 'zion', { now: 1000, refresh: true, revision: '42' }, deps)));
+      const next = await cache.getRemoteSessionPreview(id, 'zion', { now: 1100, revision: '42' }, deps);
+      db.closeDB();
+      process.stdout.write(JSON.stringify({ calls, outcomes, next }));
+    `);
+    expect(result.status, result.stderr).toBe(0);
+    const { calls, outcomes, next } = JSON.parse(result.stdout);
+    expect(calls).toBe(1);
+    for (const outcome of [...outcomes, next]) {
+      expect(outcome.cache.state).toBe('stale-offline');
+      expect(outcome.envelope.preview.firstUser).toBe('kept');
+    }
+  });
+
+  it('requires a consistent owner and actual detail payload, with bounded validation errors', () => {
+    const result = runScript(`
+      const cache = await import('./src/lib/session/remote-preview-cache.ts');
+      const id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+      const envelopes = [
+        { schemaVersion: 1, session: { id }, preview: {} },
+        { schemaVersion: 1, session: { id, machine: 'zion' }, cache: { device: 'elsewhere' }, preview: {} },
+        { schemaVersion: 1, session: { id, machine: 'zion' } },
+        { schemaVersion: 'x'.repeat(1000000), session: { id, machine: 'zion' }, preview: {} },
+        ...[
+          { request: { text: 42 } },
+          { timeline: { steps: 'bad' } },
+          { timeline: { steps: [{ mix: { run: 'one' } }] } },
+          { files: { changes: [{ edits: 1.5 }] } },
+        ].map(details => ({ schemaVersion: 1, session: { id, machine: 'zion' }, preview: { firstUser: 'hello' }, details })),
+        { schemaVersion: 1, session: { id, machine: 'zion' }, preview: { firstUser: 'hello', artifacts: [{ path: 42 }] } },
+      ];
+      const outcomes = [];
+      for (const envelope of envelopes) outcomes.push(await cache.getRemoteSessionPreview(id, 'zion', { refresh: true }, { fetchEnvelope: async () => ({ ok: true, envelope }) }));
+      (await import('./src/lib/session/db.ts')).closeDB();
+      process.stdout.write(JSON.stringify(outcomes));
+    `);
+    expect(result.status, result.stderr).toBe(0);
+    for (const outcome of JSON.parse(result.stdout)) {
+      expect(outcome.cache.state).toBe('no-cache-error');
+      expect(outcome.cache.reason.length).toBeLessThan(200);
+      expect(outcome.envelope).toBeUndefined();
+    }
+  });
+
+
+  it('bounds initial SQLite contention and preserves live details when persistence is busy', () => {
+    const result = runScript(`
+      const { spawn } = await import('node:child_process');
+      const { once } = await import('node:events');
+      const path = await import('node:path');
+      const os = await import('node:os');
+      const db = await import('./src/lib/session/db.ts');
+      const cache = await import('./src/lib/session/remote-preview-cache.ts');
+      const dbPath = path.join(os.homedir(), '.agents', '.history', 'sessions', 'sessions.db');
+      db.getDB().exec('DROP TABLE session_remote_preview_cache'); db.closeDB();
+      async function holdWriteLock() {
+        const code = "const {DatabaseSync}=require('node:sqlite'); const d=new DatabaseSync(process.argv[1]); d.exec('BEGIN IMMEDIATE'); process.stdout.write('locked'); process.stdin.once('data',()=>{d.exec('ROLLBACK');d.close();process.exit(0)}); setTimeout(()=>process.exit(2),5000).unref();";
+        const child = spawn(process.execPath, ['--no-warnings', '-e', code, dbPath], { stdio: ['pipe','pipe','pipe'] });
+        await once(child.stdout, 'data');
+        return child;
+      }
+      const lock = await holdWriteLock();
+      let initialFailed = false;
+      const started = Date.now();
+      try { db.withSessionDBTimeout(100, () => {}); } catch { initialFailed = true; }
+      const initialMs = Date.now() - started;
+      const exited = once(lock, 'exit'); lock.stdin.write('release'); await exited;
+      db.getDB();
+      const before = db.getDB().prepare('PRAGMA busy_timeout').get().timeout;
+      let writeLock;
+      const id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+      const outcome = await cache.getRemoteSessionPreview(id, 'zion', {}, { fetchEnvelope: async () => {
+        writeLock = await holdWriteLock();
+        return { ok: true, envelope: { schemaVersion: 1, session: { id, machine: 'zion' }, preview: { firstUser: 'still readable' } } };
+      }});
+      const after = db.getDB().prepare('PRAGMA busy_timeout').get().timeout;
+      const done = once(writeLock, 'exit'); writeLock.stdin.write('release'); await done;
+      db.closeDB();
+      process.stdout.write(JSON.stringify({ initialFailed, initialMs, before, after, outcome }));
+    `);
+    expect(result.status, result.stderr).toBe(0);
+    const data = JSON.parse(result.stdout);
+    expect(data.initialFailed).toBe(true);
+    expect(data.initialMs).toBeLessThan(1500);
+    expect(data.before).toBe(30_000);
+    expect(data.after).toBe(data.before);
+    expect(data.outcome.envelope.preview.firstUser).toBe('still readable');
+    expect(data.outcome.cache.reason).toContain('could not be saved');
+  });
+
+  it('rejects a daemon projection after transcript bytes change', () => {
+    const result = runScript(`
+      const db = await import('./src/lib/session/db.ts');
+      db.writeSessionTimeline({ id: 'stamp-check', fileMtimeMs: 100, fileSize: 200, timeline: { state: {}, request: { text: 'old' }, timeline: { steps: [] } } });
+      const match = db.readSessionTimelineAny('stamp-check', { fileMtimeMs: 100, fileSize: 200 });
+      const changed = db.readSessionTimelineAny('stamp-check', { fileMtimeMs: 101, fileSize: 201 });
+      db.closeDB(); process.stdout.write(JSON.stringify({ match, changed: changed ?? null }));
+    `);
+    expect(result.status, result.stderr).toBe(0);
+    const { match, changed } = JSON.parse(result.stdout);
+    expect(match.request.text).toBe('old');
+    expect(changed).toBeNull();
   });
 });
