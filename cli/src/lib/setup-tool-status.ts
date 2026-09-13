@@ -1,10 +1,11 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { findInPath } from './agent-spec/agents.js';
-import { getCacheDir } from './state.js';
+import { getCacheDir, getDeviceMetaPath, getHelpersDir, getUserAgentsDir } from './state.js';
 import { atomicWriteJsonSync, withFileLockAsync } from './fs-atomic.js';
 import { probeCapture } from './probe.js';
 import { invocation, isStandaloneComputer } from './computer-client.js';
+import { getSocketPath as browserSocketPath } from './browser/ipc.js';
 
 export const SETUP_TOOLS = ['browser', 'computer', 'secrets'] as const;
 export type SetupTool = typeof SETUP_TOOLS[number];
@@ -27,6 +28,20 @@ function cachePath(tool: SetupTool, options: ToolSetupOptions): string {
   return path.join(toolSetupCacheDir(options), `${tool}.json`);
 }
 
+function setupInputs(tool: SetupTool): string[] {
+  const inputs = [path.join(getUserAgentsDir(), 'agents.yaml'), getDeviceMetaPath()];
+  if (tool === 'browser') inputs.push(browserSocketPath());
+  if (tool === 'computer') inputs.push(process.env.COMPUTER_HELPER_SOCKET || path.join(getHelpersDir(), 'computer.sock'));
+  return inputs;
+}
+
+function inputStamp(tool: SetupTool): string {
+  return setupInputs(tool).map((file) => {
+    try { const stat = fs.statSync(file); return `${file}:${stat.ino}:${stat.mtimeMs}:${stat.size}`; }
+    catch { return `${file}:missing`; }
+  }).join('|');
+}
+
 function binaryMetadata(tool: SetupTool): { row: ToolSetupRow; fingerprint: string } {
   const empty: ToolSetupRow = { tool, installed: false, readiness: 'needs-setup', detail: 'CLI is not installed.', checkedAtMs: null };
   try {
@@ -38,9 +53,18 @@ function binaryMetadata(tool: SetupTool): { row: ToolSetupRow; fingerprint: stri
       }
       return true;
     };
-    const executable = explicit ? (accept(explicit) ? explicit : null) : findInPath(tool, { accept });
+    let executable = explicit ? (accept(explicit) ? explicit : null) : findInPath(tool, { accept });
     if (!executable) return { row: empty, fingerprint: 'missing' };
-    fs.accessSync(executable, fs.constants.X_OK);
+    if (/\.(cmd|ps1)$/i.test(executable)) {
+      const packageDir = path.join(path.dirname(executable), 'node_modules', '@phnx-labs', `${tool}-cli`);
+      const pkg = JSON.parse(fs.readFileSync(path.join(packageDir, 'package.json'), 'utf8'));
+      const entry = typeof pkg.bin === 'string' ? pkg.bin : pkg.bin?.[tool];
+      if (pkg.name !== `@phnx-labs/${tool}-cli` || typeof entry !== 'string') throw new Error('unrecognized npm launcher');
+      const resolved = path.resolve(packageDir, entry);
+      if (!resolved.startsWith(`${path.resolve(packageDir)}${path.sep}`)) throw new Error('invalid npm entrypoint');
+      executable = resolved;
+    }
+    fs.accessSync(executable, process.platform === 'win32' || /\.[cm]?js$/i.test(executable) ? fs.constants.R_OK : fs.constants.X_OK);
     const real = fs.realpathSync(executable);
     const stat = fs.statSync(real);
     if (!stat.isFile()) throw new Error('not a file');
@@ -56,7 +80,7 @@ function binaryMetadata(tool: SetupTool): { row: ToolSetupRow; fingerprint: stri
       dir = parent;
     }
     return {
-      fingerprint: `${real}:${stat.size}:${stat.mtimeMs}:${version ?? ''}`,
+      fingerprint: `${real}:${stat.size}:${stat.mtimeMs}:${version ?? ''}|${inputStamp(tool)}`,
       row: { tool, installed: true, executable, version, readiness: 'unknown', detail: 'Installed. Health has not been checked.', checkedAtMs: null },
     };
   } catch {
@@ -102,9 +126,6 @@ async function checkTool(row: ToolSetupRow): Promise<ToolSetupRow> {
   // The standalone has no non-interactive health JSON. Do not list bundles or
   // unlock the broker merely to paint a settings row.
   if (row.tool === 'secrets') return { ...row, checkedAtMs: Date.now(), detail: 'Installed. Secret access is checked when used; this check does not unlock secrets.' };
-  if (row.tool === 'computer' && process.platform !== 'darwin') {
-    return { ...row, readiness: 'unsupported', detail: 'CLI installed. Local helper setup requires macOS; remote control remains available.', checkedAtMs: Date.now() };
-  }
   try {
     const { command, prefix } = invocation(row.executable);
     const { stdout } = await probeCapture(command, [...prefix, 'status', '--json'], 8000, { acceptedExitCodes: [0, 1], maxOutputBytes: 256 * 1024 });
@@ -137,6 +158,7 @@ export function subscribeToolSetup(listener: (rows: ToolSetupRow[]) => void, opt
   const dir = toolSetupCacheDir(options);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   const paths = new Set([dir, ...(process.env.PATH ?? '').split(path.delimiter).filter(Boolean)]);
+  for (const tool of SETUP_TOOLS) for (const input of setupInputs(tool)) paths.add(path.dirname(input));
   for (const row of getCachedToolSetup(options)) {
     if (row.executable) {
       paths.add(path.dirname(row.executable));
@@ -160,5 +182,6 @@ export function subscribeToolSetup(listener: (rows: ToolSetupRow[]) => void, opt
     try { const watcher = fs.watch(target, { persistent: false }, changed); watcher.on('error', changed); watchers.push(watcher); }
     catch { /* Absent PATH entries have no executable to report. */ }
   }
+  changed();
   return () => { if (debounce) clearTimeout(debounce); for (const watcher of watchers) watcher.close(); };
 }

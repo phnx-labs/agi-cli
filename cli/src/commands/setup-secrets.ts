@@ -18,6 +18,7 @@ import { resolveSecretsBin, invocation, SecretsClientError, _resetSecretsClientF
 import { installCli, resolveCliManifest } from '../lib/cli-resources.js';
 import { SECRETS_CLI_SPEC } from '../lib/secrets-cli.js';
 import { refreshToolSetup } from '../lib/setup-tool-status.js';
+import { execFileShellSpec } from '../lib/platform/exec.js';
 
 // Re-exported for back-compat; the canonical pin lives in `secrets-cli.ts` so a
 // version bump touches ONE place (PHNX-3989 consolidation).
@@ -62,7 +63,8 @@ export function installSecretsCli(): boolean {
     if (result.error) console.error(chalk.gray(result.error));
   }
   console.log(chalk.gray(`Installing ${SECRETS_CLI_PACKAGE}…`));
-  const r = spawnSync('npm', ['install', '-g', SECRETS_CLI_PACKAGE], { stdio: 'inherit' });
+  const npm = execFileShellSpec('npm', ['install', '-g', SECRETS_CLI_PACKAGE]);
+  const r = spawnSync(npm.command, npm.args, { stdio: 'inherit', shell: npm.shell });
   _resetSecretsClientForTest();
   if (r.error) {
     console.error(chalk.red(`npm install failed: ${r.error.message}`));
