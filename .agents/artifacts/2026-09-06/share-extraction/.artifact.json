@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "slug": "share-extraction",
+  "title": "Share moves to artifacts-cli — one home, one Worker",
+  "kind": "plan",
+  "agent": "claude",
+  "host": "yosemite-s1",
+  "share_url": null,
+  "ticket": "PHNX-3992",
+  "created_at": "2026-09-06",
+  "updated_at": "2026-09-06"
+}
