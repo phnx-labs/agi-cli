@@ -43,6 +43,8 @@ import type { SessionActivity, AwaitingReason } from '../lib/session/state.js';
 import { inferSessionState } from '../lib/session/state.js';
 import { discoverSessions, queryIndexedSessions, countSessionsInScope, resolveSessionById, isCompleteSessionId, looksLikeSessionId, searchContentIndex, parseTimeFilter, getSessionRoots, scopeToManaged, type DiscoverOptions, type ScanProgress } from '../lib/session/discover.js';
 import { findSessionsById, querySessions, getSessionById, readSessionContent, readArchivedSessionPreview, readSessionTimelineAny } from '../lib/session/db.js';
+import { foldTimeline, emptyTimelineState, projectTimeline, projectSessionFiles } from '../lib/session/timeline.js';
+import { readSessionTail } from '../lib/session/tail.js';
 import { liveSessionMetas, fleetExecutionMachineById, reconcileLiveMetaMachine } from '../lib/session/live-metadata.js';
 import { sessionHeadline } from '../lib/session/title.js';
 import {
@@ -2313,25 +2315,25 @@ export interface SessionDetailMessage {
 
 /**
  * The additive `details` block on `sessions preview --json` (PHNX-3999):
- * `request`/`timeline`/`files` are read STRAIGHT from the existing
+ * `request`/`timeline`/`files` are read FIRST from the existing
  * `session_timelines` projection (`readSessionTimelineAny` — the daemon's own
  * bounded, incrementally-folded cache, `SessionTimelineProjection` in
- * `lib/session/db.ts`) rather than re-derived here, so this never triggers a
- * transcript parse of its own. When that projection has not been computed yet
- * for this session (daemon hasn't reached it, or the harness has no
- * transcript at all), the fields are `null` and `partial`/`reason` say so —
- * never a silently-empty-but-"successful" timeline.
- *
- * `messages` is a best-effort bounded recent-turn list: when `loadSessionPreviewDigest`
- * just did a fresh parse (`events` non-empty — only happens on a cache miss
- * under the bounded-parse limit), the last few message events are used;
- * otherwise it falls back to the cached digest's `firstUser`/`lastAssistant`
- * (zero extra parse cost) so a cache hit still returns *some* real content
- * rather than an empty array. `sourceRevision` is the transcript's own last-
- * activity timestamp — a stable content-change cursor a caller can compare
- * across calls, deliberately separate from the live run/idle `active` status.
+ * `lib/session/db.ts`), so a session the daemon has already reached costs
+ * nothing extra here. When that projection is missing (daemon hasn't reached
+ * this session yet), this does an ON-DEMAND fold using the EXACT same pure,
+ * already-redacting pipeline the daemon uses (`foldTimeline` /
+ * `projectTimeline` / `projectSessionFiles`, `timeline.ts`) over whatever
+ * events are cheaply available: the fresh-parse `events` from
+ * `loadSessionPreviewDigest` when there is one, else a bounded 128 KiB tail
+ * read (`readSessionTail`, Claude/Codex only — the same bounded reader the
+ * local preview's over-cap fallback uses) so a WARM cache hit (no fresh parse)
+ * still gets real, on-demand content instead of falling back to a 2-message
+ * digest summary. This is genuinely bounded either way: it folds only events
+ * already in hand or a fixed 128 KiB window, never a fresh whole-file parse.
+ * `partial`/`reason` say when this happened (`daemon-pending: on-demand
+ * bounded fold`) versus a session with no transcript at all.
  */
-function buildSessionDetailBlock(
+export function buildSessionDetailBlock(
   session: SessionMeta,
   digest: SessionPreviewDigest | undefined,
   events: SessionEvent[],
@@ -2345,11 +2347,34 @@ function buildSessionDetailBlock(
   reason: string | null;
 } {
   const bound = (text: string): string => redactSecrets(sanitizeForTerminal(text)).slice(0, SESSION_DETAIL_MESSAGE_MAX_CHARS);
-  const timelineProjection = readSessionTimelineAny(session.id);
+  const daemonProjection = readSessionTimelineAny(session.id);
+
+  let projection: { request?: unknown; timeline: unknown; files?: unknown } | undefined = daemonProjection;
+  let onDemand = false;
+  let foldEvents = events;
+  if (!projection && session.filePath) {
+    if (foldEvents.length === 0) {
+      // Warm digest cache hit: no fresh parse happened, so fold a bounded
+      // tail window instead of re-parsing the whole transcript. Empty for a
+      // harness `readSessionTail` doesn't cover, or an agent value it
+      // rejects — that degrades to the digest-based message fallback below,
+      // never a crash.
+      foldEvents = readSessionTail(session.filePath, session.agent as SessionAgentId);
+    }
+    if (foldEvents.length > 0) {
+      const state = foldTimeline(foldEvents, emptyTimelineState());
+      projection = {
+        request: state.request,
+        timeline: projectTimeline(state, undefined),
+        files: projectSessionFiles(state),
+      };
+      onDemand = true;
+    }
+  }
 
   let messages: SessionDetailMessage[];
-  if (events.length > 0) {
-    messages = events
+  if (foldEvents.length > 0) {
+    messages = foldEvents
       .filter((e): e is SessionEvent & { role: 'user' | 'assistant'; content: string } =>
         e.type === 'message' && !e._synthetic && Boolean(e.content) && (e.role === 'user' || e.role === 'assistant'))
       .slice(-SESSION_DETAIL_MAX_MESSAGES)
@@ -2360,14 +2385,16 @@ function buildSessionDetailBlock(
     if (digest?.lastAssistant) messages.push({ role: 'assistant', text: bound(digest.lastAssistant), at: session.lastActivity ?? null });
   }
 
-  const partial = Boolean(digest?.partial) || !timelineProjection;
+  const partial = Boolean(digest?.partial) || !daemonProjection;
   const reason = digest?.partialReason
-    ?? (!timelineProjection ? 'request/timeline/files have not been computed yet by the background timeline pass for this session' : null);
+    ?? (onDemand
+      ? 'background timeline pass has not reached this session yet; request/timeline/files below are an on-demand bounded fold, not the full-history daemon projection'
+      : (!projection ? 'no transcript available to fold request/timeline/files for this session' : null));
 
   return {
-    request: timelineProjection?.request ?? null,
-    timeline: timelineProjection?.timeline ?? null,
-    files: timelineProjection?.files ?? null,
+    request: projection?.request ?? null,
+    timeline: projection?.timeline ?? null,
+    files: projection?.files ?? null,
     messages,
     sourceRevision: session.lastActivity ?? session.timestamp ?? null,
     partial,
