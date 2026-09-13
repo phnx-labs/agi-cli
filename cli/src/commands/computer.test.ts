@@ -157,6 +157,28 @@ describe('resolveDeviceHost', () => {
     expect(mockResolveRemoteDevice).toHaveBeenCalledWith('linux-desk', {});
   });
 
+  it('uses the configured ssh:// host/user, not the registry\'s own resolution, when they disagree', async () => {
+    // Regression: computer.host must actually override the connection target,
+    // not just gate scheme selection while the registry's resolveRemoteDevice
+    // answer silently wins. The forwarded --host and the fd-3 target.host must
+    // also stay byte-identical, since the engine matches its own
+    // sshTarget(parseAddress(--host)) against context.target.host to decide
+    // whether the inherited ssh identity (sshArgs) applies at all.
+    mockGetConfigValue.mockReturnValue({ value: 'ssh://otheruser@otherhost:2222' });
+    mockResolveRemoteDevice.mockResolvedValue({
+      target: 'muqsit@linux-desk', user: 'muqsit', host: 'linux-desk',
+      device: { platform: 'linux' }, identityArgs: ['-i', '/key'],
+    });
+    const result = await resolveDeviceHost('linux-desk');
+    expect(result.host).toBe('ssh://otheruser@otherhost:2222');
+    // target.host must match what the engine's own sshTarget(parseAddress(host))
+    // derives from the forwarded --host, so its context lookup finds this entry.
+    expect(result.target.host).toBe('otheruser@otherhost');
+    expect(result.target.hostname).toBe('otherhost');
+    // Identity args still come from the fleet — the one thing computer.host cannot express.
+    expect(result.target.sshArgs).toEqual(['-i', '/key']);
+  });
+
   it('falls back to the Windows-only fleet ssh tunnel with no computer.host configured', async () => {
     mockGetConfigValue.mockReturnValue({ value: undefined });
     mockResolveRemoteDevice.mockResolvedValue({

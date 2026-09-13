@@ -51,7 +51,7 @@ import { buildComputerContext, type ComputerTargetContext } from '../lib/compute
 import { recordComputerAction } from '../lib/computer/record.js';
 import { resolveRemoteDevice } from '../lib/ssh-tunnel.js';
 import { getConfigValue } from '../lib/device-config.js';
-import { parseAddress } from '../lib/address.js';
+import { parseAddress, sshTarget } from '../lib/address.js';
 import {
   isComputerClientError,
   resolveComputerBin,
@@ -153,10 +153,19 @@ export async function resolveDeviceHost(device: string): Promise<{ host: string;
       // No ssh identity involved — the transport is RFB or a raw helper socket.
       return { host: configured, target: { alias: device, host: addr.host, user: addr.user ?? '', hostname: addr.host, platform: addr.scheme, sshArgs: [] } };
     }
+    // The configured address IS the connection target — an ssh:// override
+    // naming a different host/user/port than the device registry must actually
+    // take effect, not be silently replaced by the registry's own resolution.
+    // Only the ssh identity (key file flags) comes from the fleet; the target
+    // string forwarded on --host and the one recorded on fd-3 must be the same
+    // `sshTarget(addr)` the engine itself derives from that same --host value,
+    // or the engine's own context-vs-argv match (`resolveContextDevice`) misses
+    // and silently drops the identity args instead of failing loud.
     const resolved = await resolveRemoteDevice(device, {});
+    const target = sshTarget(addr);
     return {
       host: configured,
-      target: { alias: device, host: resolved.target, user: resolved.user, hostname: resolved.host, platform: resolved.device.platform, sshArgs: resolved.identityArgs },
+      target: { alias: device, host: target, user: addr.user ?? resolved.user, hostname: addr.host, platform: resolved.device.platform, sshArgs: resolved.identityArgs },
     };
   }
   const resolved = await resolveRemoteDevice(device, {
