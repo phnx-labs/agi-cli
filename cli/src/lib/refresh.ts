@@ -178,7 +178,12 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
     log(chalk.bold('\nMCP Servers:\n'));
 
     for (const [name, config] of Object.entries(manifest.mcp)) {
-      if (!config.command || config.transport === 'http') continue;
+      const transport = config.transport || 'stdio';
+      const commandOrUrl = transport === 'http' ? config.url : config.command;
+      if (!commandOrUrl) {
+        log(`  ${chalk.cyan(name)}: ${chalk.yellow(`missing ${transport === 'http' ? 'url' : 'command'}`)}`);
+        continue;
+      }
 
       const scopedAgents = (config.agents ? [...config.agents] : [...capableAgents('mcp')]).filter(
         (id) => !agentFilter || id === agentFilter
@@ -196,9 +201,9 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
       const results = await registerMcpToTargets(
         targets,
         name,
-        config.command,
+        commandOrUrl,
         config.scope || 'user',
-        config.transport || 'stdio'
+        transport
       );
 
       for (const result of results) {
