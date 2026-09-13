@@ -18,7 +18,7 @@ import * as path from 'path';
 import { assertValidSshTarget, shellQuote } from '../ssh-exec.js';
 import { resolveActor, actorEnv } from '../actor.js';
 import { getCliLaunch } from '../cli-entry.js';
-import { encodePwshBase64 } from '../pwsh.js';
+import { encodePwshBase64, pwshLiteral, pwshNativeExecStatements } from '../pwsh.js';
 import { quoteWin32ExecArg } from '../platform/exec.js';
 import { homeRemainder, remoteCdPrefix } from '../project-root.js';
 import { getCacheDir } from '../state.js';
@@ -26,6 +26,7 @@ import { hostKeyCheckingOpts } from './known-hosts.js';
 import { hostNameFor } from './ssh-config.js';
 import { resolveDeviceProfile } from './resolve-profile.js';
 import { type DeviceProfile } from './registry.js';
+import { renderPowershellCommand, windowsAgentsInvocation } from '../hosts/remote-cmd.js';
 
 /** Env var the askpass shim reads to know which bundle holds the password. */
 export const ASKPASS_BUNDLE_ENV = 'AGENTS_SSH_BUNDLE';
@@ -125,7 +126,11 @@ export function wrapRemoteCommand(
     script = [...prelude, ...cmd].join(' ');
   }
   if (device.shell === 'powershell') {
-    return `powershell -NoProfile -EncodedCommand ${encodePwshBase64(script)}`;
+    // Same renderer the Windows `agents` launcher uses, so a long script gets the
+    // compressed representation here too rather than only on that path. The
+    // interactive login route (`buildInteractiveShellCommand`, -NoExit) is
+    // deliberately left alone: it must stay an interactive session.
+    return renderPowershellCommand(script);
   }
   return script;
 }
@@ -177,22 +182,30 @@ export function pwshQuote(token: string): string {
  * `$LASTEXITCODE` is left alone rather than forced to 0.
  */
 function pwshExactArgvScript(cmd: string[], prelude: string[]): string {
+  // The Agents CLI gets the canonical launcher, not the generic dispatch. On
+  // Windows `agents` is an npm `agents.ps1` whose own body splats `$args` into
+  // native node.exe — the PowerShell 5.1 lossy path — so even a perfectly
+  // splatted call into that script loses an embedded quote one layer deeper.
+  // `windowsAgentsInvocation` resolves the package's declared entry and runs it
+  // directly, which is the only way the real Agents parser sees exact tokens.
+  const bin = cmd[0];
+  if (bin === 'agents' || bin === 'ag') {
+    // `windowsAgentsInvocation` leaves the child's code in `$zq`.
+    return [...prelude, windowsAgentsInvocation(cmd.slice(1), bin), 'exit $zq'].join('\n');
+  }
   const program = pwshQuote(cmd[0]!);
   const rest = cmd.slice(1);
-  const nativeLine = pwshQuote(rest.map(quoteWin32ExecArg).join(' '));
   const splat = rest.length > 0 ? `@(${rest.map(pwshQuote).join(', ')})` : '@()';
   return [
     ...prelude,
     `$ErrorActionPreference='Stop'`,
     `$__c = Get-Command -Name ${program} -ErrorAction Stop`,
     `if ($__c.CommandType -eq 'Application') {`,
-    `  $__psi = New-Object System.Diagnostics.ProcessStartInfo`,
-    `  $__psi.FileName = $__c.Source`,
-    `  $__psi.Arguments = ${nativeLine}`,
-    `  $__psi.UseShellExecute = $false`,
-    `  $__p = [System.Diagnostics.Process]::Start($__psi)`,
-    `  $__p.WaitForExit()`,
-    `  exit $__p.ExitCode`,
+    // One emitter for the .NET native-exec block, shared with the Windows
+    // `agents` launcher in `hosts/remote-cmd.ts`; a second copy would drift.
+    ...pwshNativeExecStatements('$__c.Source', pwshLiteral(rest.map(quoteWin32ExecArg).join(' '))).map((line) => `  ${line}`),
+    // `pwshNativeExecStatements` names the process handle `$zp`.
+    `  exit $zp.ExitCode`,
     `}`,
     // `@__a` SPLATS the array into separate arguments. `& $__c @(...)` on an
     // array LITERAL does not splat — it passes one array-valued argument, which
