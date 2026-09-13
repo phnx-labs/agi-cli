@@ -98,37 +98,105 @@ describe('session_remote_preview_cache (db.ts)', () => {
   });
 });
 
+describe('session_remote_preview_cache schema migration', () => {
+  it('adds last_caller_revision to a DB that already created the table WITHOUT it, preserving the existing row', () => {
+    const script = [
+      "const Database = (await import('./src/lib/sqlite.ts')).default;",
+      "const path = await import('node:path');",
+      "const fs = await import('node:fs');",
+      "const os = await import('node:os');",
+      // Simulate the OLD schema (this table shipped once already, before this
+      // column existed) in a fresh sqlite file at the exact path db.ts's
+      // getDB() will open.
+      "const stateDir = path.join(os.homedir(), '.agents', '.history', 'sessions');",
+      "fs.mkdirSync(stateDir, { recursive: true });",
+      "const dbPath = path.join(stateDir, 'sessions.db');",
+      "const raw = new Database(dbPath);",
+      "raw.exec(`CREATE TABLE session_remote_preview_cache (",
+      "  device TEXT NOT NULL, session_id TEXT NOT NULL, schema_version INTEGER NOT NULL,",
+      "  fetched_at INTEGER NOT NULL, ok INTEGER NOT NULL, envelope_json TEXT,",
+      "  envelope_bytes INTEGER NOT NULL DEFAULT 0, failure_reason TEXT,",
+      "  consecutive_failures INTEGER NOT NULL DEFAULT 0, next_attempt_at INTEGER NOT NULL DEFAULT 0,",
+      "  PRIMARY KEY (device, session_id, schema_version)",
+      ")`);",
+      "raw.prepare(`INSERT INTO session_remote_preview_cache",
+      "  (device, session_id, schema_version, fetched_at, ok, envelope_json, envelope_bytes, consecutive_failures, next_attempt_at)",
+      "  VALUES ('zion', 'old-row', 1, 500, 1, '{\"preview\":{\"firstUser\":\"pre-migration\"}}', 40, 0, 0)`).run();",
+      "raw.close();",
+      // Now open through the real module — it must self-heal the missing
+      // column rather than throwing "no such column: last_caller_revision".
+      "const db = await import('./src/lib/session/db.ts');",
+      "const oldRow = db.readRemotePreviewCache('zion', 'old-row');",
+      "db.writeRemotePreviewCallerRevision('zion', 'old-row', 'rev-after-migration');",
+      "const afterRevisionWrite = db.readRemotePreviewCache('zion', 'old-row');",
+      "db.closeDB();",
+      "process.stdout.write(JSON.stringify({ oldRow, afterRevisionWrite }));",
+    ].join(' ');
+    const result = runScript(script);
+    expect(result.status, result.stderr).toBe(0);
+    const { oldRow, afterRevisionWrite } = JSON.parse(result.stdout);
+    // The pre-migration row's content survived untouched.
+    expect(oldRow).toMatchObject({ ok: true, envelope: { preview: { firstUser: 'pre-migration' } } });
+    expect(oldRow.lastCallerRevision).toBeUndefined();
+    // The new column is writable/readable post-migration.
+    expect(afterRevisionWrite.lastCallerRevision).toBe('rev-after-migration');
+  });
+});
+
 describe('getRemoteSessionPreview (remote-preview-cache.ts)', () => {
-  it('serves a fresh cache hit with zero fetches, and a revision match bypasses the TTL with zero fetches', () => {
+  it('serves a fresh cache hit with zero fetches within the TTL', () => {
     const script = [
       "const cache = await import('./src/lib/session/remote-preview-cache.ts');",
       "let calls = 0;",
-      "const okEnvelope = { session: { id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' }, details: { sourceRevision: 'rev-1' } };",
+      "const okEnvelope = { schemaVersion: 1, session: { id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' }, details: { sourceRevision: 'rev-1' } };",
       "const deps = { fetchEnvelope: async () => { calls++; return { ok: true, envelope: okEnvelope }; } };",
       "const id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';",
       "const first = await cache.getRemoteSessionPreview(id, 'zion', { now: 1000 }, deps);",
       "const second = await cache.getRemoteSessionPreview(id, 'zion', { now: 1500 }, deps);", // within TTL
-      "const thirdPastTtl = await cache.getRemoteSessionPreview(id, 'zion', { now: 1000 + 999_999, revision: 'rev-1' }, deps);", // revision match, way past TTL
       "const db = await import('./src/lib/session/db.ts'); db.closeDB();",
-      "process.stdout.write(JSON.stringify({ calls, first: first.cache, second: second.cache, third: thirdPastTtl.cache }));",
+      "process.stdout.write(JSON.stringify({ calls, first: first.cache, second: second.cache }));",
     ].join(' ');
     const result = runScript(script);
     expect(result.status, result.stderr).toBe(0);
-    const { calls, first, second, third } = JSON.parse(result.stdout);
-    expect(calls).toBe(1); // one real fetch total across all three calls
+    const { calls, first, second } = JSON.parse(result.stdout);
+    expect(calls).toBe(1); // one real fetch total across both calls
     expect(first).toMatchObject({ source: 'live', state: 'fresh' });
     expect(second).toMatchObject({ source: 'cache', state: 'fresh' });
-    expect(third).toMatchObject({ source: 'cache', state: 'fresh', stale: false });
   });
 
-  it('a revision mismatch triggers exactly one bounded refetch even far past the TTL', () => {
+  it('a matching --revision (the caller\'s OWN last-observed cursor, not the envelope\'s) serves the cache with zero SSH indefinitely, past the TTL', () => {
     const script = [
       "const cache = await import('./src/lib/session/remote-preview-cache.ts');",
       "let calls = 0;",
       "const id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';",
-      "const deps = { fetchEnvelope: async () => { calls++; return { ok: true, envelope: { session: { id }, details: { sourceRevision: 'rev-' + calls } } }; } };",
-      "await cache.getRemoteSessionPreview(id, 'zion', { now: 1000 }, deps);",
-      "const changed = await cache.getRemoteSessionPreview(id, 'zion', { now: 1000 + 999_999, revision: 'stale-revision' }, deps);",
+      "const deps = { fetchEnvelope: async () => { calls++; return { ok: true, envelope: { schemaVersion: 1, session: { id }, details: { sourceRevision: '2026-01-01T00:00:00.000Z' } } }; } };",
+      // First call ever with revision '42' -- no prior recorded caller
+      // revision to compare against, so this fetches once and then records
+      // '42' as the observed caller revision.
+      "const first = await cache.getRemoteSessionPreview(id, 'zion', { now: 1000, revision: '42' }, deps);",
+      // Same caller revision '42' again, WAY past the 45s TTL: must be a pure
+      // cache hit against the caller-revision column, not the envelope's own
+      // ISO sourceRevision (which the caller's '42' could never match).
+      "const second = await cache.getRemoteSessionPreview(id, 'zion', { now: 1000 + 999_999, revision: '42' }, deps);",
+      "const db = await import('./src/lib/session/db.ts'); db.closeDB();",
+      "process.stdout.write(JSON.stringify({ calls, first: first.cache, second: second.cache }));",
+    ].join(' ');
+    const result = runScript(script);
+    expect(result.status, result.stderr).toBe(0);
+    const { calls, first, second } = JSON.parse(result.stdout);
+    expect(calls).toBe(1); // only the first call actually fetched
+    expect(first).toMatchObject({ source: 'live', state: 'fresh' });
+    expect(second).toMatchObject({ source: 'cache', state: 'fresh', stale: false });
+  });
+
+  it('a DIFFERENT --revision than last observed triggers exactly one bounded refetch even far past the TTL', () => {
+    const script = [
+      "const cache = await import('./src/lib/session/remote-preview-cache.ts');",
+      "let calls = 0;",
+      "const id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';",
+      "const deps = { fetchEnvelope: async () => { calls++; return { ok: true, envelope: { schemaVersion: 1, session: { id }, details: { sourceRevision: 'rev-' + calls } } }; } };",
+      "await cache.getRemoteSessionPreview(id, 'zion', { now: 1000, revision: '1' }, deps);",
+      "const changed = await cache.getRemoteSessionPreview(id, 'zion', { now: 1000 + 999_999, revision: '2' }, deps);",
       "const db = await import('./src/lib/session/db.ts'); db.closeDB();",
       "process.stdout.write(JSON.stringify({ calls, changed: changed.cache }));",
     ].join(' ');
@@ -178,9 +246,9 @@ describe('getRemoteSessionPreview (remote-preview-cache.ts)', () => {
     const script = [
       "const cache = await import('./src/lib/session/remote-preview-cache.ts');",
       "let calls = 0;",
-      "const deps = { fetchEnvelope: async () => { calls++; return { ok: true, envelope: { session: {} } }; } };",
-      "const shortId = await cache.getRemoteSessionPreview('d3470b57', 'zion', {}, deps);",
       "const kimiId = 'session_aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';",
+      "const deps = { fetchEnvelope: async () => { calls++; return { ok: true, envelope: { schemaVersion: 1, session: { id: kimiId } } }; } };",
+      "const shortId = await cache.getRemoteSessionPreview('d3470b57', 'zion', {}, deps);",
       "const kimi = await cache.getRemoteSessionPreview(kimiId, 'zion', { now: 1000 }, deps);",
       "const db = await import('./src/lib/session/db.ts'); db.closeDB();",
       "process.stdout.write(JSON.stringify({ calls, shortIdState: shortId.cache.state, kimiState: kimi.cache.state }));",
@@ -191,5 +259,85 @@ describe('getRemoteSessionPreview (remote-preview-cache.ts)', () => {
     expect(shortIdState).toBe('invalid-id');
     expect(kimiState).toBe('fresh');
     expect(calls).toBe(1); // only the accepted kimi-shaped id actually fetched
+  });
+
+  it('two genuinely concurrent requests for the same (device, id) coalesce onto ONE SSH attempt, not a serial redial', () => {
+    const script = [
+      "const cache = await import('./src/lib/session/remote-preview-cache.ts');",
+      "let calls = 0;",
+      "const id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';",
+      // A real, human-observable delay on the fake transport so the two
+      // requests below are DEFINITELY still in flight together, not
+      // accidentally serialized by the event loop.
+      "const deps = { fetchEnvelope: async () => { calls++; await new Promise(r => setTimeout(r, 300)); return { ok: true, envelope: { schemaVersion: 1, session: { id } } }; } };",
+      "const [a, b] = await Promise.all([",
+      "  cache.getRemoteSessionPreview(id, 'zion', { now: 1000 }, deps),",
+      "  cache.getRemoteSessionPreview(id, 'zion', { now: 1000 }, deps),",
+      "]);",
+      "const db = await import('./src/lib/session/db.ts'); db.closeDB();",
+      "process.stdout.write(JSON.stringify({ calls, a: a.cache, b: b.cache }));",
+    ].join(' ');
+    const result = runScript(script);
+    expect(result.status, result.stderr).toBe(0);
+    const { calls, a, b } = JSON.parse(result.stdout);
+    expect(calls).toBe(1); // the lease coalesced the second request onto the first's in-flight fetch
+    expect(a.state).toBe('fresh');
+    expect(b.state).toBe('fresh');
+  });
+
+  it('an oversized live response is never passed through as fresh and never cached — falls back to a stale copy when one exists', () => {
+    const script = [
+      "const db0 = await import('./src/lib/session/db.ts');",
+      "const cache = await import('./src/lib/session/remote-preview-cache.ts');",
+      "const id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';",
+      // Seed a real prior good cache entry so the oversized-response case has
+      // a stale copy to fall back to.
+      "db0.writeRemotePreviewCacheSuccess('zion', id, { schemaVersion: 1, session: { id }, preview: { firstUser: 'good copy' } }, 100);",
+      "const huge = { schemaVersion: 1, session: { id }, preview: { blob: 'x'.repeat(db0.REMOTE_PREVIEW_ENVELOPE_MAX_BYTES + 1) } };",
+      "const deps = { fetchEnvelope: async () => ({ ok: true, envelope: huge }) };",
+      "const result = await cache.getRemoteSessionPreview(id, 'zion', { now: 999_999, refresh: true }, deps);",
+      "const cachedAfter = db0.readRemotePreviewCache('zion', id);",
+      "db0.closeDB();",
+      "process.stdout.write(JSON.stringify({ cache: result.cache, envelope: result.envelope, cachedAfterIsOriginal: cachedAfter?.envelope?.preview?.firstUser === 'good copy' }));",
+    ].join(' ');
+    const result = runScript(script);
+    expect(result.status, result.stderr).toBe(0);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.cache.state).toBe('stale-error');
+    expect(parsed.cache.reason).toMatch(/bounded-cache limit/);
+    // The oversized blob is never handed back as if it were the fresh result.
+    expect(parsed.envelope?.preview?.firstUser).toBe('good copy');
+    // The durable cache still holds the ORIGINAL good copy, not the oversized one.
+    expect(parsed.cachedAfterIsOriginal).toBe(true);
+  });
+
+  it('refuses to cache (and to treat as fresh) a peer response with the wrong session id or wrong schemaVersion', () => {
+    // Two DISTINCT session ids so the second call's own negative backoff
+    // (from the first call's validation failure) can never absorb it --
+    // each sub-case must independently exercise its own validation branch.
+    const script = [
+      "const cache = await import('./src/lib/session/remote-preview-cache.ts');",
+      "const idA = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';",
+      "const idB = 'cccccccc-bbbb-cccc-dddd-eeeeeeeeeeee';",
+      "const wrongId = { fetchEnvelope: async () => ({ ok: true, envelope: { schemaVersion: 1, session: { id: 'bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee' } } }) };",
+      "const wrongSchema = { fetchEnvelope: async () => ({ ok: true, envelope: { schemaVersion: 2, session: { id: idB } } }) };",
+      "const a = await cache.getRemoteSessionPreview(idA, 'zion', { now: 1000 }, wrongId);",
+      "const b = await cache.getRemoteSessionPreview(idB, 'zion', { now: 1000 }, wrongSchema);",
+      "const db = await import('./src/lib/session/db.ts');",
+      "const stillCachedA = db.readRemotePreviewCache('zion', idA);",
+      "const stillCachedB = db.readRemotePreviewCache('zion', idB);",
+      "db.closeDB();",
+      "process.stdout.write(JSON.stringify({ a: a.cache, b: b.cache, stillCachedA: stillCachedA ?? null, stillCachedB: stillCachedB ?? null }));",
+    ].join(' ');
+    const result = runScript(script);
+    expect(result.status, result.stderr).toBe(0);
+    const { a, b, stillCachedA, stillCachedB } = JSON.parse(result.stdout);
+    expect(a.state).toBe('no-cache-error');
+    expect(a.reason).toMatch(/did not match the requested id/);
+    expect(b.state).toBe('no-cache-error');
+    expect(b.reason).toMatch(/schemaVersion/);
+    // Neither invalid response was ever persisted as a successful entry.
+    expect(stillCachedA?.ok ?? false).toBe(false);
+    expect(stillCachedB?.ok ?? false).toBe(false);
   });
 });

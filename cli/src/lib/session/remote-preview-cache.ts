@@ -1,7 +1,7 @@
 /**
  * Canonical bounded loader for a REMOTE session's preview envelope
  * (PHNX-3999): exact ID + known owning device -> one bounded SSH hop ->
- * durable local cache, with in-process request coalescing and negative
+ * durable local cache, with cross-process request coalescing and negative
  * backoff on failure. Backs the fast path in `renderSessionPreview` for
  * `agents sessions preview <full-id> --device <owner> --json`.
  *
@@ -9,10 +9,23 @@
  * sessions and never fans out to more than the one named device. Callers that
  * do not yet know the owning device (a short id, a label, no --device) must
  * still go through the existing fleet metadata resolver.
+ *
+ * End-to-end latency budget (interactive-caller-facing, e.g. the Menu):
+ * bounded lease wait + one SSH attempt must stay under
+ * {@link REMOTE_PREVIEW_TOTAL_DEADLINE_MS} (11s, under the stated ~12s
+ * ceiling). This is why the lease here is a bespoke short-stale lock, NOT
+ * `refresh-coordinator.ts`'s `withRefreshLease` (whose 2-minute stale-reclaim
+ * ceiling and ~240-retry wait exist for daemon/background callers with a very
+ * different SLA — reusing it here would make a single lock contention event
+ * blow the interactive budget by an order of magnitude).
  */
 
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
+import { createHash } from 'node:crypto';
+import lockfile from 'proper-lockfile';
 import { normalizeHost } from '../machine-id.js';
-import { withRefreshLease } from '../refresh-coordinator.js';
+import { getCacheDir } from '../state.js';
 import { isCompleteSessionId } from './discover.js';
 import {
   fetchPeerPreviewEnvelope,
@@ -22,6 +35,8 @@ import {
   readRemotePreviewCache,
   writeRemotePreviewCacheFailure,
   writeRemotePreviewCacheSuccess,
+  writeRemotePreviewCallerRevision,
+  REMOTE_PREVIEW_ENVELOPE_MAX_BYTES,
   type RemotePreviewCacheRow,
 } from './db.js';
 
@@ -34,6 +49,18 @@ function nextAttemptBackoffMs(consecutiveFailures: number): number {
   const capped = Math.min(consecutiveFailures, 6);
   return Math.min(30_000 * 2 ** (capped - 1), 30 * 60_000);
 }
+
+/**
+ * Overall interactive budget for a call that must actually dial the peer:
+ * lease-wait + SSH attempt. A caller that provides its own `timeoutMs` still
+ * has this outer ceiling applied, since the lease-wait time is additive to it.
+ */
+const REMOTE_PREVIEW_TOTAL_DEADLINE_MS = 11_000;
+/** Default SSH attempt bound for this fast path specifically — tighter than
+ * the general-purpose picker's `PEER_PREVIEW_TIMEOUT_MS` (15s), which is
+ * tuned for an interactive "peek" the user is already waiting on, not a
+ * budget-conscious automated caller. */
+const REMOTE_PREVIEW_SSH_TIMEOUT_MS = 8_000;
 
 export type RemotePreviewCacheState =
   | 'fresh'
@@ -55,16 +82,6 @@ export interface RemotePreviewOutcome {
   };
 }
 
-/** In-process coalescing: two callers asking for the same (device, id) within
- * ONE process (e.g. a daemon tick or a batch render) while a fetch is already
- * in flight share the one result instead of dialing twice — a zero-cost check
- * before ever touching the cross-process lease below. The realistic case for
- * this feature, though, is one-CLI-process-per-user-action (the Menu worker
- * shells out a fresh `agents sessions preview` per request), so cross-process
- * duplication is the one that matters and is handled by
- * {@link withRefreshLease} inside `fetchOrServe`, not by this map. */
-const inFlight = new Map<string, Promise<RemotePreviewOutcome>>();
-
 function cacheKey(device: string, sessionId: string): string {
   return `${device}::${sessionId}`;
 }
@@ -83,24 +100,32 @@ function cacheKey(device: string, sessionId: string): string {
  *   is served with zero SSH. A row still inside its negative-backoff window is
  *   also served (stale if we have prior content, else an explicit failure)
  *   with zero SSH.
- * - `revision`, when given, is compared against the CACHED envelope's own
- *   content revision (`details.sourceRevision`/`session.lastActivity` — the
- *   session's last-activity stamp, not a caller-invented value). A match means
- *   the caller has independently confirmed nothing changed (e.g. a feed-watch
- *   tick that saw no new activity for this session on this device) and serves
- *   the cache with zero SSH EVEN PAST {@link REMOTE_PREVIEW_FRESH_MS} — this is
- *   the "reopening an unchanged inactive session costs nothing" path. A
- *   mismatch means the caller believes something changed, so the freshness
+ * - `revision`, when given, is compared against the durable cache's OWN
+ *   `last_caller_revision` column (`db.ts`'s `writeRemotePreviewCallerRevision`)
+ *   — the LAST value a caller supplied for this exact (device, sessionId) pair
+ *   — never against the envelope's own `details.sourceRevision`/
+ *   `session.lastActivity`. This is deliberate: a caller's revision cursor
+ *   (e.g. a feed's `lastActivityMs`, an epoch-ms number-as-string) need not
+ *   share a format with the envelope's own content-revision fields (an ISO
+ *   timestamp), so comparing them directly would almost never match. Instead
+ *   this is pure caller-observed-value equality: the SAME value the caller
+ *   passed last time means the caller has independently confirmed nothing
+ *   changed, and serves the cache with zero SSH EVEN PAST
+ *   {@link REMOTE_PREVIEW_FRESH_MS} — indefinitely, for as long as the caller
+ *   keeps confirming the same value. A DIFFERENT value (or no prior value on
+ *   record) means the caller believes something changed, so the freshness
  *   window is skipped and one bounded fetch is attempted (still subject to
  *   backoff, unless `refresh` is also set) — this is activity-driven
  *   invalidation, and it is the ONLY thing that bypasses backoff besides an
- *   explicit `refresh`; there is no separate polling loop here or in the
- *   Menu — the caller decides when to pass a changed revision.
+ *   explicit `refresh`. There is no polling loop here or in the Menu — the
+ *   caller decides when to pass a changed revision.
  * - `refresh: true` bypasses both the freshness window and backoff for
- *   exactly one bounded attempt (still capped by the existing sshCapture
- *   timeout/byte limits) — the explicit single-owner refresh retry, distinct
- *   from a revision-driven refetch: `refresh` is a user asking again "right
- *   now", `revision` is a caller asserting "I already know it changed".
+ *   exactly one bounded attempt — the explicit single-owner refresh retry,
+ *   distinct from a revision-driven refetch: `refresh` is a user asking again
+ *   "right now", `revision` is a caller asserting "I already know it
+ *   changed". Two literally-concurrent `refresh` calls still coalesce onto
+ *   one SSH attempt (see the lease below) — refresh only means "ignore
+ *   backoff", not "always redial even if someone else just did".
  */
 export interface RemotePreviewDeps {
   /** Defaults to the real bounded SSH transport ({@link fetchPeerPreviewEnvelope}).
@@ -129,33 +154,24 @@ export async function getRemoteSessionPreview(
     };
   }
   const normalizedDevice = normalizeHost(device);
-  const key = cacheKey(normalizedDevice, sessionId);
-  const running = inFlight.get(key);
-  if (running && !opts.refresh) return running;
-
-  const promise = fetchOrServe(sessionId, normalizedDevice, opts, deps).finally(() => {
-    if (inFlight.get(key) === promise) inFlight.delete(key);
-  });
-  inFlight.set(key, promise);
-  return promise;
+  // The caller's revision is recorded ONLY at the exact point a fetch
+  // SUCCEEDS (inside `fetchOrServe`'s `attempt`), never here unconditionally.
+  // A prior cut recorded it after EVERY outcome including a failed refetch:
+  // rev1 cached -> caller passes rev2 (differs) -> fetch FAILS -> stale rev1
+  // content served -> but rev2 got stamped as "observed" anyway, so the NEXT
+  // call with rev2 would match and serve that same stale content as `fresh`
+  // forever, silently skipping backoff. Persisting only alongside a genuine
+  // successful fetch is what keeps "revision confirmed unchanged" meaning
+  // what it says.
+  return fetchOrServe(sessionId, normalizedDevice, opts, deps);
 }
 
-/** Cap on a caller-supplied `--revision` value: it's an opaque cursor (a
- * `sourceRevision`/`lastActivity` stamp the caller read back from an earlier
- * response), never free text, so this is a sanity bound, not a format check. */
+/** Cap on a caller-supplied `--revision` value: it's an opaque cursor, never
+ * free text, so this is a sanity bound, not a format check. */
 const REVISION_MAX_CHARS = 128;
 
-/** The envelope's own content-revision cursor — `details.sourceRevision` when
- * present (set by `buildSessionDetailBlock`), else `session.lastActivity` for
- * an older peer whose response predates the `details` block. Never a
- * caller-invented value: this is always read back off a real fetched envelope. */
-function extractContentRevision(envelope: unknown): string | null {
-  if (!envelope || typeof envelope !== 'object') return null;
-  const details = (envelope as { details?: { sourceRevision?: unknown } }).details;
-  if (details && typeof details.sourceRevision === 'string') return details.sourceRevision;
-  const session = (envelope as { session?: { lastActivity?: unknown } }).session;
-  if (session && typeof session.lastActivity === 'string') return session.lastActivity;
-  return null;
+function isValidRevision(revision: string): boolean {
+  return revision.length > 0 && revision.length <= REVISION_MAX_CHARS;
 }
 
 async function fetchOrServe(
@@ -166,17 +182,17 @@ async function fetchOrServe(
 ): Promise<RemotePreviewOutcome> {
   const now = opts.now ?? Date.now();
   const cached = readRemotePreviewCache(device, sessionId);
-  const revision = opts.revision !== undefined && opts.revision.length > 0 && opts.revision.length <= REVISION_MAX_CHARS
-    ? opts.revision
-    : undefined;
+  const revision = opts.revision !== undefined && isValidRevision(opts.revision) ? opts.revision : undefined;
 
   if (!opts.refresh && cached?.ok) {
-    const cachedRevision = extractContentRevision(cached.envelope);
-    const revisionConfirmedUnchanged = revision !== undefined && cachedRevision !== null && revision === cachedRevision;
-    // A revision was supplied and DIFFERS from what we have cached: skip the
-    // TTL bypass below (activity-driven invalidation) and fall through to a
-    // real attempt, still subject to backoff. No revision at all: fall back to
-    // the plain TTL freshness window, unchanged from before `--revision` existed.
+    const revisionConfirmedUnchanged = revision !== undefined
+      && cached.lastCallerRevision !== undefined
+      && revision === cached.lastCallerRevision;
+    // A revision was supplied and there is no prior recorded caller revision,
+    // or it DIFFERS: skip the TTL bypass below (activity-driven invalidation)
+    // and fall through to a real attempt, still subject to backoff. No
+    // revision supplied at all: fall back to the plain TTL freshness window,
+    // unchanged from before `--revision` existed.
     const withinFreshWindow = revision === undefined && now - cached.fetchedAt < REMOTE_PREVIEW_FRESH_MS;
     if (revisionConfirmedUnchanged || withinFreshWindow) {
       return freshFromCache(cached, device);
@@ -188,62 +204,224 @@ async function fetchOrServe(
     return cached.ok ? staleFromCache(cached, device, 'backoff') : noCacheOutcome(device, cached.failureReason ?? 'peer unreachable');
   }
 
-  // From here on we are actually about to dial the peer. This is the realistic
-  // duplication case (one CLI process per user action, e.g. the Menu worker
-  // shelling out a fresh `agents sessions preview` per click) — an in-process
-  // Map can't help two separate processes, so this takes an OS-visible,
-  // bounded-wait lease (`withRefreshLease`, `refresh-coordinator.ts`, already
-  // used by the daemon/Factory/`agents view` for the identical "many processes,
-  // one shared refresh" shape) keyed on (device, sessionId). A second
-  // invocation arriving while the first is mid-fetch waits on the lease
-  // (bounded: ~240 retries up to 500ms each, capped by a 2-minute stale-lock
-  // reclaim — never an unbounded wait) rather than firing its own SSH hop, and
-  // re-reads the cache after acquiring it so it can pick up the first
-  // invocation's result instead of repeating the fetch.
+  // From here on we are actually about to dial the peer. This is the
+  // realistic duplication case (one CLI process per user action, e.g. the
+  // Menu worker shelling out a fresh `agents sessions preview` per click), so
+  // this takes a bounded, OS-visible lease keyed on (device, sessionId) —
+  // never an in-process-only guard, which cannot help two separate processes.
   const beforeFetchedAt = cached?.fetchedAt ?? 0;
-  return withRefreshLease<RemotePreviewOutcome>({
-    scope: 'sessions-remote-preview',
-    key: `${device}::${sessionId}`,
-    readCompleted: () => {
-      if (opts.refresh) return null; // an explicit refresh always performs its own attempt
-      const afterLease = readRemotePreviewCache(device, sessionId);
-      if (!afterLease) return null;
-      if (afterLease.ok && afterLease.fetchedAt > beforeFetchedAt) {
-        // Another process completed a SUCCESSFUL fetch for this exact
-        // (device, id) while we waited for the lease: use its result instead
-        // of dialing again.
-        return freshFromCache(afterLease, device);
-      }
-      if (now < afterLease.nextAttemptAt) {
-        // Another process just recorded a FAILURE (and its backoff) for this
-        // exact (device, id) while we waited for the lease: honor that
-        // backoff too, rather than immediately firing a second attempt right
-        // behind the one that just failed.
-        return afterLease.ok
-          ? staleFromCache(afterLease, device, 'backoff')
-          : noCacheOutcome(device, afterLease.failureReason ?? 'peer unreachable');
-      }
-      return null;
-    },
-    isCompleted: () => true,
-    refresh: async () => {
-      const result = opts.timeoutMs !== undefined
-        ? await deps.fetchEnvelope(sessionId, device, opts.timeoutMs)
-        : await deps.fetchEnvelope(sessionId, device);
-      if (result.ok) {
-        writeRemotePreviewCacheSuccess(device, sessionId, result.envelope, now);
-        return {
-          envelope: result.envelope,
-          cache: { source: 'live', fetchedAt: now, stale: false, state: 'fresh', device, reason: null },
-        };
-      }
+  const timeoutMs = opts.timeoutMs ?? REMOTE_PREVIEW_SSH_TIMEOUT_MS;
 
+  const priorConsecutiveFailures = cached?.consecutiveFailures ?? 0;
+
+  const attempt = async (remainingMs: number): Promise<RemotePreviewOutcome> => {
+    const afterLease = readRemotePreviewCache(device, sessionId);
+    if (afterLease?.ok && afterLease.fetchedAt > beforeFetchedAt) {
+      // Another process completed a SUCCESSFUL fetch for this exact
+      // (device, id) while we waited for the lease — reuse it. True under
+      // --refresh too: refresh means "current data now", and data fetched a
+      // moment ago while we queued already IS current.
+      return freshFromCache(afterLease, device);
+    }
+    if (!opts.refresh && afterLease && now < afterLease.nextAttemptAt) {
+      // Another process just recorded a FAILURE (and its backoff) while we
+      // waited: honor it rather than firing a second attempt right behind it.
+      return afterLease.ok
+        ? staleFromCache(afterLease, device, 'backoff')
+        : noCacheOutcome(device, afterLease.failureReason ?? 'peer unreachable');
+    }
+    if (opts.refresh && afterLease && !afterLease.ok
+      && afterLease.consecutiveFailures > priorConsecutiveFailures) {
+      // Even under --refresh (which otherwise ignores backoff): another
+      // process's OWN refresh attempt just failed while we waited for the
+      // lease. Reuse that failure rather than immediately trying a third
+      // time — "explicit retry" still means at most one attempt per genuinely
+      // concurrent request, not one per caller.
+      return noCacheOutcome(device, afterLease.failureReason ?? 'peer unreachable');
+    }
+
+    const result = await deps.fetchEnvelope(sessionId, device, Math.min(timeoutMs, remainingMs));
+    if (!result.ok) {
       const reason = describeFailure(result);
       writeRemotePreviewCacheFailure(device, sessionId, reason, nextAttemptBackoffMs, now);
       if (cached?.ok) return staleFromCache(cached, device, reason);
       return noCacheOutcome(device, reason);
-    },
+    }
+
+    const validation = validateEnvelope(result.envelope, sessionId, device);
+    if (!validation.ok) {
+      // A peer answered, but the payload doesn't check out (wrong session id,
+      // wrong schema version, malformed shape — a version-skewed or
+      // misbehaving peer). Never cache it under this id/device key, and never
+      // pass it through as if it were a genuine success.
+      writeRemotePreviewCacheFailure(device, sessionId, validation.reason, nextAttemptBackoffMs, now);
+      if (cached?.ok) return staleFromCache(cached, device, validation.reason);
+      return noCacheOutcome(device, validation.reason);
+    }
+
+    const envelopeBytes = Buffer.byteLength(JSON.stringify(result.envelope), 'utf8');
+    if (envelopeBytes > REMOTE_PREVIEW_ENVELOPE_MAX_BYTES) {
+      // The live fetch genuinely succeeded, but the payload is too large to
+      // persist AND too large to hand back unbounded. Never silently pass an
+      // oversized blob through as "fresh" — degrade to the last-good stale
+      // copy (explicitly labeled) when one exists, else an explicit bounded
+      // error, and do not cache the oversized response either way.
+      const reason = `peer response was ${envelopeBytes} bytes, over the ${REMOTE_PREVIEW_ENVELOPE_MAX_BYTES}-byte bounded-cache limit`;
+      writeRemotePreviewCacheFailure(device, sessionId, reason, nextAttemptBackoffMs, now);
+      if (cached?.ok) return staleFromCache(cached, device, reason);
+      return noCacheOutcome(device, reason);
+    }
+
+    writeRemotePreviewCacheSuccess(device, sessionId, result.envelope, now);
+    // The caller's revision is recorded ONLY here, atomically tied to a
+    // genuine successful fetch — never on a failure/backoff/stale-serve path.
+    // See the comment on `getRemoteSessionPreview` for why that distinction
+    // is load-bearing.
+    if (revision !== undefined) writeRemotePreviewCallerRevision(device, sessionId, revision);
+    return {
+      envelope: result.envelope,
+      cache: { source: 'live', fetchedAt: now, stale: false, state: 'fresh', device, reason: null },
+    };
+  };
+
+  return withBoundedRemoteLease(device, sessionId, timeoutMs, attempt, () => {
+    // Could not acquire the lease within the interactive budget (another
+    // process is holding it, presumably mid-fetch, longer than our deadline).
+    // Degrade to whatever the cache holds rather than piling on a second SSH
+    // attempt — bounded wait, no serial redial, no unbounded queueing.
+    const current = readRemotePreviewCache(device, sessionId);
+    if (current?.ok) return staleFromCache(current, device, 'another request for this session was already in flight');
+    return noCacheOutcome(device, 'another request for this session was already in flight and did not finish in time');
   });
+}
+
+/**
+ * Validate a peer's response before it is trusted at all: schema-version 1,
+ * a `session` object present, its `id` an EXACT non-empty string match for
+ * the id we asked for (never missing/null/numeric/mismatched), and — when the
+ * peer names its own machine — that name must agree with the device we
+ * actually dialed. Without these checks a version-skewed, misbehaving, or
+ * misconfigured peer's response could be cached under the WRONG key (this
+ * caller's requested sessionId) or attributed to the wrong owning device,
+ * poisoning a later read for a completely different session/device pair.
+ */
+function validateEnvelope(envelope: unknown, sessionId: string, device: string): { ok: true } | { ok: false; reason: string } {
+  if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) {
+    return { ok: false, reason: 'peer response was not a JSON object' };
+  }
+  const obj = envelope as { schemaVersion?: unknown; session?: { id?: unknown; machine?: unknown } };
+  if (obj.schemaVersion !== 1) {
+    return { ok: false, reason: `peer response has schemaVersion ${JSON.stringify(obj.schemaVersion)}, expected 1 (version skew?)` };
+  }
+  if (!obj.session || typeof obj.session !== 'object') {
+    return { ok: false, reason: 'peer response carried no session object — refusing to cache content with no confirmed identity' };
+  }
+  if (typeof obj.session.id !== 'string' || obj.session.id.length === 0 || obj.session.id !== sessionId) {
+    return { ok: false, reason: `peer response session id (${JSON.stringify(obj.session.id)}) did not match the requested id — refusing to cache under the wrong key` };
+  }
+  if (typeof obj.session.machine === 'string' && obj.session.machine.length > 0
+    && normalizeHost(obj.session.machine) !== device) {
+    return { ok: false, reason: `peer response claims machine "${obj.session.machine}", not the dialed device "${device}" — refusing to cache under the wrong owner` };
+  }
+  return { ok: true };
+}
+
+/** Cross-process lock target for one (device, sessionId) pair. Deliberately a
+ * separate lock namespace from `refresh-coordinator.ts` — different SLA,
+ * different consumers, no reason to share contention. */
+function leaseTarget(device: string, sessionId: string): string {
+  const digest = createHash('sha256').update(`${device}::${sessionId}`).digest('hex');
+  return path.join(getCacheDir(), 'remote-preview-locks', `${digest}.lock`);
+}
+
+/**
+ * A bounded, OS-visible cross-process lease: at most
+ * {@link REMOTE_PREVIEW_TOTAL_DEADLINE_MS} total wait for the WHOLE
+ * operation — lease acquisition AND the protected work `fn` together, not
+ * just the acquisition. `fn` receives the REMAINING budget after acquisition
+ * so it can clamp its own (e.g. SSH) timeout to what's actually left, rather
+ * than the deadline racing a `fn` that can still run to its own full timeout
+ * after a slow acquire. On timeout, `onDeadline` runs immediately — no
+ * further waiting, no fetch of our own — and the lock, once eventually
+ * obtained (if ever), is released and its marker file removed in the
+ * background so neither dangles past our own interest in them. The deadline
+ * timer is always cleared once the race settles, so a fast, uncontended call
+ * never leaves a pending timer holding the process open.
+ */
+async function withBoundedRemoteLease<T>(
+  device: string,
+  sessionId: string,
+  fetchTimeoutMs: number,
+  fn: (remainingMs: number) => Promise<T>,
+  onDeadline: () => T,
+): Promise<T> {
+  const start = Date.now();
+  const target = leaseTarget(device, sessionId);
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  try {
+    await fs.writeFile(target, '', { flag: 'wx', mode: 0o600 });
+  } catch (error: any) {
+    if (error?.code !== 'EEXIST') throw error;
+  }
+
+  // Stale slightly above the fetch's own bound: a genuinely dead holder
+  // (crashed mid-fetch) is reclaimed soon after its own attempt would have
+  // timed out anyway; a live holder's lock never goes stale mid-fetch.
+  const staleMs = fetchTimeoutMs + 2_000;
+  let release: (() => Promise<void>) | undefined;
+  const acquire = lockfile.lock(target, {
+    realpath: false,
+    stale: staleMs,
+    update: staleMs / 4,
+    // The retry config's own math is deliberately generous — the deadline
+    // timer below is the real, guaranteed ceiling, not this.
+    retries: { retries: 60, minTimeout: 75, maxTimeout: 250, factor: 1.15 },
+  }).then((r) => { release = r; });
+
+  let deadlineHit = false;
+  let deadlineTimer: ReturnType<typeof setTimeout>;
+  const deadline = new Promise<void>((resolve) => {
+    deadlineTimer = setTimeout(() => { deadlineHit = true; resolve(); }, REMOTE_PREVIEW_TOTAL_DEADLINE_MS);
+  });
+
+  await Promise.race([acquire, deadline]);
+  clearTimeout(deadlineTimer!);
+
+  if (deadlineHit) {
+    // Didn't get the lease within budget: release (and clean up the marker
+    // file) later if/when we do, so it never sits held past our own interest.
+    acquire.then(() => { if (release) return release().then(() => cleanupLeaseFile(target)); }).catch(() => {});
+    return onDeadline();
+  }
+
+  const remainingMs = REMOTE_PREVIEW_TOTAL_DEADLINE_MS - (Date.now() - start);
+  if (remainingMs <= 0) {
+    // Acquired right at the wire: no budget left to do any real work with it.
+    if (release) { await release(); await cleanupLeaseFile(target); }
+    return onDeadline();
+  }
+
+  try {
+    return await fn(remainingMs);
+  } finally {
+    if (release) {
+      await release();
+      await cleanupLeaseFile(target);
+    }
+  }
+}
+
+/** Best-effort removal of the lease marker file after release, so the
+ * lock directory doesn't grow one file per (device, sessionId) pair this box
+ * has ever previewed. Self-healing either way: `withBoundedRemoteLease`
+ * recreates it on demand (`{ flag: 'wx' }` — a no-op if it's still there). */
+async function cleanupLeaseFile(target: string): Promise<void> {
+  try {
+    await fs.unlink(target);
+  } catch {
+    // Another concurrent caller may already be using it, or it's already
+    // gone — either way, nothing to do.
+  }
 }
 
 function describeFailure(result: Extract<PeerPreviewEnvelopeResult, { ok: false }>): string {
@@ -263,7 +441,8 @@ function freshFromCache(cached: RemotePreviewCacheRow, device: string): RemotePr
 }
 
 function staleFromCache(cached: RemotePreviewCacheRow, device: string, reason: string): RemotePreviewOutcome {
-  const offline = reason === 'device did not answer within the bounded window' || reason === 'backoff';
+  const offline = reason === 'device did not answer within the bounded window' || reason === 'backoff'
+    || reason === 'another request for this session was already in flight';
   return {
     envelope: cached.envelope,
     cache: {
@@ -278,7 +457,8 @@ function staleFromCache(cached: RemotePreviewCacheRow, device: string, reason: s
 }
 
 function noCacheOutcome(device: string, reason: string): RemotePreviewOutcome {
-  const offline = reason.includes('unreachable') || reason.includes('not answer') || reason === 'backoff';
+  const offline = reason.includes('unreachable') || reason.includes('not answer') || reason === 'backoff'
+    || reason.includes('already in flight');
   return {
     cache: {
       source: 'cache', fetchedAt: null, stale: false,

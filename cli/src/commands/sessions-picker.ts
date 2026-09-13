@@ -13,7 +13,7 @@ import type { SessionEvent, SessionMeta, TodoItem, TodoProgress } from '../lib/s
 import { sessionDisplayAgent } from '../lib/session/types.js';
 import { fetchPeerPreviewDigest } from '../lib/session/remote-list.js';
 import { parseSession, sanitizeForTerminal, SNAPSHOT_TODO_TOOLS } from '../lib/session/parse.js';
-import { readSessionTail } from '../lib/session/tail.js';
+import { readSessionTail, readSessionHead } from '../lib/session/tail.js';
 import { safeTeamText } from '../lib/session/team-filter.js';
 import { cleanSessionPrompt, extractSessionTopic, isSyntheticUserMessage } from '../lib/session/prompt.js';
 import { linkPath, linkUrl, relativeToCwd, shortenModel } from '../lib/session/render.js';
@@ -410,16 +410,12 @@ export function loadSessionPreviewDigest(session: SessionMeta): {
   if (!digest) {
     if (sourceStamp.size > PREVIEW_DIGEST_MAX_PARSE_BYTES) {
       // A full `parseSession` on a cache miss is a synchronous, unbounded
-      // whole-file parse with no time/byte cap of its own (PHNX-3999) — a real
-      // 35.7 MiB screenshot-heavy transcript on this fleet lacked ANY computed
-      // digest/timeline, consistent with this path never finishing in a
-      // reasonable request budget. The daemon's timeline pass already draws
-      // this exact line (TIMELINE_PASS_MAX_WHOLE_FILE_BYTES); reuse the same
-      // bound rather than blocking the request path on a file this large.
-      // NOTE: this only bounds the ONE reparse-on-cache-miss path — a smaller
-      // transcript still under this cap (e.g. the fleet's other 6.3 MiB
-      // screenshot session) still takes a real, unmeasured-here `parseSession`
-      // cost; see the PR description for this residual scope note.
+      // whole-file parse with no time/byte cap of its own (PHNX-3999) — real
+      // 6.3 MiB and 35.7 MiB screenshot-heavy transcripts on this fleet both
+      // lacked a computed digest/timeline, consistent with this path not
+      // finishing in a reasonable request budget for either. `PREVIEW_DIGEST_MAX_PARSE_BYTES`
+      // is deliberately smaller than the daemon's own background-work ceiling
+      // (see that constant's own doc) so this catches both real cases.
       //
       // This IS genuinely partial, not empty: rather than parsing nothing,
       // `readSessionTail` (`tail.ts`) reads only the LAST 128 KiB of the file
@@ -427,17 +423,33 @@ export function loadSessionPreviewDigest(session: SessionMeta): {
       // parse logic) for a real recent-events window on the two harnesses it
       // supports (Claude/Codex); event-derived fields below (toolCalls,
       // toolTags, etc.) reflect that tail window, not the whole session, which
-      // `partialReason` states explicitly. `firstUser` additionally falls back
-      // to the already-indexed `SessionMeta.firstUserMessage` when the tail
-      // didn't capture the session's actual first turn (the common case for a
-      // multi-hundred-turn session). A harness the tail reader doesn't support
-      // yields no tail events, so the digest degrades to that indexed
-      // `firstUser` alone — still real content, never a blank string. The
-      // digest is cached against this stamp so the bound is paid once per
-      // transcript version, not once per call.
+      // `partialReason` states explicitly.
+      //
+      // `firstUser` is NEVER set from the tail fold: a tail window's "first
+      // user message IN THAT WINDOW" is a mid-session follow-up on any
+      // multi-turn session, not the session's actual original request, and
+      // there is no honest way to tell the two apart from the tail alone.
+      // Falling back to it would silently mislabel a follow-up as the
+      // original ask. Preference order for the CANONICAL original request:
+      // (1) the already-indexed `SessionMeta.firstUserMessage` (zero
+      // extra I/O); (2) failing that, a bounded HEAD read (`readSessionHead`,
+      // `tail.ts` — the mirror of the tail reader, first ~32 KiB from byte 0,
+      // where a session's opening turn always lives) so a row with no indexed
+      // value yet still gets the REAL original request rather than nothing.
+      // Only when neither is available does `firstUser` stay empty —
+      // `partial`/`partialReason` already say why detail is missing, which is
+      // the truthful signal, never a guessed value. The digest is cached
+      // against this stamp so the bound is paid once per transcript version,
+      // not once per call.
       events = readSessionTail(session.filePath, session.agent);
       digest = buildSessionPreviewDigest(events, safe);
-      digest.firstUser = digest.firstUser || session.firstUserMessage || '';
+      if (session.firstUserMessage) {
+        digest.firstUser = session.firstUserMessage;
+      } else {
+        const headEvents = readSessionHead(session.filePath, session.agent);
+        const firstHeadUser = headEvents.find(e => e.type === 'message' && e.role === 'user' && !e._synthetic && e.content);
+        digest.firstUser = firstHeadUser?.content ?? '';
+      }
       digest.partial = true;
       digest.partialReason = `transcript is ${formatBytes(sourceStamp.size)}, over the ${formatBytes(PREVIEW_DIGEST_MAX_PARSE_BYTES)} bounded-parse limit for an uncached preview; digest reflects only the last ~128 KiB (tail) of the transcript, not the whole session`;
       writeSessionPreviewCache({
@@ -842,13 +854,22 @@ const DIRS_TOUCHED_MAX = 5;
 const CHANGED_FILES_MAX = 200;
 
 /**
- * Bound for an uncached `loadSessionPreviewDigest` parse (PHNX-3999). Reuses
- * the daemon's own `TIMELINE_PASS_MAX_WHOLE_FILE_BYTES` limit
- * (`timeline-pass.ts`) rather than inventing a second number for the same
- * "how big a whole-file transcript parse may this process do synchronously"
- * question.
+ * Bound for an uncached `loadSessionPreviewDigest` parse (PHNX-3999).
+ *
+ * Deliberately SMALLER than the daemon's own
+ * `TIMELINE_PASS_MAX_WHOLE_FILE_BYTES` (16 MiB, `timeline-pass.ts`) — that
+ * number bounds BACKGROUND work the daemon tick can afford to spend; this one
+ * bounds a SYNCHRONOUS request an interactive caller (the Menu, with its own
+ * end-to-end latency budget) is actively waiting on. Two real screenshot-heavy
+ * transcripts on this fleet (6.3 MiB and 35.7 MiB) both lacked any computed
+ * digest/timeline — a 16 MiB threshold here would still miss the smaller one.
+ * The exact per-byte cost of `parseSession` is not measured in this change;
+ * 4 MiB is a conservative invariant (well under the 6.3 MiB failure case,
+ * comfortably above ordinary non-screenshot transcript sizes), not a timing
+ * guarantee — verify against real transcripts before relying on a specific
+ * elapsed-time bound.
  */
-const PREVIEW_DIGEST_MAX_PARSE_BYTES = 16 * 1024 * 1024;
+const PREVIEW_DIGEST_MAX_PARSE_BYTES = 4 * 1024 * 1024;
 
 export interface SessionPreviewDigest {
   schemaVersion: 1;

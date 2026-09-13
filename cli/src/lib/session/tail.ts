@@ -94,3 +94,67 @@ export function readSessionTail(
 ): SessionEvent[] {
   return readSessionTailWithRaw(filePath, agent, maxBytes, maxEvents).events;
 }
+
+/** A session's original first turn is typically within the first few KiB —
+ * far smaller than the tail window, since it's exactly one line near the
+ * start of the file, not a rolling window of recent activity. */
+const DEFAULT_HEAD_MAX_BYTES = 32 * 1024;
+
+/**
+ * Read the FIRST `maxBytes` of a JSONL transcript as cleaned text — the mirror
+ * of {@link readSessionTailContent}, for recovering the session's ACTUAL
+ * original request boundedly when it isn't already indexed
+ * (`SessionMeta.firstUserMessage`). A head read never needs the tail's
+ * partial-leading-line handling (it starts at byte 0), but a chunk this size
+ * can still end mid-line if the file is small — that trailing partial line is
+ * dropped so downstream per-line parsers only see whole lines. Returns '' on
+ * any error or empty file.
+ */
+export function readSessionHeadContent(filePath: string, maxBytes = DEFAULT_HEAD_MAX_BYTES): string {
+  let fd: number;
+  try {
+    fd = fs.openSync(filePath, 'r');
+  } catch {
+    return '';
+  }
+  try {
+    const size = fs.fstatSync(fd).size;
+    if (size === 0) return '';
+    const len = Math.min(size, maxBytes);
+    const buf = Buffer.alloc(len);
+    fs.readSync(fd, buf, 0, len, 0);
+    let content = buf.toString('utf8');
+    if (len < size) {
+      // Didn't reach EOF: the last line in this chunk may be a partial write
+      // of a longer record. Keep only whole lines.
+      const lastNl = content.lastIndexOf('\n');
+      content = lastNl >= 0 ? content.slice(0, lastNl) : '';
+    }
+    return content;
+  } catch {
+    return '';
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/**
+ * Read the FIRST `maxEvents` normalized events from a JSONL transcript's
+ * head — the session's actual opening turns, bounded and cheap (one small
+ * read from byte 0, the same shared Claude/Codex content parsers `readSessionTail`
+ * uses, zero duplicated parse logic). Only Claude and Codex are supported,
+ * matching {@link readSessionTailWithRaw}; other agents return no events.
+ */
+export function readSessionHead(
+  filePath: string,
+  agent: SessionAgentId,
+  maxBytes = DEFAULT_HEAD_MAX_BYTES,
+  maxEvents = DEFAULT_MAX_EVENTS,
+): SessionEvent[] {
+  if (agent !== 'claude' && agent !== 'codex') return [];
+  const content = readSessionHeadContent(filePath, maxBytes);
+  if (!content.trim()) return [];
+  const events = agent === 'codex' ? parseCodexContent(content) : parseClaudeContent(content);
+  sanitizeEvents(events);
+  return events.length > maxEvents ? events.slice(0, maxEvents) : events;
+}

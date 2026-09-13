@@ -555,6 +555,14 @@ CREATE TABLE IF NOT EXISTS session_remote_preview_cache (
   failure_reason TEXT,
   consecutive_failures INTEGER NOT NULL DEFAULT 0,
   next_attempt_at INTEGER NOT NULL DEFAULT 0,
+  -- The caller's OWN last-supplied --revision cursor (opaque: an epoch-ms
+  -- string, an ISO stamp, whatever the caller's own activity feed hands us) --
+  -- deliberately NOT compared to the envelope's own details.sourceRevision,
+  -- since a caller's revision format (e.g. a feed's lastActivityMs) need not
+  -- match the envelope's own (an ISO session.lastActivity). Equality is
+  -- against THIS column only: same value back => caller has independently
+  -- confirmed nothing changed.
+  last_caller_revision TEXT,
   PRIMARY KEY (device, session_id, schema_version)
 );
 CREATE INDEX IF NOT EXISTS idx_remote_preview_cache_fetched ON session_remote_preview_cache(fetched_at DESC);
@@ -1643,6 +1651,19 @@ export function getDB(): Database.Database {
   db.pragma('synchronous = NORMAL');
   db.pragma('temp_store = MEMORY');
   db.exec(SCHEMA);
+
+  // `session_remote_preview_cache` is a lazy cache table (like the others
+  // below), independent of SCHEMA_VERSION — but it shipped once already
+  // without `last_caller_revision` before this column was added, so a DB
+  // that already ran that earlier version has the table WITHOUT the column,
+  // and `CREATE TABLE IF NOT EXISTS` above is a no-op against it. Guard with
+  // the same PRAGMA-table_info pattern the versioned `sessions` migrations
+  // use, so an existing cache DB gains the column instead of every read/write
+  // throwing "no such column".
+  const remotePreviewCacheCols = db.prepare(`PRAGMA table_info(session_remote_preview_cache)`).all() as Array<{ name: string }>;
+  if (!remotePreviewCacheCols.some(c => c.name === 'last_caller_revision')) {
+    db.exec(`ALTER TABLE session_remote_preview_cache ADD COLUMN last_caller_revision TEXT`);
+  }
 
   const readSchemaVersion = (): number | undefined => {
     const row = db.prepare(`SELECT value FROM meta WHERE key = 'schema_version'`).get() as { value: string } | undefined;
@@ -3978,6 +3999,9 @@ export interface RemotePreviewCacheRow {
   consecutiveFailures: number;
   /** Epoch ms before which a fresh fetch attempt should be skipped (negative backoff). */
   nextAttemptAt: number;
+  /** The caller's own last-observed `--revision` cursor, or undefined if no
+   * caller has ever supplied one for this (device, sessionId) pair. */
+  lastCallerRevision?: string;
 }
 
 /** Read the durable cached remote preview row for one (device, sessionId) pair,
@@ -3986,7 +4010,8 @@ export interface RemotePreviewCacheRow {
 export function readRemotePreviewCache(device: string, sessionId: string): RemotePreviewCacheRow | undefined {
   const row = getDB().prepare(`
     SELECT fetched_at AS fetchedAt, ok, envelope_json AS envelopeJson, failure_reason AS failureReason,
-           consecutive_failures AS consecutiveFailures, next_attempt_at AS nextAttemptAt
+           consecutive_failures AS consecutiveFailures, next_attempt_at AS nextAttemptAt,
+           last_caller_revision AS lastCallerRevision
     FROM session_remote_preview_cache
     WHERE device = ? AND session_id = ? AND schema_version = ?
   `).get(device, sessionId, REMOTE_PREVIEW_SCHEMA_VERSION) as {
@@ -3996,6 +4021,7 @@ export function readRemotePreviewCache(device: string, sessionId: string): Remot
     failureReason: string | null;
     consecutiveFailures: number;
     nextAttemptAt: number;
+    lastCallerRevision: string | null;
   } | undefined;
   if (!row) return undefined;
   let envelope: unknown;
@@ -4013,7 +4039,24 @@ export function readRemotePreviewCache(device: string, sessionId: string): Remot
     failureReason: row.failureReason ?? undefined,
     consecutiveFailures: row.consecutiveFailures,
     nextAttemptAt: row.nextAttemptAt,
+    lastCallerRevision: row.lastCallerRevision ?? undefined,
   };
+}
+
+/**
+ * Record the caller's own `--revision` cursor for one (device, sessionId)
+ * pair, independent of any fetch. A no-op if no row exists yet (nothing to
+ * compare against on a session this box has never fetched). This is what lets
+ * "same revision as last time" serve the durable cache with zero SSH
+ * indefinitely — the comparison is against THIS value, never against the
+ * envelope's own `details.sourceRevision` (which may be a different format).
+ */
+export function writeRemotePreviewCallerRevision(device: string, sessionId: string, revision: string): void {
+  getDB().prepare(`
+    UPDATE session_remote_preview_cache
+    SET last_caller_revision = ?
+    WHERE device = ? AND session_id = ? AND schema_version = ?
+  `).run(revision, device, sessionId, REMOTE_PREVIEW_SCHEMA_VERSION);
 }
 
 function pruneRemotePreviewCache(maxRows: number = REMOTE_PREVIEW_CACHE_MAX_ROWS): void {
@@ -4059,20 +4102,36 @@ export function writeRemotePreviewCacheSuccess(
   const envelopeJson = JSON.stringify(envelope);
   const envelopeBytes = Buffer.byteLength(envelopeJson, 'utf8');
   if (envelopeBytes > REMOTE_PREVIEW_ENVELOPE_MAX_BYTES) return;
-  getDB().prepare(`
-    INSERT INTO session_remote_preview_cache
-      (device, session_id, schema_version, fetched_at, ok, envelope_json, envelope_bytes, failure_reason, consecutive_failures, next_attempt_at)
-    VALUES (?, ?, ?, ?, 1, ?, ?, NULL, 0, 0)
-    ON CONFLICT(device, session_id, schema_version) DO UPDATE SET
-      fetched_at = excluded.fetched_at,
-      ok = 1,
-      envelope_json = excluded.envelope_json,
-      envelope_bytes = excluded.envelope_bytes,
-      failure_reason = NULL,
-      consecutive_failures = 0,
-      next_attempt_at = 0
-  `).run(device, sessionId, REMOTE_PREVIEW_SCHEMA_VERSION, fetchedAt, envelopeJson, envelopeBytes);
-  pruneRemotePreviewCache();
+  const db = getDB();
+  const write = db.transaction(() => {
+    db.prepare(`
+      INSERT INTO session_remote_preview_cache
+        (device, session_id, schema_version, fetched_at, ok, envelope_json, envelope_bytes, failure_reason, consecutive_failures, next_attempt_at)
+      VALUES (?, ?, ?, ?, 1, ?, ?, NULL, 0, 0)
+      ON CONFLICT(device, session_id, schema_version) DO UPDATE SET
+        fetched_at = excluded.fetched_at,
+        ok = 1,
+        envelope_json = excluded.envelope_json,
+        envelope_bytes = excluded.envelope_bytes,
+        failure_reason = NULL,
+        consecutive_failures = 0,
+        next_attempt_at = 0
+    `).run(device, sessionId, REMOTE_PREVIEW_SCHEMA_VERSION, fetchedAt, envelopeJson, envelopeBytes);
+    pruneRemotePreviewCache();
+  });
+  write();
+}
+
+/** Cap on a stored `failure_reason` string. Some reasons interpolate
+ * peer-controlled content (`validateEnvelope`'s mismatched-id message
+ * embeds the peer's own claimed session id) — bound it so a misbehaving or
+ * malicious peer can't inflate a cache row's stored text unboundedly. */
+const REMOTE_PREVIEW_FAILURE_REASON_MAX_CHARS = 300;
+
+function boundFailureReason(reason: string): string {
+  return reason.length > REMOTE_PREVIEW_FAILURE_REASON_MAX_CHARS
+    ? reason.slice(0, REMOTE_PREVIEW_FAILURE_REASON_MAX_CHARS) + '…'
+    : reason;
 }
 
 /**
@@ -4089,35 +4148,45 @@ export function writeRemotePreviewCacheFailure(
   backoffMs: (consecutiveFailures: number) => number,
   now: number = Date.now(),
 ): void {
-  const existing = readRemotePreviewCache(device, sessionId);
-  const consecutiveFailures = (existing?.consecutiveFailures ?? 0) + 1;
-  const nextAttemptAt = now + backoffMs(consecutiveFailures);
-  const keepOk = existing?.ok ? 1 : 0;
-  const envelopeJson = existing?.ok ? JSON.stringify(existing.envelope) : null;
-  const envelopeBytes = envelopeJson ? Buffer.byteLength(envelopeJson, 'utf8') : 0;
-  getDB().prepare(`
-    INSERT INTO session_remote_preview_cache
-      (device, session_id, schema_version, fetched_at, ok, envelope_json, envelope_bytes, failure_reason, consecutive_failures, next_attempt_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(device, session_id, schema_version) DO UPDATE SET
-      ok = excluded.ok,
-      envelope_json = excluded.envelope_json,
-      envelope_bytes = excluded.envelope_bytes,
-      failure_reason = excluded.failure_reason,
-      consecutive_failures = excluded.consecutive_failures,
-      next_attempt_at = excluded.next_attempt_at
-  `).run(
-    device,
-    sessionId,
-    REMOTE_PREVIEW_SCHEMA_VERSION,
-    existing?.fetchedAt ?? now,
-    keepOk,
-    envelopeJson,
-    envelopeBytes,
-    reason,
-    consecutiveFailures,
-    nextAttemptAt,
-  );
+  const boundedReason = boundFailureReason(reason);
+  const db = getDB();
+  const write = db.transaction(() => {
+    const existing = readRemotePreviewCache(device, sessionId);
+    const consecutiveFailures = (existing?.consecutiveFailures ?? 0) + 1;
+    const nextAttemptAt = now + backoffMs(consecutiveFailures);
+    const keepOk = existing?.ok ? 1 : 0;
+    const envelopeJson = existing?.ok ? JSON.stringify(existing.envelope) : null;
+    const envelopeBytes = envelopeJson ? Buffer.byteLength(envelopeJson, 'utf8') : 0;
+    db.prepare(`
+      INSERT INTO session_remote_preview_cache
+        (device, session_id, schema_version, fetched_at, ok, envelope_json, envelope_bytes, failure_reason, consecutive_failures, next_attempt_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(device, session_id, schema_version) DO UPDATE SET
+        ok = excluded.ok,
+        envelope_json = excluded.envelope_json,
+        envelope_bytes = excluded.envelope_bytes,
+        failure_reason = excluded.failure_reason,
+        consecutive_failures = excluded.consecutive_failures,
+        next_attempt_at = excluded.next_attempt_at
+    `).run(
+      device,
+      sessionId,
+      REMOTE_PREVIEW_SCHEMA_VERSION,
+      existing?.fetchedAt ?? now,
+      keepOk,
+      envelopeJson,
+      envelopeBytes,
+      boundedReason,
+      consecutiveFailures,
+      nextAttemptAt,
+    );
+    // A failure-only row still occupies a slot in the row/byte-bounded cache —
+    // it must be pruned like any other write, or a persistently-offline peer's
+    // failure rows accumulate without bound (they were previously exempt from
+    // this call entirely).
+    pruneRemotePreviewCache();
+  });
+  write();
 }
 
 /**

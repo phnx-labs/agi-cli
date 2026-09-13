@@ -2349,27 +2349,28 @@ export function buildSessionDetailBlock(
   const bound = (text: string): string => redactSecrets(sanitizeForTerminal(text)).slice(0, SESSION_DETAIL_MESSAGE_MAX_CHARS);
   const daemonProjection = readSessionTimelineAny(session.id);
 
+  // A bounded tail read backs `messages` on EVERY warm cache hit (no fresh
+  // parse this call), REGARDLESS of whether the daemon projection is already
+  // present — this is what fixes a real bug review caught: a warm digest hit
+  // whose daemon timeline HAD landed still fell through to the 2-message
+  // digest summary below, because the tail-read used to be gated on the
+  // on-demand-fold branch only. `messages` and the on-demand fold are two
+  // independent uses of the same cheap, bounded events window.
+  let foldEvents = events;
+  if (foldEvents.length === 0 && session.filePath) {
+    foldEvents = readSessionTail(session.filePath, session.agent as SessionAgentId);
+  }
+
   let projection: { request?: unknown; timeline: unknown; files?: unknown } | undefined = daemonProjection;
   let onDemand = false;
-  let foldEvents = events;
-  if (!projection && session.filePath) {
-    if (foldEvents.length === 0) {
-      // Warm digest cache hit: no fresh parse happened, so fold a bounded
-      // tail window instead of re-parsing the whole transcript. Empty for a
-      // harness `readSessionTail` doesn't cover, or an agent value it
-      // rejects — that degrades to the digest-based message fallback below,
-      // never a crash.
-      foldEvents = readSessionTail(session.filePath, session.agent as SessionAgentId);
-    }
-    if (foldEvents.length > 0) {
-      const state = foldTimeline(foldEvents, emptyTimelineState());
-      projection = {
-        request: state.request,
-        timeline: projectTimeline(state, undefined),
-        files: projectSessionFiles(state),
-      };
-      onDemand = true;
-    }
+  if (!projection && foldEvents.length > 0) {
+    const state = foldTimeline(foldEvents, emptyTimelineState());
+    projection = {
+      request: state.request,
+      timeline: projectTimeline(state, undefined),
+      files: projectSessionFiles(state),
+    };
+    onDemand = true;
   }
 
   let messages: SessionDetailMessage[];
@@ -2434,7 +2435,17 @@ export async function renderSessionPreview(
     console.log(JSON.stringify({
       schemaVersion: 1,
       session: envelope?.session ?? null,
-      active: envelope?.active ?? null,
+      // `active` is a live snapshot the PEER computed at the moment it ran
+      // `sessions preview --local --json` — meaningful only for that instant.
+      // When this response is served from the durable cache (`cache.source ===
+      // 'cache'`, which can be up to 45s old, or indefinitely old under a
+      // matched --revision), presenting that stale snapshot under the same
+      // `active` key would read as the session's CURRENT working/idle status
+      // when it may no longer be. Null it out rather than relabel it with an
+      // age stamp: the caller already has `cache.fetchedAt`/`cache.stale` to
+      // reason about staleness, and getting a fresh `active` read costs
+      // another SSH round trip this fast path exists specifically to avoid.
+      active: result.cache.source === 'live' ? (envelope?.active ?? null) : null,
       preview: envelope?.preview ?? null,
       error: envelope?.error ?? (envelope ? null : result.cache.reason),
       // The peer's own `sessions preview --local --json` already computed
@@ -6293,7 +6304,7 @@ export function registerSessionsCommands(program: Command): void {
     .option('-D, --device <target...>', 'Resolve only on the named device(s)')
     .option('--json', 'Output the session preview as JSON')
     .option('--refresh', 'Bypass the durable remote-preview cache and negative backoff for one bounded fetch (full ID + single --device only)')
-    .option('--revision <cursor>', 'Opaque content-revision cursor from a prior response\'s details.sourceRevision; a match serves the cache with zero SSH past the freshness window, a mismatch fetches once (full ID + single --device only)');
+    .option('--revision <cursor>', 'Opaque caller-owned activity cursor (any stable value YOU track, e.g. your own feed\'s lastActivityMs) -- passing the SAME value as your last call confirms nothing changed and serves the cache with zero SSH indefinitely; a different value fetches once, still subject to backoff unless --refresh is also set (full ID + single --device only)');
 
   setHelpSections(previewCmd, {
     examples: `

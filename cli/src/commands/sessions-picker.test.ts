@@ -938,6 +938,43 @@ describe('loadSessionPreviewDigest bounds an uncached parse (PHNX-3999)', () => 
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('recovers the REAL original request via a bounded head read when SessionMeta has no indexed firstUserMessage, never a tail follow-up', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-preview-bounded-head-'));
+    try {
+      const filePath = path.join(dir, 'session.jsonl');
+      const sessionId = 'bounded-head-session';
+      const originalRequest = 'Set up the original bootstrap task for this repo';
+      const followUp = 'This is a much later follow-up, not the original request';
+      const filler = JSON.stringify({
+        type: 'assistant', timestamp: '2026-08-01T14:00:05.000Z',
+        message: { role: 'assistant', model: 'claude-sonnet-4-20250514', usage: { input_tokens: 1, output_tokens: 1 }, content: [{ type: 'text', text: 'x'.repeat(500) }] },
+      });
+      const lines: string[] = [
+        JSON.stringify({ type: 'user', timestamp: '2026-08-01T14:00:00.000Z', cwd: dir, sessionId, version: '2.1.112', message: { role: 'user', content: originalRequest } }),
+      ];
+      const targetBytes = 5 * 1024 * 1024; // over the 4 MiB bound
+      while (lines.reduce((n, l) => n + l.length + 1, 0) < targetBytes) lines.push(filler);
+      // A follow-up user turn near the END — inside the tail window, but NOT
+      // the original request. If firstUser ever came from the tail fold, it
+      // would wrongly surface this instead.
+      lines.push(JSON.stringify({ type: 'user', timestamp: '2026-08-01T15:00:00.000Z', message: { role: 'user', content: followUp } }));
+      fs.writeFileSync(filePath, lines.join('\n') + '\n');
+
+      // Deliberately NO firstUserMessage/lastUserMessage on the session — the
+      // scenario this fallback exists for (an index row without them yet).
+      const session = mk({ id: sessionId, shortId: 'boundedhd', filePath, cwd: dir });
+
+      const { digest, error } = loadSessionPreviewDigest(session);
+
+      expect(error).toBeUndefined();
+      expect(digest!.partial).toBe(true);
+      expect(digest!.firstUser).toBe(originalRequest);
+      expect(digest!.firstUser).not.toBe(followUp);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('formatHeader — leads with the session title (RUSH-2757)', () => {
