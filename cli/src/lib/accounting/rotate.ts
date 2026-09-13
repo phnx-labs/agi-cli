@@ -18,7 +18,7 @@ import {
   type AccountInfo,
   type CredentialPresence,
 } from '../agents.js';
-import { readMeta, writeMeta, getHelpersDir } from '../state.js';
+import { readMeta, getHelpersDir } from '../state.js';
 import { resolveConfiguredModel } from '../models.js';
 import { isTierToken, resolveTier } from '../model-tiers.js';
 import { listInstalledVersions, getVersionHomePath, resolveVersion } from '../installations/versions.js';
@@ -159,7 +159,7 @@ export function normalizeRunStrategy(value: unknown): RunStrategy | null {
 }
 
 /** Read project-local run strategy from the nearest agents.yaml, if present. */
-export function getProjectRunStrategy(agent: AgentId, startPath: string): RunStrategy | null {
+function getProjectRunStrategy(agent: AgentId, startPath: string): RunStrategy | null {
   for (const runConfig of getProjectRunConfigs(startPath)) {
     const strategy = normalizeRunStrategy(runConfig[agent]?.strategy);
     if (strategy) return strategy;
@@ -182,14 +182,6 @@ export function getConfiguredRunStrategy(agent: AgentId, startPath: string = pro
   return getProjectRunStrategy(agent, startPath)
     ?? normalizeRunStrategy(readMeta().run?.[agent]?.strategy)
     ?? 'balanced';
-}
-
-/** Persist the global run strategy used by bare `agents run <agent>`. */
-export function setGlobalRunStrategy(agent: AgentId, strategy: RunStrategy): void {
-  const meta = readMeta();
-  if (!meta.run) meta.run = {};
-  meta.run[agent] = { ...(meta.run[agent] ?? {}), strategy };
-  writeMeta(meta);
 }
 
 /**
@@ -234,7 +226,7 @@ export function isLaunchableSignedIn(
 }
 
 /** Launchable-signed-in verdict for ONE specific version on THIS device. */
-export interface VersionLaunchState {
+interface VersionLaunchState {
   /** True iff this exact version home can spawn a signed-in agent right now. */
   launchable: boolean;
   /** The version home's account email when launchable, else null. */
@@ -768,7 +760,7 @@ export function pickAvailableCandidate(
  * Per-harness routing summary for `agents run auto` — the cross-harness layer
  * that sits above `pickBalancedCandidate` (which is strictly per-harness).
  */
-export interface HarnessSummary {
+interface HarnessSummary {
   agent: AgentId;
   /** Every installed account slot probed for this harness. */
   candidates: RotateCandidate[];
@@ -782,7 +774,7 @@ export interface HarnessSummary {
   exclusionReasons: string[];
 }
 
-export interface HarnessPickResult {
+interface HarnessPickResult {
   /** The harness picked for this run. */
   picked: HarnessSummary;
   /** Harnesses with ≥1 healthy account (including the picked one). */
@@ -1229,14 +1221,6 @@ export async function resolveAccountVersion(
  */
 export async function selectBalancedVersion(agent: AgentId): Promise<RotateResult | null> {
   return pickBalancedCandidate(await collectRunCandidates(agent));
-}
-
-/** Select the configured version if available, otherwise another available version. */
-export async function selectAvailableVersion(
-  agent: AgentId,
-  preferredVersion?: string | null,
-): Promise<RotateResult | null> {
-  return pickAvailableCandidate(await collectRunCandidates(agent), preferredVersion);
 }
 
 /**

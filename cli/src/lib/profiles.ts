@@ -21,7 +21,7 @@ import {
   isSecretsTransportError,
   profileKeychainItem,
 } from './secrets-client.js';
-import { getPreset, type Preset } from './profiles-presets.js';
+import { type Preset } from './profiles-presets.js';
 import { MODEL_TIERS, isTierToken, type ModelTier } from './model-tiers.js';
 import { addAccount, findAccount, resolveCredentialAccount } from './account-registry.js';
 import { atomicWriteFileSync } from './fs-atomic.js';
@@ -112,7 +112,7 @@ export interface ProfileSummary {
 const PROFILE_NAME_PATTERN = /^[a-z0-9][a-z0-9-_]{0,48}$/i;
 
 /** Get the directory where profile YAML files are stored. */
-export function getProfilesDir(): string {
+function getProfilesDir(): string {
   return path.join(getUserAgentsDir(), 'profiles');
 }
 
@@ -489,7 +489,7 @@ export function authEnvKeyForHost(host: AgentId): string | null {
 }
 
 /** Options for {@link profileFromHostModel}. */
-export interface HostModelOptions {
+interface HostModelOptions {
   version?: string;
   /** Base URL for OpenAI/Anthropic-compatible hosts (claude, codex). Ignored for hosts without a known var. */
   baseUrl?: string;
@@ -701,7 +701,7 @@ export function resolveProfileEnv(profile: Profile): Record<string, string> {
 }
 
 /** Resolved profile data ready for spawning an agent process. */
-export interface ResolvedProfileRun {
+interface ResolvedProfileRun {
   agent: AgentId;
   version?: string;
   env: Record<string, string>;
@@ -814,12 +814,4 @@ export function resolveProfileForRun(name: string, requestedModel?: string): Res
     if (pinned) resolved.resolvedModel = pinned;
   }
   return resolved;
-}
-
-/**
- * Look up the preset a profile was created from, if any. Used by
- * `profiles view` to show upstream metadata like signup URLs.
- */
-export function getPresetForProfile(profile: Profile): Preset | undefined {
-  return profile.preset ? getPreset(profile.preset) : undefined;
 }

@@ -32,7 +32,7 @@ import { getTerminalsDir } from '../state.js';
 const execFileAsync = promisify(execFile);
 
 /** Where a tmux-hosted session is currently displayed. */
-export interface ViewingIn {
+interface ViewingIn {
   /** Host app of the attached client — 'ghostty', 'iterm', 'code', 'codium', … */
   app: string;
   /** 1-based tab number within that app, when it can be resolved. */

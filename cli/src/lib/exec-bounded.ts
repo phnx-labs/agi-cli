@@ -29,9 +29,9 @@
 import { spawn } from 'child_process';
 
 /** Grace between SIGTERM and SIGKILL for a child that overran its deadline. */
-export const KILL_GRACE_MS = 250;
+const KILL_GRACE_MS = 250;
 
-export interface ExecFileBoundedOptions {
+interface ExecFileBoundedOptions {
   /** Hard wall-clock cap. On expiry the child's process group is SIGTERMed, then SIGKILLed after {@link KILL_GRACE_MS}. Required — an unbounded tick-path spawn is the bug this helper exists to prevent. */
   timeoutMs: number;
   /** Working directory for the child. */
@@ -42,7 +42,7 @@ export interface ExecFileBoundedOptions {
   input?: string;
 }
 
-export interface BoundedExecResult {
+interface BoundedExecResult {
   stdout: string;
   stderr: string;
   /** Exit code, or null when the process was killed by a signal (including our timeout kill) or never spawned. */

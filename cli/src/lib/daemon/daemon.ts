@@ -180,7 +180,7 @@ export const DAEMON_AUTOSTART_FAILURE_LIMIT = 5;
  *   !running + enabled  → boot  (gate flipped on since boot)
  *   !running + !enabled → none  (stay dark)
  */
-export type SchedulerGateTransition = 'reload' | 'stop' | 'boot' | 'none';
+type SchedulerGateTransition = 'reload' | 'stop' | 'boot' | 'none';
 
 export function schedulerGateTransition(running: boolean, enabled: boolean): SchedulerGateTransition {
   if (running) return enabled ? 'reload' : 'stop';
@@ -336,7 +336,7 @@ function removeDaemonPidIfOwned(pid: number): boolean {
   return readDaemonPid() !== pid;
 }
 
-export interface DaemonHeartbeat {
+interface DaemonHeartbeat {
   lastTick: string;
   pid: number;
 }
@@ -2213,7 +2213,7 @@ function waitForPid(timeoutMs: number): number | null {
  * One piece of daemon state that a graceful `handleShutdown` removes and an
  * escalated kill leaves behind (RUSH-2421).
  */
-export interface StopResidueArtifact {
+interface StopResidueArtifact {
   label: string;
   present: boolean;
   /** The file names a live owner, including a stopped target that survived. */
@@ -2315,7 +2315,7 @@ export function stopResidueArtifacts(stoppedPid: number | null, survivors: numbe
  * in-flight routine children that survive deliberately (SING-11a) and are
  * reported, never killed.
  */
-export interface DaemonStopResult {
+interface DaemonStopResult {
   ok: boolean;
   stoppedPid: number | null;
   escalated: boolean;

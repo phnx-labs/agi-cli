@@ -15,8 +15,6 @@ import { type ActivityEvent } from './activity.js';
 import { ActivityStream } from './activity-stream.js';
 import { PR_STATUS_TTL_MS, readPullRequestStatus, withPullRequestStatus, type PullRequestStatus } from './pr-status.js';
 import type { GhExec } from '../github/pr-mergeable.js';
-
-export const FEED_WATCH_VERSION = 1 as const;
 type Base = { v: 1; type: string; streamId: string; sequence: number; scope: string };
 export type FeedWatchEnvelope =
   | Base & { type: 'reset'; capturedAt: number; agents: SessionWatchRow[]; attention: AttentionItem[] }
@@ -196,7 +194,7 @@ function watchAttentionStores(onChange: () => void): () => void {
   return () => { for (const watcher of watchers) watcher.close(); };
 }
 
-export interface WatchLocalFeedOptions {
+interface WatchLocalFeedOptions {
   scope: string;
   signal: AbortSignal;
   emit: (event: FeedWatchEnvelope) => void;

@@ -189,7 +189,7 @@ function authEnvKeyForHostOrThrow(host: AgentId): string {
  * handled by the caller ({@link buildEdit}), not here: `forkProfile`'s own
  * ternary treats an empty string as "no override" and would otherwise inherit
  * the source's version instead of clearing it. */
-export function buildEditOverrides(opts: EditOptions): ForkProfileOptions {
+function buildEditOverrides(opts: EditOptions): ForkProfileOptions {
   const overrides: ForkProfileOptions = {};
   if (opts.model !== undefined) overrides.model = opts.model;
   if (opts.baseUrl !== undefined) overrides.baseUrl = opts.baseUrl;
@@ -266,7 +266,7 @@ export function addNeedsWizard(name: string | undefined, opts: AddProfileOptions
 }
 
 /** Whether the pre-save connection test runs, or must be asked for on a TTY. */
-export type ConnectionTestGate = 'on' | 'off' | 'ask';
+type ConnectionTestGate = 'on' | 'off' | 'ask';
 
 /**
  * Resolve the tri-state connection-test gate (RUSH-2221), pure so the branching

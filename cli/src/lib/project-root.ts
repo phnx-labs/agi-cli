@@ -148,7 +148,7 @@ export async function inferProjectRoot(cwd: string): Promise<string | undefined>
  * Resolve the projects root, auto-inferring and caching on first use. Throws an
  * actionable error when it is neither configured nor inferrable from `cwd`.
  */
-export async function ensureProjectRoot(cwd: string): Promise<string> {
+async function ensureProjectRoot(cwd: string): Promise<string> {
   const existing = getProjectRoot();
   if (existing) return existing;
   const inferred = await inferProjectRoot(cwd);
@@ -164,7 +164,7 @@ export async function ensureProjectRoot(cwd: string): Promise<string> {
   return inferred;
 }
 
-export interface ProjectRef {
+interface ProjectRef {
   slug: string;
   worktree?: string;
 }

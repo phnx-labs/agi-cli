@@ -23,7 +23,7 @@
 
 import type { BashDanger } from './schema2.js';
 
-export interface DangerVerdict {
+interface DangerVerdict {
   danger: BashDanger;
   /** Short stable label naming the operation, e.g. `recursive-delete`. Omitted for `normal`. */
   destructiveOperation?: string;

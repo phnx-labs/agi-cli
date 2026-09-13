@@ -112,7 +112,7 @@ function installedVersionMarkerPath(): string {
 /** Version label for a bundle that has none of its own (a local dev build). */
 export const LOCAL_BUILD_LABEL = 'local';
 
-export type MenubarStamp =
+type MenubarStamp =
   | { source: 'release'; helperVersion: string }
   | { source: 'local'; sourceStamp: string }
   | { source: 'legacy'; raw: string };
@@ -171,12 +171,12 @@ function disabledSentinelPath(): string {
 }
 
 /** True if the user explicitly disabled the menu bar (don't auto-enable on upgrade). */
-export function menubarDisabledByUser(): boolean {
+function menubarDisabledByUser(): boolean {
   return fs.existsSync(disabledSentinelPath());
 }
 
 /** True if the launchd plist for the menu-bar service is installed. */
-export function menubarServiceInstalled(): boolean {
+function menubarServiceInstalled(): boolean {
   return onDarwin() && fs.existsSync(servicePlistPath());
 }
 
@@ -255,7 +255,7 @@ export function cachedReleaseBundlePath(): string {
  * build, but never below what this Mac already runs — a release deleted after
  * it was installed must not roll the helper back through `setup`/`enable`.
  */
-export async function menubarVersionToInstall(opts: { force?: boolean } = {}): Promise<string> {
+async function menubarVersionToInstall(opts: { force?: boolean } = {}): Promise<string> {
   const resolved = await resolveMenubarVersion({ force: opts.force });
   const installed = readInstalledMenubarStamp();
   if (installed?.source === 'release' && compareVersions(installed.helperVersion, resolved) > 0) return installed.helperVersion;
@@ -1522,7 +1522,7 @@ export function buildMenubarDoctorReport(): MenubarDoctorReport {
 }
 
 /** Outcome of one auto-update pass (`updateMenubarHelperIfNewer`). */
-export interface MenubarUpdateResult {
+interface MenubarUpdateResult {
   outcome: 'updated' | 'current' | 'skipped' | 'failed';
   installed: string | null;
   available: string;

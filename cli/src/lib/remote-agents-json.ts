@@ -25,7 +25,7 @@ import { machineId, normalizeHost } from './machine-id.js';
 
 const REMOTE_TIMEOUT_MS = 12_000;
 
-export interface RemoteAgentsJsonOptions<T> {
+interface RemoteAgentsJsonOptions<T> {
   args: string[];
   noFanoutEnv: string;
   hosts?: string[];
@@ -74,7 +74,7 @@ export interface RemoteAgentsJsonParseResult<T> {
   valid: boolean;
 }
 
-export interface RemoteAgentsJsonResult<T> {
+interface RemoteAgentsJsonResult<T> {
   items: T[];
   deviceCount: number;
   /** Devices that were dialed but answered with an error / no CLI / a timeout. */

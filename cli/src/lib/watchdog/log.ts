@@ -120,7 +120,7 @@ export function formatEvent(ev: WatchdogEvent): string {
  * writer trims (watchdogLog.ts trimToLast). Large enough to keep a useful
  * history, small enough to bound the file the UI polls.
  */
-export const WATCHDOG_LOG_MAX_LINES = 5000;
+const WATCHDOG_LOG_MAX_LINES = 5000;
 export const WATCHDOG_TAIL_MAX_CHARS = 4096;
 
 /** Keep the newest transcript context without letting it consume the audit window. */

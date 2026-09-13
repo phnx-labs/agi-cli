@@ -708,8 +708,3 @@ export function setMonitorEnabled(name: string, enabled: boolean): void {
   monitor.enabled = enabled;
   writeMonitor(monitor);
 }
-
-/** Check whether a monitor with the given name exists on disk. */
-export function monitorExists(name: string): boolean {
-  return readMonitor(name) !== null;
-}

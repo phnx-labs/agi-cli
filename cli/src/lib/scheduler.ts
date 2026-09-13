@@ -29,7 +29,7 @@ interface ScheduledJob {
 }
 
 /** How a fire was triggered, carrying the scheduler's intended UTC slot time. */
-export interface TriggerContext {
+interface TriggerContext {
   /** The ALIGNED cron slot this callback fires for, for the single-fire claim
    *  keyed on (routine, scheduledFor). Derived by {@link fireSlot} — NOT croner's
    *  raw `currentRun()`, which carries wall-clock jitter. */

@@ -37,7 +37,7 @@ export type RemoteBackend = 'keychain' | 'file';
 
 // --- bundle document ---------------------------------------------------
 
-export const SECRET_TYPES = [
+const SECRET_TYPES = [
   'api-key',
   'token',
   'password',
@@ -48,7 +48,7 @@ export const SECRET_TYPES = [
   'webhook',
   'note',
 ] as const;
-export type SecretType = (typeof SECRET_TYPES)[number];
+type SecretType = (typeof SECRET_TYPES)[number];
 
 /** Per-secret metadata; absent fields are omitted at write time. */
 export interface VarMeta {

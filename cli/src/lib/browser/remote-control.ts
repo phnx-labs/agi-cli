@@ -41,7 +41,7 @@ export function isFleetRemoteInvocation(env: NodeJS.ProcessEnv = process.env): b
  * Whether this machine allows other fleet machines to drive its browser. Reads
  * the device-scope `browser.remote-control` config key. Unset = off (deny).
  */
-export function remoteControlEnabled(): boolean {
+function remoteControlEnabled(): boolean {
   return getConfigValue('browser.remote-control').value === true;
 }
 
@@ -88,7 +88,7 @@ export function assertRemoteControlAllowedForRequest(
 }
 
 /** The refusal text, shared by the CLI-side and daemon-side gates. */
-export function remoteControlRefusal(who: string): string {
+function remoteControlRefusal(who: string): string {
   return (
     `${who} tried to drive this machine's browser over \`browser --device\`, but remote ` +
     `browser control is off here. To allow it, run on THIS machine:\n` +

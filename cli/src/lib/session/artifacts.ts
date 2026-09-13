@@ -72,7 +72,7 @@ export function discoverArtifacts(meta: SessionMeta): SessionArtifact[] {
 }
 
 /** Refuse to load artifact files larger than this. Returns '' silently above the cap. */
-export const ARTIFACT_MAX_BYTES = 50_000_000;
+const ARTIFACT_MAX_BYTES = 50_000_000;
 
 /** Read the current contents of an artifact file from disk. Rejects symlinks. */
 export function readArtifact(artifact: SessionArtifact): string {

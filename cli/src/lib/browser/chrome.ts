@@ -494,11 +494,6 @@ async function waitForDevToolsPort(
   );
 }
 
-export async function attachToChrome(port: number): Promise<string> {
-  const { wsUrl } = await discoverBrowserWsUrl(port);
-  return wsUrl;
-}
-
 export function killChrome(pid: number): void {
   if (process.platform === 'win32') {
     // On Windows `process.kill(pid, 'SIGINT')` maps to TerminateProcess — a
@@ -693,7 +688,7 @@ export function parseUserDataDirFromCommandLine(cmdline: string): string | null 
   return value.length > 0 ? value : null;
 }
 
-export interface PortOccupant {
+interface PortOccupant {
   pid: number;
   command: string;
 }

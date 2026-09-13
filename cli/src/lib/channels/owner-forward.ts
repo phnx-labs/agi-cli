@@ -44,9 +44,9 @@ export const OWNER_FORWARD_GUARD_ENV = 'AGENTS_OWNER_NO_FORWARD';
 const PEER_SEND_TIMEOUT_MS = 15_000;
 
 /** Why forwarding did not run, so a caller/test can assert the decision. */
-export type OwnerForwardSkip = 'guarded' | 'not-rush-backed' | 'no-capable-peer';
+type OwnerForwardSkip = 'guarded' | 'not-rush-backed' | 'no-capable-peer';
 
-export interface OwnerForwardPlan {
+interface OwnerForwardPlan {
   /** Ordered machine ids to try — capable (macOS), reachable, self excluded. */
   candidates: string[];
   /** Set when forwarding does not apply; the caller keeps its local error. */
@@ -110,12 +110,12 @@ export function planOwnerForward(
  * unreachable / not a dialable device / answered with unparseable output —
  * every one of which means "try the next peer".
  */
-export interface PeerOwnerEnvelope {
+interface PeerOwnerEnvelope {
   thread?: string;
   from?: string;
 }
 
-export type PeerOwnerSender = (
+type PeerOwnerSender = (
   machine: string,
   text: string,
   channel: string,

@@ -32,7 +32,7 @@ import {
   type UnifiedSyncStatus,
   type AgentVersionStatus, formatDriftRows } from './sync-status.js';
 
-export interface DriftSyncOptions {
+interface DriftSyncOptions {
   cwd?: string;
   /** Reconcile everything detected with no prompts — the "kick it" path, also the
    * non-TTY / menu-bar-launched-with-flag behavior. Pulls `.system` if behind. */
@@ -43,7 +43,7 @@ export interface DriftSyncOptions {
   quiet?: boolean;
 }
 
-export interface DriftSyncResult {
+interface DriftSyncResult {
   systemBehindBefore: number;
   systemPulled: boolean;
   healed: VersionHealResult[];

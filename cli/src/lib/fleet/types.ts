@@ -220,15 +220,6 @@ export interface AuthFilePayload {
   mode: number;
 }
 
-/** The plaintext we encrypt before shipping auth over the wire. */
-export interface AuthBundle {
-  /** Schema version for forward-compat. */
-  v: 1;
-  /** Source machine name the snapshot was taken on. */
-  source: string;
-  files: AuthFilePayload[];
-}
-
 /** Result of classifying one source agent's auth for propagation. */
 export interface AuthSnapshotResult {
   files: AuthFilePayload[];

@@ -31,7 +31,7 @@
 export type HelperName = 'menubar';
 
 /** One helper's release identity. */
-export interface HelperRelease {
+interface HelperRelease {
   /** Tag prefix — the release is `<tagPrefix>/v<version>`. */
   tagPrefix: string;
   /**

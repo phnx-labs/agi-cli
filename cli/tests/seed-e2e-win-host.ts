@@ -23,12 +23,12 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-export interface SshGFields {
+interface SshGFields {
   user: string;
   hostname: string;
 }
 
-export interface SeedE2eWinHostOpts {
+interface SeedE2eWinHostOpts {
   host: string;
   /** Private `AGENTS_DEVICES_DIR` (fork-temp from setup.ts). */
   devicesDir: string;

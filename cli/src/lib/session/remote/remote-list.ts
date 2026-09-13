@@ -63,7 +63,7 @@ const REMOTE_TOOL_TIMEOUT_MS = 60_000;
 export { REMOTE_STDOUT_MAX_BYTES, RemoteUtf8Accumulator } from '../../ssh-exec.js';
 export const REMOTE_TOOL_AGGREGATE_MAX_BYTES = TOOL_QUERY_MAX_SERIALIZED_BYTES;
 
-export interface RemoteToolByteBudget {
+interface RemoteToolByteBudget {
   remainingBytes: number;
   exhausted: boolean;
 }
@@ -218,7 +218,7 @@ export function sshCapture(
   });
 }
 
-export interface RemoteListResult {
+interface RemoteListResult {
   sessions: SessionMeta[];
   /** How many peer machines we attempted to reach (drives the empty-fleet tip). */
   deviceCount: number;
@@ -245,7 +245,7 @@ export function isAutomaticSessionPeer(d: DeviceProfile, self: string): boolean 
  * address. `forwardedArgs` are the caller's own sessions args (query + filters,
  * already `--json`) so every peer returns the same slice this machine asked for.
  */
-export interface GatherRemoteListOptions {
+interface GatherRemoteListOptions {
   /**
    * Opt-in early-exit for a globally-unique id lookup (a full UUID): the first
    * peer to return the matching row resolves the fan-out and cancels the rest.
@@ -283,14 +283,14 @@ export async function gatherRemoteList(
   };
 }
 
-export interface RemoteToolSearchResult {
+interface RemoteToolSearchResult {
   envelopes: Array<{ machine: string; envelope: ToolSearchEnvelope }>;
   deviceCount: number;
   unreachable: string[];
   truncated: string[];
 }
 
-export interface RemoteToolProgramCountResult {
+interface RemoteToolProgramCountResult {
   envelopes: Array<{ machine: string; envelope: ToolProgramCountEnvelope }>;
   deviceCount: number;
   unreachable: string[];

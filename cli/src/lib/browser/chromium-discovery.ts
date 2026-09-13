@@ -14,7 +14,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import type { BrowserType } from './types.js';
 
-export interface ChromiumNativeProfile {
+interface ChromiumNativeProfile {
   browser: BrowserType;
   /** The agents-cli profile name: `<browser>-<display-name-slug>`. */
   name: string;
@@ -26,7 +26,7 @@ export interface ChromiumNativeProfile {
   displayName: string;
 }
 
-export type ChromiumDiscoveryResult =
+type ChromiumDiscoveryResult =
   | { ok: true; profiles: ChromiumNativeProfile[]; userDataDir: string }
   | { ok: false; kind: 'unsupported' | 'not-installed' | 'invalid'; reason: string };
 

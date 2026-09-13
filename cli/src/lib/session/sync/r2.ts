@@ -13,7 +13,7 @@
 import { AwsClient } from 'aws4fetch';
 import type { R2Config } from './config.js';
 
-export interface HeadResult {
+interface HeadResult {
   size: number;
   etag: string;
 }

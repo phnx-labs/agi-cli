@@ -21,7 +21,7 @@ import type { WatchdogTickResult } from '../watchdog/runner.js';
  * is deliberately NOT claimed here (the registry's cached tailscale flag is
  * documented as stale in both directions — registry.ts isLikelyOnline).
  */
-export interface MenubarDevice {
+interface MenubarDevice {
   name: string;
   platform: string;
   interactive: boolean;
@@ -29,7 +29,7 @@ export interface MenubarDevice {
   preferred: boolean;
 }
 
-export interface MenubarSnapshot {
+interface MenubarSnapshot {
   version: 1;
   capturedAt: string;
   /**

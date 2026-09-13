@@ -219,7 +219,7 @@ function parseHostPlatform(raw: string): { base: string; platform?: DevicePlatfo
   return { base: rest, platform };
 }
 
-export interface HandlerHostResolution {
+interface HandlerHostResolution {
   /** Resolved execution host, or undefined to run locally. */
   host?: string;
   /** Strategy that should be set on the JobConfig. */
@@ -391,7 +391,7 @@ const asString = (v: unknown): string => (typeof v === 'string' ? v : '');
  * whole text as the prompt. The token pattern forbids slashes, so a project
  * value can never carry a path into a `cwd`/`project` substitution.
  */
-export function parseSlackMessage(payload: SlackPayload): SlackMessageContext {
+function parseSlackMessage(payload: SlackPayload): SlackMessageContext {
   const cleaned = asString(payload.text).replace(/^\s*<@[^>]+>\s*/, '').trim();
   const m = /^([A-Za-z0-9][\w.-]*)\s*:\s+([\s\S]+)$/.exec(cleaned);
   return {
@@ -446,7 +446,7 @@ export function buildWebhookContext(webhook: IncomingWebhook): WebhookContext {
   };
 }
 
-export interface ExecuteHandlerOptions {
+interface ExecuteHandlerOptions {
   dispatchAgent?: (config: JobConfig) => Promise<RunMeta>;
   dispatchWorkflow?: (config: JobConfig) => Promise<RunMeta>;
   execCommand?: (command: string) => Promise<{ exitCode: number; output: string }>;

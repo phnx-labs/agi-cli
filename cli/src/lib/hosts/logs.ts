@@ -19,7 +19,7 @@ import { reconcileTask } from './reconcile.js';
 import { sshExecRaw } from '../ssh-exec.js';
 import { encodePowershell } from './remote-cmd.js';
 
-export interface HostLogResult {
+interface HostLogResult {
   /** False when no host task with this id exists (caller may fall through to sessions). */
   found: boolean;
   /** Process exit code to adopt when the task was shown/followed. */

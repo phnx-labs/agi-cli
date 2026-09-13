@@ -3,7 +3,7 @@ import { getUserAgentsDir } from './state.js';
 import { codexDefaultWritableRoots } from './permissions.js';
 import { repoAgentsDirForCwd } from './project-key.js';
 
-export type CodexPolicyMode = 'plan' | 'edit' | 'auto' | 'skip';
+type CodexPolicyMode = 'plan' | 'edit' | 'auto' | 'skip';
 
 export const CODEX_PLAN_PROFILE = 'agents-plan';
 export const CODEX_EDIT_PROFILE = 'agents-edit';

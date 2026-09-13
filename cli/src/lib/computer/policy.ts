@@ -123,7 +123,7 @@ export function loadDefaultPeers(opts: { computerBin?: string } = {}): string[] 
  * engine is ever spawned (see `shouldBlockOffPlatform`). The RFB protocol
  * implementation itself went to the engine.
  */
-export function parseVncEndpoint(raw: string | undefined): { host: string; port: number } | null {
+function parseVncEndpoint(raw: string | undefined): { host: string; port: number } | null {
   if (!raw || raw.length === 0) return null;
   const idx = raw.lastIndexOf(':');
   const host = idx >= 0 ? raw.slice(0, idx) : raw;

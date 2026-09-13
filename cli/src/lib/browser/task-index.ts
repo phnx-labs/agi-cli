@@ -17,7 +17,7 @@ import * as path from 'node:path';
 import { getBrowserRuntimeDir } from '../state.js';
 import { machineId } from '../machine-id.js';
 
-export interface TaskBinding {
+interface TaskBinding {
   device: string;
   profile?: string;
   url?: string;
@@ -26,14 +26,14 @@ export interface TaskBinding {
   createdAt: number;
 }
 
-export type TaskIndex = Record<string, TaskBinding>;
+type TaskIndex = Record<string, TaskBinding>;
 
 export const REJECT_DEVICE_MESSAGE =
   '--device is only valid on `agents browser start`.\n' +
   'The task is bound to a device at start; later verbs resolve it from --task.\n' +
   'Next: agents browser start --task <name> --device <device>';
 
-export type TaskRoute =
+type TaskRoute =
   | { kind: 'proceed'; task?: string; device: string }
   | { kind: 'unknown'; task: string; message: string }
   | { kind: 'ambiguous'; message: string }
@@ -53,7 +53,7 @@ export function isTerminalBrowserVerb(verb: string): boolean {
   return TERMINAL_BROWSER_VERBS.has(verb);
 }
 
-export function taskIndexPath(): string {
+function taskIndexPath(): string {
   return path.join(getBrowserRuntimeDir(), 'task-index.json');
 }
 

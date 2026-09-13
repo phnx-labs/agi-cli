@@ -119,7 +119,7 @@ function spawnHeadless(command: string, args: string[], logFile: string): Promis
   });
 }
 
-export async function detachAction(id: string, opts: { local?: boolean } = {}): Promise<void> {
+async function detachAction(id: string, opts: { local?: boolean } = {}): Promise<void> {
   const { self, activeById } = await gatherLiveTargets(!!opts.local, { includeCloud: true, selector: id });
   const resolved = resolveOne(activeById, id);
   if ('error' in resolved) {

@@ -19,7 +19,7 @@
 import type { ProjectDef } from './projects.js';
 
 /** A definition that disagrees with the machine it describes. */
-export interface ProjectFinding {
+interface ProjectFinding {
   project: string;
   /** One line naming the disagreement, both sides quoted. */
   message: string;

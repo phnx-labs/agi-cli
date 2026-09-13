@@ -49,13 +49,13 @@ import {
 } from './subagents.js';
 
 /** A path an installed subagent occupies, tagged for removal/trash handling. */
-export interface OccupiedEntry {
+interface OccupiedEntry {
   path: string;
   kind: 'file' | 'dir';
 }
 
 /** Parsed metadata for one installed subagent (drives the rich listing). */
-export interface SubagentMeta {
+interface SubagentMeta {
   frontmatter: SubagentFrontmatter;
   files: string[];
   /** Primary on-disk path for the listing's `path` field (a file or a dir, per layout). */
@@ -66,7 +66,7 @@ export interface SubagentMeta {
  * The complete on-disk contract for one agent's subagents. Every operation is
  * expressed here so the engine below never branches on the agent id.
  */
-export interface SubagentTarget {
+interface SubagentTarget {
   /** Absolute container dir under a home root (a version home or an agent home). */
   dir(home: string): string;
   /** Materialize central subagent `sub` into container `dir`. Throws on fs error. */

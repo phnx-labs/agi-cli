@@ -22,8 +22,6 @@ import { AGENT_IDS, type AgentId } from './types.js';
 
 /** Legacy readable alias for `__claude__`. Not migrated in this track. */
 export const AUTH_STORE_ALIAS = 'auth';
-/** The one reserved bundle name most callers actually need. */
-export const AUTH_BUNDLE_NAME = AUTH_STORE_ALIAS;
 
 /**
  * The reserved `auth` bundle holds per-account Claude setup-tokens for
@@ -35,7 +33,7 @@ export const AUTH_BUNDLE_NAME = AUTH_STORE_ALIAS;
  */
 export const AUTH_BUNDLE_BACKEND: SecretsBackend = 'file';
 
-export const RESERVED_BUNDLE_NAMES = new Set([AUTH_BUNDLE_NAME]);
+export const RESERVED_BUNDLE_NAMES = new Set([AUTH_STORE_ALIAS]);
 
 export function isReservedBundleName(name: string): boolean {
   return RESERVED_BUNDLE_NAMES.has(name.trim().toLowerCase());
@@ -126,11 +124,11 @@ export function inspectReservedAuthBundle(): {
 } {
   let exists: boolean;
   try {
-    exists = bundleExistsSync(AUTH_BUNDLE_NAME);
+    exists = bundleExistsSync(AUTH_STORE_ALIAS);
   } catch {
     return { exists: false, backend: null, ok: true };
   }
   if (!exists) return { exists: false, backend: null, ok: true };
-  const backend = bundleBackendSync(AUTH_BUNDLE_NAME);
+  const backend = bundleBackendSync(AUTH_STORE_ALIAS);
   return { exists: true, backend, ok: backend === AUTH_BUNDLE_BACKEND };
 }

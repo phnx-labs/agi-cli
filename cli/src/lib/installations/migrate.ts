@@ -1744,7 +1744,7 @@ export function migrateRoutineRemoteCwdToCwd(routinesDir?: string): void {
  * `resume`) makes it ready. Never materializes a device manifest that does not
  * yet exist, and never touches command routines (they run in the target home).
  */
-export function pauseUnreadyEnabledRoutines(): void {
+function pauseUnreadyEnabledRoutines(): void {
   const enabled = enabledRoutineNames();
   if (enabled === null) return; // no manifest yet — nothing activated to pause
   const enabledSet = new Set(enabled);

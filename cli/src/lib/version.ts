@@ -43,7 +43,7 @@ export function resolveAgentsBin(): string | null {
   return null;
 }
 
-export interface InstallLayout {
+interface InstallLayout {
   /** The install's `dist/` directory (holds `index.js` + `lib/`). */
   distDir: string;
   /** The compiled CLI entry, `dist/index.js`. */

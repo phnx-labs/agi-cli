@@ -284,7 +284,7 @@ import type { AgentId, HookCacheConfig, HookMatches, InstalledHook, ManifestHook
 import { generateHookShim, getHookShimPath, isValidHookShimName, parseCacheConfig, removeHookShim } from './cache.js';
 import { getHookShimsDir } from '../state.js';
 
-export type HookEntry = { name: string; scriptPath: string; dataFile?: string };
+type HookEntry = { name: string; scriptPath: string; dataFile?: string };
 
 export interface VersionHookCopy {
   agent: AgentId;
@@ -662,87 +662,10 @@ function copyHook(entry: HookEntry, targetDir: string): void {
 }
 
 /**
- * Check if a hook exists for an agent.
- */
-export function hookExists(agentId: AgentId, hookName: string): boolean {
-  const agent = AGENTS[agentId];
-  if (!agent.supportsHooks) {
-    return false;
-  }
-  const hooksDir = getHooksDir(agentId);
-  if (!fs.existsSync(hooksDir)) {
-    return false;
-  }
-  const files = fs.readdirSync(hooksDir);
-  return files.some((file) => {
-    const ext = path.extname(file);
-    const baseName = path.basename(file, ext);
-    return baseName === hookName && SCRIPT_EXTENSIONS.has(ext);
-  });
-}
-
-/**
  * Normalize content for comparison (trim, normalize line endings).
  */
 function normalizeContent(content: string): string {
   return content.replace(/\r\n/g, '\n').trim();
-}
-
-/**
- * Get the installed hook entry for an agent.
- */
-function getInstalledHookEntry(agentId: AgentId, hookName: string): HookEntry | null {
-  const hooksDir = getHooksDir(agentId);
-  const entries = listHookEntriesFromDir(hooksDir);
-  return entries.find((e) => e.name === hookName) || null;
-}
-
-/**
- * Check if installed hook content matches source hook content.
- * Compares both script file and data file (if present).
- */
-export function hookContentMatches(
-  agentId: AgentId,
-  hookName: string,
-  sourceEntry: HookEntry
-): boolean {
-  const agent = AGENTS[agentId];
-  if (!agent.supportsHooks) {
-    return false;
-  }
-
-  const installedEntry = getInstalledHookEntry(agentId, hookName);
-  if (!installedEntry) {
-    return false;
-  }
-
-  try {
-    const installedScript = fs.readFileSync(installedEntry.scriptPath, 'utf-8');
-    const sourceScript = fs.readFileSync(sourceEntry.scriptPath, 'utf-8');
-
-    if (normalizeContent(installedScript) !== normalizeContent(sourceScript)) {
-      return false;
-    }
-
-    const hasInstalledData = !!installedEntry.dataFile;
-    const hasSourceData = !!sourceEntry.dataFile;
-
-    if (hasInstalledData !== hasSourceData) {
-      return false;
-    }
-
-    if (hasInstalledData && hasSourceData) {
-      const installedData = fs.readFileSync(installedEntry.dataFile!, 'utf-8');
-      const sourceData = fs.readFileSync(sourceEntry.dataFile!, 'utf-8');
-      if (normalizeContent(installedData) !== normalizeContent(sourceData)) {
-        return false;
-      }
-    }
-
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 /**
@@ -882,7 +805,7 @@ export interface HookWiringIssue {
 }
 
 /** A generated, agents-managed hook wrapper and the inputs needed to recreate it. */
-export interface ManagedHookRuntimeArtifact {
+interface ManagedHookRuntimeArtifact {
   agent: AgentId;
   version: string;
   name: string;
@@ -1087,7 +1010,7 @@ export interface HookRuntimeRepairReport {
   needsAttention: string[];
 }
 
-export interface RepairManagedHookRuntimeOptions {
+interface RepairManagedHookRuntimeOptions {
   /** Detect only — never write. Default false. */
   dryRun?: boolean;
   filter?: { agent?: AgentId; version?: string };
@@ -1181,7 +1104,7 @@ function stableHookRuntimeRepairFailure(
  * content already matches). This path never calls registerHooksToSettings,
  * installHooks, or any sync routine.
  */
-export function repairManagedHookRuntimeArtifact(
+function repairManagedHookRuntimeArtifact(
   artifact: ManagedHookRuntimeArtifact,
   platform: NodeJS.Platform = process.platform,
 ): { repaired: boolean; reason?: string } {
@@ -1445,7 +1368,7 @@ function versionHookMatches(agent: AgentId, version: string, hookName: string): 
   }
 }
 
-export interface VersionHookDiff {
+interface VersionHookDiff {
   agent: AgentId;
   version: string;
   toAdd: string[];
@@ -1481,34 +1404,6 @@ export function diffVersionHooks(agent: AgentId, version: string): VersionHookDi
   }
 
   return { agent, version, toAdd: toAdd.sort(), toUpdate: toUpdate.sort(), matched, orphans: orphans.sort() };
-}
-
-/**
- * Install a single hook from central into a specific version home.
- */
-export function installHookToVersion(
-  agent: AgentId,
-  version: string,
-  hookName: string
-): { success: boolean; error?: string } {
-  const gate = supports(agent, 'hooks', version);
-  if (!gate.ok) {
-    return { success: false, error: explainSkip(agent, 'hooks', gate, version) };
-  }
-
-  const central = listHookEntriesFromDir(getCentralHooksDir()).find((e) => e.name === hookName);
-  if (!central) {
-    return { success: false, error: `Hook '${hookName}' not found in central` };
-  }
-
-  const targetDir = getVersionHooksDir(agent, version);
-  try {
-    fs.mkdirSync(targetDir, { recursive: true });
-    copyHook(central, targetDir);
-  } catch (err) {
-    return { success: false, error: (err as Error).message };
-  }
-  return { success: true };
 }
 
 /**
@@ -1636,18 +1531,6 @@ export function getHookInfo(name: string): {
 export function discoverHooksFromRepo(repoPath: string): string[] {
   const hooksDir = path.join(repoPath, 'hooks');
   return listHookEntriesFromDir(hooksDir).map((h) => h.name);
-}
-
-/**
- * Get the source hook entry from repo.
- */
-export function getSourceHookEntry(
-  repoPath: string,
-  hookName: string
-): HookEntry | null {
-  const hooksDir = path.join(repoPath, 'hooks');
-  const entries = listHookEntriesFromDir(hooksDir);
-  return entries.find((e) => e.name === hookName) || null;
 }
 
 /**
@@ -1882,7 +1765,7 @@ export function unmanagedHookNames(installedHookNames: string[], sourceHookScrip
  * dirs). This is the set an installed hook must be absent from to count as an
  * orphan.
  */
-export function listResolvedSourceHookScripts(): string[] {
+function listResolvedSourceHookScripts(): string[] {
   const roots = [
     getUserHooksDir(),
     getSystemHooksDir(),
@@ -2032,7 +1915,7 @@ function sweepOrphanShims(manifest: Record<string, ManifestHook>): void {
  * global shims. The materializer sets this so materialization stays isolated
  * (PHNX-3838); every normal caller leaves it unset and keeps the sweep.
  */
-export interface RegisterHooksOptions {
+interface RegisterHooksOptions {
   skipGlobalShimSweep?: boolean;
 }
 
@@ -3747,7 +3630,7 @@ function registerHooksForHermes(
 
 const execFileAsync = promisify(execFile);
 
-export interface InstallSessionTrackerHookResult {
+interface InstallSessionTrackerHookResult {
   installed: boolean;
   error?: string;
 }

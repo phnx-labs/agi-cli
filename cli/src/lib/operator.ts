@@ -34,13 +34,13 @@ export interface Operator {
   can?: string[];
 }
 
-export interface OperatorRegistry {
+interface OperatorRegistry {
   operators: Record<string, Operator>;
 }
 
 const OPERATORS_FILE = 'operators.yaml';
 
-export function getOperatorsPath(root?: string): string {
+function getOperatorsPath(root?: string): string {
   return path.join(root ?? getUserAgentsDir(), OPERATORS_FILE);
 }
 

@@ -112,7 +112,7 @@ async function pickMissingTarget(
   }
 }
 
-export interface ExecuteCloudDispatchParams {
+interface ExecuteCloudDispatchParams {
   provider: CloudProvider;
   dispatchOptions: DispatchOptions;
   /** Image file paths for vision dispatch (checked against provider capability). */

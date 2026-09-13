@@ -62,7 +62,7 @@ export const HOST_ROUTING_SPECS: StripSpec[] = [
 ];
 
 /** How one `agents run` option behaves when the run is offloaded with `--device`. */
-export type RunOptionForwarding =
+type RunOptionForwarding =
   /** Appended to the remote `agents run` argv — same behavior local or remote. */
   | 'forward'
   /** Refused with an actionable error BEFORE dispatch — never silently dropped. */
@@ -249,7 +249,7 @@ export function posixEnvExports(env?: Record<string, string>): string {
 }
 
 /** The two remote shell dialects we build commands for. */
-export type RemoteShell = 'posix' | 'powershell';
+type RemoteShell = 'posix' | 'powershell';
 
 /**
  * Pick the remote shell dialect from a recorded OS/platform string. A Windows
@@ -288,7 +288,7 @@ export function decodePowershell(encoded: string): string {
 }
 
 /** A single `agents …` invocation to run on a Windows remote. */
-export interface WindowsAgentsCommand {
+interface WindowsAgentsCommand {
   /** `agents` argv (command name NOT included; `agents` is prepended). */
   args: string[];
   /** Env vars scoped to this invocation (POSIX `VAR=val` ↔ PS `$env:VAR=…`). */

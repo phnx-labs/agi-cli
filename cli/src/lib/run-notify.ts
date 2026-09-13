@@ -18,7 +18,7 @@
 import * as path from 'path';
 import { notifyDesktop, type DesktopNotification } from './menubar/notify-desktop.js';
 
-export interface RunNotifyContext {
+interface RunNotifyContext {
   /** Agent that ran, e.g. `claude`. */
   agent: string;
   /** `--name` slug when the caller named the run; falls back to the agent. */

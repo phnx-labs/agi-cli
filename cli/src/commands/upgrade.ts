@@ -4,7 +4,7 @@ export interface UpgradeOptions {
   yes?: boolean;
 }
 
-export type UpgradeAction = (version: string | undefined, options: UpgradeOptions) => Promise<void>;
+type UpgradeAction = (version: string | undefined, options: UpgradeOptions) => Promise<void>;
 
 /** Register the public self-upgrade surface; the entry point supplies its runtime action. */
 export function registerUpgradeCommand(program: Command, action?: UpgradeAction): Command {

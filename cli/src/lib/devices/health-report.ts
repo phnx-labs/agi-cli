@@ -59,7 +59,7 @@ export interface FleetHealthRow {
   agents?: FleetAgentCounts;
 }
 
-export interface FleetWarning {
+interface FleetWarning {
   kind: 'unreachable' | 'drift' | 'cli' | 'version-skew' | 'divergence';
   devices: string[];
   message: string;
@@ -381,7 +381,7 @@ function starkCliGap(row: FleetHealthRow): { installed: number; total: number } 
   return total > 0 && installed * 3 < total ? { installed, total } : null;
 }
 
-export interface FleetAttentionItem {
+interface FleetAttentionItem {
   /** Leading mark: `○` offline, `⚠` config/CLI/version issue. */
   glyph: 'offline' | 'warn';
   subject: string;

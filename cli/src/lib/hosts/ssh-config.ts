@@ -14,7 +14,6 @@ import { assertValidSshTarget } from '../ssh-exec.js';
 
 const SSH_DIR = path.join(os.homedir(), '.ssh');
 const SSH_CONFIG = path.join(SSH_DIR, 'config');
-const KNOWN_HOSTS = path.join(SSH_DIR, 'known_hosts');
 
 /**
  * Parse `Host` stanza names from ssh config text. Wildcard/negated patterns
@@ -104,21 +103,12 @@ function globMaybe(pattern: string): string[] {
   }
 }
 
-/** Hostnames recorded in ~/.ssh/known_hosts (hashed entries skipped). */
-export function listKnownHosts(): string[] {
-  try {
-    return parseKnownHosts(fs.readFileSync(KNOWN_HOSTS, 'utf-8'));
-  } catch {
-    return [];
-  }
-}
-
 /** True if `name` is a concrete `Host` stanza in ssh config. */
 export function isSshConfigHost(name: string): boolean {
   return listSshConfigHosts().includes(name);
 }
 
-export interface SshGResult {
+interface SshGResult {
   hostname?: string;
   user?: string;
   port?: string;

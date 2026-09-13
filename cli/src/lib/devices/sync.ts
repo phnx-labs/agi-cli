@@ -84,9 +84,9 @@ export function withDefaultUser(
  *   through the menu-bar "NEW DEVICES → Register / Ignore" gate instead of
  *   silently landing in the registry.
  */
-export type DeviceSyncMode = 'bootstrap' | 'refresh';
+type DeviceSyncMode = 'bootstrap' | 'refresh';
 
-export interface DeviceSyncResult {
+interface DeviceSyncResult {
   /** False when discovery could not run (e.g. tailscale absent) in soft mode. */
   ok: boolean;
   /** Number of tailscale nodes upserted into the registry. */
@@ -206,7 +206,7 @@ export async function runDeviceSync(
   }
 }
 
-export interface EnsureDevicesResult {
+interface EnsureDevicesResult {
   /** Names newly resolved from Tailscale and upserted into the registry. */
   registered: string[];
   /** Names that could not be resolved (not on the tailnet / tailscale absent). */
@@ -220,7 +220,7 @@ export interface EnsureDevicesResult {
  * registered names need nothing. Pure so the bootstrap's filter matrix is
  * unit-testable without a tailnet or registry writes.
  */
-export interface WantedPartition {
+interface WantedPartition {
   toRegister: string[];
   unresolved: string[];
 }
@@ -288,7 +288,7 @@ export async function ensureDevicesRegistered(wantedNames: string[]): Promise<En
  * => remove from the registry if it was there, and ignore it so auto-sync never
  * re-adds it.
  */
-export interface DeviceReconciliation {
+interface DeviceReconciliation {
   toRegister: string[];
   toUnignore: string[];
   toRemove: string[];

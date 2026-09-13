@@ -22,7 +22,7 @@ import type { UnifiedSyncStatus } from './sync-status.js';
 import type { ViewJsonAgent } from './view-types.js';
 
 /** One open-block row in the optional feed summary (no full question bodies). */
-export interface SnapshotFeedBlock {
+interface SnapshotFeedBlock {
   blockId: string;
   sessionId: string;
   host: string;
@@ -73,7 +73,7 @@ export interface FleetSnapshot {
   sync?: UnifiedSyncStatus;
 }
 
-export interface ComputeSnapshotOptions {
+interface ComputeSnapshotOptions {
   /** Restrict inventory to one agent id. */
   agent?: AgentId;
   /** Local sessions only — no cross-machine SSH fan-out. Default true for cheap polls. */

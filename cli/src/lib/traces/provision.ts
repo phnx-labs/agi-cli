@@ -20,7 +20,7 @@ interface ProvisionOptions {
 }
 
 /** Bind the Phoenix identity base URL used to verify every trace read and write. */
-export async function setPhoenixIdBaseSecret(
+async function setPhoenixIdBaseSecret(
   apiToken: string,
   accountId: string,
   workerName: string,
@@ -32,7 +32,7 @@ export async function setPhoenixIdBaseSecret(
   await putWorkerSecret(apiToken, accountId, workerName, 'PHOENIX_ID_BASE', normalized, opts);
 }
 
-export interface ProvisionTracesOptions extends ProvisionOptions {
+interface ProvisionTracesOptions extends ProvisionOptions {
   apiToken: string;
   accountId: string;
   workerName: string;

@@ -35,14 +35,6 @@ export interface Classification {
   autoAnswer?: string;
 }
 
-/** Scan text used for classification. */
-export function askScanText(block: Pick<OpenBlock, 'questions'>): string {
-  return block.questions
-    .map((q) => [q.header, q.text].filter(Boolean).join(' '))
-    .join('\n')
-    .toLowerCase();
-}
-
 // ---- rules (order matters: first match wins) --------------------------------
 
 interface Rule {
@@ -166,7 +158,7 @@ export function classifyBlock(block: OpenBlock): Classification {
   return classifyAsk(text, { header, blockClass: block.blockClass });
 }
 
-export interface SuppressResult {
+interface SuppressResult {
   blockId: string;
   class: AskClass;
   rule: string;
@@ -226,7 +218,7 @@ export function suppressStallBlock(block: OpenBlock, root?: string, mailboxRoot?
   };
 }
 
-export interface FeedFilterResult {
+interface FeedFilterResult {
   /** Blocks that should render as cards. */
   surfaced: OpenBlock[];
   /** Suppression audit rows (stalls auto-resolved). */

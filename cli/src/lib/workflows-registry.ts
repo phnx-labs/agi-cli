@@ -36,7 +36,7 @@ import {
 } from './workflows.js';
 
 /** A central workflow bundle: its synced name and the source dir holding WORKFLOW.md. */
-export interface WorkflowSource {
+interface WorkflowSource {
   name: string;
   path: string;
 }
@@ -45,7 +45,7 @@ export interface WorkflowSource {
  * The complete on-disk contract for one harness's workflows. Every operation
  * is expressed here so the engine below never branches on the agent id.
  */
-export interface WorkflowTarget {
+interface WorkflowTarget {
   /** Noun used in ownership errors, e.g. "Kimi skill", "Grok workflow". */
   readonly label: string;
   /**

@@ -26,13 +26,13 @@ import { getUserAgentsDir, getVersionsDir } from './state.js';
 import { setGlobalDefault } from './installations/versions.js';
 import { createShim, createVersionedAlias, ensureShimCurrent, switchHomeFileSymlinks, assertIsolationBoundary } from './installations/shims.js';
 
-export interface ImportConfigResult {
+interface ImportConfigResult {
   success: boolean;
   skipped?: boolean;
   error?: string;
 }
 
-export interface ImportBinaryResult {
+interface ImportBinaryResult {
   success: boolean;
   skipped?: boolean;
   error?: string;
@@ -124,7 +124,7 @@ export function finalizeImport(agentId: AgentId, version: string): void {
  * farm from the AGENTS registry, which keeps the function pure and avoids
  * fragile coupling in test setups that stub `lib/agents.ts`.
  */
-export interface AgentBinarySpec {
+interface AgentBinarySpec {
   /** Agent id used in the marker package.json (`agents-{agentId}-{version}`). */
   agentId: string;
   /** npm package name (e.g. `openclaw`) — used as the `node_modules/<name>` dir. */

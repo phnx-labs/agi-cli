@@ -6,35 +6,6 @@ import { clickAtCoords } from './input.js';
 import { getBrowserRuntimeDir } from './profiles.js';
 import { resolveRefToCoords, type RefNode } from './refs.js';
 
-/**
- * File upload strategies for `agents browser upload`.
- *
- * Every uploader on the web is one of three patterns:
- *
- *   A. Direct file input — the page exposes (or hides) `<input type=file>`.
- *      `DOM.setFileInputFiles` plants the paths directly. The cleanest
- *      path; works whenever the input is in the DOM, even when CSS-hidden
- *      or visually offscreen.
- *
- *   B. Drag-drop target — the page listens for `drop` events on a region
- *      (Canva, Notion, Linear, GitHub PRs). We dispatch synthetic
- *      `dragenter`/`dragover`/`drop` events with a `DataTransfer` whose
- *      `files` list carries a `File` built from disk bytes. The dispatch
- *      uses real elementFromPoint coordinates so React/DOM listeners fire.
- *
- *   C. Native chooser interception — the user clicks a button that calls
- *      `input.click()` and the only file input is dynamically created in
- *      response. `Page.setInterceptFileChooserDialog` flips the chooser
- *      from a blocking OS dialog into a CDP event; we click the trigger,
- *      wait for `Page.fileChooserOpened`, then satisfy it with
- *      `Page.handleFileChooser({ action: 'accept', files })`. Lifecycle:
- *      enable interception -> click -> wait -> accept -> disable.
- */
-
-export interface UploadOptions {
-  files: string[];
-}
-
 export function getUploadStagingDir(): string {
   return path.join(getBrowserRuntimeDir(), 'uploads');
 }

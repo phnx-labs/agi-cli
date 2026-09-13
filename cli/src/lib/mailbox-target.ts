@@ -8,7 +8,7 @@ import type { ActiveSession } from './session/active.js';
 import type { HostTask } from './hosts/tasks.js';
 import { sessionHeadline } from './session/title.js';
 
-export type MessageResolution =
+type MessageResolution =
   | { kind: 'cloud'; id: string }
   | { kind: 'local'; id: string }
   | { kind: 'none' }

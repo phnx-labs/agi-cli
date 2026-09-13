@@ -10,7 +10,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-export interface FirefoxIniProfile {
+interface FirefoxIniProfile {
   /** `Name=` of the `[ProfileN]` section. */
   name: string;
   /** Absolute profile directory (`Path=` resolved against the ini's dir when `IsRelative=1`). */
@@ -21,7 +21,7 @@ export interface FirefoxIniProfile {
   iniPath: string;
 }
 
-export type FirefoxDiscoveryResult =
+type FirefoxDiscoveryResult =
   | { ok: true; profiles: FirefoxIniProfile[]; iniPaths: string[] }
   | { ok: false; kind: 'not-installed' | 'invalid'; reason: string };
 
@@ -120,7 +120,7 @@ export function discoverFirefoxProfiles(): FirefoxDiscoveryResult {
 }
 
 /** One discovered Firefox profile as an agents-cli profile row. */
-export interface FirefoxDiscoveredProfile {
+interface FirefoxDiscoveredProfile {
   /** The agents-cli profile name: `firefox-<name-slug>`. */
   name: string;
   profileName: string;

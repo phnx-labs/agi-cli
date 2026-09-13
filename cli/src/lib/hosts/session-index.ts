@@ -26,7 +26,7 @@ import { parseSessionIdMarker } from './session-marker.js';
 import { deriveShortId } from '../text/short-id.js';
 import { normalizeHost } from '../machine-id.js';
 
-export interface HostSessionContext {
+interface HostSessionContext {
   /** Local directory the `agents run --device` was invoked from. */
   cwd: string;
   /** Prompt the run was launched with, used for the session topic. */
@@ -105,7 +105,7 @@ export function captureRemoteSessionId(task: HostTask): HostTask | null {
   return updateTask(task.id, { sessionId: captured });
 }
 
-export interface InteractiveHostSessionContext {
+interface InteractiveHostSessionContext {
   cwd: string;
   host: string;
   agent: string;

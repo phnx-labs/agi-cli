@@ -907,7 +907,7 @@ export function renderSummary(events: SessionEvent[], cwd?: string): string {
 // ── Event filters ─────────────────────────────────────────────────────────────
 
 /** Allowed values for --include/--exclude role filters. */
-export const VALID_ROLE_VALUES = ['user', 'assistant', 'thinking', 'tools'] as const;
+const VALID_ROLE_VALUES = ['user', 'assistant', 'thinking', 'tools'] as const;
 /** A single role filter value derived from VALID_ROLE_VALUES. */
 export type RoleFilter = typeof VALID_ROLE_VALUES[number];
 
@@ -1040,7 +1040,7 @@ export function filterEvents(events: SessionEvent[], opts: FilterOptions): Sessi
  * order so reasoning sits where it actually occurred relative to the assistant
  * reply.
  */
-export interface RenderConversationMarkdownOptions {
+interface RenderConversationMarkdownOptions {
   redact?: boolean;
   knownSecrets?: readonly string[];
   reasoning?: 'omit' | 'fold' | 'include';

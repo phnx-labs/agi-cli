@@ -53,7 +53,7 @@ export function registerSessionsStopCommand(program: Command): void {
   });
 }
 
-export async function stopSessionAction(id: string, opts: { local?: boolean } = {}): Promise<void> {
+async function stopSessionAction(id: string, opts: { local?: boolean } = {}): Promise<void> {
   const { self, activeById } = await gatherLiveTargets(!!opts.local, { includeCloud: true, selector: id });
   const resolved = resolveOne(activeById, id);
   if ('error' in resolved) {

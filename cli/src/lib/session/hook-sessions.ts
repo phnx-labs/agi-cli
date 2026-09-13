@@ -274,7 +274,7 @@ function kindMatches(recordAgent: string | undefined, kind: string): boolean {
   return norm(recordAgent) === norm(kind);
 }
 
-export interface ResolveOpts {
+interface ResolveOpts {
   pid: number;
   kind: string;
   launchId?: string;

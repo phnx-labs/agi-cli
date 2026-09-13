@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync, type SpawnSyncOptions } from 'child_process';
+import { type SpawnSyncOptions } from 'child_process';
 import { getCliLaunch } from './cli-entry.js';
 
 /**
@@ -32,29 +32,29 @@ function buildAddGenericPasswordSpawnOptions(
   };
 }
 
-export const OPENCLAW_KEYCHAIN_ACCOUNT = 'openclaw';
-export const OPENCLAW_KEYCHAIN_PROVIDER = 'agents_keychain';
+const OPENCLAW_KEYCHAIN_ACCOUNT = 'openclaw';
+const OPENCLAW_KEYCHAIN_PROVIDER = 'agents_keychain';
 
-export const OPENCLAW_KEYCHAIN_ENV_SERVICES: Record<string, string> = {
+const OPENCLAW_KEYCHAIN_ENV_SERVICES: Record<string, string> = {
   OPENROUTER_API_KEY: 'openrouter-api-key',
   LINEAR_API_KEY: 'linear-api-key',
   GRAFANA_API_KEY: 'grafana-api-key',
   POSTHOG_API_KEY: 'posthog-api-key',
 };
 
-export interface OpenClawSecretRef {
+interface OpenClawSecretRef {
   source: 'exec';
   provider: string;
   id: string;
 }
 
-export interface OpenClawKeychainMigrationOptions {
+interface OpenClawKeychainMigrationOptions {
   account?: string;
   provider?: string;
   agentsBin?: string;
 }
 
-export interface OpenClawKeychainMigrationResult {
+interface OpenClawKeychainMigrationResult {
   services: Array<{ envKey: string; service: string; value: string }>;
   replacedPaths: string[];
   removedEnvPaths: string[];
@@ -306,48 +306,13 @@ export function buildOpenClawKeychainStoreInvocation(
   };
 }
 
-export function storeOpenClawKeychainServices(
-  services: Array<{ service: string; value: string }>,
-  account = OPENCLAW_KEYCHAIN_ACCOUNT,
-): void {
-  if (process.platform !== 'darwin') {
-    throw new Error('OpenClaw Keychain migration must run on macOS.');
-  }
-  for (const { service, value } of services) {
-    const write = buildOpenClawKeychainStoreInvocation(service, value, account);
-    const result = spawnSync(write.command, write.args, write.options);
-    if (result.status !== 0) {
-      const msg = result.stderr?.toString().trim();
-      throw new Error(msg || `Failed to write OpenClaw Keychain service '${service}'.`);
-    }
-  }
-}
-
-function stripSecurityTrailingNewline(value: string): string {
-  return value.replace(/\r?\n$/, '');
-}
-
-export function readOpenClawKeychainService(service: string, account = OPENCLAW_KEYCHAIN_ACCOUNT): string {
-  if (!/^[A-Za-z0-9][A-Za-z0-9._:/#-]{0,255}$/.test(service)) {
-    throw new Error(`Invalid OpenClaw Keychain service id '${service}'.`);
-  }
-  if (process.platform !== 'darwin') {
-    throw new Error('OpenClaw Keychain resolver must run on macOS.');
-  }
-  const value = execFileSync('/usr/bin/security', ['find-generic-password', '-s', service, '-a', account, '-w'], {
-    encoding: 'utf-8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  return stripSecurityTrailingNewline(value);
-}
-
-export interface OpenClawExecResolverRequest {
+interface OpenClawExecResolverRequest {
   protocolVersion?: number;
   provider?: string;
   ids?: unknown;
 }
 
-export interface OpenClawExecResolverResponse {
+interface OpenClawExecResolverResponse {
   protocolVersion: 1;
   values: Record<string, string>;
   errors?: Record<string, { code: string }>;

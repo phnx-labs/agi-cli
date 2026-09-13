@@ -36,7 +36,7 @@ export const COMPILED_HEADER_PROJECT =
   '     Edit the source files under .agents/rules/ — edits to this file will be overwritten on next sync. -->\n\n';
 
 /** Sidecar manifest recording source file hashes for staleness detection. */
-export interface CompileManifest {
+interface CompileManifest {
   compiledAt: string;
   sources: { path: string; sha256: string; mtime?: number; size?: number }[];
 }
@@ -77,7 +77,7 @@ function restoreCodeRegions(content: string, fences: string[], inlines: string[]
 }
 
 /** Result of resolving @-imports in a rules file. */
-export interface ResolveResult {
+interface ResolveResult {
   /** Fully-inlined content. */
   content: string;
   /** Absolute paths of every file read during resolution (including the root). */
@@ -181,7 +181,7 @@ export function isRulesStale(agentId: AgentId, version: string): boolean {
  * Agents that natively resolve @-imports are skipped (no-op) — their sync
  * uses the standard copyFileSync path in `syncResourcesToVersion`.
  */
-export function compileRulesForAgent(
+function compileRulesForAgent(
   agentId: AgentId,
   version: string
 ): { compiled: boolean; compiledPath: string; sources: number } {
@@ -246,7 +246,7 @@ export function ensureRulesFresh(agentId: AgentId, version: string): boolean {
   return result.compiled;
 }
 
-export interface ProjectCompileResult {
+interface ProjectCompileResult {
   /** True when cwd/AGENTS.md was newly written or rewritten. */
   compiled: boolean;
   /** Absolute path to cwd/AGENTS.md. Empty when no project rules dir was present. */

@@ -48,10 +48,6 @@ export interface IncomingWebhook {
   payload: Record<string, unknown>;
 }
 
-export type GithubWebhook = IncomingWebhook & { source: 'github' };
-export type LinearWebhook = IncomingWebhook & { source: 'linear' };
-export type SlackWebhook = IncomingWebhook & { source: 'slack' };
-
 /** Read `repository.full_name` (`owner/name`) from a webhook payload, if present. */
 export function webhookRepo(payload: Record<string, unknown>): string | null {
   const repo = payload?.repository as { full_name?: unknown } | undefined;
@@ -246,12 +242,12 @@ export interface FireWebhookOptions {
 }
 
 /** Result of firing one matched job. */
-export interface FiredJob {
+interface FiredJob {
   jobName: string;
   runId: string;
 }
 
-export class WebhookDispatchError extends Error {
+class WebhookDispatchError extends Error {
   constructor(
     message: string,
     readonly fired: FiredJob[],
@@ -329,7 +325,7 @@ export function verifyLinearSignature(headers: IncomingHttpHeaders, rawBody: Buf
   return timingSafeHexEqual(header(headers, 'linear-signature'), hmacHex(secret, rawBody));
 }
 
-export function verifyLinearTimestamp(payload: Record<string, unknown>, now = Date.now(), toleranceMs = 60_000): boolean {
+function verifyLinearTimestamp(payload: Record<string, unknown>, now = Date.now(), toleranceMs = 60_000): boolean {
   const ts = payload.webhookTimestamp;
   return typeof ts === 'number' && Math.abs(now - ts) <= toleranceMs;
 }
@@ -448,14 +444,14 @@ export interface WebhookSecrets {
   slack?: string;
 }
 
-export interface DeliveryStore {
+interface DeliveryStore {
   seen(id: string): boolean;
   mark(id: string): void;
   completedJobs(id: string): ReadonlySet<string>;
   markJob(id: string, jobName: string): void;
 }
 
-export function createMemoryDeliveryStore(maxEntries = 1000): DeliveryStore {
+function createMemoryDeliveryStore(maxEntries = 1000): DeliveryStore {
   const seen = new Map<string, { complete: boolean; jobs: Set<string>; updatedAt: number }>();
   const touch = (id: string) => {
     let current = seen.get(id);
@@ -582,11 +578,11 @@ export function createFileDeliveryStore(
   };
 }
 
-export interface RateLimiter {
+interface RateLimiter {
   take(key: string): boolean;
 }
 
-export function createMemoryRateLimiter(limit: number, windowMs: number): RateLimiter {
+function createMemoryRateLimiter(limit: number, windowMs: number): RateLimiter {
   const buckets = new Map<string, { resetAt: number; count: number }>();
   return {
     take: (key) => {
@@ -650,7 +646,7 @@ export function waitForListening(server: http.Server): Promise<void> {
 }
 
 /** Options for the local webhook http listener. */
-export interface WebhookServerOptions {
+interface WebhookServerOptions {
   port?: number;
   host?: string;
   /** HMAC signing secrets keyed by source. */

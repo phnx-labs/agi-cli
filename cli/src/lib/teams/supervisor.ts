@@ -21,7 +21,7 @@ import type { AgentManager, AgentProcess } from './agents.js';
 import type { TeamBudgetWatcher } from '../budget/live-team.js';
 import type { BreachInfo } from '../budget/enforce.js';
 
-export interface WaveSummary {
+interface WaveSummary {
   wave: number;
   timestamp: string;
   team: string;
@@ -33,7 +33,7 @@ export interface WaveSummary {
   drained: boolean;
 }
 
-export interface SupervisorOptions {
+interface SupervisorOptions {
   team: string;
   intervalMs?: number;
   maxWaves?: number;
@@ -50,7 +50,7 @@ export interface SupervisorOptions {
   onBudgetBreach?: (breach: BreachInfo) => void;
 }
 
-export interface SupervisorResult {
+interface SupervisorResult {
   waves: number;
   stoppedBy: 'drained' | 'max-waves' | 'signal' | 'callback' | 'budget';
   elapsed_ms: number;

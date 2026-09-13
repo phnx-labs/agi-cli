@@ -461,7 +461,7 @@ export async function killAll(socket?: string): Promise<number> {
 }
 
 /** Result returned by {@link reapDeadTmuxPanes}. */
-export interface ReapDeadPanesResult {
+interface ReapDeadPanesResult {
   /** Number of tmux sessions killed. */
   reaped: number;
   /** Names of reaped sessions. */
@@ -634,7 +634,7 @@ export async function listClients(socket?: string): Promise<TmuxClient[]> {
 }
 
 /** A dead pane's exit status, read from tmux while the pane lingers under remain-on-exit. */
-export interface PaneExit {
+interface PaneExit {
   /** False when the pane/socket no longer exists or tmux could not query it. */
   found: boolean;
   /** True once the process that ran in the pane has exited (pane is dead). */
@@ -792,7 +792,7 @@ async function lowestPaneId(name: string, socket: string, timeoutMs?: number): P
  * its attach client returns — without that, a resume-attach has no handle to ask
  * tmux what happened and can only assume success (EXEC-23b).
  */
-export type ResumePreparation =
+type ResumePreparation =
   | { decision: 'attach'; pane: string }
   | { decision: 'create' };
 

@@ -171,7 +171,7 @@ const RESPONSIVENESS_PROBE_TIMEOUT_MS = 1_500;
  */
 const RESPONSIVENESS_PROBE_ATTEMPTS = 3;
 
-export interface IPCRequestOptions {
+interface IPCRequestOptions {
   autoStartDaemon?: boolean;
   /**
    * Opt-in client-side deadline in ms — most IPC actions (browser automation,
@@ -332,7 +332,7 @@ export async function waitForBrowserService(
 }
 
 /** Outcome of {@link stopBrowserService} — what the service-scoped stop did. */
-export interface BrowserServiceStopResult {
+interface BrowserServiceStopResult {
   /** The browser IPC service was reachable before the stop was requested. */
   wasRunning: boolean;
   /** The shared daemon stayed running while only browser IPC was stopped. */
@@ -439,7 +439,7 @@ export async function clearDeadSocketFile(endpoint: string, socketPath: string):
  * caller that produced them, while the process and socket stay warm between
  * actions.
  */
-export class BrowserIPCConnection {
+class BrowserIPCConnection {
   private buffer = '';
   private pending: PendingIPCResponse | undefined;
   private tail: Promise<void> = Promise.resolve();

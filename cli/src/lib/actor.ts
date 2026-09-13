@@ -61,7 +61,7 @@ export interface ResolvedActor {
 }
 
 /** Result of `tailscale whois --json <ip>` we care about. */
-export interface WhoisIdentity {
+interface WhoisIdentity {
   login?: string;
   displayName?: string;
 }
@@ -216,7 +216,7 @@ export function actorAvatar(actor: ResolvedActor, session: PhoenixSession | null
  * (a dev machine that *is* on the tailnet would otherwise make the local path
  * non-deterministic). Production callers use the defaults.
  */
-export interface ActorResolvers {
+interface ActorResolvers {
   whois: (ip: string) => WhoisIdentity | undefined;
   self: () => WhoisIdentity | undefined;
   /** The Phoenix ID session on this device (a local file read, no network). */

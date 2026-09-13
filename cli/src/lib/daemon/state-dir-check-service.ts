@@ -32,7 +32,7 @@ const STATE_DIR_CHECK_TICK_MS = 60_000;
 /** Hard cap per tick — a single async file read, far above what it could ever need. */
 const STATE_DIR_CHECK_DEADLINE_MS = 5_000;
 
-export interface StateDirCheckServiceOptions {
+interface StateDirCheckServiceOptions {
   lifetimePath: string;
   lifetimeToken: string;
   onMissing: () => void;

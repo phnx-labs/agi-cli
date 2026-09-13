@@ -37,9 +37,9 @@ export const PEER_BACKOFF_CAP_MS = 60_000;
 /** Consecutive failed spawns before the peer is parked. */
 export const PEER_PARK_AFTER_FAILURES = 3;
 /** Bytes of a peer's stderr retained for the `unavailable` reason. */
-export const PEER_STDERR_BYTES = 2_048;
+const PEER_STDERR_BYTES = 2_048;
 /** How often a parked peer re-checks the device registry for a refresh. */
-export const PEER_REGISTRY_POLL_MS = 5_000;
+const PEER_REGISTRY_POLL_MS = 5_000;
 
 /**
  * Reconnect delay for `failures` consecutive failed spawns: 0 for a healthy
@@ -54,7 +54,7 @@ export function peerBackoffDelayMs(
   return Math.min(cap, base * 2 ** (failures - 1));
 }
 
-export interface PeerStreamOptions {
+interface PeerStreamOptions {
   /** The device to subscribe to. */
   device: DeviceProfile;
   /** Remote command to run over ssh, already shell-quoted for the peer's OS. */

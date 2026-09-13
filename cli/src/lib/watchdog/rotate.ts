@@ -52,7 +52,7 @@ import { resolveWatchdogSessionPath } from './read.js';
  * two patterns cover the weekly/session variants, including claude's
  * "You've hit your weekly limit · resets <time>" form.
  */
-export const ROTATE_LIMIT_PATTERNS: RegExp[] = [
+const ROTATE_LIMIT_PATTERNS: RegExp[] = [
   /you'?ve hit your [\w-]*\s?limit/i,
   /hit your (weekly|daily|usage|session) limit/i,
   /usage limit (has been )?(reached|exceeded)/i,
@@ -60,7 +60,7 @@ export const ROTATE_LIMIT_PATTERNS: RegExp[] = [
   /out of (credits|extra usage)/i,
 ];
 
-export type RotateTailVerdict =
+type RotateTailVerdict =
   | { kind: 'none' }
   | { kind: 'rate_limited'; resetsAtMs?: number };
 
@@ -275,7 +275,7 @@ function rotateDir(dir: string): string {
   return path.join(dir, 'rotate');
 }
 
-export function rotateStatePath(dir: string, sessionId: string): string {
+function rotateStatePath(dir: string, sessionId: string): string {
   return path.join(rotateDir(dir), `${sessionId}.json`);
 }
 
@@ -294,14 +294,6 @@ export function writeRotateState(dir: string, state: RotateState): void {
     fs.writeFileSync(rotateStatePath(dir, state.sessionId), JSON.stringify(state, null, 2));
   } catch {
     /* best-effort: the tray tolerates a missing/partial state file */
-  }
-}
-
-export function clearRotateState(dir: string, sessionId: string): void {
-  try {
-    fs.unlinkSync(rotateStatePath(dir, sessionId));
-  } catch {
-    /* already gone */
   }
 }
 
@@ -338,7 +330,7 @@ export function listInflightRotates(dir: string): RotateState[] {
  * <watchdog-state>/rotate-skips.json: { [sessionId]: suppressUntilMs }. A skip
  * inside the window logs nothing and touches nothing.
  */
-export function readRotateSkipLedger(dir: string): Record<string, number> {
+function readRotateSkipLedger(dir: string): Record<string, number> {
   try {
     return JSON.parse(fs.readFileSync(path.join(dir, 'rotate-skips.json'), 'utf8')) as Record<string, number>;
   } catch {
@@ -431,7 +423,7 @@ const ROTATE_TRANSCRIPT_AGENTS = ['claude', 'codex', 'gemini', 'droid'];
  * accepts a fresh active session (started after the rotate began), so a codex
  * pick with an unknown id is still detected.
  */
-export function defaultRotateTranscriptLive(newSessionId: string): boolean {
+function defaultRotateTranscriptLive(newSessionId: string): boolean {
   return ROTATE_TRANSCRIPT_AGENTS.some(
     (agent) => resolveWatchdogSessionPath(newSessionId, agent) !== undefined,
   );

@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { ALL_AGENT_IDS } from './agents.js';
 import {
   AUTH_BUNDLE_BACKEND,
-  AUTH_BUNDLE_NAME,
   AUTH_STORE_ALIAS,
   RESERVED_STORES,
   ReservedBundleWrongBackendError,
@@ -26,7 +25,6 @@ describe('RESERVED_STORES', () => {
 
   it('keeps the legacy auth bundle as a readable alias without migrating data', () => {
     expect(AUTH_STORE_ALIAS).toBe('auth');
-    expect(AUTH_BUNDLE_NAME).toBe(AUTH_STORE_ALIAS);
     expect(isReservedStoreName('auth')).toBe(true);
     expect(isReservedStoreName('AUTH')).toBe(true);
     expect(isReservedStoreName('prod')).toBe(false);

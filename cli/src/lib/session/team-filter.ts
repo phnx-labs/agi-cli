@@ -154,7 +154,7 @@ export function enrichTeamOrigins(sessions: SessionMeta[]): SessionMeta[] {
 }
 
 /** Result of splitting sessions into visible and hidden (team-origin) groups. */
-export interface FilterResult {
+interface FilterResult {
   visible: SessionMeta[];
   hiddenCount: number;
 }

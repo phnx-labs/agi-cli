@@ -18,7 +18,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { getCacheDir } from '../state.js';
 
-export interface RunNameRecord {
+interface RunNameRecord {
   sessionId: string;
   name: string;
   agent: string;

@@ -30,7 +30,7 @@ export function readGeminiSettings(settingsPath: string): Record<string, unknown
   return parsed;
 }
 
-export function writeGeminiSettings(settingsPath: string, settings: Record<string, unknown>): void {
+function writeGeminiSettings(settingsPath: string, settings: Record<string, unknown>): void {
   fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
 }

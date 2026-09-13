@@ -15,7 +15,7 @@ import { sshExec, sshExecAsync, type SshExecResult } from '../ssh-exec.js';
 import { updateTask, terminalPatch, type HostTask } from './tasks.js';
 import { encodePowershell } from './remote-cmd.js';
 
-export type RemoteExitState =
+type RemoteExitState =
   | { state: 'running' } //     .exit absent, or present-but-empty (mid-write) → not finished
   | { state: 'done'; code: number } // .exit holds an exit code → finished
   | { state: 'unreachable' }; //  ssh itself failed → can't tell, don't touch the record
@@ -66,7 +66,7 @@ export function readRemoteExit(target: string, remoteExit: string, timeoutMs = 6
  * `spawnSync('ssh', …)` (PHNX-3695). `sshExecAsync` applies the same
  * timeout/kill-grace bound.
  */
-export async function readRemoteExitAsync(target: string, remoteExit: string, timeoutMs = 6000, identityFile?: string, remoteShell: 'posix' | 'powershell' = 'posix'): Promise<RemoteExitState> {
+async function readRemoteExitAsync(target: string, remoteExit: string, timeoutMs = 6000, identityFile?: string, remoteShell: 'posix' | 'powershell' = 'posix'): Promise<RemoteExitState> {
   return classifyExit(await sshExecAsync(target, remoteExitCommand(remoteExit, remoteShell), remoteExitSshOpts(timeoutMs, identityFile)));
 }
 

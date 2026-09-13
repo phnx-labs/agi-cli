@@ -29,11 +29,6 @@ interface BootMark {
 const marks: BootMark[] = [];
 let flushed = false;
 
-/** True when `AGENTS_PROFILE_BOOT` is set — callers can skip building label strings. */
-export function bootProfileEnabled(): boolean {
-  return ENABLED;
-}
-
 /**
  * Record a named stage boundary. No-op unless `AGENTS_PROFILE_BOOT` is set, so
  * this is free to call unconditionally on the launch path.

@@ -141,14 +141,14 @@ export interface HarnessEditable {
 }
 
 /** One field's editability plus, when disabled, the one-line reason to surface. */
-export interface EditableField {
+interface EditableField {
   enabled: boolean;
   /** Set only when `enabled` is false — the greyed field's stated reason. */
   reason?: string;
 }
 
 /** Per-host editability with a reason attached to every disabled field. */
-export interface HarnessEditability {
+interface HarnessEditability {
   model: EditableField;
   baseUrl: EditableField;
   auth: EditableField;

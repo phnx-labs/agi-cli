@@ -35,9 +35,9 @@ import { VERSION_RE } from '../agent-spec/primitives.js';
 
 /** The three harness homes a portable schema-v3 package can be materialized into. */
 export const PORTABLE_HARNESSES = ['claude', 'codex', 'opencode'] as const;
-export type PortableHarness = (typeof PORTABLE_HARNESSES)[number];
+type PortableHarness = (typeof PORTABLE_HARNESSES)[number];
 
-export function isPortableHarness(value: string): value is PortableHarness {
+function isPortableHarness(value: string): value is PortableHarness {
   return (PORTABLE_HARNESSES as readonly string[]).includes(value);
 }
 
@@ -70,7 +70,7 @@ export function assertExactHarnessVersion(version: string): string {
 }
 
 /** True when `raw` still contains a `..` segment after splitting on both separators. */
-export function outputHomeHasDotDot(raw: string): boolean {
+function outputHomeHasDotDot(raw: string): boolean {
   return raw.split(/[\\/]/).includes('..');
 }
 

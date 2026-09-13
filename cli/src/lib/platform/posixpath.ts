@@ -28,7 +28,7 @@ export function localBinDir(home: string = os.homedir()): string {
   return path.join(home, '.local', 'bin');
 }
 
-export interface SymlinkResult {
+interface SymlinkResult {
   /** A usable symlink to `target` exists at the path after this call. */
   ok: boolean;
   /** True only when this call created the symlink (false = already correct, or left untouched). */

@@ -80,7 +80,7 @@ function agentToFormat(agent: string): SessionAgentId | null {
   return null;
 }
 
-export function assertContained(candidate: string, rootDir: string): string {
+function assertContained(candidate: string, rootDir: string): string {
   const root = path.resolve(rootDir);
   const resolved = path.resolve(root, candidate);
   if (!resolved.startsWith(root + path.sep)) {
@@ -89,7 +89,7 @@ export function assertContained(candidate: string, rootDir: string): string {
   return resolved;
 }
 
-export function validateCloudExecutionId(executionId: string): string {
+function validateCloudExecutionId(executionId: string): string {
   if (!CLOUD_EXECUTION_ID_RE.test(executionId)) {
     throw new Error(`Invalid cloud execution_id: ${JSON.stringify(executionId)}`);
   }
@@ -181,16 +181,4 @@ export function isCloudSessionPath(filePath: string): boolean {
   const root = path.resolve(CLOUD_CACHE_DIR);
   const resolved = path.resolve(filePath);
   return resolved.startsWith(root + path.sep);
-}
-
-/** Extract execution_id from a cloud cache path. */
-export function executionIdFromCloudPath(filePath: string): string | null {
-  if (!isCloudSessionPath(filePath)) return null;
-  const rel = path.relative(CLOUD_CACHE_DIR, filePath);
-  const parts = rel.split(path.sep);
-  try {
-    return parts[0] ? validateCloudExecutionId(parts[0]) : null;
-  } catch {
-    return null;
-  }
 }

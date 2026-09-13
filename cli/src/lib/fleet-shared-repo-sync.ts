@@ -19,8 +19,8 @@ import { logAndContinueOnLockCompromised } from './lock-compromise.js';
 import { machineId } from './session/sync/config.js';
 import { getDaemonDir, getUserAgentsDir } from './state.js';
 
-export const FLEET_SHARED_REPO_SYNC_DEADLINE_MS = 45_000;
-export const FLEET_SHARED_REPO_KILL_GRACE_MS = 250;
+const FLEET_SHARED_REPO_SYNC_DEADLINE_MS = 45_000;
+const FLEET_SHARED_REPO_KILL_GRACE_MS = 250;
 export const FLEET_SHARED_REPO_OUTPUT_MAX_BYTES = 1024 * 1024;
 const FLEET_SHARED_REPO_PUSH_ATTEMPTS = 3;
 const FLEET_SHARED_REPO_REBASE_CLEANUP_RESERVE_MS = 5_000;
@@ -63,14 +63,14 @@ export function readLastSuccessfulExchangeMs(): number | null {
   }
 }
 
-export interface BoundedProcessResult {
+interface BoundedProcessResult {
   code: number | null;
   stdout: string;
   stderr: string;
   timedOut: boolean;
 }
 
-export interface FleetSharedRepoSyncOptions {
+interface FleetSharedRepoSyncOptions {
   userAgentsDir?: string;
   device?: string;
   timeoutMs?: number;
@@ -78,7 +78,7 @@ export interface FleetSharedRepoSyncOptions {
   lockPath?: string;
 }
 
-export interface FleetSharedRepoSyncResult {
+interface FleetSharedRepoSyncResult {
   success: boolean;
   committed: boolean;
   pushed: boolean;

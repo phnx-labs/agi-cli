@@ -26,15 +26,15 @@ import {
 } from './feed/feed.js';
 import { enqueue, mailboxDir } from './mailbox.js';
 
-export type BlockClass = 'approval' | 'decision';
+type BlockClass = 'approval' | 'decision';
 
-export interface ClassPolicy {
+interface ClassPolicy {
   timeoutMinutes: number;
   /** For approval class only: the answer to apply when the timeout fires. */
   safeDefault?: string;
 }
 
-export interface FeedPolicy {
+interface FeedPolicy {
   approval: ClassPolicy;
   decision: ClassPolicy;
   /** High-cost-of-delay blocks below this threshold do not page the phone. */
@@ -50,7 +50,7 @@ export const DEFAULT_POLICY: FeedPolicy = {
   phoneNotifyThreshold: 'medium',
 };
 
-export function getPolicyPath(root?: string): string {
+function getPolicyPath(root?: string): string {
   return path.join(root ?? getUserAgentsDir(), POLICY_FILE);
 }
 
@@ -93,7 +93,7 @@ export function isPhoneUrgent(block: OpenBlock, policy: FeedPolicy): boolean {
   return COST_RANK[cost] >= COST_RANK[policy.phoneNotifyThreshold];
 }
 
-export function minutesElapsed(block: OpenBlock, now: Date): number {
+function minutesElapsed(block: OpenBlock, now: Date): number {
   const ts = Date.parse(block.ts);
   if (Number.isNaN(ts)) return 0;
   return (now.getTime() - ts) / 60_000;
@@ -111,7 +111,7 @@ export function isTimedOut(block: OpenBlock, policy: FeedPolicy, now: Date): boo
   return minutes >= timeoutMinutesForBlock(block, policy);
 }
 
-export interface PolicyResult {
+interface PolicyResult {
   blockId: string;
   action: 'none' | 'defaulted' | 'parked';
   answer?: AnswerRecord;

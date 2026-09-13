@@ -70,7 +70,7 @@ export const PROBE_SNIPPET = `uptime; echo ${SEP}; (vm_stat 2>/dev/null || cat /
  * "no load signal" and headroom falls back to memory pressure alone.
  * wrapRemoteCommand base64-encodes this for powershell-shell devices, so the
  * quoting survives ssh intact. */
-export const WIN_PROBE_SNIPPET = `$os = Get-CimInstance Win32_OperatingSystem; $cpu = (Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average; $disk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'"; Write-Output ('AGWINSTAT load=' + $cpu + ' freeKb=' + $os.FreePhysicalMemory + ' totalKb=' + $os.TotalVisibleMemorySize + ' ncpu=' + $env:NUMBER_OF_PROCESSORS + ' diskFreeKb=' + ($disk.FreeSpace / 1KB) + ' diskTotalKb=' + ($disk.Size / 1KB))`;
+const WIN_PROBE_SNIPPET = `$os = Get-CimInstance Win32_OperatingSystem; $cpu = (Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average; $disk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'"; Write-Output ('AGWINSTAT load=' + $cpu + ' freeKb=' + $os.FreePhysicalMemory + ' totalKb=' + $os.TotalVisibleMemorySize + ' ncpu=' + $env:NUMBER_OF_PROCESSORS + ' diskFreeKb=' + ($disk.FreeSpace / 1KB) + ' diskTotalKb=' + ($disk.Size / 1KB))`;
 
 export function localProbeInvocation(platform: NodeJS.Platform): { file: string; args: string[] } {
   return platform === 'win32'
@@ -255,7 +255,7 @@ export function parseWinProbeOutput(host: string, stdout: string, fetchedAt: num
   };
 }
 
-export interface FleetCapacity {
+interface FleetCapacity {
   reachable: number;
   cores: number;
   memTotalBytes: number;

@@ -30,7 +30,7 @@ function remoteAgentsCommand(args: string[], os?: string): string {
   return `bash -lc ${shellQuote(inner)}`;
 }
 
-export interface RemotePullResult {
+interface RemotePullResult {
   bundles: ParsedBundle[];
   errors: string[];
 }

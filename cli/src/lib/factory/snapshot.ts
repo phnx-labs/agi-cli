@@ -51,7 +51,7 @@ export interface FactorySnapshot {
   config: FactoryConfig;
 }
 
-export interface SnapshotDependencies {
+interface SnapshotDependencies {
   home: string;
   now: () => Date;
   activeSessions: () => Promise<ActiveSession[]>;
@@ -169,7 +169,7 @@ export function parseDevices(payload: unknown, cached: ReturnType<typeof readSta
   }).filter((row) => row.name.length > 0);
 }
 
-export function readRecentRuns(home: string, limit = 3): FactorySnapshot['recentRuns'] {
+function readRecentRuns(home: string, limit = 3): FactorySnapshot['recentRuns'] {
   const root = path.join(home, '.agents', '.history', 'runs');
   if (!fs.existsSync(root)) return [];
   const found: Array<FactorySnapshot['recentRuns'][number] & { mtime: number }> = [];

@@ -117,7 +117,7 @@ export interface InjectResult {
  * Everything but vscodium self-confirms (see InjectResult.confirmed); vscodium's
  * `--open-url` is fire-and-forget until the swarm-ext extension acks the verb.
  */
-export function backendConfirmsDelivery(backend: InjectBackend): boolean {
+function backendConfirmsDelivery(backend: InjectBackend): boolean {
   return backend !== 'vscodium';
 }
 

@@ -16,7 +16,7 @@ import { pickBestDevice, type DevicePlacementSignal } from './teams/scheduler.js
 import type { AgentType } from './teams/agents.js';
 
 /** Peakiness of usage weights; >1 amplifies the most-used option. */
-export const DEFAULT_AFFINITY_ALPHA = 1.3;
+const DEFAULT_AFFINITY_ALPHA = 1.3;
 
 export interface WeightedCandidate {
   key: string;
@@ -92,7 +92,7 @@ export function listOnlineDeviceNames(localName: string = localMachineId()): str
   return filterAutoPool([...names]);
 }
 
-export interface DeviceAffinityOptions {
+interface DeviceAffinityOptions {
   sinceDays?: number;
   alpha?: number;
   /**
@@ -117,7 +117,7 @@ export interface DeviceAffinityPlan {
 }
 
 /** Live placement plan used by the explicit `--device auto` surface. */
-export interface DeviceAutoPlan {
+interface DeviceAutoPlan {
   /** null means the local machine won the comparison. */
   host: string | null;
   candidates: Array<{ key: string; loadPercent?: number; installed?: boolean; signedIn?: boolean }>;
@@ -330,7 +330,7 @@ export function isDeviceAuto(value: string | undefined | null): boolean {
 
 const HOST_SLOTS = ['host', 'device', 'on', 'computer'] as const;
 
-export type DeviceAutoHostOptions = {
+type DeviceAutoHostOptions = {
   host?: string;
   device?: string;
   on?: string;

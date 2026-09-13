@@ -75,7 +75,7 @@ export function shouldAttachLocalTmuxAliasBeforeFleet(
  * SES-39's "re-read `pane_dead` immediately before attach" is honoured here:
  * liveness is queried at attach time, not read from a roster.
  */
-export async function attachLiveTmuxAlias(selector: string): Promise<boolean> {
+async function attachLiveTmuxAlias(selector: string): Promise<boolean> {
   const socket = getDefaultSocketPath();
   if (await resolveTmuxAliasState(selector, socket) !== 'live') return false;
 
@@ -105,7 +105,7 @@ export async function attachLiveTmuxAlias(selector: string): Promise<boolean> {
   return true;
 }
 
-export type LocalAliasBySuffix =
+type LocalAliasBySuffix =
   | { kind: 'alias'; alias: string }
   | { kind: 'collision'; aliases: string[] }
   | { kind: 'none' };

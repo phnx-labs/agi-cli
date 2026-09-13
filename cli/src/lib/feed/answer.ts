@@ -20,8 +20,8 @@ import { reconcileAttention, type AttentionItem } from './attention.js';
 import { readPullRequestStatus } from './pr-status.js';
 import { getAgentsInvocation } from '../daemon/daemon.js';
 
-export interface VerifiedOperator { id?: string; verified: boolean; label?: string }
-export interface FeedAnswerResult { status: 'delivered' | 'already_answered'; receipt: MessageReceipt }
+interface VerifiedOperator { id?: string; verified: boolean; label?: string }
+interface FeedAnswerResult { status: 'delivered' | 'already_answered'; receipt: MessageReceipt }
 
 function sessionForBlock(block: OpenBlock, sessions: ActiveSession[]): ActiveSession | undefined {
   return sessions.find((session) => session.sessionId === block.sessionId || session.agentId === block.mailboxId);

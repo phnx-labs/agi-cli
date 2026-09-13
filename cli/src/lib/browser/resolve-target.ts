@@ -37,7 +37,7 @@ export type DeviceProbeResult =
 
 export type DeviceProbe = (device: string) => DeviceProbeResult;
 
-export interface ResolvedBrowserTarget {
+interface ResolvedBrowserTarget {
   name: string;
   kind: 'identity' | 'fungible';
   /** Device the daemon will talk to. */
@@ -65,7 +65,7 @@ export function shouldForkProfile(
   return Boolean(conn.electron && conn.tasks.size > 0);
 }
 
-export function profileFromDeclaration(
+function profileFromDeclaration(
   name: string,
   declaration: ProfileDeclaration,
 ): BrowserProfile {
@@ -115,7 +115,7 @@ function levenshtein(a: string, b: string): number {
 }
 
 /** Declared names that look like `query` — used in the undeclared error. */
-export function similarProfileNames(query: string, names: string[]): string[] {
+function similarProfileNames(query: string, names: string[]): string[] {
   const q = query.toLowerCase();
   const maxDist = Math.max(2, Math.floor(q.length / 4));
   return names
@@ -165,7 +165,7 @@ export function undeclaredProfileError(name: string): Error {
   );
 }
 
-export function unreachableDeclaringDevicesError(
+function unreachableDeclaringDevicesError(
   name: string,
   devices: string[],
   failures: string[],

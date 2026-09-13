@@ -21,7 +21,7 @@ import { readRunMeta, type RunMeta } from '../scheduling/routines.js';
 import type { MonitorEvent } from './config.js';
 
 /** Persisted last-seen state for one monitor. */
-export interface MonitorState {
+interface MonitorState {
   monitorName: string;
   /** Hash of the last-seen de-dupe signature (see hasChanged). */
   lastHash: string;
@@ -77,7 +77,7 @@ function getLivenessPath(name: string): string {
 }
 
 /** Directory holding a monitor's fire history. */
-export function getMonitorFiresDir(name: string): string {
+function getMonitorFiresDir(name: string): string {
   return path.join(getMonitorHistoryDir(name), 'fires');
 }
 
@@ -93,7 +93,7 @@ export function readState(name: string): MonitorState | null {
 }
 
 /** Persist a monitor's state atomically (temp file + rename, like writeRunMeta). */
-export function writeStateRaw(state: MonitorState): void {
+function writeStateRaw(state: MonitorState): void {
   ensureAgentsDir();
   const dir = getMonitorHistoryDir(state.monitorName);
   fs.mkdirSync(dir, { recursive: true });
@@ -244,7 +244,7 @@ export function writeFireRecord(
 }
 
 /** A single fire history entry (as read back from disk). */
-export interface FireRecord extends MonitorEvent {
+interface FireRecord extends MonitorEvent {
   runId?: string;
   action?: string;
   ok?: boolean;
@@ -301,7 +301,7 @@ export function listFires(name: string): FireRecord[] {
 const POSTCONDITION_TIMEOUT_MS = 15_000;
 
 /** The reconciled outcome of one fire, resolved against the run's live status. */
-export interface ReconciledFireOutcome {
+interface ReconciledFireOutcome {
   /** True fire outcome, correcting the frozen `ok` against the run's CURRENT status. */
   ok: boolean;
   /** The run's live terminal status, when a runId is present and resolvable. */

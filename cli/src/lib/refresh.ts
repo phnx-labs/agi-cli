@@ -64,7 +64,7 @@ import {
 import { parseHookManifest, registerHooksToSettings } from './hooks/install.js';
 import { isPromptCancelled } from './format.js';
 
-export interface RefreshOptions {
+interface RefreshOptions {
   /** Limit operations to a single agent (claude/codex/etc). Default: all installed. */
   agentFilter?: AgentId;
   /** Auto-sync everything and skip interactive prompts. */
@@ -117,7 +117,7 @@ function migratePromptcutsToRoot(agentsDir: string, quiet = false): void {
  * visible only on the interactive path — `agents sync --yes` and the
  * `--device all` fan-out reported a clean sync (RUSH-2700).
  */
-export interface RefreshResult {
+interface RefreshResult {
   /** User-facing sentences, one per refused resource, prefixed with the agent. */
   declined: string[];
   /**

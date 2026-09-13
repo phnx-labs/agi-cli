@@ -192,7 +192,7 @@ function deviceLabel(job: JobConfig, width?: number): { raw: string; display: st
  * device's status via `agents routines list --device <name>`.
  */
 
-export interface RoutineListGroup {
+interface RoutineListGroup {
   key: string;
   title: string;
   jobs: JobConfig[];
@@ -204,7 +204,7 @@ export interface RoutineListGroup {
   local: boolean;
 }
 
-export function groupRoutineJobsByDevice(
+function groupRoutineJobsByDevice(
   jobs: JobConfig[],
   registry: DeviceRegistry,
   self: string = machineId(),

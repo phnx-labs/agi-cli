@@ -37,7 +37,7 @@ import {
 } from '../session/bash-command.js';
 
 /** Recognizable milestone events, ordered first in any activity lane. */
-export type MilestoneEvent =
+type MilestoneEvent =
   | 'plan.created'
   | 'pr.opened'
   | 'pr.merged'
@@ -469,7 +469,7 @@ export function readSessionActivity(sessionId: string, root?: string, maxBytes =
 }
 
 /** List session ids that have an activity log. */
-export function listActivitySessions(root?: string): string[] {
+function listActivitySessions(root?: string): string[] {
   const dir = root ?? getActivityDir();
   try {
     return fs.readdirSync(dir).filter(n => n.endsWith('.jsonl')).map(n => n.slice(0, -'.jsonl'.length));
@@ -478,7 +478,7 @@ export function listActivitySessions(root?: string): string[] {
   }
 }
 
-export interface RecentActivityOptions {
+interface RecentActivityOptions {
   /** Only include events at or after this epoch-ms. */
   sinceMs?: number;
   /** Cap the number of returned events (most recent first). */
@@ -520,7 +520,7 @@ export function readRecentActivity(opts: RecentActivityOptions = {}): ActivityEv
   return structuredClone(typeof opts.limit === 'number' ? all.slice(0, opts.limit) : all);
 }
 
-export interface CollapsedActivity {
+interface CollapsedActivity {
   /** Milestone events, individually preserved, newest first. */
   milestones: ActivityEvent[];
   /** Routine events rolled up to counts, e.g. { 'file.edited': 12 }. */
@@ -558,7 +558,7 @@ export function collapseActivity(events: ActivityEvent[]): CollapsedActivity {
  * agent-semantic stream reads through the same reader as operational events.
  * `module` is stamped `activity` so `--module` filters partition the two cleanly.
  */
-export function activityEventToRecord(ev: ActivityEvent): EventRecord {
+function activityEventToRecord(ev: ActivityEvent): EventRecord {
   return {
     ts: ev.ts,
     tz: '',
@@ -604,7 +604,7 @@ export function readActivityAsEventRecords(opts: RecentActivityOptions = {}): Ev
 // ---------------------------------------------------------------------------
 
 /** Glyph + color + human label per event, so the lane reads at a glance. */
-export const EVENT_STYLE: Record<string, { glyph: string; color: (s: string) => string; label: string }> = {
+const EVENT_STYLE: Record<string, { glyph: string; color: (s: string) => string; label: string }> = {
   'plan.created': { glyph: '◆', color: chalk.cyan, label: 'plan created' },
   'pr.opened': { glyph: '⇡', color: chalk.green, label: 'PR opened' },
   'pr.merged': { glyph: '✔', color: chalk.green, label: 'PR merged' },
@@ -622,7 +622,7 @@ export const EVENT_STYLE: Record<string, { glyph: string; color: (s: string) => 
   'bash.executed': { glyph: '$', color: chalk.gray, label: 'command run' },
 };
 
-export function styleForEvent(event: string) {
+function styleForEvent(event: string) {
   return EVENT_STYLE[event] ?? { glyph: '•', color: chalk.white, label: event };
 }
 
@@ -648,7 +648,7 @@ export function formatActivityLine(ev: ActivityEvent, opts: { showHost?: boolean
 // ---------------------------------------------------------------------------
 
 /** Glyph per attachment kind, so an artifact row reads at a glance. */
-export const ATTACHMENT_GLYPH: Record<string, string> = {
+const ATTACHMENT_GLYPH: Record<string, string> = {
   image: '🖼',
   audio: '♪',
   video: '▶',
@@ -656,7 +656,7 @@ export const ATTACHMENT_GLYPH: Record<string, string> = {
   link: '↗',
 };
 
-export function attachmentGlyph(kind: string): string {
+function attachmentGlyph(kind: string): string {
   return ATTACHMENT_GLYPH[kind] ?? '📎';
 }
 
@@ -679,7 +679,7 @@ export function shortSessionId(sessionId: string): string {
 }
 
 /** Extra identity resolved at display time by joining the session index. */
-export interface ProgressJoin {
+interface ProgressJoin {
   ticketId?: string;
   prUrl?: string;
   label?: string;
@@ -754,7 +754,7 @@ export interface EnrichedActivityEvent extends ActivityEvent {
  * Facts pulled off a live session to enrich its activity events. Keyed by
  * `sessionId`; every field optional so callers pass whatever they resolved.
  */
-export interface ActivitySessionHint {
+interface ActivitySessionHint {
   sessionId?: string | null;
   /** Tracker ticket id (from `ActiveSession.ticket`). */
   ticket?: string | null;
@@ -892,10 +892,10 @@ export function capActivityEvents(
   return out;
 }
 
-export type ActivityGroupBy = 'project' | 'device' | 'agent';
+type ActivityGroupBy = 'project' | 'device' | 'agent';
 
 /** One bucket of the grouped view. */
-export interface ActivityGroup {
+interface ActivityGroup {
   /** Grouping value; empty string for the "unknown" bucket. */
   key: string;
   /** Display label. */
@@ -978,7 +978,7 @@ export function formatEnrichedActivityLine(
 }
 
 /** Max device names named in a group header before the rest collapse to `+N`. */
-export const GROUP_HEADER_DEVICE_LIMIT = 3;
+const GROUP_HEADER_DEVICE_LIMIT = 3;
 
 /**
  * The distinct machines a group's events ran on, most-active first then
@@ -1885,7 +1885,7 @@ if __name__ == "__main__":
 `;
 
 /** Hook manifest entries (agents.yaml shape) for the activity-log hook. */
-export const ACTIVITY_HOOK_DEFINITIONS: Record<string, Record<string, unknown>> = {
+const ACTIVITY_HOOK_DEFINITIONS: Record<string, Record<string, unknown>> = {
   'activity-log-intent': {
     agents: ['claude'],
     events: ['PreToolUse'],

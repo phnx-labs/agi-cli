@@ -67,14 +67,14 @@ export interface UsageSyncPayload {
   rows: Record<string, CachedUsageSnapshot>;
 }
 
-export interface PublishUsageSnapshotOptions {
+interface PublishUsageSnapshotOptions {
   userAgentsDir?: string;
   cachePath?: string;
   role?: ConfiguredDeviceRole;
   device?: string;
 }
 
-export interface PublishUsageSnapshotResult {
+interface PublishUsageSnapshotResult {
   published: boolean;
   changed: boolean;
   skipped: string | null;
@@ -144,7 +144,7 @@ export async function pushUsageSnapshotNow(
   return { published, transport };
 }
 
-export interface ConsumeUsageSnapshotsOptions {
+interface ConsumeUsageSnapshotsOptions {
   userAgentsDir?: string;
   cachePath?: string;
   role?: ConfiguredDeviceRole;
@@ -152,7 +152,7 @@ export interface ConsumeUsageSnapshotsOptions {
   roles?: Record<string, ConfiguredDeviceRole>;
 }
 
-export interface ConsumeUsageSnapshotsResult {
+interface ConsumeUsageSnapshotsResult {
   sources: string[];
   merged: number;
   skipped: string | null;

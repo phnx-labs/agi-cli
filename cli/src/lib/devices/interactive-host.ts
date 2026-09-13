@@ -20,7 +20,7 @@ import { getConfigValue } from '../device-config.js';
 import { RESERVED_DEVICE_NAMES } from './registry.js';
 
 /** The reserved `--device` value meaning the box the human is at. */
-export const INTERACTIVE_DEVICE_SENTINEL = 'interactive';
+const INTERACTIVE_DEVICE_SENTINEL = 'interactive';
 
 /** True when a host flag value is the interactive sentinel. */
 export function isDeviceInteractive(value: string | undefined | null): boolean {

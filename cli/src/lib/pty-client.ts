@@ -19,18 +19,18 @@ const RESPONSE_TIMEOUT_MS = 30000;
 const START_TIMEOUT_MS = 5000;
 const IS_WINDOWS = process.platform === 'win32';
 
-export interface ServerSpawnArgs {
+interface ServerSpawnArgs {
   bin: string;
   args: string[];
 }
 
-export interface ServerExit {
+interface ServerExit {
   code: number | null;
   signal: NodeJS.Signals | null;
 }
 
 /** JSON response envelope from the PTY server. */
-export interface PtyResponse {
+interface PtyResponse {
   ok: boolean;
   error?: string;
   [key: string]: any;

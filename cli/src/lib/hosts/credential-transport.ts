@@ -14,7 +14,7 @@ import { sshTargetFor } from './types.js';
 import { isHostPinned } from '../devices/known-hosts.js';
 
 /** The host part of an ssh target (`user@host` -> `host`) for known_hosts matching. */
-export function hostKeyLookupName(target: string): string {
+function hostKeyLookupName(target: string): string {
   return target.split('@').pop() ?? target;
 }
 

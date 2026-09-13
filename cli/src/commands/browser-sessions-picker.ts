@@ -28,7 +28,7 @@ import {
 import { formatRelativeTime } from '../lib/session/relative-time.js';
 import { sessionHeadline } from '../lib/session/title.js';
 
-export interface BrowserSessionsCommandOpts {
+interface BrowserSessionsCommandOpts {
   profile?: string;
   open?: string | boolean;
   json?: boolean;

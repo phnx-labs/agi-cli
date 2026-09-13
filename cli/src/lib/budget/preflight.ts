@@ -19,7 +19,7 @@ import type { SpendEntry } from './ledger.js';
 import { resolveBudgetConfig, hasAnyCap } from './config.js';
 
 /** A pre-flight cost estimate for one run. */
-export interface RunEstimate {
+interface RunEstimate {
   /** Estimated USD for this run. 0 when the model is unpriced. */
   estUsd: number;
   /** How the token count was derived. */
@@ -108,7 +108,7 @@ export function ledgerAverageTokens(
 }
 
 /** Decision returned by the pre-flight gate. */
-export interface PreflightDecision {
+interface PreflightDecision {
   /** Whether the run may proceed. */
   allow: boolean;
   /** Whether the caller must interactively confirm (estimate >= require_confirm_over). */
@@ -232,7 +232,7 @@ export function enforcePreflight(
 }
 
 /** Build a one-line human estimate banner for `agents run` preamble. */
-export function formatEstimateBanner(agent: string, model: string, est: RunEstimate): string {
+function formatEstimateBanner(agent: string, model: string, est: RunEstimate): string {
   const cost = est.priced ? formatUsd(est.estUsd) : 'unpriced';
   const basisLabel =
     est.basis === 'ledger-average'
@@ -244,7 +244,7 @@ export function formatEstimateBanner(agent: string, model: string, est: RunEstim
 }
 
 /** Result of the high-level run gate consumed by `agents run` / teams / cloud. */
-export interface PreflightGateResult {
+interface PreflightGateResult {
   /** True when no caps are configured — budget feature dormant, nothing to do. */
   dormant: boolean;
   cfg: BudgetConfig;

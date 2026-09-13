@@ -37,7 +37,7 @@ import {
 } from './timeline.js';
 
 /** Sessions folded per tick. The tick's own deadline is 30 s; this stays well inside it. */
-export const TIMELINE_PASS_MAX_PER_TICK = 8;
+const TIMELINE_PASS_MAX_PER_TICK = 8;
 
 /** Bytes one session may consume in one tick. A bigger backlog catches up over ticks. */
 export const TIMELINE_PASS_MAX_BYTES_PER_SESSION = 4 * 1024 * 1024;
@@ -51,7 +51,7 @@ export const TIMELINE_PASS_MAX_BYTES_PER_SESSION = 4 * 1024 * 1024;
  * the service on this fleet (observed 2026-09-06). A tick budget makes a cold
  * start catch up over a few ticks instead of stalling one.
  */
-export const TIMELINE_PASS_MAX_BYTES_PER_TICK = 8 * 1024 * 1024;
+const TIMELINE_PASS_MAX_BYTES_PER_TICK = 8 * 1024 * 1024;
 
 /**
  * Ceiling on a whole-file re-parse for a harness with no resumable reader.
@@ -61,7 +61,7 @@ export const TIMELINE_PASS_MAX_BYTES_PER_TICK = 8 * 1024 * 1024;
 export const TIMELINE_PASS_MAX_WHOLE_FILE_BYTES = 16 * 1024 * 1024;
 
 /** Events folded from one non-resumable whole-file parse before reporting `partial`. */
-export const TIMELINE_PASS_MAX_EVENTS = 20_000;
+const TIMELINE_PASS_MAX_EVENTS = 20_000;
 
 /**
  * How long a non-resumable harness's timeline may go stale before the pass
@@ -92,7 +92,7 @@ const NO_TRANSCRIPT_REASON: Partial<Record<SessionAgentId, string>> = {
   openclaw: 'OpenClaw writes no parseable transcript, so there are no steps to fold',
 };
 
-export interface TimelinePassResult {
+interface TimelinePassResult {
   /** Sessions whose timeline was folded and written this tick. */
   computed: number;
   /** Sessions whose cached timeline already matched the transcript bytes. */
@@ -101,7 +101,7 @@ export interface TimelinePassResult {
   skipped: number;
 }
 
-export interface TimelinePassOptions {
+interface TimelinePassOptions {
   /** Live rows to fold. Defaults to the local active-sessions cache. */
   sessions?: ActiveSession[];
   budget?: number;
@@ -173,7 +173,7 @@ export function parseTimelineEvents(filePath: string, agent: SessionAgentId): Se
 }
 
 /** One session's fold: the entry to cache, and what it actually cost to produce. */
-export interface SessionTimelineFold {
+interface SessionTimelineFold {
   entry: SessionTimelineEntry;
   /**
    * Bytes this fold READ off disk — what the tick's byte budget is debited by.
@@ -202,7 +202,7 @@ function mib(bytes: number): number {
  * real transcript. A session that genuinely does not fit gets a `partial` row
  * stating why, never silence.
  */
-export function foldSessionTimeline(
+function foldSessionTimeline(
   session: ActiveSession,
   filePath: string,
   fileSize: number,

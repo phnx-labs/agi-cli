@@ -291,7 +291,7 @@ export function parsePrUrl(prUrl: string): { owner: string; repo: string; number
 // ---------------------------------------------------------------------------
 
 /** Fetch the current CI checks for a PR via `gh pr checks`. Returns [] on any gh error. */
-export async function fetchPrChecks(prUrl: string): Promise<PrCheck[]> {
+async function fetchPrChecks(prUrl: string): Promise<PrCheck[]> {
   try {
     const { stdout } = await execFileAsync(
       'gh',
@@ -314,7 +314,7 @@ export async function fetchPrChecks(prUrl: string): Promise<PrCheck[]> {
 }
 
 /** Fetch review comments for a PR via `gh api`. Returns [] on any gh error. */
-export async function fetchPrReviewComments(prUrl: string): Promise<PrReviewComment[]> {
+async function fetchPrReviewComments(prUrl: string): Promise<PrReviewComment[]> {
   const parsed = parsePrUrl(prUrl);
   if (!parsed) return [];
   try {
@@ -344,7 +344,7 @@ export async function fetchPrReviewComments(prUrl: string): Promise<PrReviewComm
 }
 
 /** Fetch the failing-run logs for a check via `gh run view --log-failed`. Best-effort, truncated. */
-export async function fetchCiFailureLogs(check: PrCheck, maxChars = 8000): Promise<string> {
+async function fetchCiFailureLogs(check: PrCheck, maxChars = 8000): Promise<string> {
   const runId = check.link?.match(/\/runs\/(\d+)/)?.[1] ?? check.link?.match(/\/actions\/runs\/(\d+)/)?.[1];
   if (!runId) return '';
   try {
@@ -362,7 +362,7 @@ export async function fetchCiFailureLogs(check: PrCheck, maxChars = 8000): Promi
 }
 
 /** Collect a live PR snapshot from `gh`. The poll-mode seam for `runPrWatch`. */
-export async function pollPrSnapshot(
+async function pollPrSnapshot(
   prUrl: string,
   sourceTeammate: string | null
 ): Promise<PrSnapshot> {
@@ -385,7 +385,7 @@ export interface WatchTarget {
   sourceTeammate: string | null;
 }
 
-export interface PrWatchDeps {
+interface PrWatchDeps {
   /** Discover which PRs to watch this pass (teammates may open PRs mid-run). */
   resolveTargets: () => Promise<WatchTarget[]>;
   /** Snapshot one PR's CI + review comments. Defaults to `pollPrSnapshot`. */
@@ -417,7 +417,7 @@ export type PrWatchEvent =
   | { type: 'needs-human'; prUrl: string; subject: string; waves: number; timestamp: string }
   | { type: 'error'; prUrl: string; message: string; timestamp: string };
 
-export interface PrWatchOptions {
+interface PrWatchOptions {
   intervalMs?: number;
   /** Stop after this many polls (0 / undefined = run until signalled). */
   maxPolls?: number;
@@ -431,7 +431,7 @@ export interface PrWatchOptions {
   shouldStop?: () => boolean;
 }
 
-export interface PrWatchResult {
+interface PrWatchResult {
   polls: number;
   spawned: number;
   /** How many PRs escalated to a human (wave budget exhausted). */

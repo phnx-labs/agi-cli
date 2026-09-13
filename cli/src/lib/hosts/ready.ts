@@ -66,14 +66,6 @@ export function buildRemoteVersionCommand(os?: string): string {
     : 'bash -lc "agents --version 2>/dev/null"';
 }
 
-/** Remote agents-cli version (PATH-resolved on the remote), or null if not installed. */
-export function remoteAgentsVersion(target: string, os?: string, extraSshArgs: string[] = []): string | null {
-  const r = sshExec(target, buildRemoteVersionCommand(os), { timeoutMs: 20000, extraSshArgs });
-  if (r.code !== 0) return null;
-  const v = r.stdout.trim();
-  return v || null;
-}
-
 /** ssh command that installs/upgrades agents-cli to `spec` then `agents setup`.
  * PowerShell has no `tail`/`[ -d ]`/`||`, so the Windows branch uses native
  * equivalents (`Select-Object -Last`, `Test-Path`). Pure/exported. */
@@ -237,7 +229,7 @@ export function missingPinnedVersionMessage(
 }
 
 /** Account eligibility extracted from one device's `agents view --json`. */
-export interface ViewAgentAccountEligibility {
+interface ViewAgentAccountEligibility {
   /** At least one account can launch immediately. */
   signedIn: boolean | undefined;
   /** At least one account can launch immediately or enter the harness login flow. */
@@ -310,7 +302,7 @@ export function viewAgentSignedIn(view: string, agent: string): boolean | undefi
   return viewAgentAccountEligibility(view, agent).signedIn;
 }
 
-export interface EnsureReadyOptions {
+interface EnsureReadyOptions {
   agent: string;
   /**
    * Explicit version pin (e.g. `"0.145.0"`). Concrete pins fail loud when the

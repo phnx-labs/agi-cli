@@ -21,14 +21,14 @@ interface ProjectManagedManifest {
   paths: string[];
 }
 
-export interface ProjectResourceSyncResult {
+interface ProjectResourceSyncResult {
   synced: string[];
   skipped: string[];
 }
 
 type ProjectKind = 'commands' | 'skills' | 'subagents' | 'workflows';
 
-export function projectAgentRoot(projectRoot: string, agent: AgentId): string {
+function projectAgentRoot(projectRoot: string, agent: AgentId): string {
   return path.join(projectRoot, agentConfigDirName(agent));
 }
 

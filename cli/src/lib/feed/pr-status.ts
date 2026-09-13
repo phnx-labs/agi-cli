@@ -7,7 +7,7 @@ import type { PullRequestAttentionSignal } from './attention.js';
 
 const execFileAsync = promisify(execFile);
 export const PR_STATUS_TTL_MS = 45_000;
-export const PR_STATUS_FIELDS = 'number,title,state,isDraft,reviewDecision,mergeable,statusCheckRollup';
+const PR_STATUS_FIELDS = 'number,title,state,isDraft,reviewDecision,mergeable,statusCheckRollup';
 
 export interface PullRequestStatus extends PullRequestAttentionSignal {
   statusCheckRollup?: unknown[];
@@ -50,11 +50,6 @@ export async function readPullRequestStatus(
     cache.set(key, { expiresAt: now + (options.ttlMs ?? PR_STATUS_TTL_MS) });
     return undefined;
   }
-}
-
-export async function projectPullRequestBoard(sessions: ActiveSession[]): Promise<PullRequestStatus[]> {
-  const rows = await Promise.all(sessions.map((session) => readPullRequestStatus(session)));
-  return rows.filter((row): row is PullRequestStatus => row !== undefined);
 }
 
 export function resetPullRequestStatusCache(): void { cache.clear(); }

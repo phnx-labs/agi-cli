@@ -13,10 +13,8 @@ import type { AgentId, PluginManifest } from '../../types.js';
 import { getUserAgentsDir, getAgentsDir, getEnabledExtraRepos, getCommandsDir, getSkillsDir, getHooksDir } from '../../state.js';
 import { isSafeSegmentName, safeJoin } from '../../paths.js';
 
-export type EnabledExtra = { alias: string; dir: string };
-
 /** Trusted source bases for content-like kinds. Project layer excluded. */
-export function trustedSourceBases(): { dir: string }[] {
+function trustedSourceBases(): { dir: string }[] {
   return [
     { dir: getUserAgentsDir() },
     { dir: getAgentsDir() },

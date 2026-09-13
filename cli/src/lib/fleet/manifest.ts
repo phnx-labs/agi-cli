@@ -153,7 +153,7 @@ function mergeDesired(device: string, defaults: FleetDefaults, override: FleetDe
   };
 }
 
-export interface ResolveContext {
+interface ResolveContext {
   /** Device names currently online (used to expand `devices: all`). */
   onlineDevices: string[];
   /** All registered device names (used to validate explicit entries). */

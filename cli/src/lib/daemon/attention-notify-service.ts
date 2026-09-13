@@ -97,7 +97,7 @@ export function buildAttentionNotification(item: AttentionItem, session: ActiveS
   return n;
 }
 
-export interface AttentionNotifyServiceOptions {
+interface AttentionNotifyServiceOptions {
   /** Live-session source (default: the real active-session query). Injected in tests. */
   getSessions?: () => Promise<ActiveSession[]>;
   /** Notifier (default: the real desktop notifier). Injected in tests to capture posts. */

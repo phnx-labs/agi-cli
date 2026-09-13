@@ -42,9 +42,9 @@ export function resetSyncPassphraseWarnings(): void {
 }
 
 /** Where a resolved sync passphrase came from, so callers can report honestly. */
-export type SyncPassphraseSource = 'sync-env' | 'legacy-env' | null;
+type SyncPassphraseSource = 'sync-env' | 'legacy-env' | null;
 
-export interface ResolvedSyncPassphrase {
+interface ResolvedSyncPassphrase {
   value: string | null;
   source: SyncPassphraseSource;
 }

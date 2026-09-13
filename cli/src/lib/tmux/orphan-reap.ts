@@ -118,7 +118,7 @@ const PS_TIMEOUT_MS = 10_000;
 const TMUX_QUERY_TIMEOUT_MS = 10_000;
 
 /** Grace between SIGTERM and SIGKILL for a reaped orphan. */
-export const REAP_GRACE_MS = 2_000;
+const REAP_GRACE_MS = 2_000;
 
 /** Env var `runInTmux` stamps into the pane, inherited by every descendant. */
 export const TMUX_SESSION_ENV = 'AGENT_TMUX_SESSION_NAME';
@@ -142,9 +142,9 @@ export interface PaneOwner {
 }
 
 /** Why a process was selected, for human output and tests. */
-export type OrphanReason = 'tmux-agent-exited' | 'detached-helper';
+type OrphanReason = 'tmux-agent-exited' | 'detached-helper';
 
-export interface OrphanCandidate {
+interface OrphanCandidate {
   pid: number;
   args: string;
   reason: OrphanReason;
@@ -152,7 +152,7 @@ export interface OrphanCandidate {
   tmuxSession?: string;
 }
 
-export interface OrphanReapResult {
+interface OrphanReapResult {
   /** Processes signalled (SIGTERM, escalated to SIGKILL when they ignore it). */
   killed: number;
   /** One human-readable line per reaped process. */
@@ -174,7 +174,7 @@ export interface OrphanReapResult {
  * Registry rather than per-agent branches: a second harness with the same shape
  * is one entry, and the completeness of the table is what a reviewer checks.
  */
-export interface DetachedHelperRule {
+interface DetachedHelperRule {
   /** Harness id, for the reap detail line. */
   agent: string;
   /** Owner pid the helper declares in its own argv, or undefined when it is not this rule's process. */
@@ -513,7 +513,7 @@ export async function readAgentProcesses(opts: { pids?: number[] } = {}): Promis
 }
 
 /** One socket's pane-ownership read. `ok: false` means tmux never actually answered. */
-export interface PaneOwnersRead {
+interface PaneOwnersRead {
   /**
    * `true` when tmux completed the query (whatever its exit code — a nonzero
    * exit from `list-panes -a` IS tmux affirmatively answering "no server /

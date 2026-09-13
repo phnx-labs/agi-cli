@@ -11,7 +11,7 @@ import { runAcp } from './client.js';
 import type { AgentId } from '../types.js';
 import type { ExecMode } from '../exec.js';
 
-export interface HeadlessAcpOptions {
+interface HeadlessAcpOptions {
   agent: AgentId;
   prompt: string;
   cwd: string;

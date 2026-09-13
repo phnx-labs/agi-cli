@@ -22,7 +22,7 @@ import { resolveBudgetConfig, hasAnyCap } from './config.js';
 import { loadLedger, localDay, spendForDay, spendForProject } from './ledger.js';
 
 /** Result surface exposed to the caller so it can act on a mid-stream breach. */
-export interface CloudBudgetGate {
+interface CloudBudgetGate {
   /** True once a cap crossed and cancel() was invoked. */
   breached(): boolean;
   breach(): BreachInfo | null;

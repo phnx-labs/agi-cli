@@ -131,7 +131,7 @@ function isEntry(raw: unknown): raw is CacheEntry<unknown> {
 }
 
 /** What a lookup found, and how much to trust it. */
-export interface CacheHit<T> {
+interface CacheHit<T> {
   value: T;
   /** Age in ms. Past the TTL the value is still returned, flagged stale. */
   ageMs: number;

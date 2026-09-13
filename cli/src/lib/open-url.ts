@@ -23,12 +23,12 @@ import * as path from 'path';
 import { pathToFileURL } from 'url';
 
 /** Where a "show the human this" call actually landed. */
-export type ShowOutcome =
+type ShowOutcome =
   | { via: 'profile'; profile: string; tabId?: string }
   | { via: 'os'; command: string }
   | { via: 'none'; reason: string };
 
-export interface ShowOptions {
+interface ShowOptions {
   /**
    * Force the OS default handler, ignoring `browser.viewer`. This is the
    * The programmatic escape hatch, for a caller that must use the user's own

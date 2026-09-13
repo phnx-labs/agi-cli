@@ -404,7 +404,7 @@ export const PRESETS: Preset[] = [
   },
 ];
 
-export interface ResolvedPresetEnv {
+interface ResolvedPresetEnv {
   /** Env vars from preset.env — always set, no user input. */
   static: Record<string, string>;
   /** Vars the wizard needs to prompt for. */

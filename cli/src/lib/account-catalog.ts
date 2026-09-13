@@ -51,7 +51,7 @@ export function isLaunchableSignedIn(agent: AgentId, versionHome: string, info: 
   return isCredentialLaunchable(info.signedIn, credentialPresence(agent, versionHome));
 }
 
-export interface NativeAccountCatalogEntry {
+interface NativeAccountCatalogEntry {
   kind: 'native';
   id: string;
   agent: AgentId;
@@ -187,9 +187,7 @@ export interface ProviderAccountCatalogRow {
   fix: string | null;
 }
 
-export type AccountCatalogRow = NativeAccountCatalogRow | ProviderAccountCatalogRow;
-
-export interface AccountCatalog {
+interface AccountCatalog {
   native: NativeAccountCatalogRow[];
   provider: ProviderAccountCatalogRow[];
   /**
@@ -255,7 +253,7 @@ export interface AccountListEntryJson {
   fix: string | null;
 }
 
-export interface AccountListJson {
+interface AccountListJson {
   version: 2;
   accounts: AccountListEntryJson[];
 }
@@ -599,7 +597,7 @@ export function accountListJson(
  * without telling anyone anything. They stay in `accounts list --fleet`,
  * `accounts view <name>` and `--json`.
  */
-export function verdictNote(verdict: AccountVerdict): string | null {
+function verdictNote(verdict: AccountVerdict): string | null {
   if (verdict === 'rate_limited') return chalk.yellow('rate-limited');
   if (verdict === 'expired' || verdict === 'revoked' || verdict === 'missing') {
     return chalk.red(verdict);
@@ -889,7 +887,7 @@ function normalizeAuthVerdict(
 }
 
 /** The T1 slot store's per-account observation of the local verdict. */
-export interface LocalSlotObservation {
+interface LocalSlotObservation {
   authMode: AccountDeviceVerdict['authMode'];
   verdict: AuthVerdict;
   checkedAt?: string;

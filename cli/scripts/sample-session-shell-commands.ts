@@ -6,7 +6,7 @@ import { isDialableDevice, type DeviceProfile } from '../src/lib/devices/registr
 import type { ToolSearchEnvelope, ToolSessionEvidence } from '../src/lib/session/tool-index.js';
 import { machineId, normalizeHost } from '../src/lib/session/sync/config.js';
 
-export interface SampleOptions {
+interface SampleOptions {
   sessions: number;
   since: string;
   devices: string[];
@@ -192,7 +192,7 @@ function querySource(args: string[], passes: number): QuerySourceResult {
   return { envelope, failed: false };
 }
 
-export function failedCandidateQueryEnvelope(failedQueries: number): SampleEnvelope {
+function failedCandidateQueryEnvelope(failedQueries: number): SampleEnvelope {
   return {
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),

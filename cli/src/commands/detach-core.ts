@@ -29,7 +29,7 @@ export function buildBackgroundArgv(agent: string, sessionId: string, cwd?: stri
 }
 
 /** What to do with a resolved session, given which machine we're on. */
-export type DetachTarget =
+type DetachTarget =
   | { kind: 'local'; sessionId: string }
   | { kind: 'remote'; machine: string; sessionId: string }
   | { kind: 'refuse'; reason: string };

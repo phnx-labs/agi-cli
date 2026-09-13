@@ -51,7 +51,7 @@ export interface UsageObservation {
 }
 
 /** Default ledger path: <history>/spend/ledger.jsonl. */
-export function defaultLedgerPath(): string {
+function defaultLedgerPath(): string {
   return path.join(getHistoryDir(), 'spend', 'ledger.jsonl');
 }
 

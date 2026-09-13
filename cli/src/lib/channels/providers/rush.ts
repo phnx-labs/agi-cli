@@ -11,7 +11,7 @@ import type { ChannelProvider, SendOptions, SendResult } from '../registry.js';
 
 const execFileAsync = promisify(execFile);
 
-export type RushChannel = 'telegram' | 'imessage' | 'slack' | 'discord';
+type RushChannel = 'telegram' | 'imessage' | 'slack' | 'discord';
 export const RUSH_CHANNELS: RushChannel[] = ['telegram', 'imessage', 'slack', 'discord'];
 
 /** Build the `rush send` argv (exported for tests). */

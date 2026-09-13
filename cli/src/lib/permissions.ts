@@ -50,9 +50,7 @@ const HOME = os.homedir();
 //   grok        → ~/.grok/config.toml `[permission].rules`
 // the writer in `applyPermissionsToVersion` handles the format dispatch.)
 
-export type ParsedRules = PermissionSet;
-
-export const COMPUTER_PERMISSION_RULE_PREFIX = 'Computer';
+type ParsedRules = PermissionSet;
 
 export const COMPUTER_APP_GATED_VERBS = [
   'screenshot',
@@ -70,19 +68,6 @@ export const COMPUTER_APP_GATED_VERBS = [
   'ax-action',
   'focus',
   'wait',
-] as const;
-
-export const COMPUTER_INPUT_GATED_VERBS = [
-  'raise',
-  'click',
-  'right-click',
-  'type',
-  'type-text',
-  'key',
-  'drag',
-  'scroll',
-  'ax-action',
-  'focus',
 ] as const;
 
 export function formatComputerPermissionGrantHint(bundleId?: string): string {
@@ -254,7 +239,7 @@ export function discoverPermissionsFromRepo(repoPath: string): Array<{ name: str
 /**
  * Permission group info with rule count.
  */
-export interface PermissionGroupInfo {
+interface PermissionGroupInfo {
   name: string;        // e.g., "02-node"
   ruleCount: number;   // number of allow rules in this group
   path: string;        // full path to the group file
@@ -311,7 +296,7 @@ export function getTotalPermissionRuleCount(): number {
  * A permission preset recipe — names a preset and lists which groups it composes.
  * Lives at ~/.agents/permissions/presets/<name>.yaml.
  */
-export interface PermissionPresetRecipe {
+interface PermissionPresetRecipe {
   name: string;
   description?: string;
   includes: string[];
@@ -597,7 +582,7 @@ type CopilotToolApproval =
   | { kind: 'read' | 'write' }
   | { kind: 'mcp'; serverName: string; toolName: string | null };
 
-export interface CopilotPermissionsConfig {
+interface CopilotPermissionsConfig {
   locations: Record<string, {
     tool_approvals?: CopilotToolApproval[];
     allowed_directories?: string[];
@@ -858,7 +843,7 @@ export function convertToGrokFormat(set: PermissionSet): { permission: { rules: 
   return { permission: { rules } };
 }
 
-export type GrokRule = { action: 'allow' | 'deny'; tool: string; pattern?: string };
+type GrokRule = { action: 'allow' | 'deny'; tool: string; pattern?: string };
 
 function canonicalToGrokRule(perm: string, action: 'allow' | 'deny'): GrokRule | null {
   if (BLANKET_BASH_FORMS.has(perm)) {
@@ -884,7 +869,7 @@ function canonicalToGrokRule(perm: string, action: 'allow' | 'deny'): GrokRule |
   return { action, tool, pattern };
 }
 
-export type KimiRule = { decision: 'allow' | 'deny'; pattern: string };
+type KimiRule = { decision: 'allow' | 'deny'; pattern: string };
 
 /**
  * Parse a canonical permission string preserving the tool's original casing.
@@ -1048,7 +1033,7 @@ export function codexDefaultWritableRoots(
  * keys (`network_access`) normally. Shared by the user- and version-scoped Codex
  * config writers so the two can't drift.
  */
-export function mergeCodexSandboxWrite(
+function mergeCodexSandboxWrite(
   existing: Record<string, unknown> | undefined,
   incoming: NonNullable<CodexPermissions['sandbox_workspace_write']>,
 ): Record<string, unknown> {

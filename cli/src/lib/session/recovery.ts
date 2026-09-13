@@ -35,7 +35,7 @@ export interface RecoveryAccount {
   email: string | null;
 }
 
-export interface SessionRecoverySelection {
+interface SessionRecoverySelection {
   /** Installed binary only; account homes retain their own context label. */
   executableVersion?: string;
   /** Explicit account selector resolved against the local candidate pool. */
@@ -67,7 +67,7 @@ export type SessionRecoveryTarget =
       reason: string;
     };
 
-export type NativeResumeInspection =
+type NativeResumeInspection =
   | { available: true; cwd?: string }
   | { available: false; reason: string };
 

@@ -85,7 +85,7 @@ import {
 } from '../lib/project-import.js';
 
 /** Recursion guard: a peer answering a probe fan-out never re-fans-out itself. */
-export const PROJECTS_NO_FANOUT_ENV = 'AGENTS_PROJECTS_LOCAL';
+const PROJECTS_NO_FANOUT_ENV = 'AGENTS_PROJECTS_LOCAL';
 
 /** Max peers named in the skipped note before the rest collapse to `+N`. */
 const SKIPPED_NAME_LIMIT = 4;
@@ -101,7 +101,7 @@ export function looksLikePath(token: string): boolean {
 }
 
 /** Machine-readable shape of `agents projects view <path> --json`. */
-export interface ViewDetection {
+interface ViewDetection {
   /** Detected project name, or null when no definition contains the path. */
   name: string | null;
   /** The detected project's Linear binding; fields are null when unbound. */
@@ -579,7 +579,7 @@ function renderCard(
 }
 
 /** Options shared by `status` and `view`. */
-export type ProjectCardOpts = {
+type ProjectCardOpts = {
   json?: boolean;
   window?: string;
   remote?: boolean;
@@ -591,7 +591,7 @@ export type ProjectCardOpts = {
  * Merge `--device a b` (variadic) and `--devices a,b,c` (comma list) into one
  * deduped device filter; undefined when neither was given (= whole fleet).
  */
-export function resolveDeviceFilter(device?: string[], devices?: string): string[] | undefined {
+function resolveDeviceFilter(device?: string[], devices?: string): string[] | undefined {
   const merged = [
     ...(device ?? []),
     ...(devices ? devices.split(',').map((s) => s.trim()).filter(Boolean) : []),
@@ -600,7 +600,7 @@ export function resolveDeviceFilter(device?: string[], devices?: string): string
 }
 
 /** Print the YAML-side fields that sit under the shared card in `view` mode. */
-export function printProjectDefinition(def: ProjectDef, name: string): void {
+function printProjectDefinition(def: ProjectDef, name: string): void {
   console.log();
   if (def.root) console.log(`  ${chalk.dim('root')}     ${def.root}`);
   if (def.defaultPath) console.log(`  ${chalk.dim('path')}     ${def.defaultPath}`);

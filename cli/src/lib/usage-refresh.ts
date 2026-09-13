@@ -78,10 +78,6 @@ import { USAGE_SYNC_INTERVAL_MS } from './accounting/usage-sync.js';
  * let an idle account rot longer than 5 minutes between attempts.
  */
 export const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
-/** @deprecated alias — use {@link REFRESH_INTERVAL_MS}. Kept for test imports. */
-export const REFRESH_MIN_MS = REFRESH_INTERVAL_MS;
-/** @deprecated alias — use {@link REFRESH_INTERVAL_MS}. Kept for test imports. */
-export const REFRESH_MAX_MS = REFRESH_INTERVAL_MS;
 /** Burn-rate divisor retained for the pure delay helper / tests; with min=max
  * the divisor does not change the scheduled interval. */
 export const REFRESH_BURN_DIVISOR = 4;
@@ -139,7 +135,6 @@ export const PROVIDER_CATCHUP_MAX = 2;
  * re-refresh it. Actively-used accounts stay current at zero endpoint cost, so
  * the proactive budget is reserved for genuinely idle accounts.
  */
-export const STATUSLINE_FRESH_MS = REFRESH_INTERVAL_MS;
 /** Consecutive failed live reads before one broken account is quarantined. */
 export const FAILURE_QUARANTINE_THRESHOLD = 3;
 /** A chronic offender waits this long while healthy siblings keep their cadence. */
@@ -186,7 +181,7 @@ function headroomCachePath(): string {
 }
 
 /** Read the whole headroom cache (best-effort; missing/corrupt → empty map). */
-export function readHeadroomCache(): Record<string, HeadroomEntry> {
+function readHeadroomCache(): Record<string, HeadroomEntry> {
   try {
     const parsed = JSON.parse(fs.readFileSync(headroomCachePath(), 'utf-8')) as HeadroomCacheFile;
     if (parsed && parsed.entries && typeof parsed.entries === 'object') return parsed.entries;
@@ -318,7 +313,7 @@ function skippedHeadroomEntry(
 
 /**
  * Reschedule an account we skipped because a free statusline ingest already
- * captured it inside {@link STATUSLINE_FRESH_MS}. The statusline row IS a real,
+ * captured it inside {@link REFRESH_INTERVAL_MS}. The statusline row IS a real,
  * live sample, so RE-DERIVE headroom (status / minutesToLimit) from it against
  * the prior sample — otherwise `status`/`minutesToLimit` would freeze at their
  * last API-refresh value forever for exactly the actively-used accounts that
@@ -522,7 +517,7 @@ export function trySpendUsageApiCall(usageKey: string, agentId: AgentId, now: nu
 }
 
 /** An account whose credentials live on the publisher host. */
-export interface LocalUsageAccount {
+interface LocalUsageAccount {
   usageKey: string;
   agentId: AgentId;
   /**
@@ -648,7 +643,7 @@ export async function buildLocalUsageAccounts(
 }
 
 /** Injectable side effects, so `runUsageRefresh` is drivable without the daemon. */
-export interface UsageRefreshDeps {
+interface UsageRefreshDeps {
   now?: number;
   /** Local-credential accounts to consider (one per unique usage key). */
   listAccounts: () => Promise<LocalUsageAccount[]>;
@@ -678,7 +673,7 @@ export interface UsageRefreshDeps {
   onSnapshotsChanged?: (usageKeys: string[]) => Promise<void> | void;
 }
 
-export interface UsageRefreshResult {
+interface UsageRefreshResult {
   refreshed: number;
   skippedNotDue: number;
   skippedBackoff: number;
@@ -755,7 +750,7 @@ export async function runUsageRefresh(deps: UsageRefreshDeps): Promise<UsageRefr
     if (network) {
       const cached = deps.readCachedSnapshot?.(account.usageKey) ?? null;
       const capturedAtMs = cached?.capturedAt?.getTime() ?? null;
-      if (cached && capturedAtMs !== null && now - capturedAtMs < STATUSLINE_FRESH_MS) {
+      if (cached && capturedAtMs !== null && now - capturedAtMs < REFRESH_INTERVAL_MS) {
         updates[account.usageKey] = freshHeadroomEntry(entry, cached, now, capturedAtMs);
         result.skippedFresh += 1;
         continue;

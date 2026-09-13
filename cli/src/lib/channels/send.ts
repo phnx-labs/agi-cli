@@ -17,7 +17,7 @@ import { sendToOwner } from '../notify.js';
 import type { SinkMessageFormat } from '../sink-format.js';
 
 /** Normalized delivery request after CLI/config resolution. */
-export interface SendEnvelope {
+interface SendEnvelope {
   text: string;
   channel: string;
   to: string;
@@ -57,7 +57,7 @@ export interface ResolveSendInput {
   ownerMode?: boolean;
 }
 
-export type ResolveSendResult =
+type ResolveSendResult =
   | { ok: true; envelope: SendEnvelope }
   | { ok: false; error: string };
 

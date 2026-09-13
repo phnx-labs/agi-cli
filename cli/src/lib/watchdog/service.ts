@@ -7,7 +7,7 @@ import { loadLocalActiveSessions } from '../session/session-cache.js';
 import { getRuntimeStateDir } from '../state.js';
 import { runWatchdogTick, type WatchdogThresholds, type WatchdogTickResult } from './runner.js';
 
-export interface WatchdogPassOptions {
+interface WatchdogPassOptions {
   nudge: boolean;
   nudgeText?: string;
   smartAgent?: string;
@@ -25,7 +25,7 @@ export async function loadWatchdogSessions(): Promise<ActiveSession[]> {
   return loaded.sessions;
 }
 
-export function runWatchdogMailboxGc(sessions: ActiveSession[]): void {
+function runWatchdogMailboxGc(sessions: ActiveSession[]): void {
   const activeBoxIds = new Set(
     sessions.map(mailboxIdForActiveSession).filter((id): id is string => Boolean(id)),
   );

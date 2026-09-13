@@ -453,7 +453,7 @@ export interface IndexedSession {
  * list by corpus class and by harness. Refs on a topic tile are always `'agent'`
  * (utility rows never reach a bucket), but the field is explicit for the consumer.
  */
-export interface TopicSessionRef {
+interface TopicSessionRef {
   id: string;
   title: string;
   kind: SessionKind;
@@ -468,7 +468,7 @@ export interface TopicSessionRef {
  * work the Evals console counts and scores. Utility rows are tagged, never deleted,
  * and excluded from every index statistic.
  */
-export type SessionKind = 'utility' | 'agent';
+type SessionKind = 'utility' | 'agent';
 
 /**
  * Topic/label substrings that identify an internal-prompt session regardless of its
@@ -1232,7 +1232,7 @@ export function readSyncLedger(): SyncLedger {
   }
 }
 
-export function writeSyncLedger(ledger: SyncLedger): void {
+function writeSyncLedger(ledger: SyncLedger): void {
   const p = ledgerPath();
   fs.mkdirSync(path.dirname(p), { recursive: true });
   fs.writeFileSync(p, JSON.stringify(ledger, null, 2) + '\n', 'utf8');

@@ -25,9 +25,9 @@ import { readMeta, updateMeta } from './state.js';
 import { parseRunDefaultSelector } from './run-defaults.js';
 import { MODEL_TIERS, type ModelTier } from './model-tiers.js';
 
-export type TierOverrideMap = Partial<Record<ModelTier, string>>;
+type TierOverrideMap = Partial<Record<ModelTier, string>>;
 
-export interface TierOverrideEntry {
+interface TierOverrideEntry {
   selector: string;
   tiers: TierOverrideMap;
 }

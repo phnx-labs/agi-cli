@@ -20,7 +20,7 @@
 
 export type StepOutcome = 'ok' | 'error' | 'running' | 'unknown';
 
-export interface SessionStepBase {
+interface SessionStepBase {
   ordinal: number;
   startMs: number;
   durationMs: number;
@@ -40,7 +40,7 @@ export interface ThinkingStep extends SessionStepBase {
   outcome: 'ok' | 'running' | 'unknown';
 }
 
-export interface ExecutionBase extends SessionStepBase {
+interface ExecutionBase extends SessionStepBase {
   kind: 'execution';
   lane: string;
   callId?: string;
@@ -48,9 +48,9 @@ export interface ExecutionBase extends SessionStepBase {
   targetCallId?: string;
 }
 
-export type ToolExecutionType = 'bash' | 'edit' | 'write' | 'read' | 'grep' | 'generic';
+type ToolExecutionType = 'bash' | 'edit' | 'write' | 'read' | 'grep' | 'generic';
 
-export interface ToolExecutionBase extends ExecutionBase {
+interface ToolExecutionBase extends ExecutionBase {
   executionType: ToolExecutionType;
   tool: string;
   result: ExecutionResult;

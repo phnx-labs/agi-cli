@@ -6,7 +6,7 @@ import { isAlive, killTree } from './platform/index.js';
 import { getRunsDir } from './state.js';
 import type { RunMeta } from './scheduling/routines.js';
 
-export interface RoutineProcessCleanupOptions {
+interface RoutineProcessCleanupOptions {
   runsDir?: string;
   alive?: (pid: number) => boolean;
   owns?: (meta: RunMeta) => Promise<boolean> | boolean;

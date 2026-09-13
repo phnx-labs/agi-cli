@@ -34,7 +34,7 @@ export const TOOL_PROGRAM_COUNT_SCHEMA_VERSION = 1;
 export const TOOL_QUERY_MAX_CLAUSES = 32;
 export const TOOL_QUERY_MAX_CLAUSE_BYTES = 4096;
 export const TOOL_QUERY_MAX_CALL_ROWS = 50_000;
-export const TOOL_QUERY_MAX_RESULT_BYTES = 8 * 1024 * 1024;
+const TOOL_QUERY_MAX_RESULT_BYTES = 8 * 1024 * 1024;
 export const TOOL_QUERY_MAX_RESULT_SESSIONS = 1_000;
 export const TOOL_QUERY_MAX_SERIALIZED_BYTES = 15 * 1024 * 1024;
 export const TOOL_QUERY_MERGE_OVERHEAD_BYTES = 64 * 1024;
@@ -552,7 +552,7 @@ function tokenizeClause(source: string): string[] {
 }
 
 /** Parse one same-call clause. Unprefixed terms search every evidence field. */
-export function parseToolQueryClause(source: string): QueryTerm[] {
+function parseToolQueryClause(source: string): QueryTerm[] {
   const fields = new Set(['tool', 'program', 'input', 'output', 'status', 'exit', 'error']);
   return tokenizeClause(source).map((token) => {
     const colon = token.indexOf(':');

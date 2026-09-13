@@ -22,14 +22,14 @@ export type BashCategory =
   | 'wait'
   | 'other';
 
-export interface BashToolInfo {
+interface BashToolInfo {
   category: BashCategory;
   signal: 'high' | 'mid' | 'low';
   action: string;
   aliases?: string[];
 }
 
-export interface BashCommandInfo {
+interface BashCommandInfo {
   tool: string;
   category: BashCategory;
   subcommand: string;

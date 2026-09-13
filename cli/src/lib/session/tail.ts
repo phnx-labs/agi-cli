@@ -16,7 +16,7 @@ const DEFAULT_MAX_BYTES = 128 * 1024;
 const DEFAULT_MAX_EVENTS = 60;
 
 /** A tail read: the last few normalized events plus the raw text they came from. */
-export interface SessionTail {
+interface SessionTail {
   events: SessionEvent[];
   /** The raw JSONL chunk (leading partial line dropped), for content-level math. */
   content: string;

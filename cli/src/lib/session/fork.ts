@@ -17,14 +17,14 @@ import type { SessionMeta } from './types.js';
 import { sessionHeadline } from './title.js';
 
 /** File-change tally as `sessions preview --json` serializes it (digest.changes). */
-export interface ForkRecapChanges {
+interface ForkRecapChanges {
   created: number;
   modified: number;
   deleted: number;
 }
 
 /** Everything the recap seed is built from — resolved cross-fleet before launch. */
-export interface ForkRecapInput {
+interface ForkRecapInput {
   /** Source harness id — the sibling launches the same one. */
   agent: string;
   /** Display label for the source (label → topic → short id, resolved by the caller). */

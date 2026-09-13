@@ -49,17 +49,17 @@ export const TIMELINE_EXTRACTOR_VERSION = 1;
 export const TIMELINE_KEEP_STEPS = 8;
 
 /** File rows carried on the row in full; `total` still reports the real count. */
-export const TIMELINE_KEEP_FILES = 8;
+const TIMELINE_KEEP_FILES = 8;
 
 /**
  * Steps kept in the persisted resume state. A long session narrates for hours,
  * and the state is re-read every tick, so the fold rolls everything past this
  * into {@link TimelineState.dropped} — exact totals, bounded bytes.
  */
-export const TIMELINE_STATE_MAX_STEPS = 200;
+const TIMELINE_STATE_MAX_STEPS = 200;
 
 /** Paths kept in the persisted resume state; older ones roll into `filesDropped`. */
-export const TIMELINE_STATE_MAX_FILES = 200;
+const TIMELINE_STATE_MAX_FILES = 200;
 
 /** A narration beat that said nothing and ran nothing merges into the next one within this window. */
 const NARRATION_MERGE_MS = 2_000;
@@ -307,7 +307,7 @@ function epochMs(timestamp: string | undefined): number | null {
 }
 
 /** Options the fold needs that are not on the events themselves. */
-export interface FoldTimelineOptions {
+interface FoldTimelineOptions {
   /** Row attachments, so an image the prose never named still rides the request. */
   attachments?: import('./types.js').SessionAttachment[];
   /** Stop after this many events and mark the state `truncated` (the projection reads `partial`). */
@@ -590,10 +590,10 @@ function derivedHeadline(step: SessionStep): string {
 }
 
 /** The activity values that mean the agent is mid-step, so the newest step is live. */
-export type TimelineActivity = string | undefined;
+type TimelineActivity = string | undefined;
 
 /** How {@link projectTimeline} scrubs the transcript text it is about to ship. */
-export interface ProjectTimelineOptions {
+interface ProjectTimelineOptions {
   /** Redact secrets from every projected string. Default true — see below. */
   redact?: boolean;
   /** Known credential values to mask verbatim; defaults to {@link knownSecretValuesFromEnv}. */

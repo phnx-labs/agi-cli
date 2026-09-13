@@ -36,7 +36,7 @@ export type StallStatus =
   | { kind: 'rate_limited'; cooldownRemainingMs: number }
   | { kind: 'stalled'; stalledForMs: number };
 
-export interface ClassifyInput {
+interface ClassifyInput {
   lastActivityMs: number;
   nowMs: number;
   lastNudgeMs: number | null;

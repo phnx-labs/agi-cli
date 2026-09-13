@@ -20,7 +20,7 @@ import { isHostPinned, isDevicePinned, managedKnownHostsPath } from '../lib/devi
 import { ensureDevicesRegistered } from '../lib/devices/sync.js';
 import { readFleetFile, resolveDesired, emptyTargetsMessage } from '../lib/fleet/manifest.js';
 import { snapshotAuth } from '../lib/fleet/auth-sync.js';
-import { AUTH_BUNDLE_NAME } from '../lib/secrets-policy.js';
+import { AUTH_STORE_ALIAS } from '../lib/secrets-policy.js';
 import {
   agentIdOf,
   diffFleet,
@@ -257,7 +257,7 @@ async function runApply(opts: ApplyOptions): Promise<void> {
   // discipline as `withVersions` — a fleet that uses no bundles never pays it.
   const secretsBundles = fleetSecretsBundles(manifest.secrets?.bundles);
   const withSecrets = (opts.provisionSecrets === true && secretsBundles.length > 0)
-    || secretsBundles.includes(AUTH_BUNDLE_NAME);
+    || secretsBundles.includes(AUTH_STORE_ALIAS);
   console.log(chalk.gray(`Probing ${desired.length} device(s)…`));
   const probeList = await pool(desired, 6, async (d) => probeDevice(nameToProfile.get(d.device)!, { withVersions, withSecrets }));
   const probes = new Map<string, DeviceProbe>(probeList.map((p) => [p.device, p]));
@@ -348,7 +348,7 @@ function reportResults(results: DeviceApplyResult[]): void {
 /**
  * Attach the reconcile options + action to a command node.
  */
-export function configureApplyCommand(cmd: Command): Command {
+function configureApplyCommand(cmd: Command): Command {
   return cmd
     .description('Reconcile the fleet to a declared profile: install agents and sync config.')
     .option('-f, --file <path>', 'Manifest file carrying a fleet: block (default: agents.yaml)')

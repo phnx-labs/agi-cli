@@ -285,7 +285,7 @@ async function resolveTargetHost(name: string, any: boolean): Promise<Host> {
 }
 
 /** Injectable dependencies for {@link runFleetPassthrough} — used by tests. */
-export interface FleetPassthroughOptions {
+interface FleetPassthroughOptions {
   /** Override the device registry loader (tests). */
   loadDevices?: () => Promise<DeviceRegistry>;
   /** Override the per-device runner (tests). Defaults to `runOnDevice`. */

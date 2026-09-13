@@ -74,7 +74,7 @@ export function readCachedBackupKey(userId: string): Buffer | null {
 }
 
 /** Persist a DEK (base64) for this Phoenix user in the local 0600 cache. */
-export function cacheBackupKey(userId: string, b64: string): void {
+function cacheBackupKey(userId: string, b64: string): void {
   const file = backupKeyCachePath();
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   ensureLockTarget(file, '{}', 0o700);

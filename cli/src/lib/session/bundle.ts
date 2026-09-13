@@ -26,7 +26,7 @@ import { redactSecrets } from '../redact.js';
 import { encryptTranscript, decryptTranscriptBody } from './sync/transcript-crypto.js';
 
 export const BUNDLE_KIND = 'agents-session-bundle';
-export const BUNDLE_VERSION = 1;
+const BUNDLE_VERSION = 1;
 
 /** SHA-256 of a file body, used for the bundle's dedup/conflict check on import. */
 function hashContent(content: string | Uint8Array): string {
@@ -88,7 +88,7 @@ export interface FileToExport {
   label?: string;
 }
 
-export interface BuildRecordOpts {
+interface BuildRecordOpts {
   /** Scrub secrets from the body before hashing/sealing (default-on at the command layer). */
   redact: boolean;
   /** Non-null → seal each body with this key; null → plaintext bodies. */
@@ -104,11 +104,6 @@ export interface BuildRecordOpts {
 /** Look up the sync spec for an agent id (undefined → agent not sync-representable). */
 export function specForAgent(agentId: string): SyncAgentSpec | undefined {
   return SYNC_AGENTS.find(s => s.id === agentId);
-}
-
-/** True when an agent's sessions can be represented in a bundle (has a sync spec). */
-export function isExportableAgent(agentId: string): boolean {
-  return specForAgent(agentId) !== undefined;
 }
 
 /**
@@ -241,7 +236,7 @@ export interface ImportPlanItem {
   status: ImportStatus;
 }
 
-export interface PlanImportOpts {
+interface PlanImportOpts {
   /** Key to open encrypted record bodies (null → only plaintext bodies readable). */
   decryptKey: Buffer | null;
 }
@@ -284,7 +279,7 @@ export interface WriteResult {
   unknown: number;
 }
 
-export interface WriteImportOpts {
+interface WriteImportOpts {
   overwrite: boolean;
   decryptKey: Buffer | null;
 }

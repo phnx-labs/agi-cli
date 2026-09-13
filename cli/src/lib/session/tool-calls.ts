@@ -12,7 +12,7 @@ export const TOOL_PENDING_MAX_BYTES = 1024 * 1024;
 export const TOOL_PENDING_MAX_CALLS = 256;
 export const TOOL_CHANGED_MAX_CALLS = 10_000;
 export const TOOL_INDEX_LIMIT_ORDINAL = Number.MAX_SAFE_INTEGER;
-export const TOOL_TEXT_PROCESSING_MAX_BYTES = 64 * 1024;
+const TOOL_TEXT_PROCESSING_MAX_BYTES = 64 * 1024;
 export const TOOL_SHELL_PARSE_MAX_BYTES = 64 * 1024;
 // Bumped to 9 for Codex tool-outcome classification (PHNX-3761): Codex results
 // arrive as a string or input_text[] rather than an object, so every one used to
@@ -636,7 +636,7 @@ export interface EventToolScanResumePoint {
   eventCount: number;
 }
 
-export interface EventToolScanResult {
+interface EventToolScanResult {
   /** The CHANGED calls — an append-safe upsert set, not the whole history. */
   calls: IndexedToolCall[];
   /** Serialized-ready snapshot to persist for the next incremental scan. */

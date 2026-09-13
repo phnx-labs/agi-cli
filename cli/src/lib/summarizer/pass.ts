@@ -29,12 +29,12 @@ import { resolveSummarizerConfig, isSummarizerRunnable, type SummarizerConfig } 
 import { summarize as defaultSummarize } from './summarize.js';
 
 /** Max sessions summarized per tick — a debounce ceiling on local-model calls. */
-export const SUMMARIZER_MAX_PER_TICK = 8;
+const SUMMARIZER_MAX_PER_TICK = 8;
 
 /** Narration headlines handed to the model per session — the recent tail, not the history. */
-export const SUMMARIZER_STEP_INPUT = 12;
+const SUMMARIZER_STEP_INPUT = 12;
 
-export interface SummarizerPassOptions {
+interface SummarizerPassOptions {
   now?: number;
   config?: SummarizerConfig;
   /** Live sessions to consider; default = this box's warm local-session cache. */
@@ -49,7 +49,7 @@ export interface SummarizerPassOptions {
   requireReader?: boolean;
 }
 
-export interface SummarizerPassResult {
+interface SummarizerPassResult {
   disabled: boolean;
   computed: number;
   reused: number;

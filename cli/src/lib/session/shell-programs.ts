@@ -9,7 +9,7 @@ import {
   type WordPart,
 } from 'unbash';
 
-export interface ShellProgramExtraction {
+interface ShellProgramExtraction {
   programs: string[];
   occurrences: ShellProgramOccurrence[];
   diagnostics: string[];

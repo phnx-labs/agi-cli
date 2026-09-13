@@ -3,7 +3,7 @@ import * as path from "path";
 import { getUserAgentsDir } from "../state.js";
 import { parseRunResult, validateRunId } from "./schema.js";
 import type { BenchRunResult } from "./types.js";
-export function benchHistoryDir(): string {
+function benchHistoryDir(): string {
   return path.join(getUserAgentsDir(), ".history", "bench");
 }
 export function saveRun(

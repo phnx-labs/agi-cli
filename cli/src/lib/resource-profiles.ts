@@ -22,41 +22,27 @@ export type ProfiledResourceKind =
   | 'memory'
   | 'secrets';
 
-export type PatternedProfileKind = Exclude<ProfiledResourceKind, 'memory' | 'secrets'>;
+type PatternedProfileKind = Exclude<ProfiledResourceKind, 'memory' | 'secrets'>;
 
-export interface ActiveResourceProfile {
+interface ActiveResourceProfile {
   name: string;
   preset: ResourceProfilePreset;
 }
 
 const PROFILE_NAME_PATTERN = /^[a-z0-9][a-z0-9-_]{0,48}$/i;
-const PATTERNED_KINDS: PatternedProfileKind[] = [
-  'commands',
-  'skills',
-  'hooks',
-  'subagents',
-  'plugins',
-  'workflows',
-  'permissions',
-  'mcp',
-];
 
-export function validateResourceProfileName(name: string): void {
+function validateResourceProfileName(name: string): void {
   if (!PROFILE_NAME_PATTERN.test(name)) {
     throw new Error(`Invalid profile name '${name}'. Use letters, digits, dash, underscore (max 48 chars).`);
   }
 }
 
-export function listResourceProfileNames(): string[] {
-  return Object.keys(readMeta().profiles?.presets ?? {}).sort((a, b) => a.localeCompare(b));
-}
-
-export function getResourceProfilePreset(name: string): ResourceProfilePreset | null {
+function getResourceProfilePreset(name: string): ResourceProfilePreset | null {
   validateResourceProfileName(name);
   return readMeta().profiles?.presets?.[name] ?? null;
 }
 
-export function getActiveResourceProfileName(): string | null {
+function getActiveResourceProfileName(): string | null {
   // A white-label brand pins its own profile; when running under a brand
   // (AGENTS_BRAND set) that preset wins over the global `profiles.active`, so
   // every resource filter that keys off the active profile becomes brand-scoped.
@@ -100,10 +86,6 @@ export function setActiveResourceProfile(name: string | null): void {
       active: name || undefined,
     },
   }));
-}
-
-export function patternedProfileKinds(): PatternedProfileKind[] {
-  return [...PATTERNED_KINDS];
 }
 
 function plainPatternMatches(pattern: string, name: string): boolean {
@@ -188,11 +170,4 @@ export function isNameActiveInResourceProfile(
 ): boolean {
   const sourceMap = source ? new Map([[name, source]]) : undefined;
   return filterNamesForActiveResourceProfile(kind, [name], sourceMap).includes(name);
-}
-
-export function assertNameActiveInResourceProfile(kind: ProfiledResourceKind, name: string): void {
-  const active = getActiveResourceProfile();
-  if (!active) return;
-  if (isNameActiveInResourceProfile(kind, name)) return;
-  throw new Error(`${kind === 'secrets' ? 'Secrets bundle' : 'Resource'} '${name}' is not active in profile '${active.name}'.`);
 }

@@ -50,7 +50,7 @@ export const DEFAULT_ACTIVE_CACHE_MAX_AGE_MS = 15_000;
 /** Snapshot scope: this host only, or a fleet-wide merge written by a reader. */
 export type ActiveCacheScope = 'local' | 'fleet';
 
-export interface ActiveSessionsSnapshot {
+interface ActiveSessionsSnapshot {
   version: 1;
   scope: ActiveCacheScope;
   /** Epoch ms the sessions array was captured. */
@@ -88,7 +88,7 @@ const activeSnapshotMemory = createMemoryCache<ActiveCacheScope, ActiveSessionsS
  * transcript mtime so a rewrite invalidates them. Live status is intentionally
  * absent — see {@link LIVE_STATUS_KEYS}.
  */
-export interface ImmutableSessionFields {
+interface ImmutableSessionFields {
   topic?: string;
   firstUserMessage?: string;
   label?: string;
@@ -199,22 +199,10 @@ export function setActiveSessionsSnapshotPathForTest(p: string | null): string |
   return prev;
 }
 
-/** Test seam: isolate process-local entries between fixtures. */
-export function clearActiveSnapshotMemoryForTest(): void {
-  activeSnapshotMemory.clear();
-}
-
 /** Test seam: redirect the immutable-memo file. Returns the previous override. */
 export function setImmutableMemoPathForTest(p: string | null): string | null {
   const prev = immutablePathOverride;
   immutablePathOverride = p;
-  return prev;
-}
-
-/** Test seam: redirect the append-only live-state journal. */
-export function setActiveSessionsJournalPathForTest(p: string | null): string | null {
-  const prev = journalPathOverride;
-  journalPathOverride = p;
   return prev;
 }
 
@@ -283,7 +271,7 @@ export function isActiveSessionsJournalReaderRecent(
 }
 
 /** Default poll cadence for {@link watchActiveSessionsReaderPresence}. */
-export const ACTIVE_SESSIONS_READER_TRANSITION_POLL_MS = 1_000;
+const ACTIVE_SESSIONS_READER_TRANSITION_POLL_MS = 1_000;
 
 /**
  * Watch for a reader going from absent/idle to present and fire `onConnect`
@@ -537,7 +525,7 @@ export function updateImmutableMemos(sessions: ReadonlyArray<ActiveSession>, now
  * non-stream ActiveSession consumer is unaffected. Best-effort: a DB error leaves
  * the row untouched.
  */
-export function mergeSessionSummary(s: ActiveSession): ActiveSession {
+function mergeSessionSummary(s: ActiveSession): ActiveSession {
   if (!s.sessionId) return s;
   try {
     const stored = readSessionSummaryAny(s.sessionId);
@@ -617,7 +605,7 @@ export function applyImmutableMemo(s: ActiveSession): ActiveSession {
 
 // ── cache-first load ───────────────────────────────────────────────────────
 
-export interface LoadLocalActiveSessionsOptions {
+interface LoadLocalActiveSessionsOptions {
   /** Skip the cache and re-gather (the force-refresh path). */
   forceRefresh?: boolean;
   /** Freshness window; defaults to {@link DEFAULT_ACTIVE_CACHE_MAX_AGE_MS}. */
@@ -634,7 +622,7 @@ export interface LoadLocalActiveSessionsOptions {
   writeCache?: typeof writeActiveSessionsCache;
 }
 
-export interface LoadLocalActiveSessionsResult {
+interface LoadLocalActiveSessionsResult {
   sessions: ActiveSession[];
   /** True when the row set came from the warm snapshot, not a live gather. */
   servedFromCache: boolean;
@@ -689,7 +677,7 @@ export async function loadLocalActiveSessions(
   return { sessions, servedFromCache: false, capturedAt: snap.capturedAt };
 }
 
-export interface LoadFleetActiveSessionsOptions {
+interface LoadFleetActiveSessionsOptions {
   forceRefresh?: boolean;
   maxAgeMs?: number;
   nowMs?: number;
@@ -706,7 +694,7 @@ export interface LoadFleetActiveSessionsOptions {
   writeCache?: typeof writeActiveSessionsCache;
 }
 
-export interface LoadFleetActiveSessionsResult {
+interface LoadFleetActiveSessionsResult {
   sessions: ActiveSession[];
   remoteDeviceCount: number;
   servedFromCache: boolean;

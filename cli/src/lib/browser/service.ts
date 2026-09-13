@@ -114,7 +114,7 @@ import {
   selectArcTab,
 } from './drivers/arc.js';
 
-export type UploadMode = 'auto' | 'input' | 'drop' | 'chooser';
+type UploadMode = 'auto' | 'input' | 'drop' | 'chooser';
 
 /**
  * Canonical form for comparing a requested URL against what CDP reports for a
@@ -489,7 +489,7 @@ type TargetInfo = {
 };
 
 /** Describes a ref that was re-resolved from a drifted integer via its cached descriptor. */
-export interface HealInfo {
+interface HealInfo {
   from: number;
   to: number;
   role: string;
@@ -516,7 +516,7 @@ export function resolveTaskIdentity(
   };
 }
 
-export interface StartOptions {
+interface StartOptions {
   taskName?: string;
   url?: string;
   endpointName?: string;
@@ -536,7 +536,7 @@ export interface StartOptions {
   probe?: DeviceProbe;
 }
 
-export interface StartResult {
+interface StartResult {
   task: string;
   name: string;
   tabId?: string;

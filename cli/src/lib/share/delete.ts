@@ -27,12 +27,12 @@ export type CheckFn = (url: string) => Promise<{ status: number }>;
 /** DI seam for tests — override the real HTTP GET of the revisions listing route. */
 export type RevisionsFetchFn = (url: string) => Promise<{ status: number; contentType: string; body: string }>;
 
-export interface DeleteEndpoint {
+interface DeleteEndpoint {
   baseUrl: string;
   token: string;
 }
 
-export interface ResolvedShareTarget {
+interface ResolvedShareTarget {
   /** R2 object key for the page, `<user>/<slug>`. */
   key: string;
   /** R2 object key for the sibling OG cover, `<user>/<slug>.png`. */
@@ -131,7 +131,7 @@ async function listRevisionKeys(
   }
 }
 
-export interface DeleteObjectResult {
+interface DeleteObjectResult {
   key: string;
   url: string;
   /** Whether the object resolved (non-404) before the DELETE was issued. */
@@ -177,7 +177,7 @@ export async function deleteObject(
   return { key, url, existedBefore, deleted: r.ok, verified404 };
 }
 
-export interface DeleteShareOptions {
+interface DeleteShareOptions {
   /** Skip deleting the sibling `<slug>.png` OG cover (default: delete it too). */
   keepCover?: boolean;
   /** Skip deleting the target's retained revisions (`<key>/rev-*`, RUSH-2683

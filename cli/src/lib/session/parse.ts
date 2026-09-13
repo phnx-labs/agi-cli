@@ -650,7 +650,7 @@ export function parseCodex(filePath: string): SessionEvent[] {
  * Returns every path in order (a multi-file patch emits multiple paths so
  * artifact discovery sees each file — RUSH-1410). Empty when unparseable.
  */
-export function applyPatchTargets(input: string): Array<{ path: string; op: 'Add' | 'Update' | 'Delete' }> {
+function applyPatchTargets(input: string): Array<{ path: string; op: 'Add' | 'Update' | 'Delete' }> {
   const targets: Array<{ path: string; op: 'Add' | 'Update' | 'Delete' }> = [];
   const re = /^\*\*\* (Update|Add|Delete) File: (.+)$/gm;
   for (const m of input.matchAll(re)) {
@@ -1442,7 +1442,7 @@ export function parseAntigravity(dbPath: string): SessionEvent[] {
  * than one path per session — e.g.
  * `/home/u/.local/share/opencode/opencode.db#ses_02410a2c…`.
  */
-export const SESSION_FILE_PATH_SEP = '#';
+const SESSION_FILE_PATH_SEP = '#';
 
 /**
  * Split a stored session `file_path` into its on-disk container and the optional
@@ -1505,7 +1505,7 @@ export function sessionFilePathContainer(filePath: string): string {
  * session that committed / opened / merged a PR and to report a tool-failure
  * count the event stream cannot supply.
  */
-export interface GrokSessionSignals {
+interface GrokSessionSignals {
   gitCommitCount: number;
   prCreatedCount: number;
   prMergedCount: number;
@@ -2188,7 +2188,7 @@ export function parseRush(filePath: string): SessionEvent[] {
  *   - model_completed.usage → usage
  *   - tool-related events when present
  */
-export function parseMuse(filePath: string): SessionEvent[] {
+function parseMuse(filePath: string): SessionEvent[] {
   const content = safeReadSessionFile(filePath);
   const lines = content.split('\n').filter((l) => l.trim());
   const events: SessionEvent[] = [];
@@ -2276,7 +2276,7 @@ export function parseMuse(filePath: string): SessionEvent[] {
 }
 
 /** Parse a Hermes session JSON file into normalized events. */
-export function parseHermes(filePath: string): SessionEvent[] {
+function parseHermes(filePath: string): SessionEvent[] {
   let session: any;
   try {
     session = JSON.parse(safeReadSessionFile(filePath));

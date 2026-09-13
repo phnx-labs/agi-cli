@@ -21,7 +21,7 @@ import chalk from 'chalk';
 
 export const VERSION_RE = /^(?:\*|latest|(?!.*\.\.)[A-Za-z0-9._+-]{1,64})$/;
 
-export interface ParsedRunDefaultSelector {
+interface ParsedRunDefaultSelector {
   agent: AgentId;
   version: string;
   selector: string;

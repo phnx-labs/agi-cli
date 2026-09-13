@@ -23,9 +23,9 @@ import { getActivityDir } from '../state.js';
 import { ACTIVITY_TAIL_BYTES, parseActivityLine, type ActivityEvent } from './activity.js';
 
 /** How often the stream falls back to a full directory stat sweep. */
-export const ACTIVITY_SWEEP_MS = 5_000;
+const ACTIVITY_SWEEP_MS = 5_000;
 /** Bytes behind the cursor re-verified before appended bytes are trusted. */
-export const ACTIVITY_ANCHOR_BYTES = 64;
+const ACTIVITY_ANCHOR_BYTES = 64;
 
 const NEWLINE = 0x0a;
 const EMPTY = Buffer.alloc(0);
@@ -75,7 +75,7 @@ interface FileCursor {
   ctimeNs: number;
 }
 
-export interface ActivityStreamOptions {
+interface ActivityStreamOptions {
   /** Override the activity dir (tests). */
   root?: string;
   /**

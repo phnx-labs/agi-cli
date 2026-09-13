@@ -48,9 +48,6 @@ const HOME = os.homedir();
  */
 export const CODEX_HOOKS_MIN_VERSION = '0.116.0';
 
-/** Minimum Gemini CLI version that supports the hooks system (v0.26.0, Jan 2026). */
-export const GEMINI_HOOKS_MIN_VERSION = '0.26.0';
-
 const CLI_VERSION_CACHE_PATH = getCliVersionCachePath();
 
 interface CliVersionCacheEntry {
@@ -286,14 +283,14 @@ function splitCommandLine(command: string): string[] {
  * Left as call-site specials (not registry data): `getAccountInfo` and
  * `readAuthAccountIdentity` — those are parsers, not flags.
  */
-export type VersionStdoutMatch = 'semver' | 'openclaw';
-export type UnmanagedBinaryResolver = 'path' | 'grok-downloads';
-export type McpRegisterPath = 'cli' | 'config';
-export type McpAddHttpStyle = 'transport' | 'url';
-export type McpAddStdioStyle = 'scope' | 'simple';
-export type McpConfigWriteStyle = 'json-mcpServers' | 'yaml-mcp_servers';
+type VersionStdoutMatch = 'semver' | 'openclaw';
+type UnmanagedBinaryResolver = 'path' | 'grok-downloads';
+type McpRegisterPath = 'cli' | 'config';
+type McpAddHttpStyle = 'transport' | 'url';
+type McpAddStdioStyle = 'scope' | 'simple';
+type McpConfigWriteStyle = 'json-mcpServers' | 'yaml-mcp_servers';
 
-export interface AgentRegistryConfig extends AgentConfig {
+interface AgentRegistryConfig extends AgentConfig {
   /**
    * Session-transcript directory as path segments under a HOME root, or null
    * when this harness has no local session tree `agents` can walk.
@@ -1120,9 +1117,6 @@ export const ROUTINE_AGENT_IDS: readonly string[] = Object.freeze([
   'muse',
 ]);
 
-/** Agents retained only for legacy reads, not install/import/sync targets. */
-export const HARD_DEPRECATED_AGENT_IDS: AgentId[] = ALL_AGENT_IDS.filter((id) => AGENTS[id].deprecated?.hard);
-
 /** Agents that can receive managed installs, imports, and resource sync writes. */
 export const MANAGED_AGENT_IDS: AgentId[] = ALL_AGENT_IDS.filter((id) => !AGENTS[id].deprecated?.hard);
 
@@ -1340,7 +1334,7 @@ export async function getAllCliStates(): Promise<Partial<Record<AgentId, CliStat
 }
 
 /** Info about an existing unmanaged agent installation. */
-export interface UnmanagedInstall {
+interface UnmanagedInstall {
   agentId: AgentId;
   configDir: string;
   version: string | null;
@@ -1658,7 +1652,7 @@ export function credentialPresence(agentId: AgentId, versionHome: string): Crede
 }
 
 /** Decrypted contents of Droid's auth.v2.file (subset we consume). */
-export interface DroidAuthPayload {
+interface DroidAuthPayload {
   access_token?: string;
   active_organization_id?: string | null;
 }
@@ -1689,7 +1683,7 @@ export function decryptDroidAuthPayload(base: string): DroidAuthPayload | null {
  * on any failure (missing file/key, wrong key length, bad GCM tag, malformed
  * JSON). Never throws.
  */
-export function decryptDroidAuthFile(filePath: string, keyPath: string): DroidAuthPayload | null {
+function decryptDroidAuthFile(filePath: string, keyPath: string): DroidAuthPayload | null {
   try {
     const blob = fs.readFileSync(filePath, 'utf-8').trim();
     const key = Buffer.from(fs.readFileSync(keyPath, 'utf-8').trim(), 'base64');
@@ -2165,7 +2159,7 @@ export interface ClaudeHomeIdentity {
 }
 
 /** A version home's `.claude.json` plus the identity derived from it. */
-export interface ClaudeHomeConfig {
+interface ClaudeHomeConfig {
   /** The config file actually read. */
   path: string;
   config: Record<string, any>;
@@ -2919,10 +2913,10 @@ export async function unregisterMcpFromTargets(
 }
 
 /** Scope at which an MCP server is registered: user-global or per-project. */
-export type McpScope = 'user' | 'project';
+type McpScope = 'user' | 'project';
 
 /** Describes an MCP server discovered in an agent's config, with its scope and command. */
-export interface InstalledMcp {
+interface InstalledMcp {
   name: string;
   scope: McpScope;
   command?: string;
@@ -3375,7 +3369,7 @@ export function listInstalledMcpsWithScope(
 }
 
 /** Map of agent name aliases and shorthand identifiers to canonical AgentId values. */
-export const AGENT_NAME_ALIASES: Record<string, AgentId> = {
+const AGENT_NAME_ALIASES: Record<string, AgentId> = {
   claude: 'claude',
   'claude-code': 'claude',
   cc: 'claude',

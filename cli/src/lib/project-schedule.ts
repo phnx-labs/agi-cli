@@ -35,7 +35,7 @@ import type { LinearMilestone } from './linear-project-counts.js';
 export const DUE_SOON_DAYS = 14;
 
 /** A verdict about the schedule, as a tagged union so `--json` stays stable. */
-export type ProjectVerdict =
+type ProjectVerdict =
   | { kind: 'declared'; health: string }
   | { kind: 'overdue'; milestone: string; days: number }
   | { kind: 'due-soon'; milestone: string; days: number }

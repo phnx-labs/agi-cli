@@ -33,7 +33,7 @@ export interface ResourceRow {
   buildDetail: () => string;
 }
 
-export interface ResourceViewOptions {
+interface ResourceViewOptions {
   resourcePlural: string;
   resourceSingular: string;
   extraLabel?: string;
@@ -169,7 +169,7 @@ const NAME_CAP = 22;
 /** Below this many columns of description budget, the list stacks into cards. */
 const MIN_DESC_W = 24;
 
-export interface ResourceLayout {
+interface ResourceLayout {
   mode: 'table' | 'cards';
   nameW: number;
   extraW: number;

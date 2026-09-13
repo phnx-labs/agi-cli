@@ -14,7 +14,7 @@ import path from 'node:path';
 import { getRuntimeStateDir } from './state.js';
 import type { SelfHealReport } from './self-heal/types.js';
 
-export interface InteractiveShimHealResult {
+interface InteractiveShimHealResult {
   noticeLines: string[] | null;
   report: SelfHealReport;
 }
@@ -57,13 +57,6 @@ export async function runInteractiveShimHeal(): Promise<InteractiveShimHealResul
     lines.push("It's a real binary (not a symlink), so agents-cli won't move it — reorder PATH or remove it to hand it over.");
   }
   return { noticeLines: lines.length > 0 ? lines : null, report };
-}
-
-/**
- * Back-compat wrapper for callers that only need the persistent one-time notice.
- */
-export async function healShimsInteractive(): Promise<string[] | null> {
-  return (await runInteractiveShimHeal()).noticeLines;
 }
 
 // ─── Persistent notice-state (replaces the per-PPID sentinel) ──────────────────

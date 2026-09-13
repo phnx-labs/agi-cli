@@ -15,7 +15,7 @@ export const GLYPH = {
   thread: '⇄',
 } as const;
 
-export type Accent = 'cyan' | 'amber';
+type Accent = 'cyan' | 'amber';
 
 /** Render the shared one-line comms header, with `right` aligned to the terminal edge. */
 export function masthead(o: {

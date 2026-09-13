@@ -32,7 +32,7 @@ interface MixOpts {
   limit?: string;
 }
 
-export function parseMixDays(raw: string | undefined): number {
+function parseMixDays(raw: string | undefined): number {
   const n = parseInt(raw ?? '7', 10);
   return Number.isFinite(n) && n > 0 ? n : 7;
 }
@@ -42,7 +42,7 @@ function parseLimit(raw: string | undefined, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
-export function printMixSection(section: {
+function printMixSection(section: {
   id: string;
   title: string;
   rows: Array<Record<string, string | number | null>>;
@@ -63,7 +63,7 @@ export function printMixSection(section: {
   console.log();
 }
 
-export function renderMixDashboard(days: number, asJson: boolean, bannerLabel = 'agents insights mix'): void {
+function renderMixDashboard(days: number, asJson: boolean, bannerLabel = 'agents insights mix'): void {
   const dash = buildMixDashboard({ days });
   if (asJson) {
     console.log(JSON.stringify(dash, null, 2));

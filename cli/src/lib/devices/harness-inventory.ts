@@ -91,7 +91,7 @@ export interface HostHarnessResult {
 }
 
 /** An account collapsed across the installs on one host that share it. */
-export interface AccountGroup {
+interface AccountGroup {
   /** Account display label, or null for the signed-out bucket. */
   account: string | null;
   /** Distinct agent ids using this account, sorted. */
@@ -472,7 +472,7 @@ export function renderAccountsMatrix(results: HostHarnessResult[]): string[] {
   return lines;
 }
 
-export interface AccountFleetMatrixRow {
+interface AccountFleetMatrixRow {
   harness: AgentId;
   name: string | null;
   identityLabel: string;

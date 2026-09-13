@@ -69,7 +69,7 @@ function namesWithMarker(dir: string, marker: string): Map<string, string> {
   return out;
 }
 
-export interface SystemRunSyncResult {
+interface SystemRunSyncResult {
   /** Names rewritten per kind; empty when the sentinel matched (skip-fast). */
   skills: string[];
   subagents: string[];

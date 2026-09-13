@@ -35,7 +35,7 @@ export interface WorkerExclusion {
   reason: 'unreachable' | 'probe timed out' | 'overloaded' | 'wrong-platform' | 'interactive';
 }
 
-export interface WorkerPickPlan {
+interface WorkerPickPlan {
   /** The chosen device name. Never the local box unless it is an auto-pool member. */
   device: string;
   /** True when the pick IS this machine (the caller should run in place). */
@@ -44,7 +44,7 @@ export interface WorkerPickPlan {
   excluded: WorkerExclusion[];
 }
 
-export interface WorkerPickOptions {
+interface WorkerPickOptions {
   /** Restrict to these platforms. Defaults to POSIX (`linux`, `macos`). */
   platforms?: string[];
   /** Override the candidate pool (tests). */
@@ -63,7 +63,7 @@ export interface WorkerPickOptions {
  * `win-mini` would produce a confusing failure for a platform whose result
  * nobody gates on.
  */
-export const POSIX_PLATFORMS = ['linux', 'macos'] as const;
+const POSIX_PLATFORMS = ['linux', 'macos'] as const;
 
 /**
  * Resolve the least-loaded eligible worker.

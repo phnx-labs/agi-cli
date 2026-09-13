@@ -138,7 +138,7 @@ export interface PickedSession {
   action: 'resume' | 'view';
 }
 
-export interface SessionPickerConfig {
+interface SessionPickerConfig {
   message: string;
   /** Dim hint line shown under the header (filters/flags tip). */
   subtitle?: string;
@@ -1093,7 +1093,7 @@ function classifySessionTool(tool: string, command: string): string[] {
  * it is present for remote rows whose transcript we can't parse here — otherwise
  * derive from the file-change + tool paths already available.
  */
-export function directoriesTouched(
+function directoriesTouched(
   session: SessionMeta,
   events: SessionEvent[],
   changes: ReturnType<typeof classifyFileChanges>,

@@ -65,7 +65,7 @@ export function classifyConnectionOutput(exitCode: number | null, output: string
 }
 
 /** Options for {@link runHarnessConnectionTest}. */
-export interface ConnectionTestOptions {
+interface ConnectionTestOptions {
   /** Agent-side timeout passed to `agents run --timeout`. Default `60s`. */
   timeout?: string;
   /** Hard wall-clock cap (ms) on the child, above the agent timeout. Default 90s. */

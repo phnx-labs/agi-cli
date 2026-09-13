@@ -15,7 +15,7 @@ import type { TrajectoryComparison, TrajectorySummary } from './trajectory-compa
 import type { SessionLineage } from './trajectory-lineage.js';
 import type { SessionMeta } from './types.js';
 
-export interface RenderTrajectoryTextOptions {
+interface RenderTrajectoryTextOptions {
   /** Collapse to error steps and their immediate neighbours. */
   errorsOnly?: boolean;
   /** Cap on the step lines emitted; the remainder is collapsed with a count. */
@@ -176,7 +176,7 @@ export function renderTrajectoryText(
   return lines.join('\n') + '\n';
 }
 
-export interface RenderTrajectoryCompareTextOptions {
+interface RenderTrajectoryCompareTextOptions {
   /** Cap on step lines listed per diff column; the remainder is collapsed with a count. Default 15. */
   maxDiffLines?: number;
 }

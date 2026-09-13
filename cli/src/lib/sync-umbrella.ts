@@ -30,7 +30,7 @@ export interface UmbrellaFlags {
 }
 
 /** Which stages a given flag combination runs. */
-export interface UmbrellaPlan {
+interface UmbrellaPlan {
   fetchRepos: boolean;
   fetchSecrets: boolean;
   reconcile: boolean;
@@ -65,7 +65,7 @@ export function planUmbrellaStages(f: UmbrellaFlags): UmbrellaPlan {
   return { fetchRepos: true, fetchSecrets: false, reconcile: !f.cloud };
 }
 
-export interface UmbrellaResult {
+interface UmbrellaResult {
   plan: UmbrellaPlan;
   repos?: { pulled: number; errors: string[] };
   secrets?: { pulled: number; skipped: boolean; reason?: string; errors: string[] };
@@ -84,7 +84,7 @@ export interface UmbrellaResult {
   reconciledVersions: Array<{ agent: string; version: string }>;
 }
 
-export interface RunUmbrellaArgs {
+interface RunUmbrellaArgs {
   flags: UmbrellaFlags;
   /** Progress sink (already quiet-aware in the caller). */
   log: (msg: string) => void;

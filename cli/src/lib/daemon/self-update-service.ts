@@ -73,7 +73,7 @@ const SELF_UPDATE_TICK_MS = 75 * 60_000;
  * its own `AbortController` on the SAME budget the periodic tick runs under —
  * one deadline, not two independently-tuned numbers that could drift apart.
  */
-export const SELF_UPDATE_DEADLINE_MS = 15 * 60_000;
+const SELF_UPDATE_DEADLINE_MS = 15 * 60_000;
 /**
  * First tick fires 5 minutes after daemon boot — deliberately longer than
  * self-heal's 30s stagger (`self-heal-service.ts`): self-heal repairs local
@@ -85,7 +85,7 @@ export const SELF_UPDATE_DEADLINE_MS = 15 * 60_000;
  */
 const SELF_UPDATE_STARTUP_DELAY_MS = 5 * 60_000;
 
-export interface SelfUpdateOutcome {
+interface SelfUpdateOutcome {
   updated: boolean;
   reason?: string;
 }
@@ -119,7 +119,7 @@ export interface SelfUpdateDeps {
   syncLocal(): Promise<void>;
 }
 
-export async function fetchLatestNpmMetadata(signal: AbortSignal): Promise<NpmLatestMetadata> {
+async function fetchLatestNpmMetadata(signal: AbortSignal): Promise<NpmLatestMetadata> {
   const response = await fetch(`https://registry.npmjs.org/${NPM_PACKAGE_NAME}/latest`, { signal });
   if (!response.ok) {
     throw new Error(`registry.npmjs.org responded ${response.status}`);
@@ -211,7 +211,7 @@ export async function installAndVerifyDefault(
   }
 }
 
-export function defaultSelfUpdateDeps(): SelfUpdateDeps {
+function defaultSelfUpdateDeps(): SelfUpdateDeps {
   return {
     currentVersion: () => getCliVersion(),
     installedVersion: () => getCliVersionFresh(),
@@ -443,11 +443,11 @@ export function selfUpdateSyncDeclineReason(deps: SelfUpdateDeps = defaultSelfUp
   return null;
 }
 
-export const DEV_BUILD_DECLINE = 'dev build — self-update is a no-op';
-export const SHADOW_DECLINE = 'another agents binary shadows this install — self-update is a no-op';
+const DEV_BUILD_DECLINE = 'dev build — self-update is a no-op';
+const SHADOW_DECLINE = 'another agents binary shadows this install — self-update is a no-op';
 
 /** True when the package on disk is a strictly newer release than the one this process booted with. */
-export function installedIsNewerThanRunning(installed: string, running: string): boolean {
+function installedIsNewerThanRunning(installed: string, running: string): boolean {
   if (installed === 'unknown' || running === 'unknown') return false;
   return compareVersions(installed, running) > 0;
 }

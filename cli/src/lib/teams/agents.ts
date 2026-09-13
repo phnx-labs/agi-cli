@@ -157,7 +157,7 @@ export const TERMINAL_STATUSES: ReadonlySet<AgentStatus> = new Set([
 ]);
 
 /** True when a teammate has reached a terminal (completed/failed/stopped) status. */
-export function isTerminalStatus(status: AgentStatus): boolean {
+function isTerminalStatus(status: AgentStatus): boolean {
   return TERMINAL_STATUSES.has(status);
 }
 
@@ -189,7 +189,7 @@ function safeFailureMessage(message: string): string {
  *     forever". Collapsing GONE into the empty-`.exit` case is exactly the bug
  *     that left a dead `--device` teammate RUNNING indefinitely.
  */
-export interface RemoteLivenessSnapshot {
+interface RemoteLivenessSnapshot {
   alive: boolean;
   exit: string | null;
   exitFilePresent: boolean;
@@ -533,7 +533,7 @@ export async function checkCliSignedIn(agentType: AgentType): Promise<boolean> {
 }
 
 /** Advisory sign-in status for a `teams doctor` row. */
-export interface SignInAdvisory {
+interface SignInAdvisory {
   /** true / false from the probe, or null when the agent isn't installed. */
   signedIn: boolean | null;
   /** Whether the agent is currently a running teammate. */

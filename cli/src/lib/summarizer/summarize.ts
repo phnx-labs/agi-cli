@@ -24,7 +24,7 @@ import type { TodoProgress } from '../session/types.js';
 const ANTHROPIC_VERSION = '2023-06-01';
 
 /** Live progress fed to the model alongside the goal-bearing prompt. */
-export interface SummarizeProgress {
+interface SummarizeProgress {
   /** Latest checklist write (TodoWrite / update_plan), when the session has one. */
   todos?: TodoProgress;
   /** Plan markdown from the last ExitPlanMode, when present. */
@@ -41,7 +41,7 @@ export interface SummarizeProgress {
 }
 
 /** The validated model output. `at` timestamps are stamped by the caller. */
-export interface SummarizeResult {
+interface SummarizeResult {
   goal: string;
   /** Progress checkpoints, newest last (short lines). */
   checkpoints: string[];
@@ -49,7 +49,7 @@ export interface SummarizeResult {
   checklist: { text: string; done: boolean }[];
 }
 
-export interface SummarizeOptions {
+interface SummarizeOptions {
   baseUrl: string;
   model: string;
   maxTokens?: number;

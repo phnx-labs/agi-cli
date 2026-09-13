@@ -75,7 +75,7 @@ const SETTINGS_MANIFEST: Partial<Record<AgentId, ManifestEntry[]>> = {
   ],
 };
 
-export interface CarryForwardResult {
+interface CarryForwardResult {
   /** Manifest rel paths that were created or updated in the target home. */
   applied: string[];
   /** Backup directory holding pre-merge copies of modified target files, if any. */

@@ -51,7 +51,6 @@ import { repairPluginManifestFile } from './plugins/plugin-marketplace.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { notifyDesktop } from './menubar/notify-desktop.js';
 
 // ─── result shapes ─────────────────────────────────────────────────────────
 
@@ -106,7 +105,7 @@ export interface HealResult {
   skippedPlugins: PluginRefreshSkip[];
 }
 
-export interface HealOptions {
+interface HealOptions {
   /** 'full' (agents sync): fix drift + refresh unknown-baseline plugins.
    *  'safe' (daemon): missing + invalid-manifest + unmodified refresh only. */
   mode: 'full' | 'safe';
@@ -150,41 +149,6 @@ export function healChangedAnything(r: HealResult): boolean {
   );
 }
 
-/** One-line summary of a heal pass for daemon logs. */
-export function summarizeHeal(r: HealResult): string {
-  const parts: string[] = [];
-  const healed = totalHealed(r);
-  if (healed > 0) parts.push(`${healed} resource(s) healed`);
-  if (r.repairedManifests.length > 0) parts.push(`${r.repairedManifests.length} manifest(s) repaired`);
-  if (r.refreshedPlugins.length > 0) parts.push(`${r.refreshedPlugins.length} plugin(s) refreshed`);
-  if (r.skippedPlugins.length > 0) parts.push(`${r.skippedPlugins.length} plugin(s) need attention`);
-  return parts.length > 0 ? parts.join(', ') : 'nothing to heal';
-}
-
-/**
- * Fire a branded desktop notification when a background heal did something
- * noteworthy. Routed through the MenubarHelper companion (notify-desktop.ts) so
- * it carries the agents-cli mark; clicking opens the runs folder
- * (~/.agents/.history/runs, via the `routines:list` action the companion
- * understands). Best-effort — a missing
- * notifier or no display is swallowed. Silent when the pass auto-fixed everything
- * and nothing needs the operator (no point pinging them for routine self-healing).
- */
-export function notifyHeal(r: HealResult): void {
-  const needsAttention = r.skippedPlugins.length;
-  const healed = totalHealed(r) + r.repairedManifests.length + r.refreshedPlugins.length;
-  if (needsAttention === 0 && healed === 0) return;
-
-  const title = needsAttention > 0
-    ? `${needsAttention} plugin${needsAttention === 1 ? '' : 's'} need attention`
-    : 'agents: auto-healed config gaps';
-  const body = needsAttention > 0
-    ? `${summarizeHeal(r)}. Run: agents sync`
-    : summarizeHeal(r);
-
-  notifyDesktop({ title, body, action: 'routines:list' });
-}
-
 // ─── central plugin layer (version-independent, runs once per heal) ──────────
 
 /**
@@ -192,7 +156,7 @@ export function notifyHeal(r: HealResult): void {
  * plugin's SOURCE plugin.json. Unambiguously safe (Claude auto-discovers both
  * from their directories) and the precondition for those plugins loading at all.
  */
-export function repairCentralPluginManifests(dryRun = false): ManifestRepairResult[] {
+function repairCentralPluginManifests(dryRun = false): ManifestRepairResult[] {
   const out: ManifestRepairResult[] = [];
   for (const p of discoverPlugins()) {
     const manifestPath = path.join(p.root, '.claude-plugin', 'plugin.json');

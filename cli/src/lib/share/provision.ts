@@ -186,7 +186,7 @@ export function hashWorkerScript(script: string): string {
   return createHash('sha256').update(script, 'utf8').digest('hex');
 }
 
-export interface UpdateWorkerResult {
+interface UpdateWorkerResult {
   /** sha256 of `script` (the hash the endpoint now matches, whether or not this
    * call actually redeployed). */
   templateHash: string;
@@ -202,7 +202,7 @@ export const WORKER_COLLAB_BASE_SECRET = 'PRIX_ARTIFACT_COLLAB_BASE';
 /** Cloudflare `secret_text` name the Worker reads as `env.ARTIFACT_COLLAB_SERVICE_TOKEN`. */
 export const WORKER_COLLAB_SERVICE_TOKEN_SECRET = 'ARTIFACT_COLLAB_SERVICE_TOKEN';
 
-export type UpdateWorkerOpts = ProvisionOptions & {
+type UpdateWorkerOpts = ProvisionOptions & {
   force?: boolean;
   /**
    * Phoenix ID base URL to bind as `PHOENIX_ID_BASE` after the script upload.

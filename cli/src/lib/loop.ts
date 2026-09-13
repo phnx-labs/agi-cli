@@ -60,7 +60,7 @@ export type LoopStoppedBy =
   | 'error';
 
 /** Result of a loop run. */
-export interface LoopResult {
+interface LoopResult {
   /** Iterations actually executed. */
   iterations: number;
   stoppedBy: LoopStoppedBy;

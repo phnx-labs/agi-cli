@@ -42,11 +42,11 @@ import { getHistoryDir, readMeta, updateMeta } from '../state.js';
 import type { AgentId, DeviceAccountSlot } from '../types.js';
 import { recordSlot, slotDir } from './slots.js';
 
-export const ACCOUNT_MIGRATION_SCHEMA = 1;
+const ACCOUNT_MIGRATION_SCHEMA = 1;
 
-export type MigrationActionKind = 'canonical' | 'slot' | 'trash' | 'defer' | 'skip';
+type MigrationActionKind = 'canonical' | 'slot' | 'trash' | 'defer' | 'skip';
 
-export interface InstallationInventory {
+interface InstallationInventory {
   agent: AgentId;
   label: string;
   release: string;
@@ -65,7 +65,7 @@ export interface InstallationInventory {
   busy: boolean;
 }
 
-export interface MigrationAction {
+interface MigrationAction {
   kind: MigrationActionKind;
   label: string;
   release: string;
@@ -95,9 +95,9 @@ export interface AccountMigrationPlan {
   totals: { installations: number; keep: number; slots: number; trash: number; deferred: number; skipped: number };
 }
 
-export type AccountMigrationManifestStatus = 'planned' | 'complete';
+type AccountMigrationManifestStatus = 'planned' | 'complete';
 
-export interface AccountMigrationManifest {
+interface AccountMigrationManifest {
   schema: number;
   at: string;
   dryRun: boolean;
@@ -115,7 +115,7 @@ export interface AccountMigrationManifest {
   map: Record<string, string>;
 }
 
-export interface AccountMigrateDeps {
+interface AccountMigrateDeps {
   isActive?: (installation: { agent: AgentId; label: string }) => Promise<boolean>;
   now?: () => Date;
 }
@@ -654,7 +654,7 @@ function harnessManifest(
   return created;
 }
 
-export interface ApplyMigrationResult {
+interface ApplyMigrationResult {
   plan: AccountMigrationPlan;
   manifest: AccountMigrationManifest;
   manifestPath: string;

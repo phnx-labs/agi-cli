@@ -148,7 +148,7 @@ export function pruneStatsCache(entries: Record<string, DeviceStats>, name: stri
   return remaining;
 }
 
-export interface FleetStatsResult {
+interface FleetStatsResult {
   /** name → stats for every requested device (cache-served + freshly probed). */
   stats: Map<string, DeviceStats>;
   /** Oldest `fetchedAt` among the returned rows, or null when empty. Drives the
@@ -158,7 +158,7 @@ export interface FleetStatsResult {
   servedFromCache: boolean;
 }
 
-export interface LoadFleetStatsOptions {
+interface LoadFleetStatsOptions {
   /** Skip the cache and live-probe every device (the `--refresh`/`--live` path). */
   forceRefresh?: boolean;
   /** Device name of THIS machine — always probed locally (no ssh), never cached-served. */

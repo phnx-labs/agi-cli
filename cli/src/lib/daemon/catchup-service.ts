@@ -27,7 +27,7 @@ import type { DaemonServiceId } from '../daemon-services.js';
  */
 export const CATCHUP_TICK_MS = 5 * 60_000;
 
-export interface CatchupServiceDeps {
+interface CatchupServiceDeps {
   /**
    * Whether the routine scheduler is currently booted. When false (the
    * `scheduler.enabled` gate is off), the pass no-ops — there is nothing to

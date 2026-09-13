@@ -44,14 +44,9 @@ export function resolveBrandName(): string {
 }
 
 /** The active brand name, or null when unbranded. */
-export function activeBrandName(): string | null {
+function activeBrandName(): string | null {
   const name = resolveBrandName();
   return name === DEFAULT_CLI_NAME ? null : name;
-}
-
-/** True when this process is running under a brand (not the plain `agents` CLI). */
-export function isBranded(): boolean {
-  return activeBrandName() !== null;
 }
 
 /** Names that would clobber an agent CLI shim or the `agents`/`ag` binary. */
@@ -87,7 +82,7 @@ export function getBrandConfig(name: string): BrandConfig | undefined {
  * the brand is explicitly disabled (`enabled: false`) — a disabled brand's shim
  * still works as a plain pass-through but applies no command/resource curation.
  */
-export function getActiveBrandConfig(): BrandConfig | null {
+function getActiveBrandConfig(): BrandConfig | null {
   const name = activeBrandName();
   if (!name) return null;
   const cfg = getBrandConfig(name);

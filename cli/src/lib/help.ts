@@ -7,7 +7,7 @@
 import type { Command, Help } from 'commander';
 
 /** Description of a named command group rendered as its own section in help output. */
-export interface CommandGroup {
+interface CommandGroup {
   /** Section heading, e.g. 'Bundle commands'. */
   title: string;
   /** Subcommand names (in desired display order) that belong to this group. */
@@ -50,7 +50,7 @@ export function setCompactRootHelp(program: Command): void {
 }
 
 /** Examples + Notes blocks attached to a command via setHelpSections. */
-export interface HelpSections {
+interface HelpSections {
   examples?: string;
   notes?: string;
 }

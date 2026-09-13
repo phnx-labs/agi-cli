@@ -78,13 +78,13 @@ export interface FleetSharedDeviceState {
   };
 }
 
-export interface FleetSharedStatePatch {
+interface FleetSharedStatePatch {
   usage?: FleetSharedDeviceState['usage'];
   auth?: FleetSharedDeviceState['auth'];
   sessions?: FleetSharedDeviceState['sessions'];
 }
 
-export interface FleetSharedStateReadResult {
+interface FleetSharedStateReadResult {
   states: FleetSharedDeviceState[];
   errors: Array<{ device: string; message: string }>;
 }

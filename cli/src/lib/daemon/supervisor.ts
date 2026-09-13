@@ -36,7 +36,7 @@ import type { DaemonServiceId } from '../daemon-services.js';
 import type { DaemonContext, DaemonService, PeriodicService, ServiceHealth, ServiceState } from './service.js';
 import { isPeriodicService } from './service.js';
 
-export interface ServiceSupervisorOptions {
+interface ServiceSupervisorOptions {
   /** Consecutive thrown tick failures before a service is parked. Deadline breaches park immediately. Default 3. */
   parkAfterFailures?: number;
   /** First restart backoff delay, doubled on each further failed restart attempt. Default 5s. */
@@ -80,7 +80,7 @@ interface RegisteredService {
   startupTimer?: ReturnType<typeof setTimeout>;
 }
 
-export interface RegisterServiceOptions {
+interface RegisterServiceOptions {
   /** Register the lifecycle owner but leave it stopped until a live enable. */
   enabled?: boolean;
 }

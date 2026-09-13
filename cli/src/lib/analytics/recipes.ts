@@ -1,21 +1,12 @@
 import Database from '../sqlite.js';
 import { getSessionsDbPath } from '../state.js';
-import {
-  topNamesByKind,
-  kindMix,
-  countUsage,
-  listUsageKindsWithData,
-  type UsageKind,
-} from './usage-db.js';
+import { topNamesByKind, kindMix } from './usage-db.js';
 
 /** Time window for mix recipes under `agents insights mix`. */
 export interface AnalyticsWindow {
   days: number;
   sinceIso: string;
 }
-
-/** @deprecated Use AnalyticsWindow — kept as a type alias for external callers. */
-export type TrendsWindow = AnalyticsWindow;
 
 export interface RecipeSection {
   id: string;
@@ -80,7 +71,7 @@ export function recipeHarnessMix(win: AnalyticsWindow): RecipeSection {
   }
 }
 
-export function recipeModelMix(win: AnalyticsWindow): RecipeSection {
+function recipeModelMix(win: AnalyticsWindow): RecipeSection {
   const db = openSessions();
   const id = 'model-mix';
   const title = 'Model mix';
@@ -161,7 +152,7 @@ export function recipeToolsPerSession(win: AnalyticsWindow): RecipeSection {
   }
 }
 
-export function recipeTokenRatio(win: AnalyticsWindow): RecipeSection {
+function recipeTokenRatio(win: AnalyticsWindow): RecipeSection {
   const db = openSessions();
   const id = 'token-ratio';
   const title = 'Token read→write ratio';
@@ -211,7 +202,7 @@ export function recipeTokenRatio(win: AnalyticsWindow): RecipeSection {
   }
 }
 
-export function recipeSessionVolume(win: AnalyticsWindow): RecipeSection {
+function recipeSessionVolume(win: AnalyticsWindow): RecipeSection {
   const db = openSessions();
   const id = 'session-volume';
   const title = 'Session volume';
@@ -242,7 +233,7 @@ export function recipeSessionVolume(win: AnalyticsWindow): RecipeSection {
   }
 }
 
-export function recipeSecretsHot(win: AnalyticsWindow): RecipeSection {
+function recipeSecretsHot(win: AnalyticsWindow): RecipeSection {
   const id = 'secrets-hot';
   const title = 'Hottest secrets';
   const rows = topNamesByKind('secret', win.sinceIso, 15);
@@ -255,7 +246,7 @@ export function recipeSecretsHot(win: AnalyticsWindow): RecipeSection {
   };
 }
 
-export function recipeBrowserActivity(win: AnalyticsWindow): RecipeSection {
+function recipeBrowserActivity(win: AnalyticsWindow): RecipeSection {
   const id = 'browser-activity';
   const title = 'Browser activity';
   const rows = topNamesByKind('browser', win.sinceIso, 15);
@@ -268,7 +259,7 @@ export function recipeBrowserActivity(win: AnalyticsWindow): RecipeSection {
   };
 }
 
-export function recipeResourceMix(win: AnalyticsWindow): RecipeSection {
+function recipeResourceMix(win: AnalyticsWindow): RecipeSection {
   const id = 'resource-mix';
   const title = 'Resource usage mix';
   const rows = kindMix(win.sinceIso);
@@ -323,25 +314,4 @@ export function listRecipes(): Array<{ id: RecipeId; title: string; store: 'sess
     const s = RUNNERS[id](win);
     return { id, title: s.title, store: s.store };
   });
-}
-
-export function hasSessionsInWindow(win: AnalyticsWindow): boolean {
-  const db = openSessions();
-  if (!db) return false;
-  try {
-    const row = db.prepare(`SELECT 1 AS ok FROM sessions WHERE timestamp >= ? LIMIT 1`).get(win.sinceIso) as { ok: number } | undefined;
-    return Boolean(row);
-  } catch {
-    return false;
-  } finally {
-    try { db.close(); } catch { /* ignore */ }
-  }
-}
-
-export function usageKindsPresent(win: AnalyticsWindow): UsageKind[] {
-  return listUsageKindsWithData(win.sinceIso);
-}
-
-export function usageEventCount(kind: UsageKind, win: AnalyticsWindow): number {
-  return countUsage({ kind, sinceIso: win.sinceIso });
 }

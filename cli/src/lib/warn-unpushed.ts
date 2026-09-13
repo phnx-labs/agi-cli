@@ -29,7 +29,7 @@ export function shouldWarnUnpushed(mode: string, interactive: boolean): boolean 
   return mode !== 'plan' && !interactive;
 }
 
-export interface UnpushedState {
+interface UnpushedState {
   /** cwd is inside a git work tree. */
   isRepo: boolean;
   /** current branch, or null when detached / not a repo. */

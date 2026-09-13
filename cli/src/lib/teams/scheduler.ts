@@ -70,7 +70,7 @@ export interface DevicePlacementSignal {
 }
 
 /** Team fields the placement cascade reads (a subset of TeamMeta). */
-export interface PlacementTeam {
+interface PlacementTeam {
   devices?: string[];
 }
 
@@ -84,7 +84,7 @@ export interface PlacementTeam {
  * honors caps: an explicit pin or a pool of one is the user's own choice and
  * is never second-guessed.
  */
-export interface PlacementOptions {
+interface PlacementOptions {
   /** Worker pool used when the team does not declare an explicit device pool. */
   defaultDevices?: string[];
   maxConcurrent?: Record<string, number>;
@@ -110,10 +110,10 @@ export interface PlacementOptions {
 }
 
 /** Why a device was excluded from the viable set, for the fail-loud message. */
-export type ExclusionReason = 'unreachable' | 'probe-timed-out' | 'overloaded' | 'capped' | 'not-installed';
+type ExclusionReason = 'unreachable' | 'probe-timed-out' | 'overloaded' | 'capped' | 'not-installed';
 
 /** A pool device dropped from the auto-pick, with the reason + live detail. */
-export interface ExcludedDevice {
+interface ExcludedDevice {
   device: string;
   reason: ExclusionReason;
   /** Present for `capped`: `running/cap`. */

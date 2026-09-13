@@ -25,9 +25,9 @@ import type { AgentId, DeviceAccountSlot, Meta } from './types.js';
 export { isAccountSlotDir } from './agents.js';
 export { isSymlinkAdoptedHarness };
 
-export type SpawnHomeSource = 'slot' | 'legacy-home' | 'provisioned';
+type SpawnHomeSource = 'slot' | 'legacy-home' | 'provisioned';
 
-export interface NativeSpawnHome {
+interface NativeSpawnHome {
   execHome: string;
   source: SpawnHomeSource;
   slot?: DeviceAccountSlot;
@@ -98,7 +98,7 @@ export function adoptedSymlinkMismatchError(agent: AgentId, name: string, execHo
 }
 
 /** The adopted `~/.<config>` symlink's resolved target, or null when missing / not a symlink. */
-export function adoptedConfigTarget(agent: AgentId): string | null {
+function adoptedConfigTarget(agent: AgentId): string | null {
   const configPath = getAgentConfigPath(agent);
   try {
     const stat = fs.lstatSync(configPath);

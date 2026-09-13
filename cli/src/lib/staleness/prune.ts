@@ -58,7 +58,7 @@ import { getWriter, getDetector } from './registry.js';
 export const PRUNABLE_KINDS = ['commands', 'skills'] as const;
 export type PrunableKind = typeof PRUNABLE_KINDS[number];
 
-export interface PruneInput {
+interface PruneInput {
   agent: AgentId;
   version: string;
   versionHome: string;
@@ -75,7 +75,7 @@ export interface PruneInput {
   sourceNames: Record<PrunableKind, ReadonlyArray<string>>;
 }
 
-export interface PruneOutcome {
+interface PruneOutcome {
   /** Names actually removed from the version home, per kind. */
   pruned: Record<PrunableKind, string[]>;
   /**

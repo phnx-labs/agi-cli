@@ -329,7 +329,7 @@ function shortId(id: string): string {
 }
 
 /** Where `teams message`/`teams resume` routes a follow-up, by teammate status. */
-export type TeamMessageRoute =
+type TeamMessageRoute =
   | { kind: 'steer' }        // running -> mailbox, delivered at next tool call
   | { kind: 'resume' }       // stopped/completed/failed -> re-enter its session
   | { kind: 'need-message' } // actionable, but no message was supplied
@@ -513,7 +513,7 @@ async function assertRepoFreshOrConfirm(params: {
  * dispatched when their --after deps resolve, using repo/branch stored on
  * the teammate itself so we don't need the original --cloud CLI args.
  */
-export function wireCloudDispatcher(mgr: AgentManager): void {
+function wireCloudDispatcher(mgr: AgentManager): void {
   mgr.setCloudDispatcher(async (a) => {
     if (!a.cloudProvider) {
       throw new Error(`Teammate ${a.agentId} has no cloud provider set`);

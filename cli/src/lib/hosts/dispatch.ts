@@ -35,7 +35,7 @@ export { deriveMirroredCwd, homeRemainder, remoteCdPrefix };
  * Diagnostic helper for RUSH-2441: log the requested agent and initial remote
  * `agents run` argv without changing normal command output.
  */
-export function logForwardedArgs(
+function logForwardedArgs(
   kind: string,
   agent: string,
   version: string | undefined,
@@ -479,7 +479,7 @@ export interface DispatchOptions {
  * the table side.
  */
 /** Compose `agent[@version][#account]` so the peer resolves ITS slot (PHNX-3940 T5). */
-export function runAgentSpecArg(opts: {
+function runAgentSpecArg(opts: {
   agent: string;
   version?: string;
   account?: string;
@@ -525,7 +525,7 @@ export function buildRunForwardedArgs(opts: DispatchOptions): string[] {
   return args;
 }
 
-export interface InteractiveDispatchOptions {
+interface InteractiveDispatchOptions {
   agent: string;
   /** Explicit agent version pin (e.g. "2.1.207") to forward as `agent@version`. */
   version?: string;
@@ -686,7 +686,7 @@ export async function dispatchToHost(host: Host, opts: DispatchOptions): Promise
   });
 }
 
-export interface CommandDispatchOptions {
+interface CommandDispatchOptions {
   /** `agents …` args (command name first), already stripped of routing flags. */
   forwardedArgs: string[];
   remoteCwd?: string;

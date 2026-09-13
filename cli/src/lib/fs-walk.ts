@@ -44,7 +44,7 @@ function walkEntries(dir: string, ext: string, onFile: (filePath: string, mtimeM
 }
 
 /** A file surfaced by the walk, carrying the mtime+size from the walk's own stat. */
-export interface WalkedFile {
+interface WalkedFile {
   path: string;
   mtimeMs: number;
   size: number;

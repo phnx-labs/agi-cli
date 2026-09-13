@@ -36,9 +36,9 @@ import {
 } from './db.js';
 
 /** Cap on sessions published per device — the payload stays what a picker shows. */
-export const SESSION_MIRROR_MAX_ROWS = 200;
+const SESSION_MIRROR_MAX_ROWS = 200;
 /** First-user-message snippet ceiling; the full turn stays on the owning box. */
-export const SESSION_MIRROR_SNIPPET_MAX = 280;
+const SESSION_MIRROR_SNIPPET_MAX = 280;
 /** Mirror rows older than this since their last sync are pruned (staleness/size ceiling). */
 export const SESSION_MIRROR_MAX_AGE_MS = 14 * 24 * 60 * 60_000;
 
@@ -84,13 +84,13 @@ function boundedFiles(files: SessionFiles): SessionFiles {
   };
 }
 
-export interface PublishSessionMirrorOptions {
+interface PublishSessionMirrorOptions {
   userAgentsDir?: string;
   device?: string;
   limit?: number;
 }
 
-export interface PublishSessionMirrorResult {
+interface PublishSessionMirrorResult {
   published: boolean;
   changed: boolean;
   count: number;
@@ -178,7 +178,7 @@ export async function publishSessionMirrorToSharedStore(
   return result;
 }
 
-export interface ConsumeSessionMirrorOptions {
+interface ConsumeSessionMirrorOptions {
   userAgentsDir?: string;
   device?: string;
   role?: ConfiguredDeviceRole;
@@ -186,7 +186,7 @@ export interface ConsumeSessionMirrorOptions {
   maxAgeMs?: number;
 }
 
-export interface ConsumeSessionMirrorResult {
+interface ConsumeSessionMirrorResult {
   sources: string[];
   merged: number;
   pruned: number;

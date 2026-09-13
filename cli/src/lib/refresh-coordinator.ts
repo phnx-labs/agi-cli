@@ -20,7 +20,7 @@ function lockTarget(scope: string, key: string): string {
   return path.join(refreshLockRootOverride ?? getCacheDir(), 'refresh-locks', scope, `${digest}.lock`);
 }
 
-export interface RefreshLeaseOptions<T> {
+interface RefreshLeaseOptions<T> {
   scope: string;
   key: string;
   /**

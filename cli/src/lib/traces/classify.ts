@@ -29,7 +29,7 @@ export interface DriftSignal {
   severity: 'degrading' | 'stable' | 'improving';
 }
 
-export interface TopicEvidence {
+interface TopicEvidence {
   cwd?: string | null;
   gitBranch?: string | null;
   topic?: string | null;
@@ -43,7 +43,7 @@ export interface ClassifiedTopic {
   label: string;
 }
 
-export interface ToolCallFailure {
+interface ToolCallFailure {
   tool: string;
   exit_code?: number | null;
   status_code?: number | null;

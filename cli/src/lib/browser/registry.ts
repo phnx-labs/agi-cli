@@ -31,7 +31,7 @@ export function centralBrowserProfiles(): Record<string, BrowserProfileConfig> {
   return { ...central };
 }
 
-export interface CentralClaimResult {
+interface CentralClaimResult {
   claimed: string[];
   skipped: string[];
 }
