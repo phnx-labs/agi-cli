@@ -16,6 +16,7 @@
  */
 
 import * as path from 'path';
+import { Lexer } from 'marked';
 import type { SessionAttachment, SessionEvent, TodoItem, TodoProgress } from './types.js';
 import { isCompletedTodoStatus, SNAPSHOT_TODO_TOOLS, summarizeToolUse } from './parse.js';
 import { isShellExecTool } from './shell-programs.js';
@@ -61,9 +62,22 @@ export interface QuestionOption {
  * {@link AwaitingReason}; `options` is present when the agent offered discrete choices.
  */
 export interface StructuredQuestion {
+  /**
+   * The question itself — the trailing ask, not the whole message. For a prose
+   * question this is the extracted trailing question block (see
+   * {@link extractProseQuestion}); for a structured harness question it is the
+   * agent-supplied question text, unchanged.
+   */
   text: string;
   reason: AwaitingReason;
   options?: QuestionOption[];
+  /**
+   * Optional preceding prose for a prose question — the report/explanation that
+   * came BEFORE the trailing ask, with its Markdown and newlines preserved so a
+   * consumer can render it as context under the question. Absent for a structured
+   * harness question and when a prose question carries no preceding context.
+   */
+  context?: string;
 }
 
 export interface DetectedPr {
@@ -578,12 +592,116 @@ function eventStampMs(e: SessionEvent | undefined, mtimeMs?: number): number | u
 }
 
 /** Does an assistant message read as a question directed at the user? */
-function looksLikeQuestion(text: string): boolean {
-  const t = text.trim();
-  if (!t) return false;
-  // Only weigh the final line — a long answer that ends with a question is a question.
-  const lastLine = t.split('\n').filter(Boolean).pop() ?? t;
-  return QUESTION_TRAILING.test(lastLine) || QUESTION_PHRASE.test(lastLine);
+/** Strip inline-code spans so a `?` living only inside `code` never reads as a question. */
+function stripInlineCode(s: string): string {
+  return s.replace(/`[^`]*`/g, '');
+}
+
+/** Whether one line's prose ENDS an ask (trailing '?' or an interrogative phrase). */
+function lineIsQuestion(line: string): boolean {
+  const probe = stripInlineCode(line.trim());
+  return QUESTION_TRAILING.test(probe) || QUESTION_PHRASE.test(probe);
+}
+
+/** The separated question the CLI shows: the trailing ask + optional preceding context. */
+export interface ProseQuestion {
+  /** The trailing ask, with its original Markdown and line breaks. */
+  text: string;
+  /** The preceding report/explanation, Markdown + newlines preserved; absent when none. */
+  context?: string;
+}
+
+/**
+ * Split a run of prose into its trailing QUESTION and the CONTEXT before it,
+ * instead of flattening a whole report into one line (the old `oneLine(content)`
+ * that copied a merged report and lost its Markdown). Returns undefined when the
+ * text has no real trailing ask.
+ *
+ * Rules, each pinned by a test:
+ *   - The ask must be TRAILING: the last eligible non-empty line is the question,
+ *     or the search stops (a report line after the question means it isn't the ask).
+ *   - A `?` that lives ONLY inside a fenced code block, an inline `code` span, or a
+ *     `>` blockquote does NOT count — those lines are ineligible to end the ask
+ *     (they still ride along in `context`).
+ *   - Multiple/multiline related asks are kept together (a contiguous run of
+ *     question / list-item / `:`-lead-in lines), never dropped.
+ *   - When the ask shares ONE line with preceding prose, the leading non-question
+ *     sentences peel into `context` and only the trailing question sentence(s) stay
+ *     in `text`.
+ *   - Both fields preserve newlines and Markdown.
+ */
+export function extractProseQuestion(raw: string): ProseQuestion | undefined {
+  const content = (raw ?? '').replace(/\r\n/g, '\n');
+  if (!content.trim()) return undefined;
+  const lines = content.split('\n');
+
+  // Mark lines that may NOT end the ask: fenced-code (delimiters + body) and
+  // blockquotes. They remain part of context; they just can't BE the question.
+  const eligible: boolean[] = [];
+  let fence: { marker: string; length: number } | undefined;
+  for (const line of lines) {
+    const t = line.trim();
+    const delimiter = /^(`{3,}|~{3,})(.*)$/.exec(t);
+    if (fence) {
+      if (delimiter && delimiter[1][0] === fence.marker && delimiter[1].length >= fence.length && !delimiter[2].trim()) fence = undefined;
+      eligible.push(false);
+      continue;
+    }
+    if (delimiter) {
+      fence = { marker: delimiter[1][0], length: delimiter[1].length };
+      eligible.push(false);
+      continue;
+    }
+    eligible.push(!/^>/.test(t)); // blockquote line is ineligible
+  }
+
+  // The trailing ask: the last eligible non-empty line must itself be a question.
+  let qEnd = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!eligible[i] || !lines[i].trim()) continue;
+    if (lineIsQuestion(lines[i])) qEnd = i;
+    break; // first eligible non-empty line from the end decides it
+  }
+  if (qEnd === -1) return undefined;
+
+  // Expand upward over contiguous eligible non-empty ask/lead-in lines so a
+  // multi-line ask ("Questions:\n- A?\n- B?") stays whole.
+  let blockStart = qEnd;
+  for (let i = qEnd - 1; i >= 0; i--) {
+    if (!eligible[i]) break;
+    if (!lines[i].trim()) break; // blank line ends the paragraph/block
+    blockStart = i;
+  }
+
+  const contextAbove = lines.slice(0, blockStart).join('\n').trim();
+  let block = lines.slice(blockStart, qEnd + 1).join('\n').trim();
+
+  // Only plain text can contribute a sentence boundary. Code, links and other
+  // inline Markdown remain whole, even when their content contains punctuation.
+  let inlineContext = '';
+  if (!/^\s*(?:[-*]|\d+[.)])\s/m.test(block)) {
+    const boundaries: number[] = [];
+    let offset = 0;
+    for (const token of Lexer.lexInline(block)) {
+      if (token.type === 'text') {
+        for (const match of token.raw.matchAll(/(?<=[.!?])\s+/g)) boundaries.push(offset + match.index + match[0].length);
+      }
+      offset += token.raw.length;
+    }
+    const starts = [0, ...boundaries];
+    const sentences = starts.map((start, i) => block.slice(start, starts[i + 1] ?? block.length));
+    let firstQ = sentences.length - 1;
+    for (let i = sentences.length - 1; i >= 0; i--) {
+      if (lineIsQuestion(sentences[i])) firstQ = i;
+      else break;
+    }
+    inlineContext = sentences.slice(0, firstQ).join('').trim();
+    block = sentences.slice(firstQ).join('').trim();
+  }
+
+  const trailingContext = lines.slice(qEnd + 1).join('\n').trim();
+  const context = [contextAbove, inlineContext, trailingContext].filter(Boolean).join('\n\n').trim() || undefined;
+  return { text: block, context };
 }
 
 /** Human-readable one-liner for the latest event (message text or tool action). */
@@ -714,9 +832,11 @@ export function inferActivity(events: SessionEvent[], ctx: StateContext = {}): S
     // kept the question forever).
     const askedAtMs = eventStampMs(last, ctx.mtimeMs) ?? ctx.mtimeMs;
     const questionFresh = askedAtMs != null && nowMs - askedAtMs < PROSE_QUESTION_FRESH_MS;
-    if (questionFresh && looksLikeQuestion(last.content ?? '')) {
-      const text = oneLine(last.content ?? '');
-      return { ...base, activity: 'waiting_input', awaitingReason: 'question', question: { text, reason: 'question' } };
+    const prose = questionFresh ? extractProseQuestion(last.content ?? '') : undefined;
+    if (prose) {
+      const question: StructuredQuestion = { text: prose.text, reason: 'question' };
+      if (prose.context) question.context = prose.context;
+      return { ...base, activity: 'waiting_input', awaitingReason: 'question', question };
     }
     return { ...base, activity: 'idle' };
   }

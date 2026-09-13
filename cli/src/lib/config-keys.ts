@@ -13,7 +13,29 @@ import { MODEL_TIERS, type ModelTier } from './model-tiers.js';
 import { VERSION_RE } from './run-defaults.js';
 
 /** The top-level scope of a unified config key. */
-export type ConfigScope = 'run' | 'interactive' | 'auto' | 'browser' | 'project' | 'device' | 'summarizer' | 'updates';
+export type ConfigScope = 'run' | 'interactive' | 'auto' | 'browser' | 'project' | 'device' | 'summarizer' | 'updates' | 'menubar';
+
+/**
+ * The AGI Menu preference leaf names under `menubar.menu.*` (PHNX-3999). The
+ * types, defaults, and enum validation for each live in `device-config.ts`'s
+ * CONFIG_KEYS (user scope); this list is only the parser's allow-set so an
+ * unknown `menubar.menu.<x>` fails loud here instead of at the store.
+ */
+export const MENUBAR_MENU_PROPERTIES = [
+  'defaultProject',
+  'workingRowsShown',
+  'showPreviews',
+  'projectPriorityFilter',
+  'hideCompletedMilestones',
+  'bannerWhenNeedsYou',
+  'includeOtherDeviceRequests',
+  'groupBy',
+  'thenBy',
+  'projectScope',
+  'projectSort',
+  'ticketSort',
+  'showPullRequests',
+] as const;
 
 /** A run-time default key: model, mode, effort, or tier override. */
 export interface ParsedRunConfigKey {
@@ -73,6 +95,13 @@ export interface ParsedUpdatesConfigKey {
   agent?: AgentId;
 }
 
+/** An AGI Menu preference key: `menubar.menu.<property>` (user-scope, PHNX-3999). */
+export interface ParsedMenubarConfigKey {
+  scope: 'menubar';
+  /** Leaf name under `menubar.menu.` — one of {@link MENUBAR_MENU_PROPERTIES}. */
+  property: string;
+}
+
 export type ParsedConfigKey =
   | ParsedRunConfigKey
   | ParsedInteractiveConfigKey
@@ -81,7 +110,8 @@ export type ParsedConfigKey =
   | ParsedProjectConfigKey
   | ParsedDeviceConfigKey
   | ParsedSummarizerConfigKey
-  | ParsedUpdatesConfigKey;
+  | ParsedUpdatesConfigKey
+  | ParsedMenubarConfigKey;
 
 export type DeviceConfigProperty =
   | 'role'
@@ -95,7 +125,8 @@ export type DeviceConfigProperty =
   | 'notes'
   | 'browser.profile'
   | 'browser.viewer'
-  | 'computer.host';
+  | 'computer.host'
+  | 'formFactor';
 
 const DEVICE_CONFIG_PROPERTIES: DeviceConfigProperty[] = [
   'browser.viewer',
@@ -110,6 +141,7 @@ const DEVICE_CONFIG_PROPERTIES: DeviceConfigProperty[] = [
   'notes',
   'browser.profile',
   'computer.host',
+  'formFactor',
 ];
 
 /** Split an agent@version token into its parts. Accepts both `@` and `:`. */
@@ -203,6 +235,17 @@ export function parseConfigKey(key: string): ParsedConfigKey {
     return { scope: 'summarizer', property: summarizerMatch[1] as 'enabled' | 'baseUrl' | 'model' };
   }
 
+  const menubarMatch = raw.match(/^menubar\.menu\.(.+)$/);
+  if (menubarMatch) {
+    const property = menubarMatch[1];
+    if (!(MENUBAR_MENU_PROPERTIES as readonly string[]).includes(property)) {
+      throw new Error(
+        `Unknown AGI Menu preference '${key}'. Known keys: ${MENUBAR_MENU_PROPERTIES.map((p) => `menubar.menu.${p}`).join(', ')}.`,
+      );
+    }
+    return { scope: 'menubar', property };
+  }
+
   if (raw === 'updates.auto') {
     return { scope: 'updates', property: 'auto' };
   }
@@ -217,7 +260,7 @@ export function parseConfigKey(key: string): ParsedConfigKey {
   }
 
   const deviceMatch = raw.match(
-    /^devices\.(.+)\.(role|max-agents|scheduler|daemon|watchdog|tmux|notes|browser\.remote-control|browser\.task-idle-minutes|browser\.profile|browser\.viewer|computer\.host)$/,
+    /^devices\.(.+)\.(role|max-agents|scheduler|daemon|watchdog|tmux|notes|formFactor|browser\.remote-control|browser\.task-idle-minutes|browser\.profile|browser\.viewer|computer\.host)$/,
   );
   if (deviceMatch) {
     return {
@@ -251,6 +294,11 @@ export function parseConfigKey(key: string): ParsedConfigKey {
   if (raw.startsWith('updates.')) {
     throw new Error(`Invalid updates config key '${key}'. Use updates.auto or updates.<agent>.auto.`);
   }
+  if (raw.startsWith('menubar.')) {
+    throw new Error(
+      `Invalid AGI Menu config key '${key}'. Use ${MENUBAR_MENU_PROPERTIES.map((p) => `menubar.menu.${p}`).join(', ')}.`,
+    );
+  }
   if (raw.startsWith('devices.')) {
     throw new Error(
       `Invalid device config key '${key}'. Expected devices.<name>.<${DEVICE_CONFIG_PROPERTIES.join('|')}>.`,
@@ -258,7 +306,7 @@ export function parseConfigKey(key: string): ParsedConfigKey {
   }
 
   throw new Error(
-    `Unknown config scope in '${key}'. Use one of: run, interactive, auto, browser, project, devices, summarizer.`,
+    `Unknown config scope in '${key}'. Use one of: run, interactive, auto, browser, project, devices, summarizer, updates, menubar.`,
   );
 }
 
@@ -286,6 +334,8 @@ export function formatConfigKey(parsed: ParsedConfigKey): string {
       return `summarizer.${parsed.property}`;
     case 'updates':
       return parsed.agent ? `updates.${parsed.agent}.auto` : 'updates.auto';
+    case 'menubar':
+      return `menubar.menu.${parsed.property}`;
   }
 }
 
@@ -313,6 +363,9 @@ export function listKnownConfigKeys(): string[] {
     'updates.auto',
     'updates.<agent>.auto',
   );
+  for (const prop of MENUBAR_MENU_PROPERTIES) {
+    keys.push(`menubar.menu.${prop}`);
+  }
   for (const prop of DEVICE_CONFIG_PROPERTIES) {
     keys.push(`devices.<name>.${prop}`);
   }
@@ -350,6 +403,8 @@ export function devicePropertyToConfigName(property: DeviceConfigProperty): stri
       return 'browser.viewer';
     case 'computer.host':
       return 'computer.host';
+    case 'formFactor':
+      return 'formFactor';
   }
 }
 
@@ -392,5 +447,7 @@ export function configKeyStorageHint(parsed: ParsedConfigKey): string {
       return parsed.agent
         ? `config.updatesAgentAuto.${parsed.agent} (central agents.yaml; syncs fleet-wide)`
         : 'config.updatesAuto (central agents.yaml; syncs fleet-wide)';
+    case 'menubar':
+      return `config.menubarMenu${parsed.property.charAt(0).toUpperCase()}${parsed.property.slice(1)} (central agents.yaml; syncs fleet-wide)`;
   }
 }
