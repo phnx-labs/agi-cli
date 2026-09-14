@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **A bare interactive `agents run <harness>` runs on the machine you typed it on again.** Since PHNX-4083 a bare human-facing run (no prompt, real TTY) placed itself like `--device auto`, so `agents run claude` on a laptop landed on whichever fleet worker had the most headroom — including a Windows box the operator never chose. Placement is now opt-in: `--device auto`, `--device <box>`, or the `<harness>@` picker; headless runs are unchanged. The "Run here instead" fallback hint is gone with the default that needed it. Source: `cli/src/commands/exec.ts`, `cli/src/commands/exec.test.ts`, `cli/docs/hosts.md`.
+
 - **Account-slot rules are now symlinked to the version home instead of composed independently.** Each account slot previously ran the full rules-composition pipeline and wrote its own `CLAUDE.md`, duplicating the ~260-line ruleset already present in the version home — ~5K tokens loaded twice per session because the harness reads rules from both paths. The slot now symlinks to the version home's rules file (via `createLink` for Windows compatibility), so both paths resolve to the same inode and the harness can deduplicate them. Falls back to composition when the version home has no rules file yet. Source: `cli/src/lib/accounts/slots.ts`.
 
 - Browser setup selects standalone Browser CLI 0.1.3. A surviving browser can restore its task through an existing debugging port after service replacement; private debugging-pipe handles cannot transfer between services.

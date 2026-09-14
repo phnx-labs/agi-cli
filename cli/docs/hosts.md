@@ -40,25 +40,24 @@ affinity (weighted by launch counts on `sessions.db` `machine`; most-used online
 device has highest probability). Harness stays the agent you typed — never
 auto-picked. Affinity failure degrades to local rather than aborting the run.
 
-### A bare interactive run places itself (PHNX-4083)
+### A bare interactive run stays on this machine
 
 A bare human-facing `agents run <harness>` — no prompt, so an interactive TUI
-run — places itself like `--device auto`: the same pool, the same health
-checks, the same `[agents] device=auto → <box>` banner, with the TUI forwarded
-over SSH. A marker you leave off is decided for you: no `#` means balanced
-rotation, no `@` means automatic device placement. Headless runs are
-unchanged — any prompt (`agents run claude "fix it"`), `--json`, no TTY,
-teams/routines/hooks — those keep running in place. Two spellings stay local:
+run — starts on the machine you typed it on, like a headless run does.
+Fleet placement is opt-in, with the same pool, health checks, and
+`[agents] device=auto → <box>` banner in every spelling:
 
 ```
-agents run claude --device $(hostname -s)   # pin this machine explicitly
-agents run claude@                          # …or pick "this machine" (listed first) in the @ menu
+agents run claude --device auto             # let the fleet place it, TUI forwarded over SSH
+agents run claude --device mac-mini         # pin a box
+agents run claude@                          # pick the device from a menu
 ```
 
-Placement failure never silently becomes a local launch: with no healthy
-device (an empty pool, or every candidate refused — e.g. the PHNX-4051
-stale-usage gate) the run exits nonzero with the placement error plus one
-line naming the local spelling: `Run here instead: agents run claude --device <this machine>`.
+(Until 1.22.115 a bare interactive run placed itself automatically,
+PHNX-4083; that default was reverted because a run typed on a laptop kept
+landing on a fleet worker the operator had not chosen.) An automatic placement
+that finds no healthy device exits nonzero with the placement error; it never
+silently becomes a local launch.
 
 ### Which devices `auto` may pick — device roles
 
@@ -184,9 +183,7 @@ agents run claude# --device yosemite-s0  # choose from yosemite-s0 only
 A trailing `@` opens the device picker instead: every registered fleet device,
 rendered from the last cached fleet state (this machine first, offline rows
 disabled, state age in the prompt). The pick becomes the run's `--device`;
-choosing this machine is a plain local run — one of the two spellings that
-keep a bare interactive run off the automatic-placement path (the other is
-`--device <this machine>`). `#@` (or `@#`) asks both, in
+choosing this machine is a plain local run, the same as a bare run. `#@` (or `@#`) asks both, in
 order — the account picker runs first against this machine's slots, then the
 device picker shows a ✓/– mark for the picked account on each device, and the
 run dispatches to the chosen device with `claude#<label>` so the peer
