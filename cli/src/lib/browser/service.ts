@@ -2737,7 +2737,25 @@ export class BrowserService {
       : Array.from(this.connections.keys());
 
     for (const key of candidates) {
-      const status = await this.getProfileStatus(key);
+      // Read-only: a profile that cannot be read is reported as unreadable, not
+      // allowed to abort the listing. Before this, a single stale Arc task made
+      // `status` throw and EVERY profile vanished, including healthy ones.
+      let status: ProfileStatus | null;
+      try {
+        status = await this.getProfileStatus(key);
+      } catch (err) {
+        const parsed = parseConnectionKey(key);
+        statuses.push({
+          name: this.connections.get(key)?.profile ?? parsed.profile,
+          endpoint: parsed.endpoint,
+          key,
+          running: false,
+          tasks: [],
+          unavailable: err instanceof Error ? err.message : String(err),
+        });
+        seenProfiles.add(parsed.profile);
+        continue;
+      }
       if (status) {
         statuses.push(status);
         seenProfiles.add(status.name);
@@ -4515,7 +4533,20 @@ export class BrowserService {
     if (conn.backend === 'arc-native') {
       const tasks: TaskStatus[] = [];
       for (const task of conn.tasks.values()) {
-        const tabs = await this.listArcTaskTabs(task);
+        // `listArcTaskTabs` refuses to adopt a tab that moved window/Space or was
+        // closed, and that refusal is the ownership guarantee every ACTION relies
+        // on — it stays exactly as strict. But `status` only reads, so one stale
+        // task must not take down this profile's other tasks, nor the other
+        // profiles (see the loop in `status`). Report the task with what is known
+        // from disk and say plainly that its tabs could not be read: `tabs` stays
+        // ABSENT rather than empty, so nothing claims a moved tab is live.
+        let tabs: TabInfo[] = [];
+        let unavailable: string | undefined;
+        try {
+          tabs = await this.listArcTaskTabs(task);
+        } catch (err) {
+          unavailable = err instanceof Error ? err.message : String(err);
+        }
         const domains = tabs.flatMap((tab) => {
           try {
             const domain = new URL(tab.url).hostname.replace(/^www\./, '');
@@ -4533,6 +4564,7 @@ export class BrowserService {
           createdAt: task.createdAt,
           tabs: tabs.length ? tabs : undefined,
           domains: [...new Set(domains)],
+          unavailable,
         });
       }
       const parsed = parseConnectionKey(key);

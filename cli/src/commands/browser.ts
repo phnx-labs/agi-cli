@@ -3019,6 +3019,11 @@ function registerTaskCommands(browser: Command): void {
           // instead of the raw `comet-local@endpoint-0` key (RUSH-2709).
           const endpointLabel = profile.endpoint ? `endpoint: ${profile.endpoint}, ` : '';
           console.log(`\n${profile.name} (${endpointLabel}${portLabel}, ${pidLabel})`);
+          // A profile whose live state could not be read is still listed, and
+          // says so — it is not silently dropped and not shown as healthy.
+          if (profile.unavailable) {
+            console.log(`  Unavailable: ${profile.unavailable}`);
+          }
           if (profile.tasks.length === 0) {
             console.log('  No active tasks');
           } else {
@@ -3043,6 +3048,12 @@ function registerTaskCommands(browser: Command): void {
                   domains.slice(0, 20).padEnd(22) +
                   age
               );
+              // The recorded tab count above is what the task owns on disk; this
+              // says the live tabs behind it could not be read, so the count is
+              // not mistaken for verified-live tabs.
+              if (task.unavailable) {
+                console.log('  '.padEnd(14) + `↳ tabs unreadable: ${task.unavailable}`);
+              }
             }
           }
         }
