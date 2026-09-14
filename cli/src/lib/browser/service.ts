@@ -2812,21 +2812,36 @@ export class BrowserService {
     // Disk reconcile reads `tasks.json` too, so it fails on exactly the same
     // corrupt file — report that profile rather than let it empty the table.
     const reconcile = async (name: ProfileName): Promise<void> => {
+      const failures = new Map<ConnectionKey, string>();
+      let reconciled: ProfileStatus | null = null;
       try {
-        const reconciled = await this.reconcileFromDisk(name);
-        if (reconciled) statuses.push(reconciled);
+        reconciled = await this.reconcileFromDisk(name, (key, err) => {
+          failures.set(key, err instanceof Error ? err.message : String(err));
+        });
       } catch (err) {
+        // Listing the profile's runtime dirs failed, so no single runtime is at
+        // fault and none is invented: this is reported at profile level.
         statuses.push({
           name,
-          // Keep the runtime this failed on, so later dedupe and any caller can
-          // tell WHICH runtime dir is unreadable rather than just the profile.
-          key: (() => {
-            const dir = listProfileCacheDirs(name)[0];
-            return dir ? asConnectionKey(path.basename(dir)) : undefined;
-          })(),
           running: false,
           tasks: [],
           unavailable: err instanceof Error ? err.message : String(err),
+        });
+        return;
+      }
+      if (reconciled) statuses.push(reconciled);
+      // Keyed by the runtime dir that actually failed, so a profile with several
+      // runtimes names the unreadable one rather than guessing at the first.
+      for (const [key, message] of failures) {
+        if (statuses.some((status) => status.key === key)) continue;
+        const parsed = parseConnectionKey(key);
+        statuses.push({
+          name,
+          endpoint: parsed.endpoint,
+          key,
+          running: false,
+          tasks: [],
+          unavailable: message,
         });
       }
     };
@@ -2852,13 +2867,26 @@ export class BrowserService {
    * ({@link listProfileCacheDirs}), including the legacy pre-composite dir named
    * exactly the profile.
    */
-  private async reconcileFromDisk(profileName: ProfileName): Promise<ProfileStatus | null> {
+  private async reconcileFromDisk(
+    profileName: ProfileName,
+    /**
+     * Read-only callers pass a sink so an unreadable runtime dir is attributed
+     * to the dir that actually failed, and the remaining dirs are still tried.
+     * Callers without a sink keep the strict behaviour.
+     */
+    onError?: (key: ConnectionKey, error: unknown) => void,
+  ): Promise<ProfileStatus | null> {
     const dirs = listProfileCacheDirs(profileName);
     for (const dir of dirs) {
       const key = asConnectionKey(path.basename(dir));
-      const info = getRunningChromeInfo(key);
-      if (!info) continue;
-      return this.profileStatusFromDisk(profileName, key, info.port, info.pid);
+      try {
+        const info = getRunningChromeInfo(key);
+        if (!info) continue;
+        return await this.profileStatusFromDisk(profileName, key, info.port, info.pid);
+      } catch (err) {
+        if (!onError) throw err;
+        onError(key, err);
+      }
     }
     return null;
   }
