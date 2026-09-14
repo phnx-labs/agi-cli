@@ -49,25 +49,6 @@ vi.spyOn(profiles, 'listProfiles').mockImplementation(async () => {
 });
 vi.spyOn(profiles, 'getProfile').mockImplementation(async (name: string) => readProfileYaml(name));
 
-// Count how many times status reaches out to Arc. This does NOT replace the
-// behaviour under test — the real `enumerateArcSpaces` still runs and still
-// fails on a machine with no Arc; the counter only observes how OFTEN it is
-// called, which is exactly the property at issue: a profile with 28 tasks used
-// to pay one serialized AppleScript round trip per tab.
-const arcDriver = await import('./drivers/arc.js');
-let arcSnapshotCalls = 0;
-let arcLivenessCalls = 0;
-const realEnumerateArcSpaces = arcDriver.enumerateArcSpaces;
-const realIsArcRunning = arcDriver.isArcRunning;
-vi.spyOn(arcDriver, 'enumerateArcSpaces').mockImplementation(() => {
-  arcSnapshotCalls += 1;
-  return realEnumerateArcSpaces();
-});
-vi.spyOn(arcDriver, 'isArcRunning').mockImplementation(() => {
-  arcLivenessCalls += 1;
-  return realIsArcRunning();
-});
-
 const { BrowserService, resolveScreenshotOutputPath, resolveTaskIdentity, arcNotDrivableError } = await import('./service.js');
 
 function reset() {
@@ -1864,61 +1845,14 @@ describe('BrowserService.start — registry resolution', () => {
  * unchanged here. What changed is that a READ-ONLY status no longer inherits the
  * blast radius of that refusal.
  */
-/** A task whose refs are structurally valid, so status must consult Arc for it. */
-function registerConsistentArcProfile(
-  service: InstanceType<typeof BrowserService>,
-  key: string,
-  taskCount: number,
-): void {
-  const tasks = new Map<string, unknown>();
-  for (let i = 0; i < taskCount; i++) {
-    const name = `task-${i}`;
-    tasks.set(name, {
-      id: `arc-task-${i}`,
-      name,
-      label: name,
-      profile: key,
-      tabs: { t1: 'arc-t1', t2: 'arc-t2' },
-      currentTabId: 't1',
-      createdAt: 1_700_000_000_000,
-      lastActionAt: 1_700_000_000_000,
-      pid: 0,
-      arcNative: {
-        profileId: 'arc-profile',
-        windowId: 'window-1',
-        spaceId: 'space-1',
-        spaceTitle: 'Work',
-        tabs: {
-          t1: { windowId: 'window-1', spaceId: 'space-1', tabId: 'arc-t1' },
-          t2: { windowId: 'window-1', spaceId: 'space-1', tabId: 'arc-t2' },
-        },
-      },
-    });
-  }
-  (service as unknown as { connections: Map<string, unknown> }).connections.set(key, {
-    backend: 'arc-native',
-    key,
-    profile: key,
-    tasks,
-    sessionCache: new Map(),
-    port: 0,
-    pid: 0,
-    electron: false,
-    browserType: 'arc',
-    arcProfile: 'arc-profile',
-  });
-}
-
 describe('BrowserService.status — a stale Arc task must not abort the listing', () => {
   /**
-   * Register an arc-native connection holding one task whose durable Arc
-   * identity is genuinely unusable.
+   * An arc-native connection whose task has an unusable Arc identity.
    *
-   * `moved: true` reproduces the real defect exactly, with no mocking and no
-   * macOS: the tab's ref points at a DIFFERENT window than the task recorded,
-   * which is what "the tab was moved to another window/Space" looks like on
-   * disk. The real `requireArcTask` rejects it (`service.ts:4934`), so the real
-   * throw travels the real status path.
+   * `moved: true` reproduces the production defect with no mocking and no macOS:
+   * the tab's ref names a different window than the task recorded, which is what
+   * a moved tab looks like on disk, so the real `requireArcTask` rejects it and
+   * the real throw travels the real status path.
    */
   function registerArcProfile(
     service: InstanceType<typeof BrowserService>,
@@ -1929,7 +1863,6 @@ describe('BrowserService.status — a stale Arc task must not abort the listing'
     const tabs: Record<string, { windowId: string; spaceId: string; tabId: string }> = {};
     for (const id of opts.tabIds) {
       tabs[id] = {
-        // A moved tab still carries its own id, but no longer the task's window.
         windowId: opts.moved ? 'window-2-somewhere-else' : windowId,
         spaceId: 'space-1',
         tabId: `arc-${id}`,
@@ -1968,7 +1901,6 @@ describe('BrowserService.status — a stale Arc task must not abort the listing'
   }
 
   it('reports the healthy profile even when an Arc task is unreadable', async () => {
-    // A perfectly healthy profile that used to disappear along with the bad one.
     writeProfile('rush-mini', ['cdp://localhost:9222']);
     writeRunningChrome('rush-mini', 9222, process.pid);
     writeTaskState('rush-mini', [{ id: 'work', tabIds: ['tab1'], createdAt: 100 }]);
@@ -1978,7 +1910,7 @@ describe('BrowserService.status — a stale Arc task must not abort the listing'
 
     const result = await service.status();
 
-    // Before the fix this threw, so `result` did not exist at all.
+    // Before the fix this threw, so there was no result at all.
     const healthy = result.find((p) => p.name === 'rush-mini');
     expect(healthy).toBeDefined();
     expect(healthy).toMatchObject({ running: true, port: 9222, pid: process.pid });
@@ -1994,23 +1926,18 @@ describe('BrowserService.status — a stale Arc task must not abort the listing'
 
     const arc = result.find((p) => p.name === 'arc-work');
     expect(arc).toBeDefined();
-    expect(arc!.tasks).toHaveLength(1);
 
     const task = arc!.tasks[0];
-    // Truthful: the task is still reported, and the reason is carried, not hidden.
-    expect(task.unavailable).toBeTruthy();
-    expect(task.unavailable).toMatch(/window|Space|missing|stable id/i);
-    // It must NOT claim the stale tabs are live. Absent, not an empty array that
-    // would read as "this task genuinely has no tabs right now".
+    expect(task.unavailable).toMatch(/stable id in its original window/);
+    // Never claims the stale tabs are live: absent, not an empty array, which
+    // would read as "this task genuinely has no tabs open right now".
     expect(task.tabs).toBeUndefined();
     expect(task.domains).toEqual([]);
-    // The recorded count is on-disk truth and stays, so the tabs are not lost.
+    // The recorded count is on-disk truth and stays.
     expect(task.tabCount).toBe(2);
   });
 
   it('reports every Arc profile when several have stale tasks', async () => {
-    // Per-task isolation across profiles: two independent Arc profiles, both
-    // stale, must both still be listed.
     writeProfile('rush-mini', ['cdp://localhost:9222']);
     writeRunningChrome('rush-mini', 9222, process.pid);
 
@@ -2025,155 +1952,176 @@ describe('BrowserService.status — a stale Arc task must not abort the listing'
       expect(result.find((p) => p.name === name)!.tasks[0].unavailable).toBeTruthy();
     }
   });
+});
 
-  it('reports a profile whose status read fails outright, and keeps the others', async () => {
-    // This is the PROFILE-level catch in `status` (service.ts), which the
-    // per-task guard above deliberately never reaches. A connection object that
-    // cannot be read at all — here a `tasks` map whose iteration throws, the
-    // shape a half-torn-down connection leaves behind — fails inside
-    // `getProfileStatus` itself rather than inside one task.
-    writeProfile('rush-mini', ['cdp://localhost:9222']);
-    writeRunningChrome('rush-mini', 9222, process.pid);
+/**
+ * The snapshot path status uses instead of asking Arc about each tab.
+ *
+ * These call the real resolver with an explicit snapshot — the same shape
+ * `enumerateArcSpaces` returns — so they test the actual ownership rule rather
+ * than a stand-in. They say nothing about how fast Arc answers on macOS; the
+ * process-budget claim belongs to a real macOS run.
+ */
+describe('listArcTaskTabsFromSnapshot — ownership against one shared snapshot', () => {
+  const SNAPSHOT = [
+    {
+      windowId: 'window-1',
+      spaceId: 'space-1',
+      spaceTitle: 'Work',
+      tabs: [
+        { windowId: 'window-1', spaceId: 'space-1', tabId: 'arc-t1', url: 'https://example.com/a', title: 'A' },
+        { windowId: 'window-1', spaceId: 'space-1', tabId: 'arc-t2', url: 'https://example.org/b', title: 'B' },
+      ],
+    },
+  ];
 
-    const service = new BrowserService();
-    const brokenTasks = {
-      values: () => {
-        throw new Error('connection torn down while status was reading it');
+  function task(tabs: Record<string, { windowId: string; spaceId: string; tabId: string }>) {
+    return {
+      id: 'arc-task-1',
+      name: 'work',
+      profile: 'arc-work',
+      tabs: Object.fromEntries(Object.keys(tabs).map((k) => [k, `arc-${k}`])),
+      currentTabId: 't1',
+      createdAt: 1_700_000_000_000,
+      arcNative: {
+        profileId: 'arc-profile',
+        windowId: 'window-1',
+        spaceId: 'space-1',
+        spaceTitle: 'Work',
+        tabs,
       },
     };
-    (service as unknown as { connections: Map<string, unknown> }).connections.set('arc-broken', {
-      backend: 'arc-native',
-      key: 'arc-broken',
-      profile: 'arc-broken',
-      tasks: brokenTasks,
-      sessionCache: new Map(),
-      port: 0,
-      pid: 0,
-      electron: false,
-      browserType: 'arc',
-      arcProfile: 'arc-profile',
-    });
+  }
 
+  function resolve(t: unknown, snapshot: unknown = SNAPSHOT) {
+    const service = new BrowserService();
+    return (
+      service as unknown as {
+        listArcTaskTabsFromSnapshot: (t: unknown, s: () => Promise<unknown>) => Promise<unknown>;
+      }
+    ).listArcTaskTabsFromSnapshot(t, async () => snapshot);
+  }
+
+  it('resolves every owned tab from the snapshot, with url, title and current', async () => {
+    const tabs = (await resolve(
+      task({
+        t1: { windowId: 'window-1', spaceId: 'space-1', tabId: 'arc-t1' },
+        t2: { windowId: 'window-1', spaceId: 'space-1', tabId: 'arc-t2' },
+      }),
+    )) as Array<{ id: string; url: string; title: string; current: boolean }>;
+
+    expect(tabs).toEqual([
+      { id: 't1', url: 'https://example.com/a', title: 'A', task: 'work', current: true },
+      { id: 't2', url: 'https://example.org/b', title: 'B', task: 'work', current: false },
+    ]);
+  });
+
+  it('refuses a tab that is no longer in the snapshot (closed)', async () => {
+    await expect(
+      resolve(task({ t1: { windowId: 'window-1', spaceId: 'space-1', tabId: 'arc-gone' } })),
+    ).rejects.toThrow(/missing from its original window\/Space/);
+  });
+
+  it('refuses a tab that moved, from the record alone, before reading the snapshot', async () => {
+    // The snapshot would happily match this tab id, but the ref names a window
+    // the task does not own, so ownership fails first. That ordering is why a
+    // stale task reports the right reason even when Arc cannot be reached.
+    let snapshotRead = false;
+    const service = new BrowserService();
+    const moved = task({ t1: { windowId: 'window-2-somewhere-else', spaceId: 'space-1', tabId: 'arc-t1' } });
+
+    await expect(
+      (
+        service as unknown as {
+          listArcTaskTabsFromSnapshot: (t: unknown, s: () => Promise<unknown>) => Promise<unknown>;
+        }
+      ).listArcTaskTabsFromSnapshot(moved, async () => {
+        snapshotRead = true;
+        return SNAPSHOT;
+      }),
+    ).rejects.toThrow(/stable id in its original window/);
+
+    expect(snapshotRead).toBe(false);
+  });
+});
+
+/**
+ * Cold status: nothing in memory, saved runtime dirs on disk, one of them
+ * unreadable. Rehydration runs before any per-profile guard, so an unreadable
+ * saved profile used to abort the whole pass and hide healthy ones.
+ *
+ * The fixture is a REAL corrupt `tasks.json` — a truncated file, which is what a
+ * crash mid-write leaves — so `loadTaskState`'s own `JSON.parse` throws on the
+ * real path. Nothing is mocked.
+ */
+describe('BrowserService.status — a cold pass survives an unreadable saved profile', () => {
+  function writeCorruptRuntimeDir(key: string): void {
+    const dir = path.join(TEST_BROWSER_DIR, key);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'tasks.json'), '{"task-a": {"id": "a", "tabs":');
+  }
+
+  it('reports the unreadable profile and still lists the healthy one', async () => {
+    writeProfile('rush-mini', ['cdp://localhost:9222']);
+    writeRunningChrome('rush-mini', 9222, process.pid);
+    writeTaskState('rush-mini', [{ id: 'work', tabIds: ['tab1'], createdAt: 100 }]);
+    writeCorruptRuntimeDir('broken-profile');
+
+    const service = new BrowserService();
     const result = await service.status();
 
-    const broken = result.find((p) => p.name === 'arc-broken');
-    expect(broken).toBeDefined();
-    expect(broken!.unavailable).toMatch(/torn down while status was reading it/);
-    expect(broken!.running).toBe(false);
-    expect(broken!.tasks).toEqual([]);
+    // Healthy profile survives — before this, the corrupt dir threw first.
+    const healthy = result.find((p) => p.name === 'rush-mini');
+    expect(healthy).toBeDefined();
+    expect(healthy).toMatchObject({ running: true, port: 9222 });
+    expect(healthy!.unavailable).toBeUndefined();
 
-    // The healthy profile is untouched — the whole point of the isolation.
+    // The unreadable one is reported, not silently dropped, and its
+    // `running: false` comes with the reason rather than standing alone.
+    const broken = result.find((p) => p.name === 'broken-profile');
+    expect(broken).toBeDefined();
+    expect(broken!.running).toBe(false);
+    expect(broken!.unavailable).toBeTruthy();
+    expect(broken!.tasks).toEqual([]);
+  });
+
+  it('reports a live-but-unreadable runtime exactly ONCE, not twice', async () => {
+    // A profile with a valid running pid/port AND a corrupt tasks.json is seen
+    // by both rehydration and the disk reconcile, since both read that same
+    // file. Reported once, keyed by the runtime that actually failed.
+    writeProfile('half-broken', ['cdp://localhost:9333']);
+    writeRunningChrome('half-broken', 9333, process.pid);
+    const dir = path.join(TEST_BROWSER_DIR, 'half-broken');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'tasks.json'), '{"task-a": {"id": "a", "tabs":');
+
+    writeProfile('rush-mini', ['cdp://localhost:9222']);
+    writeRunningChrome('rush-mini', 9222, process.pid);
+    writeTaskState('rush-mini', [{ id: 'work', tabIds: ['tab1'], createdAt: 100 }]);
+
+    const service = new BrowserService();
+    const result = await service.status();
+
+    const rows = result.filter((p) => p.name === 'half-broken');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].unavailable).toBeTruthy();
+    expect(rows[0].key).toBe('half-broken');
+
+    // The healthy neighbour is unaffected.
     const healthy = result.find((p) => p.name === 'rush-mini');
     expect(healthy).toBeDefined();
     expect(healthy!.unavailable).toBeUndefined();
     expect(healthy).toMatchObject({ running: true, port: 9222 });
   });
-});
 
-describe('BrowserService.status — Arc is read once per pass, not once per tab', () => {
-  it('takes ONE Arc snapshot for 28 tasks across two profiles', async () => {
-    arcSnapshotCalls = 0;
-    const service = new BrowserService();
-    // 28 tasks x 2 tabs each: the old per-tab path would have made 56 calls.
-    registerConsistentArcProfile(service, 'arc-work', 14);
-    registerConsistentArcProfile(service, 'arc-personal', 14);
-
-    await service.status();
-
-    expect(arcSnapshotCalls).toBe(1);
-  });
-
-  it('never touches Arc when no Arc profile is present', async () => {
-    arcSnapshotCalls = 0;
-    writeProfile('rush-mini', ['cdp://localhost:9222']);
-    writeRunningChrome('rush-mini', 9222, process.pid);
+  it('reports it for a scoped query too', async () => {
+    writeCorruptRuntimeDir('broken-profile');
 
     const service = new BrowserService();
-    await service.status();
+    const result = await service.status('broken-profile');
 
-    expect(arcSnapshotCalls).toBe(0);
-  });
-
-  it('never touches Arc for a task whose record already proves the tab moved', async () => {
-    // The moved-tab refusal is decided from the record alone, so a stale task
-    // costs no round trip and reports the RIGHT reason even if Arc is down.
-    arcSnapshotCalls = 0;
-    const service = new BrowserService();
-    registerConsistentArcProfile(service, 'arc-stale', 1);
-    // Move the tab: its ref now names a different window than its own task.
-    const conn = (service as unknown as {
-      connections: Map<string, { tasks: Map<string, { arcNative: { tabs: Record<string, { windowId: string }> } }> }>;
-    }).connections.get('arc-stale')!;
-    conn.tasks.get('task-0')!.arcNative.tabs.t1.windowId = 'window-2-somewhere-else';
-
-    const result = await service.status('arc-stale');
-
-    expect(arcSnapshotCalls).toBe(0);
-    expect(result[0].tasks[0].unavailable).toMatch(/stable id in its original window/);
-  });
-});
-
-describe('BrowserService.status — one Arc budget for the whole pass', () => {
-  /** A saved Arc runtime dir, as a cold status would find on disk. */
-  function writeArcRuntimeDir(key: string): void {
-    const dir = path.join(TEST_BROWSER_DIR, key);
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(
-      path.join(dir, 'tasks.json'),
-      JSON.stringify({
-        'task-a': {
-          id: `${key}-task`,
-          name: 'task-a',
-          profile: key,
-          tabs: { t1: 'arc-t1' },
-          createdAt: 1_700_000_000_000,
-          arcNative: {
-            profileId: 'arc-profile',
-            windowId: 'window-1',
-            spaceId: 'space-1',
-            spaceTitle: 'Work',
-            tabs: { t1: { windowId: 'window-1', spaceId: 'space-1', tabId: 'arc-t1' } },
-          },
-        },
-      }),
-    );
-  }
-
-  it('asks Arc whether it is running exactly ONCE for many Arc profiles', async () => {
-    // Each arc-native profile used to answer `running` with its own probe, so
-    // the count rose with the number of profiles. It is now one shared read.
-    arcLivenessCalls = 0;
-    const service = new BrowserService();
-    for (let i = 0; i < 6; i++) registerConsistentArcProfile(service, `arc-${i}`, 2);
-
-    await service.status();
-
-    expect(arcLivenessCalls).toBe(1);
-  });
-
-  it('still asks only once when saved Arc runtimes are rehydrated first', async () => {
-    // A cold pass rehydrates saved runtime dirs BEFORE reporting, and each Arc
-    // dir used to probe independently. The shared reader is threaded into
-    // rehydration, so the budget for the whole pass stays at one.
-    //
-    // Note for the reader: off macOS, `attachRunningProfile` returns early on
-    // the platform check before it would probe, so the rehydrate half of this
-    // contributes nothing to the count here — the in-memory profiles are what
-    // make the number meaningful on every platform. The rehydrate path is
-    // exercised for real on macOS.
-    arcLivenessCalls = 0;
-    for (let i = 0; i < 8; i++) {
-      writeProfile(`arc-saved-${i}`, ['arc-native:profile'], 'arc');
-      writeArcRuntimeDir(`arc-saved-${i}`);
-    }
-
-    const service = new BrowserService();
-    // Three live profiles alongside the saved dirs, so the count is meaningful
-    // on every platform: without sharing this is 3, not 1.
-    for (let i = 0; i < 3; i++) registerConsistentArcProfile(service, `arc-live-${i}`, 2);
-
-    await service.status();
-
-    expect(arcLivenessCalls).toBe(1);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ name: 'broken-profile', running: false });
+    expect(result[0].unavailable).toBeTruthy();
   });
 });
