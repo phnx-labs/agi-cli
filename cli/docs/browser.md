@@ -177,9 +177,9 @@ Now the task is still listed, with the tab count it owns on disk, plus the reaso
 its live tabs could not be read:
 
 ```
-arc-work (device: zion, port 0, attached)
+arc-profile (device: laptop, port 0, attached)
   ID          LABEL               TABS  DOMAINS               CREATED
-  34222fc9    research            2     -                     3d ago
+  a1b2c3d4    example             2     -                     3d ago
               ↳ tabs unreadable: Owned Arc tab "t1" has no stable id in its
                 original window/Space.
 ```

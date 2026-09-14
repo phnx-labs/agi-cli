@@ -1834,7 +1834,7 @@ describe('BrowserService.start — registry resolution', () => {
 });
 
 /**
- * Production failure (zion, default profile `arc-work`): a single Arc task whose
+ * Production failure on a machine whose default profile is an Arc one: a task whose
  * tab had been moved or closed made `agents browser status` throw, and EVERY
  * profile vanished from the listing — including healthy ones that had nothing
  * to do with Arc.
@@ -1906,7 +1906,7 @@ describe('BrowserService.status — a stale Arc task must not abort the listing'
     writeTaskState('rush-mini', [{ id: 'work', tabIds: ['tab1'], createdAt: 100 }]);
 
     const service = new BrowserService();
-    registerArcProfile(service, 'arc-work', { moved: true, tabIds: ['t1'] });
+    registerArcProfile(service, 'arc-primary', { moved: true, tabIds: ['t1'] });
 
     const result = await service.status();
 
@@ -1920,11 +1920,11 @@ describe('BrowserService.status — a stale Arc task must not abort the listing'
 
   it('still lists the Arc profile, and says its tabs could not be read', async () => {
     const service = new BrowserService();
-    registerArcProfile(service, 'arc-work', { moved: true, tabIds: ['t1', 't2'] });
+    registerArcProfile(service, 'arc-primary', { moved: true, tabIds: ['t1', 't2'] });
 
     const result = await service.status();
 
-    const arc = result.find((p) => p.name === 'arc-work');
+    const arc = result.find((p) => p.name === 'arc-primary');
     expect(arc).toBeDefined();
 
     const task = arc!.tasks[0];
@@ -1979,7 +1979,7 @@ describe('listArcTaskTabsFromSnapshot — ownership against one shared snapshot'
     return {
       id: 'arc-task-1',
       name: 'work',
-      profile: 'arc-work',
+      profile: 'arc-primary',
       tabs: Object.fromEntries(Object.keys(tabs).map((k) => [k, `arc-${k}`])),
       currentTabId: 't1',
       createdAt: 1_700_000_000_000,
@@ -2112,6 +2112,26 @@ describe('BrowserService.status — a cold pass survives an unreadable saved pro
     expect(healthy).toBeDefined();
     expect(healthy!.unavailable).toBeUndefined();
     expect(healthy).toMatchObject({ running: true, port: 9222 });
+  });
+
+  it('names the runtime that actually failed, not the first one listed', async () => {
+    // Two runtimes for one profile: the FIRST is dead (no pid/port) and the
+    // SECOND is live but corrupt. Reporting the first would name the wrong dir.
+    writeProfile('two-runtimes', ['cdp://localhost:9444']);
+    const dead = path.join(TEST_BROWSER_DIR, 'two-runtimes');
+    fs.mkdirSync(dead, { recursive: true });
+    const live = path.join(TEST_BROWSER_DIR, 'two-runtimes@device-b');
+    fs.mkdirSync(live, { recursive: true });
+    fs.writeFileSync(path.join(live, 'pid'), String(process.pid));
+    fs.writeFileSync(path.join(live, 'port'), '9444');
+    fs.writeFileSync(path.join(live, 'tasks.json'), '{"task-a": {"id": "a", "tabs":');
+
+    const service = new BrowserService();
+    const result = await service.status('two-runtimes');
+
+    const row = result.find((p) => p.unavailable);
+    expect(row).toBeDefined();
+    expect(row!.key).toBe('two-runtimes@device-b');
   });
 
   it('reports it for a scoped query too', async () => {
