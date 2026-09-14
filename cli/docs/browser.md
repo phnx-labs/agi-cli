@@ -184,6 +184,16 @@ arc-work (device: zion, port 0, attached)
                 original window/Space.
 ```
 
+Status reads Arc **once per pass**, not once per tab. A profile with 28 tasks
+used to pay one AppleScript round trip per owned tab, plus one liveness probe per
+saved Arc runtime while reconnecting — so a cold `status` spent dozens of
+serialized round trips before printing anything. One enumeration and one liveness
+probe now cover the whole pass, across every Arc profile, and a fleet with no Arc
+profile never talks to Arc at all. A task whose record already proves its tab
+moved costs nothing: that is decided from the record, so it reports the right
+reason even when Arc is down. Actions still read Arc live per tab, because a
+snapshot can go stale between being taken and being acted on.
+
 `tabs` is **absent** rather than empty in `--json` for such a task: an empty list
 would claim the task genuinely has no tabs open right now, and that is precisely
 what could not be verified. `tabCount` stays, because it is read from disk and is
