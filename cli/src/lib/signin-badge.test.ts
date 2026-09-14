@@ -77,6 +77,9 @@ describe('fixFor', () => {
     // grok's wired login is the device-code flow — the fix must carry the flag.
     expect(fixFor({ agent: 'grok', version: '0.2.118', verdict: 'missing' }))
       .toBe('agents run grok@0.2.118 -- login --device-auth');
+    // cursor signs in on launch — no `--` subcommand, same as `agents doctor`.
+    expect(fixFor({ agent: 'cursor', version: '9.9.9', verdict: 'missing' }))
+      .toBe('agents run cursor@9.9.9');
   });
 
   it('emits no repair for unverified — an unconfirmed probe is not an actionable failure', () => {

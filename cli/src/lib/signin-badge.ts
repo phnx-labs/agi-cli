@@ -41,7 +41,7 @@ export function loginHint(agentId: AgentId): string {
     case 'codex':
     case 'grok':
     case 'opencode':
-      return `${cli} ${loginSubcommand(agentId)}`;
+      return `${cli} ${loginSubcommand(agentId)!}`;
     // Warp Agent CLI has no `login` subcommand: running `warp` opens a browser
     // sign-in on launch (or set WARP_API_KEY / pass --api-key), so the default
     // bare-`warp` hint is correct.
@@ -51,16 +51,21 @@ export function loginHint(agentId: AgentId): string {
 }
 
 /**
+ * Harnesses that log back in through a finite native subcommand runnable via
+ * `agents run <agent>@<version> -- <args>`. Claude logs in from inside its TUI
+ * (`/login`); cursor and the rest start their device/oauth flow on launch.
+ */
+export const SUBCOMMAND_LOGIN_AGENTS: readonly AgentId[] = ['codex', 'grok', 'opencode'];
+
+/**
  * The finite native login subcommand (`login`, `login --device-auth`,
- * `auth login`) for a harness that logs in through one, read from the one
+ * `auth login`) for a {@link SUBCOMMAND_LOGIN_AGENTS} harness, read from the one
  * `HARNESS_AUTH` row so every surface that spells it — the hint, the per-version
- * fix, `agents doctor` — agrees. Null for claude (in-TUI `/login`) and for
- * harnesses with no finite login command.
+ * fix, `agents doctor` — agrees. Null for every other harness.
  */
 export function loginSubcommand(agent: AgentId): string | null {
-  if (agent === 'claude') return null;
-  const args = HARNESS_AUTH[agent].login;
-  return args ? args.join(' ') : null;
+  if (!SUBCOMMAND_LOGIN_AGENTS.includes(agent)) return null;
+  return HARNESS_AUTH[agent].login!.join(' ');
 }
 
 /**

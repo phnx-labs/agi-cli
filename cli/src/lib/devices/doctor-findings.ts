@@ -41,7 +41,7 @@ import chalk from 'chalk';
 import * as path from 'path';
 import { AGENTS, ALL_AGENT_IDS, supportsAccountInspection } from '../agents.js';
 import { blocksLocalScripts } from '../platform/winpath.js';
-import { loginHint, loginSubcommand } from '../signin-badge.js';
+import { loginHint, loginSubcommand, SUBCOMMAND_LOGIN_AGENTS } from '../signin-badge.js';
 import { CONFIG_ENV_ISOLATED_AGENTS } from '../installations/shims.js';
 import { padToWidth, stringWidth } from '../text/width.js';
 import type { AgentId } from '../types.js';
@@ -100,7 +100,7 @@ const NO_PER_VERSION_LOGIN = new Set<AgentId>(
  *    `in-tui`     — claude only: a `/login` slash command inside its own TUI
  *    `on-launch`  — the device/oauth flow starts when the agent launches */
 const LOGIN_SUBCOMMAND: Partial<Record<AgentId, string>> = Object.fromEntries(
-  (['codex', 'grok', 'opencode'] as const).map((agent) => [agent, loginSubcommand(agent)]),
+  SUBCOMMAND_LOGIN_AGENTS.map((agent) => [agent, loginSubcommand(agent)!]),
 );
 
 /** Kinds whose fix is inherently PER VERSION, so a row collapsed across versions
