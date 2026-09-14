@@ -194,6 +194,43 @@ describe('projectAccountSlots (PHNX-3940: slots follow the version home)', () =>
     }
   });
 
+  it('symlinks the slot rules file to the version home instead of composing a duplicate', () => {
+    const rulesContent = '# Composed rules\nDo not duplicate me.\n';
+    fs.writeFileSync(path.join(versionHome(), '.claude', 'CLAUDE.md'), rulesContent);
+    const created = addNativeAccount('link', 'claude', 'claude:user=slot-link', 'link@example.com', 'version');
+    const slot = ensureSlot('claude', created.id);
+    try {
+      const slotRules = path.join(slot.slotDir, '.claude', 'CLAUDE.md');
+      const st = fs.lstatSync(slotRules);
+      expect(st.isSymbolicLink()).toBe(true);
+      expect(fs.readlinkSync(slotRules)).toBe(path.join(versionHome(), '.claude', 'CLAUDE.md'));
+      expect(fs.readFileSync(slotRules, 'utf8')).toBe(rulesContent);
+
+      // Idempotent: re-projection keeps the symlink.
+      projectAccountSlots('claude');
+      const st2 = fs.lstatSync(slotRules);
+      expect(st2.isSymbolicLink()).toBe(true);
+      expect(fs.readFileSync(slotRules, 'utf8')).toBe(rulesContent);
+    } finally {
+      removeAccount('link');
+      fs.rmSync(slot.slotDir, { recursive: true, force: true });
+    }
+  });
+
+  it('falls back to composing rules when the version home has no rules file', () => {
+    const created = addNativeAccount('norules', 'claude', 'claude:user=slot-norules', 'norules@example.com', 'version');
+    const slot = ensureSlot('claude', created.id);
+    try {
+      const slotRules = path.join(slot.slotDir, '.claude', 'CLAUDE.md');
+      expect(fs.existsSync(slotRules)).toBe(true);
+      const st = fs.lstatSync(slotRules);
+      expect(st.isSymbolicLink()).toBe(false);
+    } finally {
+      removeAccount('norules');
+      fs.rmSync(slot.slotDir, { recursive: true, force: true });
+    }
+  });
+
   it('skips a slot whose directory is gone, and never touches a slot through another harness', () => {
     const created = addNativeAccount('gone', 'claude', 'claude:user=slot-3', 'gone@example.com', 'version');
     const slot = ensureSlot('claude', created.id);

@@ -14,6 +14,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { AGENTS, agentConfigDirName } from '../agents.js';
+import { createLink } from '../platform/links.js';
 import { harnessAuth, harnessWorkerIsPerDevice } from '../harness-auth-capabilities.js';
 import { installSessionTrackerHookSync } from '../hooks/install.js';
 import { getGlobalDefault, getVersionHomePath, listInstalledVersions } from '../installations/store.js';
@@ -89,7 +90,12 @@ function projectResources(harness: AgentId, version: string, destHome: string, f
         const st = fs.lstatSync(destFile);
         if (st.isSymbolicLink() || st.isFile()) fs.unlinkSync(destFile);
       } catch { /* did not exist */ }
-      fs.symlinkSync(srcFile, destFile);
+      try {
+        createLink(srcFile, destFile);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'EEXIST') { continue; }
+        throw err;
+      }
       continue;
     }
     const names = getDetector(kind, harness)?.list({ version, versionHome: fromHome, cwd }) ?? [];
