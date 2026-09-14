@@ -520,12 +520,12 @@ async function deliverMailbox(
   // because a kill AFTER the agent drained the message would otherwise look
   // like nothing was ever sent and enqueue the answer a second time.
   //
-  // The match is on the ASK and the ATTEMPT, not just the block id: a block id
-  // is per SESSION, so an already-consumed message answering question N would
-  // otherwise suppress a genuine delivery for question N+1.
-  // Matched on the ASK, not the attempt: adopting a stranded claim necessarily
-  // mints a NEW attempt, so requiring an attempt match would never find the
-  // message the killed run queued and would duplicate the answer.
+  // The match is on the ASK (block id + generation), not just the block id: a
+  // block id is per SESSION, so an already-consumed message answering question N
+  // would otherwise suppress a genuine delivery for question N+1. It is NOT keyed
+  // on the attempt: adopting a stranded claim necessarily mints a NEW attempt, so
+  // requiring an attempt match would never find the message the killed run queued
+  // and would duplicate the answer.
   const existing = adopted
     ? readBox(dir).find((msg) => msg.blockId === block.blockId && msg.generation === origin.generation)
     : undefined;
