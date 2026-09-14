@@ -696,7 +696,11 @@ Host dispatch has two shapes, chosen by whether a prompt is present:
 Headless dispatch supports Linux, macOS, and Windows OpenSSH hosts. Windows uses
 a hidden detached PowerShell process plus the same durable per-task log and exit
 sentinel as POSIX hosts; follow, reconnect, `hosts logs`, `hosts ps`, and
-`hosts stop` select the matching remote protocol from the task record.
+`hosts stop` select the matching remote protocol from the task record. An
+interactive run (TTY forwarded) speaks the peer's shell too: a Windows host gets
+one rendered `powershell -NoProfile` script carrying the env, the mirrored cwd
+and the `agents run` argv, where a POSIX host gets the `export …; cd … && agents
+run …` login-shell form.
 
 (`--json`/`--quiet`/`--mode`/`--model` are real flags on `agents run`, registered in
 `src/commands/exec.ts`; there is no user-facing `--print` — the per-harness

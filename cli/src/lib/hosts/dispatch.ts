@@ -15,7 +15,7 @@ import { sshExec, sshStream, shellQuote } from '../ssh-exec.js';
 import type { Host } from './types.js';
 import { hostIdentityArgs, sshTargetFor } from './types.js';
 import { ensureHostReady } from './ready.js';
-import { encodePowershell, powershellQuote, remoteShellFor, posixEnvExports } from './remote-cmd.js';
+import { buildWindowsAgentsCommand, encodePowershell, powershellQuote, remoteShellFor, posixEnvExports, windowsRemotePath, windowsSetLocation } from './remote-cmd.js';
 import { resolveRemoteOsSync } from './remote-os.js';
 import { resolveActor, actorEnv } from '../actor.js';
 import { saveTask, updateTask, terminalPatch, type HostTask } from './tasks.js';
@@ -98,9 +98,19 @@ export function withActorEnv(env?: Record<string, string>): Record<string, strin
  * place.
  */
 export function remoteRunShellPrelude(agent: string, extra: Record<string, string> = {}): string {
-  const guard: Record<string, string> = agent === RUN_AUTO_KEYWORD ? { [RUN_AUTO_HOST_RESOLVED_ENV]: '1' } : {};
-  const exports = posixEnvExports(withActorEnv({ ...guard, ...extra }));
+  const exports = posixEnvExports(remoteRunEnv(agent, extra));
   return exports ? `${exports}; ` : '';
+}
+
+/**
+ * The env every remote `agents run` dispatch carries across the SSH hop —
+ * actor provenance, the `run auto` chain-hop guard, and the caller's path
+ * markers. `remoteRunShellPrelude` renders it as POSIX exports; a Windows peer
+ * gets the same record as `$env:` assignments in its PowerShell script.
+ */
+export function remoteRunEnv(agent: string, extra: Record<string, string> = {}): Record<string, string> {
+  const guard: Record<string, string> = agent === RUN_AUTO_KEYWORD ? { [RUN_AUTO_HOST_RESOLVED_ENV]: '1' } : {};
+  return withActorEnv({ ...guard, ...extra });
 }
 
 /**
@@ -122,12 +132,6 @@ export function buildDetachedLaunchCommand(inner: string): string {
   return `bash -lc ${shellQuote(`node -e ${shellQuote(nodeScript)}`)}`;
 }
 
-function windowsRemotePath(path: string): string {
-  return path.startsWith('$HOME/')
-    ? `(Join-Path $HOME ${powershellQuote(path.slice('$HOME/'.length))})`
-    : powershellQuote(path);
-}
-
 /** Build the detached PowerShell launch protocol used by Windows SSH hosts. */
 export function buildWindowsDetachedLaunchCommand(opts: {
   forwardedArgs: string[];
@@ -140,11 +144,7 @@ export function buildWindowsDetachedLaunchCommand(opts: {
   const log = windowsRemotePath(opts.remoteLog);
   const exit = windowsRemotePath(opts.remoteExit);
   const env = Object.entries(opts.env).map(([key, value]) => `$env:${key} = ${powershellQuote(value)}`);
-  const cwd = opts.remoteCwd
-    ? opts.mirrorCwd
-      ? `try { Set-Location -LiteralPath ${powershellQuote(opts.remoteCwd)} } catch { Set-Location -LiteralPath $HOME }`
-      : `Set-Location -LiteralPath ${powershellQuote(opts.remoteCwd)}`
-    : '';
+  const cwd = opts.remoteCwd ? windowsSetLocation(opts.remoteCwd, opts.mirrorCwd) : '';
   const inner = [
     `$ProgressPreference = 'SilentlyContinue'`,
     `$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'`,
@@ -336,7 +336,7 @@ async function launchDetached(host: Host, target: string, opts: LaunchOptions): 
         mirrorCwd: opts.mirrorCwd,
         remoteLog,
         remoteExit,
-        env: withActorEnv(opts.agentLabel === RUN_AUTO_KEYWORD ? { [RUN_AUTO_HOST_RESOLVED_ENV]: '1' } : {}),
+        env: remoteRunEnv(opts.agentLabel),
       })
     : `mkdir -p ${REMOTE_DIR}; ${buildDetachedLaunchCommand(inner)}`;
   const res = sshExec(target, launch, {
@@ -525,7 +525,7 @@ export function buildRunForwardedArgs(opts: DispatchOptions): string[] {
   return args;
 }
 
-interface InteractiveDispatchOptions {
+export interface InteractiveDispatchOptions {
   agent: string;
   /** Explicit agent version pin (e.g. "2.1.207") to forward as `agent@version`. */
   version?: string;
@@ -613,19 +613,17 @@ export function buildInteractiveRunForwardedArgs(opts: InteractiveDispatchOption
 }
 
 /**
- * Run an agent interactively on a host, forwarding the local TTY over SSH.
- * Returns the SSH exit code. The remote `agents` CLI is responsible for its own
- * tmux wrapping; the local machine is just the transport.
+ * The remote command of an interactive host dispatch, by peer shell.
+ *
+ * A Windows peer's sshd hands the command to PowerShell, which cannot parse the
+ * POSIX `export …; { cd … || cd "$HOME"; } && agents …` form (a `run --device
+ * <windows box>` from a TTY died with `At line:1 char:420` at the `||`). That
+ * peer gets the rendered PowerShell every other `--device` site uses — env,
+ * mirrored cwd and argv inside one `-EncodedCommand` — the interactive analogue
+ * of `buildWindowsDetachedLaunchCommand`.
  */
-export async function runInteractiveOnHost(host: Host, opts: InteractiveDispatchOptions): Promise<number> {
-  const target = sshTargetFor(host);
-  // Concrete version pins fail loud here (RUSH-2313) so we never open a TTY
-  // to a box that cannot run the pin.
-  const { warnings } = ensureHostReady(host, { agent: opts.agent, version: opts.version });
-  for (const w of warnings) process.stderr.write(`[hosts] warning: ${w}\n`);
-
-  const invocation = ['agents', ...buildInteractiveRunForwardedArgs(opts)].map(shellQuote).join(' ');
-  const cwd = remoteCdPrefix(opts.remoteCwd, { mirror: opts.mirrorCwd });
+export function buildInteractiveRemoteCommand(remoteShell: ReturnType<typeof remoteShellFor>, opts: InteractiveDispatchOptions): string {
+  const forwardedArgs = buildInteractiveRunForwardedArgs(opts);
   // Forward actor provenance so the interactive remote run inherits it rather
   // than re-resolving from this box's SSH_CONNECTION (RUSH-2028); a `run auto`
   // dispatch also gets the chain-hop guard (remoteRunShellPrelude).
@@ -638,11 +636,35 @@ export async function runInteractiveOnHost(host: Host, opts: InteractiveDispatch
   // longer forces the tmux wrap on a TTY-followed run — the peer's
   // tmux.enabled decides that. Set here, on the interactive path only:
   // `launchDetached` already setsids the headless one.
-  const prelude = remoteRunShellPrelude(opts.agent, { [REMOTE_INTERACTIVE_ENV]: '1' });
-  let remoteCmd = `${prelude}${cwd}${invocation}`;
-  if (opts.copyCreds) {
-    remoteCmd = wrapHostCommandWithCredentials(remoteCmd, opts.copyCreds);
+  const env = { [REMOTE_INTERACTIVE_ENV]: '1' };
+  if (remoteShell === 'powershell') {
+    if (opts.copyCreds) throw new Error('--copy-creds cannot ride an interactive dispatch to a Windows host');
+    return buildWindowsAgentsCommand({
+      args: forwardedArgs,
+      env: remoteRunEnv(opts.agent, env),
+      cwd: opts.remoteCwd,
+      mirrorCwd: opts.mirrorCwd,
+    });
   }
+  const invocation = ['agents', ...forwardedArgs].map(shellQuote).join(' ');
+  const cwd = remoteCdPrefix(opts.remoteCwd, { mirror: opts.mirrorCwd });
+  const remoteCmd = `${remoteRunShellPrelude(opts.agent, env)}${cwd}${invocation}`;
+  return opts.copyCreds ? wrapHostCommandWithCredentials(remoteCmd, opts.copyCreds) : remoteCmd;
+}
+
+/**
+ * Run an agent interactively on a host, forwarding the local TTY over SSH.
+ * Returns the SSH exit code. The remote `agents` CLI is responsible for its own
+ * tmux wrapping; the local machine is just the transport.
+ */
+export async function runInteractiveOnHost(host: Host, opts: InteractiveDispatchOptions): Promise<number> {
+  const target = sshTargetFor(host);
+  // Concrete version pins fail loud here (RUSH-2313) so we never open a TTY
+  // to a box that cannot run the pin.
+  const { warnings } = ensureHostReady(host, { agent: opts.agent, version: opts.version });
+  for (const w of warnings) process.stderr.write(`[hosts] warning: ${w}\n`);
+
+  const remoteCmd = buildInteractiveRemoteCommand(remoteShellFor(host.os ?? resolveRemoteOsSync(host.name)), opts);
   // Credentials ride this stream when --copy-creds is set: verify the host key
   // strictly against the managed pin and force a fresh connection so a stale
   // accept-new control socket can't bypass the check (RUSH-1767).

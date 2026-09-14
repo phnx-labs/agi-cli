@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'child_process';
-import { stripRoutingFlags, buildRemoteAgentsInvocation, buildWindowsAgentsCommand, buildWindowsStdinImportCommand, buildWindowsStdinAgentsCommand, posixEnvExports, remoteShellFor, powershellQuote, decodePowershell, stripClixml, HOST_ROUTING_SPECS, type StripSpec } from './remote-cmd.js';
+import { stripRoutingFlags, buildRemoteAgentsInvocation, buildWindowsAgentsCommand, buildWindowsStdinImportCommand, buildWindowsStdinAgentsCommand, posixEnvExports, remoteShellFor, powershellQuote, decodePowershell, windowsRemotePath, windowsSetLocation, stripClixml, HOST_ROUTING_SPECS, type StripSpec } from './remote-cmd.js';
 import { decodeRenderedPowershell } from './remote-cmd.test-fixture.js';
 
 describe('stripClixml', () => {
@@ -459,5 +459,21 @@ describe('the Windows remote command stays well inside the peer length limit', (
     for (const size of sizes) expect(size).toBeLessThan(2934);
     // A real margin, so a future addition cannot quietly exhaust it.
     expect(Math.max(...sizes)).toBeLessThan(2000);
+  });
+});
+
+describe('windowsRemotePath / windowsSetLocation — the PowerShell analogue of remoteCdPrefix', () => {
+  it('re-roots a home-anchored path onto the peer $HOME and quotes any other verbatim', () => {
+    expect(windowsRemotePath('~/tools/cgraph')).toBe("(Join-Path $HOME 'tools/cgraph')");
+    expect(windowsRemotePath('$HOME/.agents/.cache/hosts/abc.log')).toBe("(Join-Path $HOME '.agents/.cache/hosts/abc.log')");
+    expect(windowsRemotePath('~')).toBe('$HOME');
+    expect(windowsRemotePath("C:\\Users\\me\\it's")).toBe("'C:\\Users\\me\\it''s'");
+  });
+
+  it('an explicit cwd aborts on a missing directory; a mirrored one falls back to $HOME', () => {
+    expect(windowsSetLocation('C:\\src\\repo')).toBe("Set-Location -LiteralPath 'C:\\src\\repo' -ErrorAction Stop");
+    expect(windowsSetLocation('~/src/repo', true)).toBe(
+      "try { Set-Location -LiteralPath (Join-Path $HOME 'src/repo') -ErrorAction Stop } catch { Set-Location -LiteralPath $HOME }",
+    );
   });
 });

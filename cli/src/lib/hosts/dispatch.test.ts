@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, afterAll } from 'vitest';
 import * as os from 'os';
+import * as zlib from 'zlib';
 import * as fs from 'fs';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
@@ -8,6 +9,7 @@ import { shellQuote, sshExec } from '../ssh-exec.js';
 import {
   buildDetachedLaunchCommand,
   buildWindowsDetachedLaunchCommand,
+  buildInteractiveRemoteCommand,
   buildRunForwardedArgs,
   buildInteractiveRunForwardedArgs,
   buildStopRemoteCommand,
@@ -68,6 +70,56 @@ function decodeWindows(command: string): string {
   return Buffer.from(encoded, 'base64').toString('utf16le');
 }
 
+/**
+ * The script inside a `renderPowershellCommand` result, whichever of its two
+ * forms (plain `-EncodedCommand`, or the deflated `-Command` bootstrap) it chose.
+ */
+function decodeRendered(command: string): string {
+  const encoded = command.match(/-EncodedCommand (\S+)$/)?.[1];
+  if (encoded) return Buffer.from(encoded, 'base64').toString('utf16le');
+  const packed = command.match(/FromBase64String\('([A-Za-z0-9+/=]+)'\)/)?.[1];
+  if (!packed) throw new Error(`not rendered PowerShell: ${command}`);
+  return zlib.inflateRawSync(Buffer.from(packed, 'base64')).toString('utf-8');
+}
+
+// A `run --device <windows box>` from a TTY sent the POSIX prelude + `{ cd … ||
+// cd "$HOME"; }` to a PowerShell sshd and died with `At line:1 char:420` at the
+// `||`. The headless path already rendered PowerShell; the interactive one must too.
+describe('buildInteractiveRemoteCommand — the interactive dispatch speaks the peer shell', () => {
+  const opts = { agent: 'claude', mode: 'plan', remoteCwd: '~/tools/cgraph', mirrorCwd: true };
+
+  it('renders PowerShell for a Windows peer: no POSIX export, no `||` cd chain', () => {
+    const command = buildInteractiveRemoteCommand('powershell', opts);
+    expect(command.startsWith('powershell -NoProfile ')).toBe(true);
+    const script = decodeRendered(command);
+    expect(script).not.toContain('export ');
+    expect(script).not.toContain('||');
+    expect(script).toContain("$env:AGENTS_REMOTE_INTERACTIVE = '1'");
+    expect(script).toContain("try { Set-Location -LiteralPath (Join-Path $HOME 'tools/cgraph') -ErrorAction Stop } catch { Set-Location -LiteralPath $HOME }");
+    expect(script).toContain("'run claude --mode plan'");
+    expect(script).toContain('exit $zq');
+  });
+
+  it('keeps the POSIX prelude and mirrored cd for a POSIX peer', () => {
+    const command = buildInteractiveRemoteCommand('posix', opts);
+    expect(command).toContain('export AGENTS_REMOTE_INTERACTIVE=1');
+    expect(command).toContain('{ cd "$HOME"/tools/cgraph || cd "$HOME"; } && agents run claude --mode plan');
+    expect(command).not.toContain('powershell');
+  });
+
+  it('arms the run-auto chain-hop guard as $env on a Windows peer, exactly as the POSIX export', () => {
+    const script = decodeRendered(buildInteractiveRemoteCommand('powershell', { agent: 'auto' }));
+    expect(script).toContain("$env:AGENTS_RUN_AUTO_HOST_RESOLVED = '1'");
+    expect(buildInteractiveRemoteCommand('posix', { agent: 'auto' })).toContain('export AGENTS_RUN_AUTO_HOST_RESOLVED=1');
+  });
+
+  it('an explicit --remote-cwd on a Windows peer must abort on a missing directory, not fall back', () => {
+    const script = decodeRendered(buildInteractiveRemoteCommand('powershell', { agent: 'claude', remoteCwd: 'C:\\src\\repo' }));
+    expect(script).toContain("Set-Location -LiteralPath 'C:\\src\\repo' -ErrorAction Stop");
+    expect(script).not.toContain('catch { Set-Location -LiteralPath $HOME }');
+  });
+});
+
 describe('Windows detached protocol', () => {
   it('starts a hidden process with actor env, cwd, log, and exit sentinel', () => {
     const outer = decodeWindows(buildWindowsDetachedLaunchCommand({
@@ -85,8 +137,26 @@ describe('Windows detached protocol', () => {
     expect(inner).toContain("$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'");
     expect(inner).toContain("$env:AGENTS_ACTOR = 'overnight'");
     expect(inner).toContain("Set-Location -LiteralPath 'C:\\src\\repo'");
+    expect(inner).not.toContain('catch { Set-Location');
     expect(inner).toContain("& 'agents' 'run' 'codex' 'hello world' '--mode' 'plan'");
     expect(inner).toContain('Set-Content -LiteralPath $exit -Value $code');
+  });
+
+  it('re-roots a mirrored home-relative cwd onto the peer $HOME and falls back to $HOME when it is missing', () => {
+    const outer = decodeWindows(buildWindowsDetachedLaunchCommand({
+      forwardedArgs: ['run', 'codex', 'hello'],
+      remoteCwd: '~/tools/cgraph',
+      mirrorCwd: true,
+      remoteLog: '$HOME/.agents/.cache/hosts/abc.log',
+      remoteExit: '$HOME/.agents/.cache/hosts/abc.exit',
+      env: {},
+    }));
+    const innerEncoded = outer.match(/-EncodedCommand ([A-Za-z0-9+/=]+)/)?.[1];
+    const inner = Buffer.from(innerEncoded!, 'base64').toString('utf16le');
+    // `-ErrorAction Stop` is what makes the catch reachable: a missing directory is
+    // a non-terminating error for Set-Location, which try/catch would sail past.
+    expect(inner).toContain("try { Set-Location -LiteralPath (Join-Path $HOME 'tools/cgraph') -ErrorAction Stop } catch { Set-Location -LiteralPath $HOME }");
+    expect(inner).not.toContain("'~/tools/cgraph'");
   });
 
   it('stops by pid without overwriting a completed exit sentinel', () => {
@@ -715,7 +785,11 @@ describe('remoteRunShellPrelude — the run-auto chain-hop guard crosses the SSH
     // launchDetached calls the prelude with no extras: its run is already
     // setsid-detached, so forcing the tmux wrap there would be pure overhead.
     expect(remoteRunShellPrelude('claude')).not.toContain('AGENTS_REMOTE_INTERACTIVE');
-    const out = spawnSync('bash', ['-lc', `${remoteRunShellPrelude('claude')}printf %s "$AGENTS_REMOTE_INTERACTIVE"`], { encoding: 'utf-8' });
+    // A test run that itself arrived over an interactive dispatch inherits the
+    // marker; clear it so the assertion sees only what the prelude exports.
+    const env = { ...process.env };
+    delete env.AGENTS_REMOTE_INTERACTIVE;
+    const out = spawnSync('bash', ['-lc', `${remoteRunShellPrelude('claude')}printf %s "$AGENTS_REMOTE_INTERACTIVE"`], { encoding: 'utf-8', env });
     expect(out.stdout).toBe('');
   });
 

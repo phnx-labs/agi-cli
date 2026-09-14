@@ -11,6 +11,7 @@
 import { shellQuote } from '../ssh-exec.js';
 import { pwshLiteral, pwshNativeExecStatements } from '../pwsh.js';
 import { quoteWin32ExecArg } from '../platform/exec.js';
+import { homeRemainder } from '../project-root.js';
 import * as zlib from 'node:zlib';
 
 /** A flag to strip from a forwarded argv, with whether it consumes a value. */
@@ -297,6 +298,12 @@ interface WindowsAgentsCommand {
   /** Directory to enter before running (`--remote-cwd`). */
   cwd?: string;
   /**
+   * `cwd` was DERIVED from the local cwd rather than named by the user (see
+   * `deriveMirroredCwd`): a directory the peer does not have falls back to
+   * `$HOME` instead of failing the run, exactly as `remoteCdPrefix({ mirror })`.
+   */
+  mirrorCwd?: boolean;
+  /**
    * Append `exit $LASTEXITCODE` so a native `agents` exit code propagates out
    * through `powershell.exe` (which otherwise exits 0 regardless). Default true;
    * pass false for probes whose reachability keys off a sentinel, not the code.
@@ -426,14 +433,38 @@ export function windowsAgentsInvocation(args: string[], binName: 'agents' | 'ag'
   ].join('\n');
 }
 
+/**
+ * PowerShell expression for a remote path. A home-anchored path (`~/x`,
+ * `$HOME/x`) re-roots onto the peer's `$HOME` through `Join-Path` — the Windows
+ * counterpart of `remoteCdPrefix`'s `"$HOME"/x` — so a directory mirrored from
+ * another box resolves on the peer. Any other path is quoted verbatim.
+ */
+export function windowsRemotePath(p: string): string {
+  const rest = homeRemainder(p);
+  if (rest === null) return powershellQuote(p);
+  return rest === '' ? '$HOME' : `(Join-Path $HOME ${powershellQuote(rest)})`;
+}
+
+/**
+ * The `Set-Location` step of a Windows remote command. `-ErrorAction Stop` is
+ * spelled out because a missing directory is a NON-terminating error for
+ * `Set-Location`, which a `try`/`catch` would otherwise sail past: the mirrored
+ * form must genuinely land in `$HOME` when the peer lacks the checkout, and the
+ * explicit form must abort rather than run the command in the wrong directory.
+ */
+export function windowsSetLocation(cwd: string, mirror = false): string {
+  const enter = `Set-Location -LiteralPath ${windowsRemotePath(cwd)} -ErrorAction Stop`;
+  return mirror ? `try { ${enter} } catch { Set-Location -LiteralPath $HOME }` : enter;
+}
+
 export function windowsAgentsScript(cmd: WindowsAgentsCommand): string {
-  const { args, env, cwd, propagateExit = true, remapExit255 = false } = cmd;
+  const { args, env, cwd, mirrorCwd = false, propagateExit = true, remapExit255 = false } = cmd;
   // `Stop` FIRST, before the env assignments and the Set-Location: a failing
   // `Set-Location` (a cwd that does not exist on the peer) must abort rather than
   // continue into the launcher and run the command in the wrong directory.
   const parts: string[] = [POWERSHELL_PROGRESS_SILENCE, `$ErrorActionPreference = 'Stop'`];
   if (env) for (const [k, v] of Object.entries(env)) parts.push(`$env:${k} = ${powershellQuote(v)}`);
-  if (cwd) parts.push(`Set-Location -LiteralPath ${powershellQuote(cwd)}`);
+  if (cwd) parts.push(windowsSetLocation(cwd, mirrorCwd));
   parts.push(windowsAgentsInvocation(args));
   if (propagateExit) {
     if (remapExit255) parts.push('if ($zq -eq 255) { exit 254 }', 'exit $zq');
