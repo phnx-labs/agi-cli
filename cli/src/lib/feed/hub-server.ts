@@ -150,10 +150,11 @@ class ReaderWriter {
   ) {}
 
   /**
-   * Bytes the daemon holds for this reader: queued lines, the unwritten rest of
-   * the line being pumped, and the socket's own unflushed buffer. A 5 MiB frame
-   * to a paused reader leaves the queue on its first chunk, so a queue-only
-   * gauge read 0 while the daemon still held all of it.
+   * Unflushed bytes for this reader: queued lines, the unwritten rest of the
+   * line being pumped, and the socket's own buffer. A gauge of what is still
+   * owed to the socket, not of retained heap. A 5 MiB frame to a paused reader
+   * leaves the queue on its first chunk, so a queue-only gauge read 0 while
+   * almost all of it was still unflushed.
    */
   get pendingBytes(): number {
     return this.queue.reduce((sum, line) => sum + line.bytes.length, 0) + this.activeRemaining + this.socket.writableLength;
