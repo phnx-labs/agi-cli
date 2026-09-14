@@ -152,11 +152,29 @@ are load-bearing:
   per-caller fan-out this replaced. `--local` no longer runs `watchLocalFeed`
   in-process: each observing box's ssh subscription used to build a separate
   activity cursor set, tool watcher and setup subscription on the same peer.
-- **A stalled reader cannot grow the daemon.** `socket.write` backpressure is
-  bounded by `HUB_CLIENT_BACKLOG_LIMIT`; a reader past it is dropped and can
-  reconnect from held state. A collector that fails to start is reported to its
-  readers rather than leaving them on a stream indistinguishable from an idle
-  fleet.
+- **A large snapshot reaches a healthy reader whole; a stalled reader cannot
+  grow the daemon.** Each connection has one ordered writer (`ReaderWriter` in
+  [`feed/hub-server.ts`](src/lib/feed/hub-server.ts)): every line — the catch-up
+  snapshot, live events, the error envelope before a refusal — goes through its
+  queue, is written in `HUB_WRITE_CHUNK_BYTES` chunks, and waits for `'drain'`
+  after every write the socket did not accept, so the socket never holds more
+  than one chunk past its high-water mark and `pendingBytes` (queued lines, the
+  unwritten rest of the frame in flight, the socket buffer) is the true figure.
+  Two bounds drop a reader, each on its own counter: live bytes queued past
+  `HUB_CLIENT_BACKLOG_LIMIT` for longer than `HUB_BACKLOG_GRACE_MS`
+  (`droppedForBacklog`), and a chunk left unaccepted for `HUB_DRAIN_STALL_MS`
+  (`droppedForStall`). The budget is a sustained condition, never a verdict on
+  one envelope or one burst — a cold collector hands the first reader every
+  peer's reset as a live event inside one tick — and the held-state replay is
+  not counted at all. Judging a 5 MB fleet reset against the budget the instant
+  it was written is how a healthy reader used to get 8 KiB of it, no newline,
+  then EOF. On the client side `streamFeedFromHub` rejects any close the caller
+  did not abort — a FIN inside a line as `closed mid-frame`, a refusal or a
+  daemon exit as `closed the stream` — and a consumer that throws or a
+  non-envelope line rejects the same promise, so `agents feed watch --json`
+  never exits 0 on a truncated stream and nothing escapes as an uncaught
+  exception. A collector that fails to start is reported to its readers rather
+  than leaving them on a stream indistinguishable from an idle fleet.
 - **Reset semantics preserved.** A peer's reset replaces that ONE scope's rows; a
   peer going unavailable forwards the `scope` event and RETAINS its rows, so a
   reader attaching while a box is offline still sees its last-known rows.
