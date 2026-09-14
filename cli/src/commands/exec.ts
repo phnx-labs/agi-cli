@@ -10,7 +10,6 @@ import type { DeviceAutoApplyResult } from '../lib/smart-launch.js';
 import { setHelpSections } from '../lib/help.js';
 import { formatModeSupportTable } from '../lib/agent-modes.js';
 import { isInteractiveTerminal, isPromptCancelled, requireInteractiveSelection } from './utils.js';
-import { isHumanFacingRun } from './run-account-picker.js';
 import { getUserAgentsDir, readMeta } from '../lib/state.js';
 import type { CrabboxBox } from '../lib/crabbox/cli.js';
 import { parseLoopInterval } from '../lib/loop.js';
@@ -232,29 +231,6 @@ export function runAutoDefaultsToAffinity(
   if (hostTargetGiven(options).length > 0) return false;
   if (env.AGENTS_RUN_AUTO_HOST_RESOLVED === '1') return false;
   return env.AGENTS_REMOTE_INTERACTIVE !== '1';
-}
-
-export function bareInteractiveRunDefaultsToDeviceAuto(
-  options: {
-    host?: string;
-    device?: string;
-    on?: string;
-    computer?: string;
-    resume?: string | boolean;
-    lease?: string | boolean;
-    box?: string;
-    cloud?: boolean;
-    local?: boolean;
-  },
-  run: { prompt?: string; devicePickerRequested?: boolean },
-  surface: { tty: boolean; json?: boolean },
-  env: NodeJS.ProcessEnv = process.env,
-): boolean {
-  if (run.prompt !== undefined) return false;
-  if (!isHumanFacingRun({ tty: surface.tty, json: surface.json === true })) return false;
-  if (run.devicePickerRequested) return false;
-  if (options.resume !== undefined || options.lease || options.box || options.cloud) return false;
-  return runAutoDefaultsToAffinity(options, env);
 }
 
 export function hostInteractiveNeedsCorrelationId(
@@ -711,7 +687,7 @@ export function registerRunCommand(program: Command): void {
     )
     .option(
       '--local',
-      'Run on this machine. A bare interactive run otherwise places itself like --device auto; --local pins it here. Same as --where local or --device <this machine>.',
+      'Run on this machine, the default for a bare run. Pins it against --where defaults and run-auto affinity. Same as --where local or --device <this machine>.',
     )
     .option(
       '-D, --device <name>',
@@ -773,10 +749,9 @@ export function registerRunCommand(program: Command): void {
       # Headless, can edit: have the agent make changes
       agents run claude "fix lint errors in src/" --mode edit
 
-      # Interactive (TUI): a bare run places itself like --device auto (a fleet
-      # worker, TUI forwarded over SSH); --local keeps it on this machine
+      # Interactive (TUI): a bare run starts on this machine
       agents run claude
-      agents run claude --local            # stay local (or pick this machine in claude@)
+      agents run claude --device auto      # ...or let the fleet place it (TUI over SSH)
 
       # Pick a signed-in account/version for only this run (# = account picker)
       agents run claude#
@@ -885,13 +860,11 @@ ${formatModeSupportTable().split('\n').map((line) => `        ${line}`).join('\n
         with an explicit pin of the same thing (--account, --device/--on/
         --computer/--host) or with --strategy/--balanced/--resume/--lease/--box.
 
-      Interactive placement: a bare 'agents run <harness>' (no prompt, real TTY)
-        places itself like --device auto — a fleet worker runs it, with the TUI
-        forwarded over SSH. Headless runs (any prompt, --json, no TTY) are
-        unchanged: they run in place. To stay on this machine, pass --local
-        (--device <this machine> means the same), or pick this machine (listed
-        first) in the '<harness>@' device picker. When placement finds no
-        healthy device the run fails loud and names the local spelling.
+      Interactive placement: a bare 'agents run <harness>' runs on this
+        machine. Placement is opt-in: --device auto (a fleet worker runs it,
+        TUI forwarded over SSH), --device <box>, or the '<harness>@' device
+        picker. When automatic placement finds no healthy device the run fails
+        loud rather than silently running here.
 
       Fallback: --fallback codex,antigravity retries on rate-limit failure via /continue handoff. Each entry accepts @version.
 
@@ -1285,31 +1258,14 @@ ${formatModeSupportTable().split('\n').map((line) => `        ${line}`).join('\n
         if (!isSelfHost(pickedDevice)) options.device = pickedDevice;
       }
 
-      const defaultPlacement = bareInteractiveRunDefaultsToDeviceAuto(
-        options,
-        { prompt, devicePickerRequested },
-        { tty: isInteractiveTerminal(), json: options.json },
-      );
-      if (defaultPlacement) options.device = 'auto';
-
       {
         const { applyDeviceAutoToOptions } = await import('../lib/smart-launch.js');
-        let result: DeviceAutoApplyResult;
-        try {
-          result = await applyDeviceAutoToOptions(options, {
-            accountPickerRequested,
-            agent: normalizedAgentSpec.split('#')[0].split('@')[0] === RUN_AUTO_KEYWORD
-              ? undefined
-              : (resolveAgentName(normalizedAgentSpec.split('#')[0].split('@')[0]) ?? undefined),
-          });
-        } catch (err) {
-          if (!defaultPlacement) throw err;
-          console.error(chalk.red((err as Error).message));
-          console.error(chalk.gray(
-            `Run here instead: agents run ${runBaseAgentName} --local`,
-          ));
-          process.exit(1);
-        }
+        const result: DeviceAutoApplyResult = await applyDeviceAutoToOptions(options, {
+          accountPickerRequested,
+          agent: normalizedAgentSpec.split('#')[0].split('@')[0] === RUN_AUTO_KEYWORD
+            ? undefined
+            : (resolveAgentName(normalizedAgentSpec.split('#')[0].split('@')[0]) ?? undefined),
+        });
         if (!options.quiet && result.banner) {
           const { hostLabel, deviceHint, acctNote } = result.banner;
           process.stderr.write(
