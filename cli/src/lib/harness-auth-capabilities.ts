@@ -44,7 +44,12 @@ interface HarnessAuthCapability {
 export const HARNESS_AUTH: Record<AgentId, HarnessAuthCapability> = {
   claude: { login: ['auth', 'login'], status: ['auth', 'status'], identity: 'strong', worker: 'setup-token', slotEnv: 'CLAUDE_CONFIG_DIR' },
   codex: { login: ['login'], status: ['login', 'status'], identity: 'strong', worker: ['api-key:OPENAI_API_KEY', 'per-device:device-auth'], slotEnv: 'CODEX_HOME' },
-  grok: { login: ['login'], status: null, identity: 'strong', worker: 'api-key:XAI_API_KEY', slotEnv: 'GROK_HOME' },
+  // `--device-auth` pins the device-code flow: bare `grok login` defaults to
+  // `--oauth`, the loopback browser flow, which opens whatever browser profile
+  // the OS defaults to. The device-code screen prints the URL + code instead,
+  // so the human finishes it in the browser profile they choose and
+  // `fleet login` can drive it over SSH.
+  grok: { login: ['login', '--device-auth'], status: null, identity: 'strong', worker: 'api-key:XAI_API_KEY', slotEnv: 'GROK_HOME' },
   // auth.json has no email claim; identity is the sorted provider-id join
   // (`resolveOpenCodeAccountId`). NATIVE_ACCOUNT_CAPABILITIES.opencode.inspection
   // is already 'opaque'.

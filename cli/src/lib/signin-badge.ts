@@ -27,7 +27,8 @@ export type AccountProvisioning = 'portable' | 'per-device';
 /**
  * The exact command that logs a given agent in — for warn banners and nudges.
  * Driven off the registry `cliCommand` with the per-agent subcommand overrides
- * (verified against the real CLIs): codex/grok use `<cli> login`, opencode uses
+ * (verified against the real CLIs): codex uses `<cli> login`, grok
+ * `<cli> login --device-auth` (the device-code screen, not the loopback browser), opencode uses
  * `<cli> auth login`, claude logs in from inside its TUI via `/login`, and the
  * remaining agents (kimi, gemini, …) start their device/oauth flow on launch.
  */
@@ -37,8 +38,9 @@ export function loginHint(agentId: AgentId): string {
     case 'claude':
       return `${cli}, then /login`;
     case 'codex':
-    case 'grok':
       return `${cli} login`;
+    case 'grok':
+      return `${cli} login --device-auth`;
     case 'opencode':
       return `${cli} auth login`;
     // Warp Agent CLI has no `login` subcommand: running `warp` opens a browser
@@ -87,7 +89,8 @@ export function fixFor(input: {
   const version = input.version ?? null;
   if (!version || !CONFIG_ENV_ISOLATED_AGENTS.includes(agent)) return loginHint(agent);
   if (agent === 'claude') return `agents run ${agent}@${version}, then /login`;
-  if (agent === 'codex' || agent === 'grok') return `agents run ${agent}@${version} -- login`;
+  if (agent === 'codex') return `agents run ${agent}@${version} -- login`;
+  if (agent === 'grok') return `agents run ${agent}@${version} -- login --device-auth`;
   if (agent === 'opencode') return `agents run ${agent}@${version} -- auth login`;
   return `agents run ${agent}@${version}`;
 }
