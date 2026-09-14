@@ -775,7 +775,7 @@ describe('remediationFor', () => {
     const r = remediationFor({ ...base, kind: 'logged-out', agent: 'codex', version: '1.2.3' });
     expect(r).toBe('agents run codex@1.2.3 -- login');
     expect(remediationFor({ ...base, kind: 'logged-out', agent: 'grok', version: '0.2.82' }))
-      .toBe('agents run grok@0.2.82 -- login');
+      .toBe('agents run grok@0.2.82 -- login --device-auth');
   });
 
   it('claude launches ONCE and logs in from its own TUI', () => {

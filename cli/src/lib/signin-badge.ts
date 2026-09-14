@@ -13,6 +13,7 @@ import { addWorkerRefusal } from './accounts/add.js';
 import { AGENTS } from './agents.js';
 import type { AccountInfo } from './agents.js';
 import type { AuthVerdict } from './auth-health.js';
+import { HARNESS_AUTH } from './harness-auth-capabilities.js';
 import { CONFIG_ENV_ISOLATED_AGENTS } from './installations/shims.js';
 import type { AgentId } from './types.js';
 
@@ -27,10 +28,10 @@ export type AccountProvisioning = 'portable' | 'per-device';
 /**
  * The exact command that logs a given agent in — for warn banners and nudges.
  * Driven off the registry `cliCommand` with the per-agent subcommand overrides
- * (verified against the real CLIs): codex uses `<cli> login`, grok
- * `<cli> login --device-auth` (the device-code screen, not the loopback browser), opencode uses
- * `<cli> auth login`, claude logs in from inside its TUI via `/login`, and the
- * remaining agents (kimi, gemini, …) start their device/oauth flow on launch.
+ * (verified against the real CLIs): codex/grok/opencode run the finite login
+ * subcommand `HARNESS_AUTH` wires (`loginSubcommand`), claude logs in from
+ * inside its TUI via `/login`, and the remaining agents (kimi, gemini, …) start
+ * their device/oauth flow on launch.
  */
 export function loginHint(agentId: AgentId): string {
   const cli = AGENTS[agentId]?.cliCommand ?? agentId;
@@ -38,17 +39,28 @@ export function loginHint(agentId: AgentId): string {
     case 'claude':
       return `${cli}, then /login`;
     case 'codex':
-      return `${cli} login`;
     case 'grok':
-      return `${cli} login --device-auth`;
     case 'opencode':
-      return `${cli} auth login`;
+      return `${cli} ${loginSubcommand(agentId)}`;
     // Warp Agent CLI has no `login` subcommand: running `warp` opens a browser
     // sign-in on launch (or set WARP_API_KEY / pass --api-key), so the default
     // bare-`warp` hint is correct.
     default:
       return cli;
   }
+}
+
+/**
+ * The finite native login subcommand (`login`, `login --device-auth`,
+ * `auth login`) for a harness that logs in through one, read from the one
+ * `HARNESS_AUTH` row so every surface that spells it — the hint, the per-version
+ * fix, `agents doctor` — agrees. Null for claude (in-TUI `/login`) and for
+ * harnesses with no finite login command.
+ */
+export function loginSubcommand(agent: AgentId): string | null {
+  if (agent === 'claude') return null;
+  const args = HARNESS_AUTH[agent].login;
+  return args ? args.join(' ') : null;
 }
 
 /**
@@ -89,9 +101,8 @@ export function fixFor(input: {
   const version = input.version ?? null;
   if (!version || !CONFIG_ENV_ISOLATED_AGENTS.includes(agent)) return loginHint(agent);
   if (agent === 'claude') return `agents run ${agent}@${version}, then /login`;
-  if (agent === 'codex') return `agents run ${agent}@${version} -- login`;
-  if (agent === 'grok') return `agents run ${agent}@${version} -- login --device-auth`;
-  if (agent === 'opencode') return `agents run ${agent}@${version} -- auth login`;
+  const sub = loginSubcommand(agent);
+  if (sub) return `agents run ${agent}@${version} -- ${sub}`;
   return `agents run ${agent}@${version}`;
 }
 
