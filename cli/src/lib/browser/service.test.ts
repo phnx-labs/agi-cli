@@ -1832,3 +1832,150 @@ describe('BrowserService.start — registry resolution', () => {
     expect(fs.readFileSync(path.join(chromeData, 'Cookies'), 'utf8')).toBe('identity');
   });
 });
+
+/**
+ * Production failure (zion, default profile `arc-work`): a single Arc task whose
+ * tab had been moved or closed made `agents browser status` throw, and EVERY
+ * profile vanished from the listing — including healthy ones that had nothing
+ * to do with Arc.
+ *
+ * The refusal itself is correct and deliberate: `listArcTaskTabs` will not adopt
+ * a tab that is no longer in its original window/Space, because adopting one
+ * would let an action drive a tab the task does not own. That guarantee is
+ * unchanged here. What changed is that a READ-ONLY status no longer inherits the
+ * blast radius of that refusal.
+ */
+describe('BrowserService.status — a stale Arc task must not abort the listing', () => {
+  /**
+   * Register an arc-native connection holding one task whose durable Arc
+   * identity is genuinely unusable.
+   *
+   * `moved: true` reproduces the real defect exactly, with no mocking and no
+   * macOS: the tab's ref points at a DIFFERENT window than the task recorded,
+   * which is what "the tab was moved to another window/Space" looks like on
+   * disk. The real `requireArcTask` rejects it (`service.ts:4934`), so the real
+   * throw travels the real status path.
+   */
+  function registerArcProfile(
+    service: InstanceType<typeof BrowserService>,
+    key: string,
+    opts: { moved: boolean; tabIds: string[] },
+  ): void {
+    const windowId = 'window-1';
+    const tabs: Record<string, { windowId: string; spaceId: string; tabId: string }> = {};
+    for (const id of opts.tabIds) {
+      tabs[id] = {
+        // A moved tab still carries its own id, but no longer the task's window.
+        windowId: opts.moved ? 'window-2-somewhere-else' : windowId,
+        spaceId: 'space-1',
+        tabId: `arc-${id}`,
+      };
+    }
+    const task = {
+      id: '34222fc9',
+      name: 'stale-arc-task',
+      label: 'stale-arc-task',
+      profile: key,
+      tabs: Object.fromEntries(opts.tabIds.map((id) => [id, `arc-${id}`])),
+      currentTabId: opts.tabIds[0],
+      createdAt: 1_700_000_000_000,
+      lastActionAt: 1_700_000_000_000,
+      pid: 0,
+      arcNative: {
+        profileId: 'arc-profile',
+        windowId,
+        spaceId: 'space-1',
+        spaceTitle: 'Work',
+        tabs,
+      },
+    };
+    (service as unknown as { connections: Map<string, unknown> }).connections.set(key, {
+      backend: 'arc-native',
+      key,
+      profile: key.split('@')[0],
+      tasks: new Map([[task.name, task]]),
+      sessionCache: new Map(),
+      port: 0,
+      pid: 0,
+      electron: false,
+      browserType: 'arc',
+      arcProfile: 'arc-profile',
+    });
+  }
+
+  it('reports the healthy profile even when an Arc task is unreadable', async () => {
+    // A perfectly healthy profile that used to disappear along with the bad one.
+    writeProfile('rush-mini', ['cdp://localhost:9222']);
+    writeRunningChrome('rush-mini', 9222, process.pid);
+    writeTaskState('rush-mini', [{ id: 'work', tabIds: ['tab1'], createdAt: 100 }]);
+
+    const service = new BrowserService();
+    registerArcProfile(service, 'arc-work', { moved: true, tabIds: ['t1'] });
+
+    const result = await service.status();
+
+    // Before the fix this threw, so `result` did not exist at all.
+    const healthy = result.find((p) => p.name === 'rush-mini');
+    expect(healthy).toBeDefined();
+    expect(healthy).toMatchObject({ running: true, port: 9222, pid: process.pid });
+    expect(healthy!.unavailable).toBeUndefined();
+    expect(healthy!.tasks[0]).toMatchObject({ id: 'work', tabCount: 1 });
+  });
+
+  it('still lists the Arc profile, and says its tabs could not be read', async () => {
+    const service = new BrowserService();
+    registerArcProfile(service, 'arc-work', { moved: true, tabIds: ['t1', 't2'] });
+
+    const result = await service.status();
+
+    const arc = result.find((p) => p.name === 'arc-work');
+    expect(arc).toBeDefined();
+    expect(arc!.tasks).toHaveLength(1);
+
+    const task = arc!.tasks[0];
+    // Truthful: the task is still reported, and the reason is carried, not hidden.
+    expect(task.unavailable).toBeTruthy();
+    expect(task.unavailable).toMatch(/window|Space|missing|stable id/i);
+    // It must NOT claim the stale tabs are live. Absent, not an empty array that
+    // would read as "this task genuinely has no tabs right now".
+    expect(task.tabs).toBeUndefined();
+    expect(task.domains).toEqual([]);
+    // The recorded count is on-disk truth and stays, so the tabs are not lost.
+    expect(task.tabCount).toBe(2);
+  });
+
+  it('does not mark a healthy Arc task unavailable', async () => {
+    // Guard against the opposite failure: blanket-reporting every Arc task as
+    // unreadable would be just as untruthful as hiding the bad one. This task's
+    // refs are internally consistent, so it clears `requireArcTask` and fails
+    // later (or not at all) rather than being pre-judged.
+    const service = new BrowserService();
+    registerArcProfile(service, 'arc-ok', { moved: false, tabIds: ['t1'] });
+
+    const result = await service.status();
+    const arc = result.find((p) => p.name === 'arc-ok');
+
+    expect(arc).toBeDefined();
+    // Whatever the tab resolution decided, it was NOT the moved-tab refusal.
+    expect(arc!.tasks[0].unavailable ?? '').not.toMatch(/no stable id in its original window/);
+  });
+
+  it('keeps every OTHER profile when one profile fails outright', async () => {
+    // Two independent Arc profiles, one broken: the healthy one must survive,
+    // which is the per-profile isolation in `status` (service.ts:2738).
+    writeProfile('rush-mini', ['cdp://localhost:9222']);
+    writeRunningChrome('rush-mini', 9222, process.pid);
+
+    const service = new BrowserService();
+    registerArcProfile(service, 'arc-bad', { moved: true, tabIds: ['t1'] });
+    registerArcProfile(service, 'arc-also-bad', { moved: true, tabIds: ['t9'] });
+
+    const result = await service.status();
+
+    // All three present: neither bad profile swallowed the others.
+    expect(result.map((p) => p.name).sort()).toEqual(['arc-also-bad', 'arc-bad', 'rush-mini']);
+    for (const name of ['arc-bad', 'arc-also-bad']) {
+      expect(result.find((p) => p.name === name)!.tasks[0].unavailable).toBeTruthy();
+    }
+  });
+});

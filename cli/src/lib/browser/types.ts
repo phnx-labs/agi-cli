@@ -390,6 +390,15 @@ export interface ProfileStatus {
   /** The port declared in the profile's first endpoint, when it differs from the running port. */
   configuredPort?: number;
   tasks: TaskStatus[];
+  /**
+   * Why this profile's live state could not be read, when it could not be.
+   *
+   * `status` is read-only, so one unreadable profile must not hide the others:
+   * the profile is still listed, with what is known from disk, and this says
+   * what is missing. Absent means the read succeeded — it is never set to paper
+   * over a failure that did not happen.
+   */
+  unavailable?: string;
 }
 
 export interface TaskStatus {
@@ -403,6 +412,15 @@ export interface TaskStatus {
   endedAt?: number;
   domains?: string[];
   tabs?: Array<{ id: string; url: string; title?: string; current?: boolean; task?: string }>;
+  /**
+   * Why this task's live tabs could not be enumerated, when they could not be.
+   *
+   * Set together with an ABSENT {@link tabs} — the recorded {@link tabCount}
+   * still reports what the task owns on disk, but nothing claims those tabs are
+   * live, because that is exactly what could not be verified. An Arc tab moved
+   * to another window or Space is the case this exists for.
+   */
+  unavailable?: string;
 }
 
 export interface HistoricalTask {

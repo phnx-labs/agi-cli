@@ -161,6 +161,35 @@ and `status --json` carries them as separate `profile`-side fields:
 Passing a runtime key where a name is expected still works, so a key copied out
 of an older listing resolves to its profile.
 
+### Status is read-only, and never hides a profile
+
+`status` reports what it can read and says what it cannot. If one profile's live
+state is unreadable, that profile is listed with an `unavailable` reason and the
+other profiles are reported normally — one bad profile never empties the table.
+
+The case this exists for is a **moved or closed Arc tab**. Actions refuse to
+adopt a tab that is no longer in the window and Space its task recorded, because
+driving it would mean acting on a tab the task does not own. That refusal is
+unchanged. But it used to travel out of `status` as a thrown error and take the
+whole listing with it, so a single stale Arc task made every profile disappear.
+
+Now the task is still listed, with the tab count it owns on disk, plus the reason
+its live tabs could not be read:
+
+```
+arc-work (device: zion, port 0, attached)
+  ID          LABEL               TABS  DOMAINS               CREATED
+  34222fc9    research            2     -                     3d ago
+              ↳ tabs unreadable: Owned Arc tab "t1" has no stable id in its
+                original window/Space.
+```
+
+`tabs` is **absent** rather than empty in `--json` for such a task: an empty list
+would claim the task genuinely has no tabs open right now, and that is precisely
+what could not be verified. `tabCount` stays, because it is read from disk and is
+still true. Nothing about the stale task is presented as live, and no action
+gains permission it did not have.
+
 The configured default is a **per-device setting**: it lives in this machine's
 `browser.profile` config key (`devices/<machine>/agents.yaml` `config:`), so
 each machine keeps its own choice — the profile it points at may hold
