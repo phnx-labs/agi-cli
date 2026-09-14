@@ -222,6 +222,7 @@ function elideOversizedJsonStrings(input: string, deadlineMs: number): { text: s
         const elidedUnits = i - stringStart - HEAD_ELISION_STRING_KEEP_UNITS;
         outParts.push(`…[elided ${elidedUnits} chars]`);
         spanStart = i; // resume normal copying AT the closing quote
+        skipping = false; // the string is closed; the final flush must still emit the record's own tail ("}\n) even when this was the last string literal
       }
       continue;
     }
