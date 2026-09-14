@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Account-slot rules are now symlinked to the version home instead of composed independently.** Each account slot previously ran the full rules-composition pipeline and wrote its own `CLAUDE.md`, duplicating the ~260-line ruleset already present in the version home — ~5K tokens loaded twice per session because the harness reads rules from both paths. The slot now symlinks to the version home's rules file (via `createLink` for Windows compatibility), so both paths resolve to the same inode and the harness can deduplicate them. Falls back to composition when the version home has no rules file yet. Source: `cli/src/lib/accounts/slots.ts`.
+
 - Browser setup selects standalone Browser CLI 0.1.3. A surviving browser can restore its task through an existing debugging port after service replacement; private debugging-pipe handles cannot transfer between services.
 
 - Standalone Browser, Computer and Secrets CLI setup now separates executable installation from health. `agents setup status --tool <name> --json` reads cached metadata; `--refresh` performs a bounded, shared check for that tool. `agents setup <tool> --install-only` installs without starting services or changing permissions. The standalone Browser CLI owns the `browser` executable; Agents CLI retains `agents browser` and no longer installs the conflicting alias.
