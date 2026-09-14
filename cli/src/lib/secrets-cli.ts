@@ -16,7 +16,7 @@ import { findInPath } from './agent-spec/agents.js';
 export const SECRETS_CLI_NAME = 'secrets';
 export const SECRETS_CLI_PACKAGE = '@phnx-labs/secrets-cli';
 /** Published standalone `agents setup secrets` installs; bump with the protocol. */
-export const SECRETS_CLI_VERSION = '0.1.4';
+export const SECRETS_CLI_VERSION = '0.1.5';
 export const SECRETS_CLI_SPEC = `${SECRETS_CLI_PACKAGE}@${SECRETS_CLI_VERSION}`;
 export const SECRETS_CLI_INSTALL_HINT = `npm i -g ${SECRETS_CLI_SPEC}`;
 
