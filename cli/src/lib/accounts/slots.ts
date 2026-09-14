@@ -13,7 +13,7 @@
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { agentConfigDirName } from '../agents.js';
+import { AGENTS, agentConfigDirName } from '../agents.js';
 import { harnessAuth, harnessWorkerIsPerDevice } from '../harness-auth-capabilities.js';
 import { installSessionTrackerHookSync } from '../hooks/install.js';
 import { getGlobalDefault, getVersionHomePath, listInstalledVersions } from '../installations/store.js';
@@ -71,7 +71,25 @@ function projectResources(harness: AgentId, version: string, destHome: string, f
     const writer = getWriter(kind, harness);
     if (!writer) continue;
     if (kind === 'rules') {
-      writer.write({ version, versionHome: destHome, selection: { preset: 'default' }, cwd });
+      // Symlink to the version home's rules instead of composing a duplicate.
+      // Harnesses whose shim pins a separate config dir (e.g. CLAUDE_CONFIG_DIR
+      // → account slot) cause the harness to load rules from both the version
+      // home (~/.claude/) and the slot, doubling ~5 K tokens per session.
+      // A symlink gives both paths the same inode so the harness can dedup.
+      const cap = AGENTS[harness].capabilities.rules;
+      if (typeof cap !== 'object') continue;
+      const srcFile = path.join(fromHome, agentConfigDirName(harness), cap.file);
+      if (!fs.existsSync(srcFile)) {
+        writer.write({ version, versionHome: destHome, selection: { preset: 'default' }, cwd });
+        continue;
+      }
+      const destFile = path.join(destHome, agentConfigDirName(harness), cap.file);
+      fs.mkdirSync(path.dirname(destFile), { recursive: true });
+      try {
+        const st = fs.lstatSync(destFile);
+        if (st.isSymbolicLink() || st.isFile()) fs.unlinkSync(destFile);
+      } catch { /* did not exist */ }
+      fs.symlinkSync(srcFile, destFile);
       continue;
     }
     const names = getDetector(kind, harness)?.list({ version, versionHome: fromHome, cwd }) ?? [];
