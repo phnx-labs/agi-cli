@@ -578,21 +578,15 @@ export function isArcCreateMarker(url: string): boolean {
 }
 
 /**
- * One shared read of Arc's live state for a single `status` pass.
- *
- * Both are lazy: a fleet with no Arc profile never talks to Arc, and a fleet
- * with several Arc profiles asks exactly once instead of once per profile.
+ * One shared read of Arc's live state per `status` pass. Both are lazy, so a
+ * fleet with no Arc profile never contacts Arc at all.
  */
 interface ArcStatusReaders {
   spaces: () => Promise<ArcEnumeratedSpace[]>;
   running: () => Promise<boolean>;
 }
 
-/**
- * Run `fn` at most once and hand every later caller the same promise, including
- * a rejection — a failed Arc read must not be retried N times inside one status
- * pass, which is the cost this exists to avoid.
- */
+/** Run `fn` once per pass and share its promise, rejections included. */
 function onceAsync<T>(fn: () => Promise<T>): () => Promise<T> {
   let pending: Promise<T> | undefined;
   return () => (pending ??= fn());
@@ -2743,18 +2737,21 @@ export class BrowserService {
    * it used to return (RUSH-2709).
    */
   async status(profileRef?: ProfileName | ConnectionKey): Promise<ProfileStatus[]> {
-    // Built BEFORE rehydration on purpose: a cold status rehydrates every saved
-    // runtime dir first, and each Arc one probed Arc independently, so the
-    // process budget was already spent before the shared snapshot existed.
-    // One enumeration and one liveness probe now cover the entire pass.
+    // Built before rehydration: a cold pass rehydrates every saved runtime dir
+    // first, and each Arc one probed Arc on its own, spending the budget before
+    // the snapshot existed. One enumeration and one liveness read cover the pass.
     const arc: ArcStatusReaders = {
       spaces: onceAsync(() => enumerateArcSpaces()),
       running: onceAsync(() => isArcRunning()),
     };
 
     // Reconnect live browsers after a daemon restart so status is not empty
-    // while tasks.json still holds open work.
-    await this.rehydrateAllFromDisk(arc.running);
+    // while tasks.json still holds open work. Rehydration is per runtime dir:
+    // one unreadable saved profile is reported below, never fatal to the pass.
+    const rehydrateErrors = new Map<ConnectionKey, string>();
+    await this.rehydrateAllFromDisk(arc.running, (key, err) => {
+      rehydrateErrors.set(key, err instanceof Error ? err.message : String(err));
+    });
 
     // A caller who pasted a runtime key out of an older listing still gets the
     // profile it belongs to, rather than an empty result.
@@ -2793,15 +2790,54 @@ export class BrowserService {
       }
     }
 
+    // Reported BEFORE the disk reconcile, and keyed by the runtime dir that
+    // actually failed. Reconcile reads the same `tasks.json`, so without this
+    // ordering one corrupt runtime produced two rows for the same profile: one
+    // keyed here and one unkeyed from reconcile, which the dedupe then missed.
+    for (const [key, message] of rehydrateErrors) {
+      const parsed = parseConnectionKey(key);
+      if (profileName && parsed.profile !== profileName) continue;
+      if (statuses.some((status) => status.key === key)) continue;
+      statuses.push({
+        name: parsed.profile,
+        endpoint: parsed.endpoint,
+        key,
+        running: false,
+        tasks: [],
+        unavailable: message,
+      });
+      seenProfiles.add(parsed.profile);
+    }
+
+    // Disk reconcile reads `tasks.json` too, so it fails on exactly the same
+    // corrupt file — report that profile rather than let it empty the table.
+    const reconcile = async (name: ProfileName): Promise<void> => {
+      try {
+        const reconciled = await this.reconcileFromDisk(name);
+        if (reconciled) statuses.push(reconciled);
+      } catch (err) {
+        statuses.push({
+          name,
+          // Keep the runtime this failed on, so later dedupe and any caller can
+          // tell WHICH runtime dir is unreadable rather than just the profile.
+          key: (() => {
+            const dir = listProfileCacheDirs(name)[0];
+            return dir ? asConnectionKey(path.basename(dir)) : undefined;
+          })(),
+          running: false,
+          tasks: [],
+          unavailable: err instanceof Error ? err.message : String(err),
+        });
+      }
+    };
+
     if (!profileName) {
       for (const profile of await listProfiles()) {
         if (seenProfiles.has(profile.name)) continue;
-        const reconciled = await this.reconcileFromDisk(profile.name);
-        if (reconciled) statuses.push(reconciled);
+        await reconcile(profile.name);
       }
     } else if (statuses.length === 0) {
-      const reconciled = await this.reconcileFromDisk(profileName);
-      if (reconciled) statuses.push(reconciled);
+      await reconcile(profileName);
     }
 
     return statuses;
@@ -4208,11 +4244,9 @@ export class BrowserService {
     key: ConnectionKey,
     diskTasks: Map<string, Task>,
     /**
-     * Shared Arc liveness for one pass. A cold `status` rehydrates every saved
-     * runtime dir, and each Arc one used to ask Arc "are you running?" on its
-     * own — eight saved dirs meant eight AppleScript round trips before the
-     * status snapshot was even taken. Callers with no pass to share (an action
-     * attaching one profile) pass nothing and probe directly, as before.
+     * Shared Arc liveness for one status pass; each saved Arc runtime used to
+     * probe on its own. Callers with no pass to share pass nothing and probe
+     * directly, as before.
      */
     arcRunning?: () => Promise<boolean>,
   ): Promise<ProfileConnection | null> {
@@ -4432,7 +4466,16 @@ export class BrowserService {
     return existing;
   }
 
-  private async rehydrateAllFromDisk(arcRunning?: () => Promise<boolean>): Promise<void> {
+  private async rehydrateAllFromDisk(
+    arcRunning?: () => Promise<boolean>,
+    /**
+     * Read-only callers pass a sink to make rehydration per-runtime: one saved
+     * dir that cannot be read (corrupt `tasks.json`, an Arc Apple Event that
+     * times out) is reported through this instead of aborting the pass. Callers
+     * without a sink keep the strict behaviour and the error propagates.
+     */
+    onError?: (key: ConnectionKey, error: unknown) => void,
+  ): Promise<void> {
     const runtimeRoot = getBrowserRuntimeDir();
     let dirNames: string[] = [];
     try {
@@ -4453,19 +4496,24 @@ export class BrowserService {
       if (this.connections.has(key)) continue;
       // Skip non-runtime dirs (e.g. profiles/)
       if (dirName === 'profiles' || dirName === 'sessions' || dirName === 'exports') continue;
-      const tasks = this.loadTaskState(key);
-      if (tasks.size === 0) continue;
-      // Soft attach only — never launch / never clear pid files.
-      const conn = await this.attachRunningProfile(key, tasks, arcRunning);
-      if (!conn) continue;
-      // A concurrent rehydrate may have registered one for this key while we
-      // awaited the attach; keep the winner and tear our loser's tunnel down.
-      const registered = this.registerRehydratedConnection(key, conn);
-      if (registered !== conn) continue;
       try {
-        if (conn.backend !== 'arc-native' && conn.backend !== 'bidi') await this.applyDefaultDownloadBehavior(conn, key);
-      } catch {
-        // Non-fatal for rehydrate.
+        const tasks = this.loadTaskState(key);
+        if (tasks.size === 0) continue;
+        // Soft attach only — never launch / never clear pid files.
+        const conn = await this.attachRunningProfile(key, tasks, arcRunning);
+        if (!conn) continue;
+        // A concurrent rehydrate may have registered one for this key while we
+        // awaited the attach; keep the winner and tear our loser's tunnel down.
+        const registered = this.registerRehydratedConnection(key, conn);
+        if (registered !== conn) continue;
+        try {
+          if (conn.backend !== 'arc-native' && conn.backend !== 'bidi') await this.applyDefaultDownloadBehavior(conn, key);
+        } catch {
+          // Non-fatal for rehydrate.
+        }
+      } catch (err) {
+        if (!onError) throw err;
+        onError(key, err);
       }
     }
   }
@@ -4570,20 +4618,16 @@ export class BrowserService {
     if (!conn) return null;
 
     if (conn.backend === 'arc-native') {
-      // One snapshot and one liveness probe for this whole status pass, shared
-      // across every task AND every Arc profile (see `status`), rather than one
-      // AppleScript round trip per tab.
+      // One snapshot and one liveness read for the whole pass, shared across
+      // every task and every Arc profile (built in `status`).
       const spaces = arc?.spaces ?? onceAsync(() => enumerateArcSpaces());
       const running = arc?.running ?? onceAsync(() => isArcRunning());
       const tasks: TaskStatus[] = [];
       for (const task of conn.tasks.values()) {
-        // `listArcTaskTabs` refuses to adopt a tab that moved window/Space or was
-        // closed, and that refusal is the ownership guarantee every ACTION relies
-        // on — it stays exactly as strict. But `status` only reads, so one stale
-        // task must not take down this profile's other tasks, nor the other
-        // profiles (see the loop in `status`). Report the task with what is known
-        // from disk and say plainly that its tabs could not be read: `tabs` stays
-        // ABSENT rather than empty, so nothing claims a moved tab is live.
+        // The moved-tab refusal is the ownership guarantee actions rely on and
+        // stays strict. `status` only reads, so one stale task must not take down
+        // its neighbours: report what disk knows plus the reason, and leave
+        // `tabs` ABSENT rather than empty so nothing claims a moved tab is live.
         let tabs: TabInfo[] = [];
         let unavailable: string | undefined;
         try {
@@ -5137,31 +5181,21 @@ export class BrowserService {
   }
 
   /**
-   * Resolve a task's owned Arc tabs against an already-taken snapshot of every
-   * window/space/tab, instead of asking Arc about each tab individually.
+   * Resolve a task's owned Arc tabs against one shared snapshot of every
+   * window/space/tab, rather than asking Arc per tab as `listArcTaskTabs` does.
    *
-   * `listArcTaskTabs` costs one serialized AppleScript round trip PER TAB, which
-   * is fine for an action touching one task and far too slow for `status`, where
-   * a profile with 28 tasks paid 28+ sequential round trips to render a table.
-   * One `enumerateArcSpaces` call already returns everything needed, so status
-   * takes that snapshot once and every task validates against it in memory.
-   *
-   * The identity rule is IDENTICAL to the live path — `requireArcTask` first, so
-   * a tab that moved window/Space is still refused, then the recorded ref must
-   * be present in its original window and Space. Reading from a snapshot changes
-   * only how many times Arc is asked, never what counts as owned. Actions keep
-   * using the live `listArcTaskTabs`, because a snapshot can go stale between
-   * being taken and being acted on.
+   * Same ownership rule as the live path — `requireArcTask`, then the recorded
+   * ref must be present in its original window and Space. The snapshot changes
+   * how often Arc is asked, never what counts as owned. Actions keep the live
+   * path, because a snapshot can go stale before it is acted on.
    */
   private async listArcTaskTabsFromSnapshot(
     task: Task,
     spaces: () => Promise<ArcEnumeratedSpace[]>,
   ): Promise<TabInfo[]> {
-    // Structural validity first, and deliberately BEFORE the snapshot is taken:
-    // a tab recorded against a different window/Space than its own task is a
-    // moved tab on the evidence of the record alone. Reporting that needs no
-    // round trip to Arc, and reporting it as "Arc was unreachable" would be the
-    // wrong reason when Arc is perfectly fine.
+    // Before the snapshot on purpose: a ref naming a window its task does not
+    // own is a moved tab on the record alone, so it needs no round trip and
+    // reports the right reason even when Arc is unreachable.
     const native = this.requireArcTask(task);
     const snapshot = await spaces();
     const tabs: TabInfo[] = [];
