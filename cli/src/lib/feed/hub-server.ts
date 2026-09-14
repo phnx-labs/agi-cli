@@ -56,9 +56,10 @@ export const HUB_CLIENT_BACKLOG_LIMIT = 4 * 1024 * 1024;
 /**
  * How long a reader may stay past {@link HUB_CLIENT_BACKLOG_LIMIT} before it is
  * dropped. A healthy reader on a unix socket clears the whole budget in well
- * under this; one still over it after this long is not keeping up. The bytes
- * the daemon holds for a reader are therefore bounded by the budget plus what
- * the stream produces in this window.
+ * under this; one still over it after this long is not keeping up. The live
+ * bytes queued for a reader are therefore bounded by the budget plus what the
+ * stream produces in this window; the snapshot and the frame in flight sit
+ * outside that figure.
  */
 export const HUB_BACKLOG_GRACE_MS = 2_000;
 
@@ -120,11 +121,14 @@ type DropReason = 'backlog' | 'stall';
  * error envelope that precedes a refusal — so nothing can land inside another
  * line. Lines are written in {@link HUB_WRITE_CHUNK_BYTES} chunks and the pump
  * waits for `'drain'` after every write the socket did not accept, so the socket
- * never holds more than one chunk past its high-water mark and the daemon's
- * copy of a frame is released as it is accepted. Two bounds drop the reader: a
- * chunk left unaccepted for
- * `drainStallMs`, and live bytes queued past `backlogBytes` for longer than
- * `backlogGraceMs`.
+ * never holds more than one chunk past its high-water mark. The frame's own
+ * Buffer stays allocated until its last chunk is written (`subarray` is a view),
+ * so `pendingBytes` is a gauge of UNFLUSHED bytes, not of retained heap. Two
+ * bounds drop the reader: a chunk left unaccepted for `drainStallMs`, and live
+ * bytes queued past `backlogBytes` for longer than `backlogGraceMs`. The bound
+ * on what a reader can make the daemon hold is therefore time- and
+ * rate-dependent — the budget, plus the stream's ingress during the grace,
+ * plus the snapshot and the frame in flight — not a hard allocation cap.
  */
 class ReaderWriter {
   /** Lines not yet handed to the socket; `live` marks the ones the budget counts. */

@@ -158,12 +158,16 @@ are load-bearing:
   snapshot, live events, the error envelope before a refusal — goes through its
   queue, is written in `HUB_WRITE_CHUNK_BYTES` chunks, and waits for `'drain'`
   after every write the socket did not accept, so the socket never holds more
-  than one chunk past its high-water mark and `pendingBytes` (queued lines, the
-  unwritten rest of the frame in flight, the socket buffer) is the true figure.
-  Two bounds drop a reader, each on its own counter: live bytes queued past
-  `HUB_CLIENT_BACKLOG_LIMIT` for longer than `HUB_BACKLOG_GRACE_MS`
-  (`droppedForBacklog`), and a chunk left unaccepted for `HUB_DRAIN_STALL_MS`
-  (`droppedForStall`). The budget is a sustained condition, never a verdict on
+  than one chunk past its high-water mark; `pendingBytes` (queued lines, the
+  unwritten rest of the frame in flight, the socket buffer) is a gauge of
+  unflushed bytes, not of retained heap — a frame's Buffer lives until its last
+  chunk is written. Two bounds drop a reader, each on its own counter: live
+  bytes queued past `HUB_CLIENT_BACKLOG_LIMIT` for longer than
+  `HUB_BACKLOG_GRACE_MS` (`droppedForBacklog`), and a chunk left unaccepted for
+  `HUB_DRAIN_STALL_MS` (`droppedForStall`). What a reader can make the daemon
+  hold is therefore time- and rate-dependent — budget plus ingress during the
+  grace plus the snapshot and frame in flight — not a hard 4 MiB allocation
+  cap. The budget is a sustained condition, never a verdict on
   one envelope or one burst — a cold collector hands the first reader every
   peer's reset as a live event inside one tick — and the held-state replay is
   not counted at all. Judging a 5 MB fleet reset against the budget the instant
