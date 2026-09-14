@@ -74,6 +74,9 @@ describe('fixFor', () => {
       .toBe('agents run claude@2.1.220, then /login');
     expect(fixFor({ agent: 'codex', version: '0.146.0', verdict: 'missing' }))
       .toBe('agents run codex@0.146.0 -- login');
+    // grok's wired login is the device-code flow — the fix must carry the flag.
+    expect(fixFor({ agent: 'grok', version: '0.2.118', verdict: 'missing' }))
+      .toBe('agents run grok@0.2.118 -- login --device-auth');
   });
 
   it('emits no repair for unverified — an unconfirmed probe is not an actionable failure', () => {
