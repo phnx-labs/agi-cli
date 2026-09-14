@@ -19,7 +19,7 @@ describe('loginHint', () => {
   // wrong hint sends them down the wrong path, so pin the per-agent overrides.
   it('uses the correct login command per agent', () => {
     expect(loginHint('codex')).toBe('codex login');
-    expect(loginHint('grok')).toBe('grok login');
+    expect(loginHint('grok')).toBe('grok login --device-auth');
     expect(loginHint('opencode')).toBe('opencode auth login');
     expect(loginHint('claude')).toBe('claude, then /login');
     // Warp Agent CLI has no `login` subcommand — bare `warp` opens sign-in.

@@ -173,13 +173,19 @@ export const FLEET_LOGIN_FLOWS: Record<string, LoginFlow> = {
     userCodeRegex: /\b([A-Z0-9]{4}-[A-Z0-9]{4})\b/,
     successFile: successFileFor('kimi'),
   },
-  // grok: `grok login`. No captured pattern this session — flowType is
-  // device-code (best guess for the remotable path) but regexes are left unset
-  // (TODO: capture grok's login output), so scrapeLogin yields nothing until a
-  // real pattern is added and driveRemoteLogin will time out rather than guess.
+  // grok: `grok login --device-auth` (grok 1.0.30, captured 2026-09-14) prints:
+  //   "To sign in, open this URL in your browser:
+  //      https://accounts.x.ai/oauth2/device?user_code=CSXW-TMHH
+  //    Confirm this code in your browser:
+  //      CSXW-TMHH
+  //    ... Waiting for authorization..." then "✓ Signed in as <email>".
+  // Bare `grok login` defaults to `--oauth`, the loopback browser flow, so the
+  // flag is what guarantees the device-code screen over SSH.
   grok: {
-    loginCommand: 'grok login',
+    loginCommand: 'grok login --device-auth',
     flowType: 'device-code',
+    verificationUrlRegex: /open this URL in your browser:\s+(https:\/\/\S+)/i,
+    userCodeRegex: /Confirm this code in your browser:\s+([A-Z0-9]{4}-[A-Z0-9]{4})/i,
     successFile: successFileFor('grok'),
   },
   // antigravity: bare `agy`, Google OAuth. Keychain-bound on macOS and loopback

@@ -59,12 +59,15 @@ describe('scrapeLogin', () => {
     expect(got.code).toBeUndefined();
   });
 
-  it('yields nothing when a flow defines no regexes (grok — pattern not yet captured)', () => {
-    const grok = FLEET_LOGIN_FLOWS.grok;
-    expect(grok.verificationUrlRegex).toBeUndefined();
-    const got = scrapeLogin('grok login: visit https://x.ai/device code ABCD-0000', grok);
-    expect(got.url).toBeUndefined();
-    expect(got.code).toBeUndefined();
+  it('extracts the exact URL and code from a real grok device-code screen', () => {
+    const got = scrapeLogin(fixture('grok-device-code.txt'), FLEET_LOGIN_FLOWS.grok);
+    expect(got.url).toBe('https://accounts.x.ai/oauth2/device?user_code=CSXW-TMHH');
+    expect(got.code).toBe('CSXW-TMHH');
+  });
+
+  it('grok is driven with --device-auth so the device-code screen appears even with a TTY', () => {
+    expect(FLEET_LOGIN_FLOWS.grok.loginCommand).toBe('grok login --device-auth');
+    expect(FLEET_LOGIN_FLOWS.grok.flowType).toBe('device-code');
   });
 });
 
