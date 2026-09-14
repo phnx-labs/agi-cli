@@ -140,6 +140,41 @@ describe('readSessionHead recovers the original request past an oversized inline
     }
   });
 
+  it('recovers the opening record when the oversized image is the LAST string literal (no trailing text)', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-head-elision-trailing-image-'));
+    try {
+      const filePath = path.join(dir, 'session.jsonl');
+      const ask = 'Please debug this crash — screenshot attached:';
+      // The image is the FINAL content block, so its base64 `data` is the last
+      // string literal in the record: nothing after it resets the elision
+      // scanner, so the record's own closing `"}]}}` + newline must still be
+      // emitted by the final flush. Regression for the dropped-tail bug where
+      // an image-only / image-last first turn produced zero events.
+      const imageData = 'D'.repeat(1 * 1024 * 1024);
+      const first = claudeUserRecord([
+        { type: 'text', text: ask },
+        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: imageData } },
+      ]);
+      // No record follows: a just-started session whose only turn is text+image.
+      // Nothing after the image's `data` value resets the elision scanner, so
+      // the record's own closing `"}]}}` + newline is what the final flush must
+      // still emit. Any following record's opening quote would have masked the
+      // bug (which is why the existing tests never caught it).
+      fs.writeFileSync(filePath, first + '\n');
+
+      // The plain bounded chunk alone cannot see this record.
+      expect(readSessionHeadContent(filePath, 32 * 1024)).toBe('');
+
+      const events = readSessionHead(filePath, 'claude');
+      expect(events.length).toBeGreaterThan(0);
+      expect(firstUserMessageFromEvents(events)).toBe(ask);
+      // The oversized payload was elided, not read whole.
+      expect(events.some(e => typeof e.content === 'string' && e.content.length > 100_000)).toBe(false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('still returns the original request when the image sits at the START, before any text', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-head-elision-lead-image-'));
     try {
