@@ -17,6 +17,7 @@ import * as path from 'path';
 import * as yaml from 'yaml';
 import { getUserAgentsDir } from './state.js';
 import {
+  deriveBlockState,
   recordAnswer,
   recordDefaulted,
   recordMessageReceipt,
@@ -88,7 +89,10 @@ export function blockClass(block: OpenBlock): BlockClass {
 }
 
 export function isPhoneUrgent(block: OpenBlock, policy: FeedPolicy): boolean {
-  if (block.answer) return false; // already answered
+  // Openness is the canonical deriveBlockState, not a raw `block.answer`: a
+  // pending, unconfirmed claim sets `answer` while state stays `open`, and such
+  // a block is still waiting on the operator, so it must not silence the alert.
+  if (deriveBlockState(block) !== 'open') return false; // already answered
   const cost = block.costOfDelay ?? 'low';
   return COST_RANK[cost] >= COST_RANK[policy.phoneNotifyThreshold];
 }
@@ -128,7 +132,10 @@ export function applyPolicyToBlock(
   root?: string,
   mailboxRoot?: string,
 ): PolicyResult {
-  if (block.answer || block.parkedAt || block.defaultedAt) {
+  // A pending, unconfirmed claim sets `block.answer` but keeps state `open`
+  // (deriveBlockState), so it must still be able to time out and escalate;
+  // parked/defaulted are separate terminal markers deriveBlockState omits.
+  if (deriveBlockState(block) !== 'open' || block.parkedAt || block.defaultedAt) {
     return { blockId: block.blockId, action: 'none' };
   }
 
