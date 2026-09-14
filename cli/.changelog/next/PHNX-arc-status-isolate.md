@@ -9,3 +9,10 @@
   `unavailable` reason instead of disappearing, and the other profiles are reported
   normally. `tabs` is absent rather than empty for such a task, so nothing claims a
   stale tab is live. Source: `cli/src/lib/browser/service.ts`.
+- **`browser status` reads Arc once per pass instead of once per tab (PHNX-3999).** A
+  profile with 28 tasks paid one AppleScript round trip per owned tab, plus one
+  liveness probe per saved Arc runtime while reconnecting, so a cold `status` spent
+  dozens of serialized round trips before printing anything. It now takes a single
+  snapshot and a single liveness probe for the entire pass, shared across every Arc
+  profile, and never contacts Arc at all when no Arc profile is present. Actions are
+  unchanged and still read Arc live per tab. Source: `cli/src/lib/browser/service.ts`.

@@ -7,7 +7,7 @@ export interface ArcNativeTabRef {
   tabId: string;
 }
 interface ArcNativeTab extends ArcNativeTabRef { url: string; title: string }
-interface ArcEnumeratedSpace {
+export interface ArcEnumeratedSpace {
   windowId: string;
   spaceId: string;
   spaceTitle: string;
