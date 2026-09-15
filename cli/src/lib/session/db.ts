@@ -475,9 +475,9 @@ CREATE TABLE IF NOT EXISTS session_timelines (
   state_json TEXT NOT NULL
 );
 
--- Durable metadata for one browser task (RUSH-2549). The browser engine's
--- tasks.json is LIVE state: it holds the in-memory task map, so stopping a task
--- drops its entry and a restart empties the file. That is
+-- Durable metadata for one browser task (RUSH-2549). The browser daemon's
+-- tasks.json is LIVE state: saveTaskState writes the in-memory task map, so
+-- stopping a task drops its entry and a daemon restart empties the file. That is
 -- correct for live state and useless as history, which is why every finished task
 -- listed as "unlinked". This row is written once at task start and is never
 -- deleted, so the link from a capture back to the agent session that drove it
@@ -5619,12 +5619,12 @@ interface ComputerSessionRecord {
 /**
  * Upsert one browser task's durable metadata.
  *
- * Since PHNX-4101 this runs in the `agents browser` CLI process itself, driven by
- * the standalone `browser` engine's fd-4 action events (`lib/browser/record.ts`)
- * — so the identity written is that process's own actor/session, resolved locally.
- * (Before the extraction it ran inside the shared daemon's BrowserService with the
- * identity forwarded over IPC, precisely so a task was never attributed to the
- * daemon's own actor — the RUSH-2020 bug; the CLI-process write preserves that.)
+ * Called at task START. This executes INSIDE the browser daemon (daemon.ts
+ * constructs BrowserService; ipc.ts dispatches `start` to it), which makes the
+ * shared daemon a writer of this DB — but the identity it writes is RESOLVED IN
+ * THE CALLING CLI PROCESS and forwarded over IPC, never resolved here. That
+ * distinction is the whole fix: resolving it daemon-side would attribute every
+ * task to the daemon's own actor (the RUSH-2020 bug).
  *
  * `agents browser stop` deliberately does NOT delete this row: the whole point
  * is that the link outlives the task.
