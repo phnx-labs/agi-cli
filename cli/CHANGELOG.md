@@ -1,23 +1,5 @@
 # Changelog
 
-## Unreleased
-
-- **`agents run claude#email` resolves accounts that predate the native registry.**
-  On machines where the Claude login was established before the `accounts.native`
-  registry existed, `agents run claude#muqsitnawaz@gmail.com` threw "Unknown account"
-  even though `agents view claude` showed that exact email as a valid login. The
-  account resolver now discovers unregistered native accounts by scanning version
-  homes for a matching `.claude.json` identity when the registry lookup fails and
-  the selector is an explicit email. Source: `cli/src/lib/account-registry.ts`
-  (`discoverUnregisteredNativeAccount`).
-
-- **Stale regular-file `.lock` no longer wedges file locking permanently.** A prior
-  crash could leave a regular file at `<target>.lock` instead of the directory
-  `proper-lockfile` expects. The library's `rmdir` cleanup then failed with
-  `ENOTDIR`, and every subsequent lock acquisition for that target timed out. The
-  lock functions now detect `ENOTDIR`, verify the stale file, and remove it so the
-  next attempt can succeed. Source: `cli/src/lib/fs-atomic.ts`.
-
 ## 1.22.117
 
 - **`agents run --local`, and `--device <this machine>` no longer SSHes to itself.** A bare
