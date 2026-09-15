@@ -155,7 +155,9 @@ if (process.argv[2] === 'sessions') {
   const {
     isReadQuery,
     usesFilterFlags,
+    usesHostFlag,
     sessionsBinSupportsFilters,
+    sessionsBinSupportsHost,
     resolveSessionsBin,
     invocation,
     SessionsClientError,
@@ -163,9 +165,12 @@ if (process.argv[2] === 'sessions') {
   } = await import('./lib/sessions-client.js');
   // Resolve the bin up front (a cheap PATH lookup): its presence decides whether
   // we can route at all, and its VERSION decides whether the 0.2.0 filter flags
-  // (`--project`/`--since`/`--until`/`--sort`, `@version`, the shorthands) are
-  // recognized — an older `sessions` would mis-read them as FTS tokens, so those
-  // queries stay on the in-repo engine (which implements the same filters).
+  // (`--project`/`--since`/`--until`/`--sort`, `@version`, the shorthands) and the
+  // 0.3.0 `--host <target>` point-to-one remote read flag are recognized — an
+  // older `sessions` would mis-read them as FTS tokens, so those queries stay on
+  // the in-repo engine (which implements the same filters and the `--device`
+  // fan-out). The two floors are checked independently: a 0.2.0 binary takes the
+  // filters but not `--host`.
   let bin: string | null = null;
   try {
     bin = resolveSessionsBin();
@@ -177,7 +182,8 @@ if (process.argv[2] === 'sessions') {
     if (!(err instanceof SessionsClientError && err.code === 'SESSIONS_BIN_MISSING')) throw err;
   }
   const filters = bin !== null && usesFilterFlags(forwarded) ? sessionsBinSupportsFilters(bin) : false;
-  if (isReadQuery(forwarded, { filters })) {
+  const host = bin !== null && usesHostFlag(forwarded) ? sessionsBinSupportsHost(bin) : false;
+  if (isReadQuery(forwarded, { filters, host })) {
     if (bin) {
       const { spawnSync } = await import('node:child_process');
       const { command, prefix } = invocation(bin);

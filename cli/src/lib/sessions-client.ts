@@ -27,6 +27,17 @@ const INSTALL_HINT = 'npm i -g @phnx-labs/sessions-cli';
  */
 const SESSIONS_FILTERS_MIN_VERSION = '0.2.0';
 
+/**
+ * First `sessions` release that implements the point-to-one remote read flag
+ * `--host <target>` (SSH to ONE box, run `sessions … --local`, stream JSON back).
+ * An older binary would treat `--host` as an FTS token, so a box with `sessions`
+ * below this floor keeps a `--host` query on the in-repo engine (which resolves
+ * `--device` against the fleet) rather than mis-routing it. Kept separate from the
+ * filter floor above even though 0.3.0 ≥ 0.2.0 — a 0.2.0 binary supports the
+ * filters but NOT `--host`, so the two gates are checked independently.
+ */
+const SESSIONS_HOST_MIN_VERSION = '0.3.0';
+
 export class SessionsClientError extends Error {
   code: string;
   constructor(code: string, message: string) {
@@ -96,7 +107,7 @@ const FILTER_VALUE_FLAGS = new Set([
   '--sort',
 ]);
 
-/** True if any 0.2.0-only filter flag is present — the only case that needs the version probe. */
+/** True if any 0.2.0-only filter flag is present — one case that needs the version probe. */
 export function usesFilterFlags(args: string[]): boolean {
   return args.some((arg) => {
     if (arg === '-p' || arg === '-a') return true;
@@ -108,22 +119,49 @@ export function usesFilterFlags(args: string[]): boolean {
   });
 }
 
-let cachedFilterSupport: boolean | undefined;
+/**
+ * True if the 0.3.0 point-to-one remote read flag `--host <value>` (or `--host=value`)
+ * is present — the other case that needs the version probe, gated on its own floor.
+ */
+export function usesHostFlag(args: string[]): boolean {
+  return args.some((arg) => arg === '--host' || arg.startsWith('--host='));
+}
+
+let cachedProbedVersion: string | null | undefined;
 
 /**
- * Whether the resolved `sessions` binary is new enough for the 0.2.0 filters.
- * Runs `sessions --version` once per process (cached). A probe failure or an
- * unparseable version reads as unsupported — the safe direction (in-repo engine
- * handles the filters), never a mis-route to an old binary.
+ * Probe `sessions --version` ONCE per process (cached), returning the parsed
+ * version string, or `null` when the probe fails or the output is unparseable.
+ * The single cache is what keeps the filter and host gates to one spawn between
+ * them, however many `sessionsBinSupports*` calls a query makes.
  */
-export function sessionsBinSupportsFilters(bin: string): boolean {
-  if (cachedFilterSupport !== undefined) return cachedFilterSupport;
+function probeSessionsVersion(bin: string): string | null {
+  if (cachedProbedVersion !== undefined) return cachedProbedVersion;
   const { command, prefix } = invocation(bin);
   const res = spawnSync(command, [...prefix, '--version'], { encoding: 'utf8', timeout: 3000 });
   const version = (res.stdout ?? '').trim();
-  cachedFilterSupport =
-    !res.error && /^\d+\.\d+\.\d+/.test(version) && compareVersions(version, SESSIONS_FILTERS_MIN_VERSION) >= 0;
-  return cachedFilterSupport;
+  cachedProbedVersion = !res.error && /^\d+\.\d+\.\d+/.test(version) ? version : null;
+  return cachedProbedVersion;
+}
+
+/**
+ * Whether the resolved `sessions` binary is at or above `minVersion`. A probe
+ * failure or an unparseable version reads as unsupported — the safe direction
+ * (in-repo engine handles it), never a mis-route to an old binary.
+ */
+export function sessionsBinSupports(bin: string, minVersion: string): boolean {
+  const version = probeSessionsVersion(bin);
+  return version !== null && compareVersions(version, minVersion) >= 0;
+}
+
+/** Whether the resolved `sessions` binary is new enough for the 0.2.0 filters. */
+export function sessionsBinSupportsFilters(bin: string): boolean {
+  return sessionsBinSupports(bin, SESSIONS_FILTERS_MIN_VERSION);
+}
+
+/** Whether the resolved `sessions` binary is new enough for the 0.3.0 `--host` flag. */
+export function sessionsBinSupportsHost(bin: string): boolean {
+  return sessionsBinSupports(bin, SESSIONS_HOST_MIN_VERSION);
 }
 
 const ENGINE_VERBS = new Set([
@@ -151,16 +189,18 @@ const ENGINE_VERBS = new Set([
   'export',
 ]);
 
-export function isReadQuery(args: string[], opts: { filters?: boolean } = {}): boolean {
+export function isReadQuery(args: string[], opts: { filters?: boolean; host?: boolean } = {}): boolean {
   if (args.length === 0) return false;
   // Base (0.1.x) value flags, always recognized; the 0.2.0 filter value flags
-  // join them only when the binary supports filters.
+  // join them only when the binary supports filters, and the 0.3.0 `--host`
+  // value flag only when the binary supports it (its own, higher floor).
   const valueFlags = new Set(['--limit', '--agent']);
   const boolFlags = new Set(READ_FLAGS);
   if (opts.filters) {
     for (const vf of FILTER_VALUE_FLAGS) valueFlags.add(vf);
     for (const bf of FILTER_BOOL_FLAGS) boolFlags.add(bf);
   }
+  if (opts.host) valueFlags.add('--host');
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     // `-a` (agent) and `-p` (project) are 0.2.0 short flags that take a value.
@@ -193,7 +233,7 @@ export function isReadQuery(args: string[], opts: { filters?: boolean } = {}): b
 /** Test seam: drop the memoized bin so PATH fixtures can re-resolve. */
 export function _resetSessionsClientForTest(): void {
   cachedBin = undefined;
-  cachedFilterSupport = undefined;
+  cachedProbedVersion = undefined;
 }
 
 export const SESSIONS_INSTALL_HINT = INSTALL_HINT;

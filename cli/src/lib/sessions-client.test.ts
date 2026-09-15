@@ -9,7 +9,9 @@ import {
   isReadQuery,
   resolveSessionsBin,
   sessionsBinSupportsFilters,
+  sessionsBinSupportsHost,
   usesFilterFlags,
+  usesHostFlag,
 } from './sessions-client.js';
 
 describe('isReadQuery', () => {
@@ -66,6 +68,25 @@ describe('isReadQuery', () => {
     expect(isReadQuery(['--device', 'mac-mini'], { filters: true })).toBe(false);
     expect(isReadQuery(['watch', '--json'], { filters: true })).toBe(false);
   });
+
+  it('routes the 0.3.0 `--host` flag only when the binary supports it', () => {
+    // Conservative default (host:false) — an old/absent binary keeps `--host` in-repo.
+    expect(isReadQuery(['auth', '--host', 'box'])).toBe(false);
+    expect(isReadQuery(['auth', '--host=box'])).toBe(false);
+    // filters:true but host:false — a 0.2.0 binary takes filters, NOT `--host`.
+    expect(isReadQuery(['auth', '--host', 'box'], { filters: true })).toBe(false);
+
+    // host:true (binary >= 0.3.0) — the query routes to the standalone.
+    expect(isReadQuery(['auth', '--host', 'box'], { host: true })).toBe(true);
+    expect(isReadQuery(['auth', '--host=box', '--json'], { host: true })).toBe(true);
+    expect(isReadQuery(['a1b2c3d4', '--host', 'box'], { host: true })).toBe(true);
+    // `--host` composes with the filter flags when both are enabled.
+    expect(
+      isReadQuery(['--project', 'agents-cli', '--host', 'box'], { filters: true, host: true }),
+    ).toBe(true);
+    // Lifecycle verbs still stay in-repo even with `--host` recognized.
+    expect(isReadQuery(['resume', 'a1b2c3d4', '--host', 'box'], { host: true })).toBe(false);
+  });
 });
 
 describe('usesFilterFlags', () => {
@@ -88,9 +109,27 @@ describe('usesFilterFlags', () => {
       ['--agent', 'claude'],
       ['auth', 'middleware'],
       ['a1b2c3d4'],
+      ['--host', 'box'], // `--host` is NOT a filter flag — it has its own predicate/floor
       [],
     ]) {
       expect(usesFilterFlags(args)).toBe(false);
+    }
+  });
+});
+
+describe('usesHostFlag', () => {
+  it('detects the 0.3.0 `--host` flag and nothing else', () => {
+    for (const args of [['--host', 'box'], ['--host=box'], ['auth', '--host', 'box', '--json']]) {
+      expect(usesHostFlag(args)).toBe(true);
+    }
+    for (const args of [
+      ['--json', '--limit', '5'],
+      ['--project', 'x'],
+      ['--device', 'mac-mini'],
+      ['auth', 'middleware'],
+      [],
+    ]) {
+      expect(usesHostFlag(args)).toBe(false);
     }
   });
 });
@@ -126,6 +165,49 @@ describe.skipIf(process.platform === 'win32')('sessionsBinSupportsFilters', () =
     expect(sessionsBinSupportsFilters(fakeSessions('0.1.1'))).toBe(false);
     _resetSessionsClientForTest();
     expect(sessionsBinSupportsFilters(fakeSessions('nonsense'))).toBe(false);
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('sessionsBinSupportsHost', () => {
+  let dir: string;
+  const prevBin = process.env.SESSIONS_BIN;
+
+  function fakeSessions(version: string): string {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sessions-host-ver-'));
+    const bin = path.join(dir, 'sessions');
+    fs.writeFileSync(bin, `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}"\n`);
+    fs.chmodSync(bin, 0o755);
+    return bin;
+  }
+
+  afterEach(() => {
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+    if (prevBin === undefined) delete process.env.SESSIONS_BIN;
+    else process.env.SESSIONS_BIN = prevBin;
+    _resetSessionsClientForTest();
+  });
+
+  it('is true for a binary at or above the 0.3.0 floor', () => {
+    _resetSessionsClientForTest();
+    expect(sessionsBinSupportsHost(fakeSessions('0.3.0'))).toBe(true);
+    _resetSessionsClientForTest();
+    expect(sessionsBinSupportsHost(fakeSessions('1.4.2'))).toBe(true);
+  });
+
+  it('is false below the host floor even when filters are supported (0.2.0)', () => {
+    // The load-bearing safety case: a 0.2.0 binary takes the filters but must NOT
+    // receive a `--host` query.
+    _resetSessionsClientForTest();
+    const bin = fakeSessions('0.2.0');
+    expect(sessionsBinSupportsHost(bin)).toBe(false);
+    expect(sessionsBinSupportsFilters(bin)).toBe(true);
+  });
+
+  it('is false for an older binary or an unreadable version (fail-safe)', () => {
+    _resetSessionsClientForTest();
+    expect(sessionsBinSupportsHost(fakeSessions('0.1.1'))).toBe(false);
+    _resetSessionsClientForTest();
+    expect(sessionsBinSupportsHost(fakeSessions('nonsense'))).toBe(false);
   });
 });
 
