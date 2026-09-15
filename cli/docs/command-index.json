@@ -5104,7 +5104,7 @@
         },
         {
           "flags": "--caller <kind>",
-          "description": "Only this caller kind (claude-code, codex, gemini, cursor, terminal, script)",
+          "description": "Only this caller kind (claude-code, codex, cursor, terminal, script)",
           "long": "--caller",
           "required": true,
           "optional": false,
@@ -5252,7 +5252,7 @@
             },
             {
               "flags": "--caller <kind>",
-              "description": "Only this caller kind (claude-code, codex, gemini, cursor, terminal, script)",
+              "description": "Only this caller kind (claude-code, codex, cursor, terminal, script)",
               "long": "--caller",
               "required": true,
               "optional": false,
@@ -7991,7 +7991,7 @@
             },
             {
               "flags": "--caller <kind>",
-              "description": "Only this caller kind (claude-code, codex, gemini, cursor, terminal, script)",
+              "description": "Only this caller kind (claude-code, codex, cursor, terminal, script)",
               "long": "--caller",
               "required": true,
               "optional": false,
@@ -12099,7 +12099,7 @@
           "negate": false
         }
       ],
-      "examples": "# Create a router scoped to two harnesses, capped at a tier\n      agents route add research --harness gemini,kimi --tier cheap,default\n\n      # Narrow one harness's model set\n      agents route allow research kimi kimi-k2\n\n      # Link accounts so routing under this router only ever picks them\n      agents route link-account research gemini personal\n      agents route link-account research kimi work\n\n      # Inspect, rename, remove it\n      agents route view research\n      agents route rename research deep-research\n      agents route list --json",
+      "examples": "# Create a router scoped to two harnesses, capped at a tier\n      agents route add research --harness grok,kimi --tier cheap,default\n\n      # Narrow one harness's model set\n      agents route allow research kimi kimi-k2\n\n      # Link accounts so routing under this router only ever picks them\n      agents route link-account research grok personal\n      agents route link-account research kimi work\n\n      # Inspect, rename, remove it\n      agents route view research\n      agents route rename research deep-research\n      agents route list --json",
       "notes": "A router is a generalization of a profile -- a profile is a router\n      pinned to one harness and one account. It never resolves a target\n      outside its declared harness/model/tier allowlist or linked accounts.\n\n      Routers are a layered resource (project > user > system, like commands,\n      skills, and profiles) but 'agents route add'/'allow'/'link-account'\n      always write to the user layer (~/.agents/routers/<name>.yml).\n\n      The older verb names still work as aliases: 'create' for 'add',\n      'show' for 'view'.",
       "subcommands": [
         {
@@ -12120,7 +12120,7 @@
           "options": [
             {
               "flags": "--harness <list>",
-              "description": "Comma-separated harness ids to allow, e.g. gemini,kimi",
+              "description": "Comma-separated harness ids to allow, e.g. grok,kimi",
               "long": "--harness",
               "required": true,
               "optional": false,
