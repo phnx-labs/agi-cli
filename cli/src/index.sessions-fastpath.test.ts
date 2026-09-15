@@ -26,6 +26,20 @@ function stubSessions(): string {
   return bin;
 }
 
+/** A stub `sessions` that reports `version` for `--version` (so the fast-path's
+ *  gated-flag probe sees a real floor) and otherwise records the argv it got. */
+function stubSessionsVersioned(version: string): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sessions-fastpath-'));
+  temps.push(dir);
+  const bin = path.join(dir, 'sessions');
+  fs.writeFileSync(
+    bin,
+    `#!/bin/sh\nif [ "$1" = "--version" ]; then echo "${version}"; exit 0; fi\necho STUB_SESSIONS_OK\nprintf '%s\\n' "$@" > "${dir}/argv"\n`,
+    { mode: 0o755 },
+  );
+  return bin;
+}
+
 describe('index.ts sessions read fast-path (PHNX-4012)', () => {
   it('execs SESSIONS_BIN for a search without loading the sessions command module', () => {
     const bin = stubSessions();
@@ -61,6 +75,20 @@ describe('index.ts sessions read fast-path (PHNX-4012)', () => {
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
+  });
+
+  it('forwards --host to a >=0.3.0 standalone, argv intact (PHNX-4012 remote read)', () => {
+    const bin = stubSessionsVersioned('0.3.0');
+    const r = spawnSync('bun', [INDEX, 'sessions', 'auth', '--host', 'box', '--json'], {
+      cwd: REPO_ROOT,
+      env: { ...process.env, SESSIONS_BIN: bin, AGENTS_NO_AUTOPULL: '1' },
+      encoding: 'utf-8',
+      timeout: 15_000,
+    });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toContain('STUB_SESSIONS_OK');
+    const argv = fs.readFileSync(path.join(path.dirname(bin), 'argv'), 'utf-8').trim().split('\n');
+    expect(argv).toEqual(['auth', '--host', 'box', '--json']);
   });
 
   it('does not intercept resume — that stays on the in-repo engine', () => {
