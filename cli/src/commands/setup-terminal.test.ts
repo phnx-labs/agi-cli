@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 it('all setup commands reject invalid terminal modes before opening or installing anything', () => {
   const entry = fileURLToPath(new URL('../index.ts', import.meta.url));
-  for (const tool of ['browser', 'computer', 'secrets']) {
+  for (const tool of ['browser', 'computer', 'secrets', 'term']) {
     for (const [args, error] of [
       [['--terminal', 'invalid-backend'], 'Unknown --terminal backend'],
       [['--terminal', '--install-only'], '--terminal and --install-only are separate setup modes.'],

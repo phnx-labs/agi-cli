@@ -7,7 +7,7 @@ import { probeCapture } from './probe.js';
 import { invocation, isStandaloneComputer } from './computer-client.js';
 import { getSocketPath as browserSocketPath } from './browser/ipc.js';
 
-export const SETUP_TOOLS = ['browser', 'computer', 'secrets'] as const;
+export const SETUP_TOOLS = ['browser', 'computer', 'secrets', 'term'] as const;
 export type SetupTool = typeof SETUP_TOOLS[number];
 export interface ToolSetupRow {
   tool: SetupTool;
@@ -126,6 +126,10 @@ async function checkTool(row: ToolSetupRow): Promise<ToolSetupRow> {
   // The standalone has no non-interactive health JSON. Do not list bundles or
   // unlock the broker merely to paint a settings row.
   if (row.tool === 'secrets') return { ...row, checkedAtMs: Date.now(), detail: 'Installed. Secret access is checked when used; this check does not unlock secrets.' };
+  // term is a headless PTY engine with no `status --json` health surface; it is
+  // spawned on demand by the OAuth device-code driver (fleet login / auth mint).
+  // Presence on PATH is the whole readiness signal — do not probe it.
+  if (row.tool === 'term') return { ...row, readiness: 'ready', detail: 'Installed. Spawned on demand by fleet login and auth mint.', checkedAtMs: Date.now() };
   try {
     const { command, prefix } = invocation(row.executable);
     const { stdout } = await probeCapture(command, [...prefix, 'status', '--json'], 8000, { acceptedExitCodes: [0, 1], maxOutputBytes: 256 * 1024 });
