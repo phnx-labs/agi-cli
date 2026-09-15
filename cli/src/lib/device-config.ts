@@ -1298,18 +1298,11 @@ export function assertDaemonEnabled(): void {
   );
 }
 
-/**
- * Idle window (ms) the browser-task reaper (`browser/hygiene.ts`) uses on THIS
- * machine, or `null` when idle reaping is off (`browser.task-idle-minutes=0`)
- * — session-dead reaping is unaffected either way. Unset means the default 30
- * minutes. Read by the daemon's periodic tick and, as the fallback when a
- * caller omits `--idle-minutes`, by the `gc` IPC action.
- */
-/** Async so the daemon's browser-task-reap tick reads the config off the shared event loop (PHNX-3695). */
-export async function resolveBrowserTaskIdleMs(): Promise<number | null> {
-  const minutes = ((await getConfigValueAsync('browser.task-idle-minutes')).value as number | undefined) ?? 30;
-  return minutes === 0 ? null : minutes * 60_000;
-}
+// The browser-task idle-reaper resolver (`resolveBrowserTaskIdleMs`) was removed
+// with the in-repo browser engine (PHNX-4101): the standalone `browser` CLI runs
+// its own `prune` reaper now. The `browser.task-idle-minutes` device-config key is
+// retained as part of the shared `browser:` block browser-cli reads from
+// agents.yaml (alongside `browser.remote-control` / `browser.profile` / `browser.viewer`).
 
 /**
  * Read the effective `agents.max-concurrent` cap for each named device (fleet

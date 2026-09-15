@@ -508,10 +508,11 @@ export function claimDaemonInstance(): boolean {
     const existing = resolveLiveDaemonPid(true);
     if (existing !== null && existing !== process.pid) {
       // Evict, and WAIT for the incumbent to be provably dead — its graceful
-      // handleShutdown releasing the browser IPC binding — before we write our
-      // pid and (later, in runDaemon) bind our own. Binding before the release
-      // recreates the two-owners-on-one-socket orphan documented at stopDaemon
-      // below, so the pid file is not written until the prior owner is gone.
+      // handleShutdown releasing its socket bindings (feed-stream hub, monitor)
+      // — before we write our pid and (later, in runDaemon) bind our own.
+      // Binding before the release recreates the two-owners-on-one-socket orphan
+      // documented at stopDaemon below, so the pid file is not written until the
+      // prior owner is gone.
       if (!evictIncumbentDaemon(existing)) return false;
     }
     writeDaemonPid(process.pid);
@@ -523,10 +524,11 @@ export function claimDaemonInstance(): boolean {
 
 /**
  * SIGTERM a live incumbent daemon and block until it is provably dead, so its
- * graceful handleShutdown has released the browser IPC binding BEFORE the
- * newcomer binds anything of its own (SING-11) — the daemon no longer hosts a
- * secrets broker socket to release (the standalone `secrets` CLI owns it now,
- * PHNX-3989 OWN-1). Escalates
+ * graceful handleShutdown has released its socket bindings (the feed-stream hub,
+ * the monitor socket) BEFORE the newcomer binds anything of its own (SING-11) —
+ * the daemon no longer hosts a secrets broker socket (the standalone `secrets`
+ * CLI owns it, PHNX-3989 OWN-1) nor a browser IPC socket (the standalone
+ * `browser` CLI owns it, PHNX-4101). Escalates
  * to killTree after the grace window. Passes the POSITIVE pid so the kill reaches
  * only the incumbent daemon — never its detached routine children, which run in
  * their own process groups and must survive takeover (SING-11a); the new daemon
@@ -1046,11 +1048,11 @@ export async function runDaemon(): Promise<void> {
     log('ERROR', `Stray daemon reaper failed: ${(err as Error).message}`);
   }
 
-  // Socket services: monitor engine, account-state, and browser IPC are all
-  // managed by the ServiceSupervisor (RUSH-3193 P2). The secrets broker moved
-  // with the standalone `secrets` engine (PHNX-3989 OWN-1) — this daemon no
-  // longer hosts or takes over that broker; the standalone owns its own
-  // lifecycle exclusively.
+  // Socket services: monitor engine, account-state, and the feed-stream hub are
+  // all managed by the ServiceSupervisor (RUSH-3193 P2). The secrets broker moved
+  // with the standalone `secrets` engine (PHNX-3989 OWN-1) and the browser IPC
+  // service with the standalone `browser` CLI (PHNX-4101) — this daemon no longer
+  // hosts either; each standalone owns its own lifecycle exclusively.
   const supervisor = new ServiceSupervisor();
 
   if (isEnabled('session-state')) {
@@ -1058,8 +1060,7 @@ export async function runDaemon(): Promise<void> {
   } else log('INFO', 'Live session-state service disabled');
 
   // The shared feed fan-out. Registered even when disabled at boot so a later
-  // `agents daemon services enable feed-stream` brings it up over SIGHUP, the
-  // same live-transition shape browser IPC uses.
+  // `agents daemon services enable feed-stream` brings it up over SIGHUP.
   supervisor.register(new FeedStreamService(), { enabled: isEnabled('feed-stream') });
   if (!isEnabled('feed-stream')) log('INFO', 'Shared feed stream service disabled');
 
@@ -1165,7 +1166,7 @@ export async function runDaemon(): Promise<void> {
 
   // scheduler.enabled=false in this machine's device doc means NO routines fire
   // here — the scheduler and its catchup recovery simply never start, while the
-  // daemon keeps its other duties (browser IPC, session sync).
+  // daemon keeps its other duties (feed stream, session sync).
   // The refusal message is the same one the start surfaces
   // (`routines add` auto-start, manual `routines start`) raise. The gate is
   // re-evaluated on every SIGHUP reload (handleReload below) via
@@ -1364,8 +1365,8 @@ export async function runDaemon(): Promise<void> {
     }
   }
 
-  // Browser orphan reap and IPC server start are now managed by BrowserIPCService
-  // on the supervisor (RUSH-3193 P2). The orphan reap runs inside onStart().
+  // The browser IPC server and its orphan reap left this daemon with the
+  // standalone `browser` CLI (PHNX-4101) — it hosts its own IPC service now.
 
   // Webhook receivers: signed webhook receiver(s) + their funnel (RUSH-2548).
   // Resolves each receiver's signing secret headlessly through the standalone
@@ -1389,17 +1390,15 @@ export async function runDaemon(): Promise<void> {
   // (single executor). Dead managed panes and their orphan helpers are
   // reaped by TmuxReapService.
 
-  // RUSH-2622: close abandoned browser-task tabs on the same 5-min cadence,
-  // reusing the daemon's long-lived BrowserService when browser IPC is enabled.
-  // Abandoned browser tasks are reaped by BrowserTaskReapService, sharing the
-  // same BrowserService instance as BrowserIPCService.
+  // Abandoned browser-task reaping (RUSH-2622) left this daemon with the
+  // standalone `browser` CLI (PHNX-4101) — its own `prune` reaper owns it now.
 
   // RUSH-2367 / RUSH-3193 P3: state-dir-check (self-terminate guard) is
   // registered on the supervisor further below, once `handleShutdown` exists
   // — see the registration site after its declaration for why.
 
-  // RUSH-2418: startup is over — the scheduler, browser IPC, broker decision,
-  // monitor engine and every background tick are up. Only NOW does this daemon
+  // RUSH-2418: startup is over — the scheduler, feed stream, monitor engine and
+  // every background tick are up. Only NOW does this daemon
   // clear the auto-start failure streak `ensureDaemonStarted` reads. Clearing it
   // at claim time instead would reset the breaker for a process that dies while
   // initializing a subsystem, which is exactly the crash loop it exists to stop.
@@ -2016,7 +2015,7 @@ function startDaemonLocked(agentsBin: string, releaseLock: () => void): { pid: n
  * console-owning wrapper (cmd.exe / the npm shim). When that wrapper exits it
  * closes its console, and the detached daemon sharing that console receives a
  * console-close event that trips its shutdown handler — the daemon comes up,
- * binds the browser IPC socket, then tears itself down ~36ms later (#556).
+ * binds its sockets, then tears itself down ~36ms later (#556).
  * Going through `process.execPath` means a real PE/binary is spawned with
  * `detached: true` and no console, so nothing signals the daemon after launch.
  *
@@ -2357,13 +2356,11 @@ export function findSurvivingStateDirDaemons(exclude: Set<number>): number[] {
  * from launchd/systemd if applicable.
  *
  * The SIGTERM → grace → killTree sequence is unchanged; what it adds is
- * verification. After the daemon is gone it checks that the browser IPC
- * binding actually released — a stale socket present on disk but with no live
- * owner is the orphan that keeps clients hanging on it — and that no
- * `__daemon-run` for THIS state dir survives. A killTree escalation exits
- * without running the daemon's graceful handleShutdown, so that socket can be
- * left stale; this reclaims it (the owner is provably dead) and reports it. It
- * never reports success on an unverified stop.
+ * verification: after the daemon is gone it checks that no `__daemon-run` for
+ * THIS state dir survives and reclaims the state files a killTree escalation
+ * (which skips the graceful handleShutdown) can leave stale. The browser IPC
+ * socket is no longer among them — it left with the standalone `browser` CLI
+ * (PHNX-4101). It never reports success on an unverified stop.
  */
 export function stopDaemon(): DaemonStopResult {
   const releaseLock = acquireLifecycleLock();
