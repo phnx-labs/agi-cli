@@ -105,34 +105,6 @@
     ],
     "registry_divergence": "agents-cli registry has commandsSubdir='prompts' and skillsDir=~/.codex/skills/. For codex >= 0.117 the skill target should be ~/.agents/skills/ per official docs. Writing to ~/.codex/skills/ is invisible to the CLI."
   },
-  "gemini": {
-    "supported": true,
-    "docs": {
-      "url": "https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/custom-commands.md",
-      "quote_path": "User commands (global): Located in `~/.gemini/commands/`",
-      "quote_format": "Your command definition files must be written in the TOML format and use the `.toml` file extension.",
-      "quote_schema_required": "prompt (String): The prompt that will be sent to the Gemini model when the command is executed.",
-      "quote_schema_optional": "description (String): A brief, one-line description of what the command does.",
-      "quote_naming": "A file at ~/.gemini/commands/test.toml becomes the command /test.",
-      "quote_namespace": "Subdirectories are used to create namespaced commands, with the path separator (`/` or `\\`) being converted to a colon (`:`)."
-    },
-    "formats": [
-      {
-        "kind": "toml-flat",
-        "path_template": "{HOME}/.gemini/commands/{name}.toml",
-        "schema": {
-          "required": [
-            "prompt"
-          ],
-          "optional": [
-            "description"
-          ]
-        },
-        "name_from": "filename",
-        "namespace_via": "subdirectories-become-colons"
-      }
-    ]
-  },
   "cursor": {
     "supported": true,
     "docs": {

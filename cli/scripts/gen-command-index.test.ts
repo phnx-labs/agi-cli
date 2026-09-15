@@ -111,9 +111,13 @@ describe('command index generation', () => {
 
   it('captures nested option variants, choices, defaults, examples, and notes', async () => {
     const nodes = await tree();
-    const start = find(nodes, 'browser start');
-    expect(start).toBeDefined();
-    expect(start!.options.some((option) => option.long?.startsWith('--'))).toBe(true);
+    // `insights query` is a nested command that redeclares its flags (unlike the
+    // opaque `browser start` passthrough, PHNX-4101), so it exercises the generator's
+    // capture of nested long options AND their defaults.
+    const query = find(nodes, 'insights query');
+    expect(query).toBeDefined();
+    expect(query!.options.some((option) => option.long?.startsWith('--'))).toBe(true);
+    expect(query!.options.some((option) => option.defaultValue !== undefined)).toBe(true);
     const tmux = find(nodes, 'tmux');
     expect(tmux?.examples).toContain('agents tmux');
     expect(tmux?.notes?.length).toBeGreaterThan(0);
