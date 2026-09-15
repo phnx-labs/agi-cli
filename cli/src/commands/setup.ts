@@ -344,7 +344,7 @@ export async function getSetupStatus(): Promise<SetupStatusRow[]> {
     { phase: 'browser', state: browserReady ? 'ready' : 'missing', detail: browserReady ? `profile ${browserProfile.name}` : browserProfile ? `profile ${browserProfile.name} cannot launch here` : installedBrowsers.length ? 'no default profile' : 'no supported browser found' },
     { phase: 'computer', state: computerState, detail: computerState === 'ready' ? 'helper trusted' : computerState === 'n/a' ? 'macOS local setup only' : 'helper not running or not trusted' },
     { phase: 'secrets', state: secretsReady ? 'ready' : 'missing', detail: secretsReady ? 'defaults chosen' : 'defaults not chosen' },
-    { phase: 'term', state: termReady ? 'ready' : 'missing', detail: termReady ? 'installed' : 'not installed (fleet login / auth mint spawn it)' },
+    { phase: 'term', state: termReady ? 'ready' : 'missing', detail: termReady ? 'installed' : 'not installed (accounts add/login spawn it)' },
     { phase: 'accounts', state: minted.ready ? 'ready' : 'missing', detail: minted.detail },
     { phase: 'fleet', state: Object.keys(devices).length ? 'ready' : 'missing', detail: Object.keys(devices).length ? `${Object.keys(devices).length} device${Object.keys(devices).length === 1 ? '' : 's'} registered` : 'no devices registered' },
     { phase: 'watchdog', state: watchdogEnabled ? 'ready' : 'missing', detail: watchdogEnabled ? 'enabled on this device' : 'disabled on this device' },
@@ -509,7 +509,7 @@ export function registerSetupCommand(program: Command): void {
         agents setup browser    # detect a browser + create the default profile
         agents setup computer    # install the signed macOS helper + grant permissions
         agents setup secrets     # choose secrets backend/policy defaults + import
-        agents setup term        # install the standalone term CLI (PTY engine for fleet login / auth mint)
+        agents setup term        # install the standalone term CLI (PTY engine agents accounts add/login spawn)
         agents setup accounts    # mint a Claude setup-token for unattended usage/probe
         agents setup fleet       # discover Tailscale devices + configure SSH access
         agents setup watchdog    # choose which devices run the daemon watchdog pass

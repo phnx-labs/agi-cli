@@ -20,7 +20,7 @@ core, browser, computer, secrets, term, accounts, fleet, watchdog, and preferenc
 delegates each selected phase to its existing `agents setup <capability>` wizard.
 `agents setup status --json` is the non-interactive view of the same probes. The
 `term` phase installs the standalone `term` CLI (`@phnx-labs/term-cli`, the PTY
-engine `agents fleet login` and `agents auth mint` spawn on demand, PHNX-4091);
+engine the setup-token mint behind `agents accounts add`/`login` spawns on demand, PHNX-4091);
 presence on PATH is its whole readiness signal — there is nothing else to configure.
 
 `agents reminders` lists personal operating reminders kept in

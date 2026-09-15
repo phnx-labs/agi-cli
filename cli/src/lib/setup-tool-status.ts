@@ -127,9 +127,10 @@ async function checkTool(row: ToolSetupRow): Promise<ToolSetupRow> {
   // unlock the broker merely to paint a settings row.
   if (row.tool === 'secrets') return { ...row, checkedAtMs: Date.now(), detail: 'Installed. Secret access is checked when used; this check does not unlock secrets.' };
   // term is a headless PTY engine with no `status --json` health surface; it is
-  // spawned on demand by the OAuth device-code driver (fleet login / auth mint).
+  // spawned on demand by the setup-token mint (`agents accounts add`/`login`,
+  // via auth-mint.ts → term-driver.ts, the sole term-client consumers).
   // Presence on PATH is the whole readiness signal — do not probe it.
-  if (row.tool === 'term') return { ...row, readiness: 'ready', detail: 'Installed. Spawned on demand by fleet login and auth mint.', checkedAtMs: Date.now() };
+  if (row.tool === 'term') return { ...row, readiness: 'ready', detail: 'Installed. Spawned on demand by `agents accounts add`/`login`.', checkedAtMs: Date.now() };
   try {
     const { command, prefix } = invocation(row.executable);
     const { stdout } = await probeCapture(command, [...prefix, 'status', '--json'], 8000, { acceptedExitCodes: [0, 1], maxOutputBytes: 256 * 1024 });
