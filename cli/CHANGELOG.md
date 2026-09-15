@@ -2,14 +2,6 @@
 
 ## 1.22.117
 
-- **`agents sessions` filter/sort queries take the standalone fast path when it's new enough.**
-  `--project`/`-p`, `--since`, `--until`, `--sort`, the `--agent name@version` suffix, and the
-  harness shorthands (`--claude`/`--codex`/…) now route to the standalone `sessions` binary when
-  the installed one is ≥ 0.2.0 (which implements them), and stay on the in-process engine
-  otherwise — a version probe (`sessions --version`, cached) gates it, so an older binary never
-  gets a flag it would mis-read as an FTS token. Behavior is unchanged; the fast path just covers
-  more queries. Source: `cli/src/lib/sessions-client.ts`, `cli/src/index.ts`
-
 - **`agents run --local`, and `--device <this machine>` no longer SSHes to itself.** A bare
   interactive run places itself like `--device auto` (PHNX-4083), and the documented way to
   stay put was `--device <this machine>` — which took the remote path and probed its own
@@ -19,6 +11,13 @@
   MagicDNS name, loopback, or the `interactive` sentinel now resolves to the same local
   run. The placement-failure hint names `--local`. Source: `cli/src/commands/exec.ts`
   (`pinLocalWhenTargetIsSelf`), `cli/src/lib/placement.ts`, `cli/src/lib/hosts/remote-cmd.ts`.
+- **`agents sessions` filter/sort queries take the standalone fast path when it's new enough.**
+  `--project`/`-p`, `--since`, `--until`, `--sort`, the `--agent name@version` suffix, and the
+  harness shorthands (`--claude`/`--codex`/…) now route to the standalone `sessions` binary when
+  the installed one is ≥ 0.2.0 (which implements them), and stay on the in-process engine
+  otherwise — a version probe (`sessions --version`, cached) gates it, so an older binary never
+  gets a flag it would mis-read as an FTS token. Behavior is unchanged; the fast path just covers
+  more queries. Source: `cli/src/lib/sessions-client.ts`, `cli/src/index.ts`.
 
 ## 1.22.116
 
