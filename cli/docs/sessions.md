@@ -99,6 +99,20 @@ running what, and the read follows it. A session that is readable locally never
 takes a needless hop, and an owner that cannot be reached is an error rather than an
 empty local card.
 
+When the standalone `sessions` CLI (`@phnx-labs/sessions-cli`) is installed, a
+read query — list, search, or id lookup — takes a fast path that execs it directly
+instead of loading the in-repo session module. Two flag families on that path are
+version-gated so an older standalone can never mis-read them as search tokens:
+the 0.2.0 metadata filters/sort (`--project`/`--since`/`--until`/`--sort`, the
+`@version` suffix, the harness shorthands) forward only when the installed
+`sessions` is ≥ 0.2.0, and the point-to-one remote read `agents sessions <query>
+--host <target>` (SSH to ONE box, run `sessions … --local`, stream JSON back)
+forwards only when it is ≥ 0.3.0 — its own, higher floor. Below a floor, or with no
+standalone installed at all, that query stays on the in-repo engine (which
+implements the same filters and resolves `--device` against the fleet); nothing
+mis-routes or crashes. `--host` targets one box directly; the fleet-aware `--device`
+fan-out is unaffected and continues to be answered by the in-repo engine.
+
 ## Off-box backup
 
 `agents sessions export --to-r2` and `agents sessions import --from-r2` are
