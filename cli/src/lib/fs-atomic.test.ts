@@ -121,6 +121,46 @@ describe('withFileLock heartbeat', () => {
   });
 });
 
+describe('ENOTDIR stale-lock self-healing', () => {
+  function plantStaleRegularFileLock(target: string): string {
+    // proper-lockfile resolves realpath before computing the lock path.
+    const lockPath = `${fs.realpathSync(target)}.lock`;
+    fs.writeFileSync(lockPath, 'stale');
+    // Back-date the file so proper-lockfile considers it stale and attempts rmdir.
+    const old = new Date(Date.now() - 60_000);
+    fs.utimesSync(lockPath, old, old);
+    return lockPath;
+  }
+
+  it('withFileLock recovers when the lock path is a regular file instead of a directory', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fs-atomic-enotdir-'));
+    const target = path.join(dir, 'target');
+    ensureLockTarget(target);
+    const lockPath = plantStaleRegularFileLock(target);
+    try {
+      const result = withFileLock(target, () => 'ok', { acquireTimeoutMs: 10_000 });
+      expect(result).toBe('ok');
+      expect(fs.existsSync(lockPath)).toBe(false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('withFileLockAsync recovers when the lock path is a regular file instead of a directory', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fs-atomic-enotdir-'));
+    const target = path.join(dir, 'target');
+    ensureLockTarget(target);
+    const lockPath = plantStaleRegularFileLock(target);
+    try {
+      const result = await withFileLockAsync(target, () => 'ok', { acquireTimeoutMs: 10_000 });
+      expect(result).toBe('ok');
+      expect(fs.existsSync(lockPath)).toBe(false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 /**
  * RUSH-2840: `atomicWriteJsonSync` is the JSON convenience wrapper around
  * `atomicWriteFileSync` -- six independent private/inline copies of this

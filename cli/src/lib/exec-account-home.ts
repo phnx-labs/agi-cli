@@ -170,6 +170,11 @@ async function matchLegacyIdentityHome(
   const needles = [row?.identityKey, row?.identityLabel]
     .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
     .map((value) => value.trim().toLowerCase());
+  // For accounts that predate the native registry, the row is missing but the
+  // account name carries the email the caller selected with `#email`.
+  if (needles.length === 0 && account.name.includes('@')) {
+    needles.push(account.name.trim().toLowerCase());
+  }
   if (needles.length === 0) return null;
   const needleSet = new Set(needles);
   const preferred = nativeAccountHome(account.id, meta);
