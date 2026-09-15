@@ -56,27 +56,25 @@ function stubSessionsHost127(version: string): string {
   return bin;
 }
 
-/** Register a single device in an isolated registry dir so the fast-path's
- *  `resolveRemoteDevice(<name>)` resolves to `user@dnsName`. Returns the dir to
- *  pass as `AGENTS_DEVICES_DIR` (the state.ts test escape hatch). `.invalid`
+/** Register one or more devices in an isolated registry dir so the fast-path's
+ *  `resolveRemoteDevice(<name>)` resolves to `me@<name>.invalid`. Returns the dir
+ *  to pass as `AGENTS_DEVICES_DIR` (the state.ts test escape hatch). `.invalid`
  *  never resolves in DNS, so the in-repo fan-out's fall-through SSH fails fast. */
-function writeDeviceRegistry(home: string, name: string, user: string, dnsName: string): string {
+function writeDeviceRegistry(home: string, names: string[]): string {
   const dir = path.join(home, 'devices-reg');
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(
-    path.join(dir, 'registry.json'),
-    JSON.stringify({
-      [name]: {
-        name,
-        platform: 'linux',
-        shell: 'posix',
-        user,
-        address: { via: 'manual', dnsName },
-        auth: { method: 'key' },
-      },
-    }),
-    'utf-8',
-  );
+  const registry: Record<string, unknown> = {};
+  for (const name of names) {
+    registry[name] = {
+      name,
+      platform: 'linux',
+      shell: 'posix',
+      user: 'me',
+      address: { via: 'manual', dnsName: `${name}.invalid` },
+      auth: { method: 'key' },
+    };
+  }
+  fs.writeFileSync(path.join(dir, 'registry.json'), JSON.stringify(registry), 'utf-8');
   return dir;
 }
 
@@ -135,7 +133,7 @@ describe('index.ts sessions read fast-path (PHNX-4012)', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-device-host-'));
     temps.push(home);
     writeUpdateCache(home);
-    const devicesDir = writeDeviceRegistry(home, 'box', 'me', 'box.invalid');
+    const devicesDir = writeDeviceRegistry(home, ['box']);
     const bin = stubSessionsVersioned('0.3.0');
     const r = runAgents(['sessions', 'auth', '--device', 'box', '--json'], REPO_ROOT, home, {
       SESSIONS_BIN: bin,
@@ -148,11 +146,31 @@ describe('index.ts sessions read fast-path (PHNX-4012)', () => {
     expect(argv).toEqual(['auth', '--json', '--host', 'ssh://me@box.invalid']);
   });
 
+  it('does NOT route a MULTI-device read to the standalone --host (stays on the in-repo fan-out)', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-device-host-multi-'));
+    temps.push(home);
+    writeUpdateCache(home);
+    const devicesDir = writeDeviceRegistry(home, ['box', 'mac-mini']);
+    const bin = stubSessionsVersioned('0.3.0');
+    // Variadic `--device box mac-mini` is two devices; `--host` is point-to-one,
+    // so the whole query must stay on the in-repo fan-out (which answers with a
+    // merged array, [] for the unreachable peers) — the standalone is never
+    // handed a `--host` read, so its argv-recording branch never runs.
+    const r = runAgents(['sessions', 'auth', '--device', 'box', 'mac-mini', '--json'], REPO_ROOT, home, {
+      SESSIONS_BIN: bin,
+      AGENTS_DEVICES_DIR: devicesDir,
+      AGENTS_NO_AUTOPULL: '1',
+    });
+    expect(r.status, r.stderr).toBe(0);
+    expect(() => JSON.parse(r.stdout)).not.toThrow();
+    expect(fs.existsSync(path.join(path.dirname(bin), 'argv'))).toBe(false);
+  });
+
   it('falls through to the in-repo --device path when the peer lacks the standalone (exit 127)', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-device-host-127-'));
     temps.push(home);
     writeUpdateCache(home);
-    const devicesDir = writeDeviceRegistry(home, 'box', 'me', 'box.invalid');
+    const devicesDir = writeDeviceRegistry(home, ['box']);
     const bin = stubSessionsHost127('0.3.0');
     const r = runAgents(['sessions', 'auth', '--device', 'box', '--json'], REPO_ROOT, home, {
       SESSIONS_BIN: bin,
@@ -172,7 +190,7 @@ describe('index.ts sessions read fast-path (PHNX-4012)', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-device-host-floor-'));
     temps.push(home);
     writeUpdateCache(home);
-    const devicesDir = writeDeviceRegistry(home, 'box', 'me', 'box.invalid');
+    const devicesDir = writeDeviceRegistry(home, ['box']);
     const bin = stubSessionsVersioned('0.2.0');
     const r = runAgents(['sessions', 'auth', '--device', 'box', '--json'], REPO_ROOT, home, {
       SESSIONS_BIN: bin,
@@ -190,7 +208,7 @@ describe('index.ts sessions read fast-path (PHNX-4012)', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-device-host-life-'));
     temps.push(home);
     writeUpdateCache(home);
-    const devicesDir = writeDeviceRegistry(home, 'box', 'me', 'box.invalid');
+    const devicesDir = writeDeviceRegistry(home, ['box']);
     const bin = stubSessionsVersioned('0.3.0');
     const r = runAgents(['sessions', 'resume', '--help', '--device', 'box'], REPO_ROOT, home, {
       SESSIONS_BIN: bin,

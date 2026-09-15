@@ -1,8 +1,10 @@
-- **`agents sessions <read> --device <name>` routes the READ through the standalone `sessions --host` when both sides support it (PHNX-4012).**
-  A read `--device` query (search / list / id lookup, and no explicit `--host`) now resolves the
-  device to its SSH target and forwards `sessions <read args> --host ssh://<target>` to the local
-  standalone — the local-orchestration collapse where `sessions` owns the remote hop, instead of the
-  in-repo peer fan-out. It takes this path only when THIS box's `sessions` is ≥ 0.3.0. If the PEER
+- **`agents sessions <read> --device <name>` routes a SINGLE-device READ through the standalone `sessions --host` when both sides support it (PHNX-4012).**
+  A read `--device` query (search / list / id lookup, and no explicit `--host`) that names exactly one
+  device now resolves it to its SSH target and forwards `sessions <read args> --host ssh://<target>` to
+  the local standalone — the local-orchestration collapse where `sessions` owns the remote hop, instead
+  of the in-repo peer fan-out. `--host` is point-to-one, so a **multi-device** read (`--device box
+  mac-mini`, a repeated `--device`, or a `--device all`/`fleet` sentinel) stays on the in-repo `--device`
+  fan-out, which merges the peers. It takes the standalone path only when THIS box's `sessions` is ≥ 0.3.0. If the PEER
   lacks the standalone the remote `bash -lc` command-not-found surfaces as exit 127, on which the read
   falls through to the existing in-repo `--device` fan-out so it still succeeds — a capability gate
   keyed on that specific signal (same spirit as the 0.3.0 `--host` version gate), a migration bridge
