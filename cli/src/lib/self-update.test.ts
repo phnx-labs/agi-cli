@@ -1359,6 +1359,18 @@ describe.skipIf(!hasBun())('installPackageWithBun', () => {
     expect(readManifest().trustedDependencies).toEqual(trusted);
   });
 
+  it('installs into a prefix whose manifest has no dependencies yet', { timeout: 120_000 }, async () => {
+    // A global manifest can exist with no `dependencies` at all — bun writes one
+    // for `trustedDependencies` alone. Clearing the pin must no-op here rather
+    // than throw on the missing key, or the upgrade dies before it installs.
+    seedBunPrefix({ trustedDependencies: [NPM_PACKAGE_NAME] });
+
+    await installPackageWithBun(packAgentsCli('1.22.117'));
+
+    expect(await readInstalledVersion(path.join(bunGlobalDir(), 'node_modules', NPM_PACKAGE_NAME))).toBe('1.22.117');
+    expect(readManifest().dependencies?.[NPM_PACKAGE_NAME]).toBe('1.22.117');
+  });
+
   it('installs into a prefix that has no global manifest yet', { timeout: 120_000 }, async () => {
     const bunInstall = makeTempDir('bun-install-bare');
     process.env.BUN_INSTALL = bunInstall;
