@@ -9,6 +9,7 @@ import { promisify } from 'util';
 
 const execFileAsync = promisify(execFile);
 import { compareVersions } from './agent-spec/primitives.js';
+import { atomicWriteJsonSync } from './fs-atomic.js';
 import { needsWindowsShell } from './platform/index.js';
 import { PEER_HOP_ENV } from './types.js';
 
@@ -308,11 +309,59 @@ export function installLooksSettled(packageRoot: string, settleMs: number = INST
   }
 }
 
-export async function installPackageWithBun(spec: string, signal?: AbortSignal): Promise<void> {
+function readBunGlobalManifest(globalDir: string): Record<string, unknown> | null {
+  try {
+    const parsed: unknown = JSON.parse(fs.readFileSync(path.join(globalDir, 'package.json'), 'utf-8'));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function setBunGlobalDependency(globalDir: string, spec: string | null): string | null {
+  const manifest = readBunGlobalManifest(globalDir);
+  if (!manifest) return null;
+  const deps = manifest.dependencies;
+  if (!deps || typeof deps !== 'object' || Array.isArray(deps)) return null;
+  const entries = deps as Record<string, string>;
+  const previous = entries[NPM_PACKAGE_NAME] ?? null;
+  if (spec === null) {
+    if (!(NPM_PACKAGE_NAME in entries)) return previous;
+    delete entries[NPM_PACKAGE_NAME];
+  } else {
+    if (entries[NPM_PACKAGE_NAME] === spec) return previous;
+    entries[NPM_PACKAGE_NAME] = spec;
+  }
+  atomicWriteJsonSync(path.join(globalDir, 'package.json'), manifest);
+  return previous;
+}
+
+function restoreBunGlobalDependency(globalDir: string, spec: string | null): void {
+  try { setBunGlobalDependency(globalDir, spec); } catch {}
+}
+
+export async function installPackageWithBun(spec: string, globalDir: string, signal?: AbortSignal): Promise<void> {
   const { execFile } = await import('child_process');
   const { promisify } = await import('util');
   const execFileAsync = promisify(execFile);
-  await execFileAsync('bun', ['add', '-g', spec, '--ignore-scripts'], { shell: needsWindowsShell('bun'), signal });
+  const previous = setBunGlobalDependency(globalDir, null);
+  try {
+    await execFileAsync('bun', ['add', '-g', spec, '--ignore-scripts'], {
+      shell: needsWindowsShell('bun'),
+      signal,
+      env: { ...process.env, BUN_INSTALL: path.dirname(path.dirname(globalDir)) },
+    });
+  } catch (err) {
+    restoreBunGlobalDependency(globalDir, previous);
+    throw err;
+  }
+  try {
+    setBunGlobalDependency(globalDir, await readInstalledVersion(path.join(globalDir, 'node_modules', NPM_PACKAGE_NAME)));
+  } catch {
+    restoreBunGlobalDependency(globalDir, null);
+  }
 }
 
 // Fail closed on anything except the registry's sha512 bytes before handing a tarball to a package manager.
