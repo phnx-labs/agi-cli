@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { SessionMeta } from '../lib/session/types.js';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import { sessionRecoveryPeer } from '../lib/session/recovery.js';
 import {
   buildResumeRunArgs,

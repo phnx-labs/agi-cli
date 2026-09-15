@@ -17,7 +17,7 @@
 import fs from 'fs';
 import path from 'path';
 import { getHistoryDir } from '../state.js';
-import { isAgentTmuxAlias, type SessionRunMode } from './types.js';
+import { isAgentTmuxAlias, type SessionRunMode } from '@phnx-labs/sessions-cli/reader';
 
 interface SessionActorRecord {
   sessionId: string;

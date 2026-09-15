@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { composeOwnerMessage } from './owner-message.js';
-import { _resetLinearWorkspaceCache } from './session/linear.js';
 
 // Real path, no mocks of the composer: composeOwnerMessage resolves the run
 // identity from the environment (the same resolver feed post uses) and shapes the
@@ -19,7 +18,6 @@ function stash(key: string, value: string | undefined) {
 }
 
 beforeEach(() => {
-  _resetLinearWorkspaceCache();
   stash('LINEAR_WORKSPACE', 'getrush');
   // AGENT_SESSION_ID is checked before AGENTS_SESSION_ID, and the real run this
   // suite executes inside sets it — pin both to the fixture and clear the other
@@ -37,7 +35,6 @@ afterEach(() => {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
   }
-  _resetLinearWorkspaceCache();
 });
 
 describe('composeOwnerMessage — the shared owner-ping composer (PHNX-3698)', () => {

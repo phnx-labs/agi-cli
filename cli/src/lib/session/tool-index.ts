@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import { StringDecoder } from 'string_decoder';
 import type Database from '../sqlite.js';
 import { getDB, maintainSessionSearchIndex } from './db.js';
-import { parseSession } from './parse.js';
+import { parseSession } from '@phnx-labs/sessions-cli/reader';
 import {
   TOOL_INDEX_VERSION,
   TOOL_INDEX_LIMIT_ORDINAL,
@@ -13,8 +13,8 @@ import {
   toolCallEvidenceBytes,
   toolCallsFromEvents,
   type IndexedToolCall,
-} from './tool-calls.js';
-import type { SessionMeta } from './types.js';
+} from '@phnx-labs/sessions-cli/reader';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import {
   canonicalToolLedgerPath,
   persistToolCalls,

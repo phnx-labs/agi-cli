@@ -54,7 +54,7 @@ import { showResourceList } from './resource-view.js';
 import { PLUGIN_GROUP_COLORS } from './plugins.js';
 import { isInteractiveTerminal } from './utils.js';
 import { countSessionsInScope } from '../lib/session/discover.js';
-import { isSessionTrackedAgent } from '../lib/session/types.js';
+import { isSessionTrackedAgent } from '@phnx-labs/sessions-cli/reader';
 import { damerauLevenshtein } from '../lib/fuzzy.js';
 import { terminalWidth, truncateToWidth, stringWidth, stripAnsi } from '../lib/session/width.js';
 import {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { formatFanOut } from './sessions-picker.js';
-import type { SessionMeta } from '../lib/session/types.js';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 
 /**
  * RUSH-3091/3095 regression. A REMOTE or unindexed row renders through

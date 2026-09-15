@@ -32,10 +32,10 @@ import {
   writeSessionPhenotypes,
   writeSessionTopics,
 } from '../session/db.js';
-import type { SessionAgentId, SessionMeta, SessionRunMode } from '../session/types.js';
-import { parseSession } from '../session/parse.js';
-import { buildTrajectory, type SessionTrajectory } from '../session/trajectory.js';
-import { computeInsightFacets, type InsightFacets } from '../session/insights.js';
+import type { SessionAgentId, SessionMeta, SessionRunMode } from '@phnx-labs/sessions-cli/reader';
+import { parseSession } from '@phnx-labs/sessions-cli/reader';
+import { buildTrajectory, type SessionTrajectory } from '@phnx-labs/sessions-cli/reader';
+import { computeInsightFacets, type InsightFacets } from '@phnx-labs/sessions-cli/reader';
 import { knownSecretValuesFromEnv, redactSecrets } from '../redact.js';
 import { getRuntimeStateDir } from '../state.js';
 import { resolveTracesBackend, type TracesBackend } from './backend.js';
@@ -53,7 +53,7 @@ import { computeBehavioralPatterns, computeInsights, type FailurePattern } from 
 import { classifyPhenotype, recoveredAfterErrors, type FailurePhenotype } from './phenotype.js';
 import type { LatencyInsight } from './segments.js';
 import { buildSessionDetailV2 } from './schema2-build.js';
-import type { SessionEvent } from '../session/types.js';
+import type { SessionEvent } from '@phnx-labs/sessions-cli/reader';
 
 /**
  * The per-session shard body: the schema-2 rich `ToolExecution` detail. The

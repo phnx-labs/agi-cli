@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { ActiveSession } from '../session/active.js';
-import type { DetectedPr } from '../session/state.js';
+import type { DetectedPr } from '@phnx-labs/sessions-cli/reader';
 import type { GhExec } from '../github/pr-mergeable.js';
 import type { PullRequestAttentionSignal } from './attention.js';
 

@@ -8,8 +8,8 @@ import { describe, expect, test } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { parseGrok, detectAgent } from '../parse.js';
-import { toolCallsFromEvents } from '../tool-calls.js';
+import { parseGrok, detectAgent } from '@phnx-labs/sessions-cli/reader';
+import { toolCallsFromEvents } from '@phnx-labs/sessions-cli/reader';
 
 /**
  * Build a Grok session dir (summary.json + chat_history.jsonl) and return the

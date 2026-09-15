@@ -11,7 +11,7 @@ process.env.USERPROFILE = TEST_HOME;
 
 const { upsertSession, seedLabelsFromNames, syncLabels, ftsSearch, getSessionById, findSessionsByShortIds } =
   await import('./db.js');
-type SessionMeta = import('./types.js').SessionMeta;
+type SessionMeta = import('@phnx-labs/sessions-cli/reader').SessionMeta;
 
 function meta(id: string, extra: Partial<SessionMeta> = {}): SessionMeta {
   return {

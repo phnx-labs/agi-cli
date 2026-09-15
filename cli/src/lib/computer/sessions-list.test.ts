@@ -17,7 +17,7 @@ import {
   type ComputerRunRow,
 } from './sessions-list.js';
 import { emit, query, truncate, _resetForTest } from '../feed/events.js';
-import type { SessionMeta } from '../session/types.js';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 
 function makeSession(overrides: Partial<SessionMeta> = {}): SessionMeta {
   return {

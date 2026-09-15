@@ -10,7 +10,7 @@ import {
   buildRoutineChoices,
   hasNoBrowserDisqualifyingFlags,
 } from './sessions.js';
-import type { SessionMeta } from '../lib/session/types.js';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import type { ActiveSession } from '../lib/session/active.js';
 import { describeLive, writeUpdateCache, writeClaudeSession, runAgents } from './sessions.test-fixture.js';
 

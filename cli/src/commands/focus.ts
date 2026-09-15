@@ -19,7 +19,7 @@ import chalk from 'chalk';
 import { confirm } from '@inquirer/prompts';
 import { gatherLiveTargets, pickLiveTarget, pickLiveTargets, jumpTo, probeAttachRail, refuseFallback, type AttachRailLiveness, type UnreachableFallback } from './go.js';
 import { sessionProcessIsLocal, sessionProcessHost, shortIdFromName, type ActiveSession } from '../lib/session/active.js';
-import { SESSION_AGENTS, isAgentTmuxAlias, type SessionMeta, type SessionAgentId } from '../lib/session/types.js';
+import { SESSION_AGENTS, isAgentTmuxAlias, type SessionMeta, type SessionAgentId } from '@phnx-labs/sessions-cli/reader';
 import { attachLocalLiveSelector } from '../lib/session/local-tmux-attach.js';
 export { looksLikeTmuxAlias, resolveTmuxAliasState, shouldAttachLocalTmuxAliasBeforeFleet, type TmuxAliasState } from '../lib/session/local-tmux-attach.js';
 import {

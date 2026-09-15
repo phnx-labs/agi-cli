@@ -32,7 +32,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { spawnSync } from 'child_process';
 import { randomUUID } from 'crypto';
-import { isSessionTrackedAgent } from '../lib/session/types.js';
+import { isSessionTrackedAgent } from '@phnx-labs/sessions-cli/reader';
 import { applyActiveRulesPresetAtRun } from '../lib/rules/run-sync.js';
 import { applySystemResourcesAtRun } from '../lib/system-run-sync.js';
 import { handleBroadcast } from './run-broadcast.js';
@@ -1397,7 +1397,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         process.exit(1);
       }
       let autoHarnessRequested = normalizedAgentSpec === RUN_AUTO_KEYWORD;
-      let resolvedResumeSource: import('../lib/session/types.js').SessionMeta | undefined;
+      let resolvedResumeSource: import('@phnx-labs/sessions-cli/reader').SessionMeta | undefined;
       let resolvedRecoveryTarget: import('../lib/session/recovery.js').SessionRecoveryTarget | undefined;
 
       // Concrete resume ids resolve BEFORE placement. Full UUIDs take the local
@@ -1409,7 +1409,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         const injectedSource = (() => {
           try {
             const parsed = JSON.parse(process.env.AGENTS_RESUME_SOURCE_JSON ?? 'null');
-            return parsed?.id === selector ? parsed as import('../lib/session/types.js').SessionMeta : undefined;
+            return parsed?.id === selector ? parsed as import('@phnx-labs/sessions-cli/reader').SessionMeta : undefined;
           } catch {
             return undefined;
           }

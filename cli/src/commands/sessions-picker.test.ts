@@ -30,9 +30,8 @@ import {
 } from './sessions-picker.js';
 import { stringWidth } from '../lib/session/width.js';
 import { limitPreviewHeight, pickerPageSize, PREVIEW_MIN_ROWS } from '../lib/picker.js';
-import { _resetLinearWorkspaceCache } from '../lib/session/linear.js';
 import { machineId } from '../lib/session/sync/config.js';
-import type { SessionEvent, SessionMeta, TodoProgress } from '../lib/session/types.js';
+import type { SessionEvent, SessionMeta, TodoProgress } from '@phnx-labs/sessions-cli/reader';
 import { hostSessionMeta } from '../lib/hosts/session-index.js';
 import type { HostTask } from '../lib/hosts/tasks.js';
 
@@ -276,13 +275,11 @@ describe('relativizeDir — readable Dirs line', () => {
 describe('buildPreview — ticket + PR links line', () => {
   const savedEnv = process.env.LINEAR_WORKSPACE;
   beforeEach(() => {
-    _resetLinearWorkspaceCache();
     process.env.LINEAR_WORKSPACE = 'acme';
   });
   afterEach(() => {
     if (savedEnv === undefined) delete process.env.LINEAR_WORKSPACE;
     else process.env.LINEAR_WORKSPACE = savedEnv;
-    _resetLinearWorkspaceCache();
   });
 
   it('shows the custom-harness name in the preview header, not the host (PHNX-2935)', () => {

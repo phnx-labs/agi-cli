@@ -19,7 +19,7 @@
 // a genuinely local row renders the header + a "not indexed here" note.
 
 import { deriveShortId } from '../text/short-id.js';
-import { isSessionTrackedAgent, type SessionMeta } from './types.js';
+import { isSessionTrackedAgent, type SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import type { ActiveSession } from './active.js';
 
 /**

@@ -39,12 +39,12 @@ import { loadHookSessionIndex, resolveHookSessionRecord, readStateSessionRecord,
 import { buildClaudeLabelMap, getAgentSessionDirs } from './discover.js';
 import { buildRunNameMap } from './run-names.js';
 import { latestSessionFileForCwd, findSessionsByShortIds, findSessionMachinesByIds, getSessionById } from './db.js';
-import { extractSessionTopic, classifyUserPrompt, tidyRequest, type UserPromptKind } from './prompt.js';
-import { readSessionTailWithRaw } from './tail.js';
-import { parseSession } from './parse.js';
+import { extractSessionTopic, classifyUserPrompt, tidyRequest, type UserPromptKind } from '@phnx-labs/sessions-cli/reader';
+import { readSessionTailWithRaw } from '@phnx-labs/sessions-cli/reader';
+import { parseSession } from '@phnx-labs/sessions-cli/reader';
 import { computeTokPerSec } from './throughput.js';
-import { inferSessionState, type SessionState, type SessionActivity, type AwaitingReason, type StructuredQuestion, type TodoProgress, type DetectedPr, type DetectedWorktree, type DetectedTicket } from './state.js';
-import { isSessionTrackedAgent, SESSION_AGENTS, AG_TMUX_NAME_RE, type SessionAgentId, type SessionAttachment, type SessionEvent, type SessionFiles, type SessionMeta, type SessionRequest, type SessionTimeline } from './types.js';
+import { inferSessionState, type SessionState, type SessionActivity, type AwaitingReason, type StructuredQuestion, type TodoProgress, type DetectedPr, type DetectedWorktree, type DetectedTicket } from '@phnx-labs/sessions-cli/reader';
+import { isSessionTrackedAgent, SESSION_AGENTS, AG_TMUX_NAME_RE, type SessionAgentId, type SessionAttachment, type SessionEvent, type SessionFiles, type SessionMeta, type SessionRequest, type SessionTimeline } from '@phnx-labs/sessions-cli/reader';
 import { AGENTS } from '../agents.js';
 import { confirmedProjectForCwd, listProjectDefsCached } from '../projects.js';
 import { detectProvenance, type SessionProvenance } from './provenance.js';
@@ -53,7 +53,7 @@ import { machineId, normalizeHost } from '../machine-id.js';
 import { presenceFromStore, type Presence } from './detached.js';
 import { classifyHostLink, hostWindowLost, HOST_HEARTBEAT_STALE_MS, type HostLink } from './host-link.js';
 import { mapBounded } from '../concurrency.js';
-import { linearIssueUrl } from './linear.js';
+import { linearIssueUrl } from '@phnx-labs/sessions-cli/reader';
 import { viewingInLabel } from './viewing-in.js';
 import { claudeProjectDirName } from '../project-key.js';
 
@@ -511,7 +511,7 @@ export interface ActiveSession {
   /** Number of subagents launched, persisted by the index scanner. */
   subAgentCount?: number;
   /** Durable documents created in the live transcript tail. */
-  artifacts?: import('./highlights.js').ProducedArtifact[];
+  artifacts?: import('@phnx-labs/sessions-cli/reader').ProducedArtifact[];
   /** Created plan document singled out for plan-first consumers. */
   planFile?: string;
   sessionFile?: string;
@@ -745,11 +745,11 @@ export interface ActiveSession {
    */
   goal?: string;
   /** Daemon-computed progress checkpoints, newest last (PHNX-3939). */
-  checkpoints?: import('./types.js').SessionCheckpoint[];
+  checkpoints?: import('@phnx-labs/sessions-cli/reader').SessionCheckpoint[];
   /** Daemon-computed detailed checklist for the session (PHNX-3939). */
-  summaryChecklist?: import('./types.js').SessionChecklistItem[];
+  summaryChecklist?: import('@phnx-labs/sessions-cli/reader').SessionChecklistItem[];
   /** Lifecycle of the daemon-computed summary; `skipped` when disabled (PHNX-3939). */
-  summaryState?: import('./types.js').SummaryState;
+  summaryState?: import('@phnx-labs/sessions-cli/reader').SummaryState;
 }
 
 export function activeStatusFromCloudStatus(status: CloudTaskStatus): ActiveStatus {

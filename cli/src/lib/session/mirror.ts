@@ -27,7 +27,7 @@ import {
   type SessionMirrorRow,
 } from '../fleet-shared-state.js';
 import { getUserAgentsDir } from '../state.js';
-import type { SessionFileChange, SessionFiles, SessionRequest, SessionStep, SessionTimeline, SessionVerbClass } from './types.js';
+import type { SessionFileChange, SessionFiles, SessionRequest, SessionStep, SessionTimeline, SessionVerbClass } from '@phnx-labs/sessions-cli/reader';
 import { machineId, normalizeHost } from './sync/config.js';
 import {
   pruneMirrorSessions,

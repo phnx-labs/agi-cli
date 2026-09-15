@@ -7,10 +7,10 @@ import { describe, expect, test } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { parseKimi, detectAgent, parseSession, summarizeToolUse } from '../parse.js';
+import { parseKimi, detectAgent, parseSession, summarizeToolUse } from '@phnx-labs/sessions-cli/reader';
 import { readKimiMeta } from '../discover.js';
-import { extractTodoProgressFromEvents } from '../state.js';
-import { toolCallsFromEvents } from '../tool-calls.js';
+import { extractTodoProgressFromEvents } from '@phnx-labs/sessions-cli/reader';
+import { toolCallsFromEvents } from '@phnx-labs/sessions-cli/reader';
 
 /** A Kimi session dir whose state.json omits BOTH createdAt and updatedAt. */
 function makeKimiStateNoTimestamps(): string {

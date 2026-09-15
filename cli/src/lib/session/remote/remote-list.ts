@@ -35,7 +35,7 @@ import { NO_FANOUT_ENV } from '../remote-active.js';
 import { terminalWidth } from '../../text/width.js';
 import { sanitizeForTerminal } from '../../redact.js';
 import { mapBounded } from '../../concurrency.js';
-import type { SessionMeta } from '../types.js';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import {
   TOOL_QUERY_MAX_CLAUSE_BYTES,
   TOOL_QUERY_MAX_CALL_ROWS,
@@ -53,7 +53,7 @@ import {
   TOOL_INPUT_MAX_BYTES,
   TOOL_SUCCESS_OUTPUT_MAX_BYTES,
   sanitizeToolEvidenceText,
-} from '../tool-calls.js';
+} from '@phnx-labs/sessions-cli/reader';
 
 const REMOTE_TOOL_TIMEOUT_MS = 60_000;
 // The per-peer stdout ceiling and the UTF-8-safe accumulator live in ssh-exec.ts

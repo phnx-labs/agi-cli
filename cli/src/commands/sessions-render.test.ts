@@ -4,7 +4,7 @@ import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { describe, expect, it } from 'vitest';
 import Database from '../lib/sqlite.js';
-import type { SessionAgentId, SessionMeta } from '../lib/session/types.js';
+import type { SessionAgentId, SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import { MARKDOWN_RENDER_AGENTS, renderSessionMarkdownDocument } from './sessions-render.js';
 
 const TESTDATA = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../lib/session/testdata/render');
