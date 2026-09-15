@@ -741,7 +741,7 @@ export type SpawnAccount =
 function discoverUnregisteredNativeAccount(
   email: string,
   agent: AgentId,
-): SpawnAccount | null {
+): NativeAccount | null {
   if (agent !== 'claude') return null;
   const needle = email.toLowerCase();
   for (const label of listInstalledVersions(agent)) {
@@ -796,8 +796,7 @@ export function resolveSpawnAccount(
   // into, and only this one can authenticate the spawn.
   let unified = findUnifiedAccount(selection.id, meta, undefined, agent);
   if (!unified && selection.source === 'explicit' && selection.id.includes('@')) {
-    const discovered = discoverUnregisteredNativeAccount(selection.id, agent);
-    if (discovered) return discovered;
+    unified = discoverUnregisteredNativeAccount(selection.id, agent);
   }
   if (!unified) {
     // A stale per-harness default is a preference, not a hard requirement: the

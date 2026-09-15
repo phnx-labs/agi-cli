@@ -12,7 +12,8 @@ import {
   writeBundleWithItemsSync,
 } from './secrets-client.js';
 import { standaloneKeychainIsFileBacked, useFreshSecretsHome } from '../../tests/secrets-standalone.js';
-import { readMeta, updateMeta, getUserAgentsDir, getDeviceMetaPath } from './state.js';
+import { readMeta, updateMeta, getUserAgentsDir, getDeviceMetaPath, getVersionsDir } from './state.js';
+import { invalidateInstalledVersionsCache } from './installations/store.js';
 import {
   addAccount,
   addNativeAccount,
@@ -741,6 +742,72 @@ describe('native account device-scoping (PHNX-3315)', () => {
       workerCredential: { bundle: '__claude__', kind: 'setup-token' },
     });
     removeAccount('relabeled');
+  });
+});
+
+describe('discoverUnregisteredNativeAccount fallback (resolveSpawnAccount)', () => {
+  const testVersionLabel = `test-unregistered-${process.pid}`;
+  let versionHome: string;
+  let root: string;
+
+  beforeEach(() => {
+    const versionDir = path.join(getVersionsDir(), 'claude', testVersionLabel);
+    versionHome = path.join(versionDir, 'home');
+    // Plant a .claude.json identity in the version home.
+    fs.mkdirSync(path.join(versionHome, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(versionHome, '.claude', '.claude.json'), JSON.stringify({
+      oauthAccount: {
+        emailAddress: 'test-discover@example.com',
+        accountUuid: 'acct-uuid-test',
+        organizationUuid: 'org-uuid-test',
+      },
+    }));
+    // Plant a minimal npm package so isVersionInstalled recognises this version.
+    const pkgDir = path.join(versionDir, 'node_modules', '@anthropic-ai', 'claude-code');
+    fs.mkdirSync(path.join(pkgDir, 'bin'), { recursive: true });
+    fs.writeFileSync(path.join(pkgDir, 'package.json'), JSON.stringify({ bin: { claude: 'bin/claude.js' } }));
+    fs.writeFileSync(path.join(pkgDir, 'bin', 'claude.js'), '');
+    invalidateInstalledVersionsCache('claude');
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-discover-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+    const versionDir = path.join(getVersionsDir(), 'claude', testVersionLabel);
+    fs.rmSync(versionDir, { recursive: true, force: true });
+    invalidateInstalledVersionsCache('claude');
+  });
+
+  it('discovers an unregistered native account when the email matches a version home identity', () => {
+    // Empty native registry — the pre-fix code would throw "Unknown account".
+    const meta = { accounts: { native: {} } };
+    const result = resolveSpawnAccount('test-discover@example.com', 'claude', '2.1.260', meta, { base: root });
+    expect(result).toMatchObject({ kind: 'native', name: 'test-discover@example.com', agent: 'claude' });
+  });
+
+  it('is case-insensitive on the email match', () => {
+    const meta = { accounts: { native: {} } };
+    const result = resolveSpawnAccount('Test-Discover@Example.COM', 'claude', '2.1.260', meta, { base: root });
+    expect(result).toMatchObject({ kind: 'native', name: 'Test-Discover@Example.COM' });
+  });
+
+  it('rejects a discovered native account on a provider-backed harness', () => {
+    const meta = { accounts: { native: {} } };
+    expect(() => resolveSpawnAccount('test-discover@example.com', 'claude', '2.1.260', meta, { base: root, provider: 'openrouter' }))
+      .toThrow('cannot run under a provider-backed harness (openrouter)');
+  });
+
+  it('returns null for a non-claude agent even when the email would match', () => {
+    // discoverUnregisteredNativeAccount only supports claude.
+    const meta = { accounts: { native: {} } };
+    expect(() => resolveSpawnAccount('test-discover@example.com', 'codex', '0.146.0', meta, { base: root }))
+      .toThrow("Unknown account 'test-discover@example.com'");
+  });
+
+  it('still throws for a non-@ selector that is not in the registry', () => {
+    const meta = { accounts: { native: {} } };
+    expect(() => resolveSpawnAccount('work', 'claude', '2.1.260', meta, { base: root }))
+      .toThrow("Unknown account 'work'");
   });
 });
 
