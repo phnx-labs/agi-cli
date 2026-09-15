@@ -21,8 +21,7 @@ import { formatBytes } from '../format.js';
 export { formatBytes };
 import * as path from 'path';
 
-import { getBrowserRuntimeDir, getProfileRuntimeDir } from './profiles.js';
-import { listProfileCacheDirs } from './runtime-state.js';
+import { getBrowserRuntimeDir, getProfileRuntimeDir, listProfileCacheDirs } from './paths.js';
 import { formatRelativeTime } from '../session/relative-time.js';
 import type { SessionMeta } from '../session/types.js';
 import { getSessionById, listBrowserSessionRecords, pruneToolSessions } from '../session/db.js';

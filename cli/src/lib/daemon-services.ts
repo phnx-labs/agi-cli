@@ -18,7 +18,6 @@ export type DaemonServiceId =
   | 'scheduler'
   | 'catchup'
   | 'monitors'
-  | 'browser-ipc'
   | 'webhook-receiver'
   | 'self-heal'
   | 'self-update'
@@ -33,7 +32,6 @@ export type DaemonServiceId =
   | 'usage-sync'
   | 'daemon-heartbeat'
   | 'tmux-reap'
-  | 'browser-task-reap'
   | 'session-state'
   | 'feed-stream'
   | 'session-summarizer'
@@ -62,11 +60,6 @@ export const DAEMON_SERVICES: DaemonServiceDef[] = [
     id: 'monitors',
     title: 'Monitor engine',
     description: 'Watches event sources and triggers monitor-driven routines.',
-  },
-  {
-    id: 'browser-ipc',
-    title: 'Browser IPC',
-    description: 'Keeps a supervised browser automation IPC socket available for sessions.',
   },
   {
     id: 'webhook-receiver',
@@ -117,11 +110,6 @@ export const DAEMON_SERVICES: DaemonServiceDef[] = [
     id: 'tmux-reap',
     title: 'Tmux reap',
     description: 'Reaps dead managed tmux sessions and their orphaned helper processes.',
-  },
-  {
-    id: 'browser-task-reap',
-    title: 'Browser task reap',
-    description: 'Closes abandoned browser-task tabs whose owner exited or idle lease expired.',
   },
   {
     id: 'session-state',

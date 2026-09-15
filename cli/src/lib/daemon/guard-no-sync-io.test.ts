@@ -146,10 +146,6 @@ describe('daemon tick call sites use the async, non-blocking helper variants', (
     expect(read('usage-sync-service.ts')).toMatch(/await publishReservedAuthVerdict\(/);
   });
 
-  it('browser-task-reap tick awaits the async idle-config read', () => {
-    expect(read('browser-task-reap-service.ts')).toMatch(/await resolveBrowserTaskIdleMs\(/);
-  });
-
   it('heartbeat tick uses the async run reaper, not the sync monitorRunningJobs', () => {
     const src = read('heartbeat-service.ts');
     expect(src).toMatch(/await reapExitedRunningJobs\(/);

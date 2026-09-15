@@ -22,30 +22,27 @@ import { DAEMON_SERVICE_IDS } from '../lib/daemon-services.js';
 const describeDaemon = DAEMON_TESTS_SUPPORTED ? describe : describe.skip;
 
 describeDaemon('agents daemon — services, broker, webhooks', () => {
-  it('services --json reports the browser-ipc socket path and a reachability-only secrets-broker probe', () => {
+  it('services --json reports a reachability-only secrets-broker probe', () => {
     const res = run(makeHome(), ['services', '--json']);
     expect(res.status).toBe(0);
     const payload = JSON.parse(res.stdout);
-    // Pinned: existing agents/CI consumers read these two fields directly —
-    // RUSH-3193 P4 must only ADD a `services` array alongside them.
-    // secretsBroker.socketPath is always null now (PHNX-3989 OWN-1): the
-    // daemon no longer hosts that broker, only probes its reachability.
+    // Pinned: existing agents/CI consumers read this field directly.
+    // secretsBroker.socketPath is always null now (PHNX-3989 OWN-1): the daemon
+    // no longer hosts that broker, only probes its reachability. The browserIpc
+    // field is gone with the standalone browser CLI (PHNX-4101).
     expect(payload.secretsBroker.reachable).toBe(false);
     expect(payload.secretsBroker.socketPath).toBeNull();
-    expect(payload.browserIpc.bound).toBe(false);
-    expect(typeof payload.browserIpc.socketPath).toBe('string');
+    expect(payload.browserIpc).toBeUndefined();
   });
   it('services --json additionally reports every registered service with health, live or inferred', () => {
     const res = run(makeHome(), ['services', '--json']);
     expect(res.status).toBe(0);
     const payload = JSON.parse(res.stdout) as {
       secretsBroker: unknown;
-      browserIpc: unknown;
       services: Array<{ id: string; enabled: boolean; state: string; supervised: boolean; consecutiveFailures: number }>;
     };
-    // Old fields still present (pinned above), new field additive.
+    // Old field still present (pinned above), new field additive.
     expect(payload.secretsBroker).toBeDefined();
-    expect(payload.browserIpc).toBeDefined();
     expect(Array.isArray(payload.services)).toBe(true);
     // No daemon has ever run in this HOME, so every service is "stopped" and
     // none has a real supervisor-reported state yet.
@@ -62,7 +59,7 @@ describeDaemon('agents daemon — services, broker, webhooks', () => {
     expect(res.status).toBe(0);
     expect(res.stdout).toContain('Daemon services');
     expect(res.stdout).toContain('session-index');
-    expect(res.stdout).toContain('browser-ipc');
+    expect(res.stdout).toContain('monitors');
     expect(res.stdout).toContain('Hosted sockets');
   });
   it('services restart rejects an unknown service id and a not-running daemon', () => {
@@ -79,7 +76,7 @@ describeDaemon('agents daemon — services, broker, webhooks', () => {
   it('services list shows every service enabled by default', () => {
     const res = run(makeHome(), ['services', 'list']);
     expect(res.status).toBe(0);
-    expect(res.stdout).toContain('browser-ipc');
+    expect(res.stdout).toContain('monitors');
     expect(res.stdout).toContain('scheduler');
     expect(res.stdout).toContain('enabled');
   });
@@ -119,30 +116,30 @@ describeDaemon('agents daemon — services, broker, webhooks', () => {
   });
   it('services disable writes the config and services list reflects it', () => {
     const home = makeHome();
-    const disable = run(home, ['services', 'disable', 'browser-ipc']);
+    const disable = run(home, ['services', 'disable', 'monitors']);
     expect(disable.status).toBe(0);
-    expect(disable.stdout).toContain("Disabled 'browser-ipc'");
+    expect(disable.stdout).toContain("Disabled 'monitors'");
 
     const list = run(home, ['services', 'list', '--json']);
     expect(list.status).toBe(0);
     const services = JSON.parse(list.stdout) as Array<{ id: string; enabled: boolean }>;
-    const browserIpcSvc = services.find((s) => s.id === 'browser-ipc');
-    expect(browserIpcSvc).toBeDefined();
-    expect(browserIpcSvc!.enabled).toBe(false);
+    const monitorsSvc = services.find((s) => s.id === 'monitors');
+    expect(monitorsSvc).toBeDefined();
+    expect(monitorsSvc!.enabled).toBe(false);
 
     const cfgPath = path.join(home, '.agents', 'daemon', 'services.yaml');
-    expect(fs.readFileSync(cfgPath, 'utf-8')).toContain('browser-ipc: false');
+    expect(fs.readFileSync(cfgPath, 'utf-8')).toContain('monitors: false');
   });
   it('services enable re-enables a disabled service', () => {
     const home = makeHome();
-    run(home, ['services', 'disable', 'browser-ipc']);
-    const enable = run(home, ['services', 'enable', 'browser-ipc']);
+    run(home, ['services', 'disable', 'monitors']);
+    const enable = run(home, ['services', 'enable', 'monitors']);
     expect(enable.status).toBe(0);
-    expect(enable.stdout).toContain("Enabled 'browser-ipc'");
+    expect(enable.stdout).toContain("Enabled 'monitors'");
 
     const list = run(home, ['services', 'list', '--json']);
     const services = JSON.parse(list.stdout) as Array<{ id: string; enabled: boolean }>;
-    expect(services.find((s) => s.id === 'browser-ipc')!.enabled).toBe(true);
+    expect(services.find((s) => s.id === 'monitors')!.enabled).toBe(true);
   });
   it('services enable|disable reject unknown service ids', () => {
     const home = makeHome();

@@ -122,7 +122,7 @@ describe('runDaemon() supervisor wiring (integration: real daemon subprocess)', 
   // checks the composed set rather than isolated wrapper stand-ins.
   const PERIODIC_SERVICE_IDS = [
     'watchdog', 'device-probe', 'self-heal', 'state-dir-check',
-    'session-state', 'daemon-heartbeat', 'tmux-reap', 'browser-task-reap',
+    'session-state', 'daemon-heartbeat', 'tmux-reap',
     // PHNX-3608: catch-up recovery is a supervised service now. Its first tick
     // fires during startAll and reads `scheduler`; a real boot here is what
     // catches a TDZ/ordering regression that unit-testing the class can't.
@@ -136,10 +136,10 @@ describe('runDaemon() supervisor wiring (integration: real daemon subprocess)', 
   // real daemon boot.
   const ALL_SUPERVISED_SERVICE_IDS = [
     'session-state', 'monitors', 'account-state',
-    'account-auth', 'catchup', 'browser-ipc', 'session-index', 'watchdog',
+    'account-auth', 'catchup', 'session-index', 'watchdog',
     'device-probe', 'self-heal', 'self-update', 'auth-sync',
     'usage-sync', 'webhook-receiver', 'daemon-heartbeat', 'tmux-reap',
-    'browser-task-reap', 'state-dir-check', 'attention-notify',
+    'state-dir-check', 'attention-notify',
   ] as const;
 
   it('registers every supervised service during a real daemon boot', async () => {
@@ -235,7 +235,6 @@ describe('runDaemon() supervisor wiring (integration: real daemon subprocess)', 
         'Live session-state service disabled',
         'Daemon heartbeat service disabled',
         'Tmux reap service disabled',
-        'Browser-task reap service disabled',
         'Catch-up recovery service disabled',
       ];
       let sawAll = false;

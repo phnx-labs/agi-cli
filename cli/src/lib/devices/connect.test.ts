@@ -11,7 +11,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildAskpassShimBody, buildInteractiveShellCommand, buildSshInvocation, deviceIdentityArgs, fleetDialTarget, isAgentsBrowserDrive, markFleetRemote, sshTargetFor, wrapRemoteCommand, ASKPASS_BUNDLE_ENV, ASKPASS_KEY_ENV, ASKPASS_AGENT_ONLY_ENV } from './connect.js';
 import type { DeviceProfile } from './registry.js';
-import { assertRemoteControlAllowed } from '../browser/remote-control.js';
 import { decodeRenderedPowershell } from '../hosts/remote-cmd.test-fixture.js';
 
 const decodePowerShell = decodeRenderedPowershell;
@@ -329,12 +328,12 @@ describe('buildSshInvocation — fleet-remote consent marker (PHNX-3065)', () =>
     const remote = args[args.length - 1] as string;
     const stamped = remote.match(/^env AGENTS_FLEET_REMOTE=(\S+) /);
     expect(stamped?.[1]).toBe('1');
-    expect(() =>
-      assertRemoteControlAllowed({ env: { AGENTS_FLEET_REMOTE: stamped![1] }, enabled: false }),
-    ).toThrow(/remote browser control is off/);
+    // The far-side consent gate is browser-cli's now (PHNX-4101): it reads the
+    // resolved remote-control flag from the fd-3 context. connect.ts's job is to
+    // STAMP the marker, which is what this asserts.
   });
 
-  it('without the marker the gate no-ops — that is the bypass this closes', () => {
+  it('without the marker the far side is not a fleet-remote drive', () => {
     const { args } = buildSshInvocation(
       dev({ name: 'peer', user: 'me', auth: { method: 'key' } }),
       ['uptime'],
@@ -342,7 +341,6 @@ describe('buildSshInvocation — fleet-remote consent marker (PHNX-3065)', () =>
     );
     expect(args[args.length - 1]).toBe('uptime');
     expect(args[args.length - 1]).not.toContain('AGENTS_FLEET_REMOTE');
-    expect(() => assertRemoteControlAllowed({ env: {}, enabled: false })).not.toThrow();
   });
 
   it('marks the ag alias and the quoted single-string form', () => {
@@ -371,9 +369,6 @@ describe('buildSshInvocation — fleet-remote consent marker (PHNX-3065)', () =>
     ).args.at(-1) as string;
     const stamped = remote.match(/^env AGENTS_FLEET_REMOTE=(\S+) /);
     expect(stamped?.[1]).toBe('1');
-    expect(() =>
-      assertRemoteControlAllowed({ env: { AGENTS_FLEET_REMOTE: stamped![1] }, enabled: false }),
-    ).toThrow(/remote browser control is off/);
   });
 
   it('does not mark agents sessions or an interactive login', () => {

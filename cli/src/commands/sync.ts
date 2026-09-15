@@ -37,8 +37,6 @@ import chalk from 'chalk';
 import { resolveSyncPassphraseFromEnv } from '../lib/sync-passphrase.js';
 import { agentLabel, resolveAgentName, MANAGED_AGENT_IDS, isAgentHardDeprecated, hardDeprecationError } from '../lib/agents.js';
 import type { AgentId } from '../lib/types.js';
-import { autoEvictCentralBrowserProfiles } from '../lib/browser/registry.js';
-import { shouldAutoClaimCentralProfile } from '../lib/browser/profiles.js';
 import {
   isVersionInstalled,
   syncResourcesToVersion,
@@ -497,12 +495,9 @@ async function runInteractiveReconcile(
     } else outLog(chalk.yellow(`  ! ${repo}: ${(res.error ?? 'pull failed').split('\n')[0]}`));
   }
 
-  // Drain the legacy central `browser:` tombstone now that the repos are pulled.
-  // Running AFTER the pull is load-bearing: it acts on a view of central that
-  // already reflects peers' drains, so it never re-claims a profile another box
-  // already migrated (which would flip that profile's kind identity->fungible).
-  // The interactive path is always non-quiet, non-json.
-  evictCentralBrowserProfilesForSync(false, false, outLog, errLog);
+  // Central browser-profile claiming is the standalone `browser` CLI's now
+  // (PHNX-4101): `browser profiles claim` / `browser profiles prune` own it.
+  // agents-cli no longer evicts central `browser:` tombstones on sync.
 
   // 2. One selection spanning the chosen repos.
   const selection = mergeRepoScopedSelections(repos, cwd);
@@ -546,45 +541,6 @@ async function runInteractiveReconcile(
   const umbrellaRepair = await repairAfterSync({ cwd, pruneClis: !!opts.pruneClis });
   renderRepairAfterSync(umbrellaRepair, outLog);
   if (repairHadFailures(umbrellaRepair)) process.exitCode = 1;
-}
-
-/**
- * Drain the legacy central `browser:` tombstone during `agents sync` (PHNX-3315).
- * New profiles write the per-device doc, but profiles created before the
- * device-scoped store lingered in the shared top-level `agents.yaml` and churned
- * every fleet pull until someone ran `agents browser profiles claim` by hand.
- * Fold the ones THIS box can host into its device doc — host-gated, and the
- * selection is computed under the meta lock (see autoEvictCentralBrowserProfiles)
- * so it never races itself. Callers MUST invoke this AFTER the repo pull: acting
- * on a pre-pull view of central risks re-claiming a profile a peer already
- * drained, which would flip its kind identity->fungible. Non-fatal so a hiccup
- * can never wedge the sync.
- */
-function evictCentralBrowserProfilesForSync(
-  quiet: boolean,
-  json: boolean,
-  outLog: (msg: string) => void,
-  errLog: (msg: string) => void,
-): void {
-  try {
-    // Auto-claim ONLY remote (ssh://) tombstones — they are fungible by design,
-    // so a concurrent cross-machine double-claim is harmless. Local/cdp profiles
-    // have no per-machine ownership signal and are left central for an explicit
-    // `agents browser profiles claim` (PHNX-3315 review). See
-    // shouldAutoClaimCentralProfile.
-    const result = autoEvictCentralBrowserProfiles(shouldAutoClaimCentralProfile);
-    if (!quiet && !json && result.claimed.length > 0) {
-      outLog(
-        chalk.gray(
-          `  Claimed ${result.claimed.length} central browser profile(s) into this device: ${result.claimed.join(', ')}`,
-        ),
-      );
-    }
-  } catch (err) {
-    if (!quiet && !json) {
-      errLog(chalk.yellow(`  ! browser profile eviction skipped: ${(err as Error).message}`));
-    }
-  }
 }
 
 /**
@@ -672,11 +628,9 @@ async function runUmbrella(
       log: (msg) => { if (!quiet && !json) outLog(chalk.gray(`  ${msg}`)); },
     });
 
-    // Drain the legacy central `browser:` tombstone AFTER the umbrella pull, so
-    // we act on central as converged by this sync rather than a stale pre-pull
-    // copy that could re-claim a profile a peer already migrated. Skipped under
-    // --cloud (fetch-only, no local reconcile).
-    if (!opts.cloud && !kindSelection) evictCentralBrowserProfilesForSync(quiet, json, outLog, errLog);
+    // Central browser-profile claiming moved to the standalone `browser` CLI
+    // (PHNX-4101: `browser profiles claim` / `prune`), so `agents sync` no longer
+    // drains the central `browser:` tombstone.
 
     // Post-reconcile verification (PHNX-3186): re-read every version the reconcile
     // wrote into and confirm it now matches source. Without this the umbrella

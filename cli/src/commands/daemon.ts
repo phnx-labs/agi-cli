@@ -2,11 +2,12 @@
  * `agents daemon` — runtime, hosted services, and failure visibility for the
  * always-on daemon (RUSH-2354).
  *
- * The daemon holds the routines scheduler, the browser IPC server, and the
+ * The daemon holds the routines scheduler, the session/usage sync, and the
  * watchdog pass — but until this command group existed it had no user-facing
  * surface: no way to see it, restart it, or turn it off. The secrets broker
  * moved out of this daemon entirely with the standalone `secrets` engine
- * (PHNX-3989 OWN-1); `agents daemon status` only probes its reachability.
+ * (PHNX-3989 OWN-1), and the browser IPC server with the standalone `browser`
+ * CLI (PHNX-4101); `agents daemon status` only probes the broker's reachability.
  * `daemon.ts` (the runtime) has always implemented every mechanism this file
  * wires up; nothing here is new machinery, only the missing CLI surface.
  *
@@ -41,7 +42,6 @@ import { getConfigValue, setConfigValue, isDaemonEnabled } from '../lib/device-c
 import {
   readSubsystemHealth,
   readAllSubsystemHealth,
-  SUBSYSTEM_BROWSER_IPC,
   SUBSYSTEM_DAEMON_START,
   type SubsystemHealth,
 } from '../lib/daemon-health.js';
@@ -372,22 +372,6 @@ async function probeSecretsBroker(): Promise<SecretsBrokerHealth> {
   }
 }
 
-interface BrowserIpcHealth {
-  bound: boolean;
-  socketPath: string;
-  sessionCount: number;
-  record: SubsystemHealth | null;
-}
-
-async function probeBrowserIPC(): Promise<BrowserIpcHealth> {
-  const record = readSubsystemHealth(SUBSYSTEM_BROWSER_IPC);
-  const { isBrowserServiceReachable, getSocketPath } = await import('../lib/browser/ipc.js');
-  const { listAllProfileSnapshots } = await import('../lib/browser/runtime-state.js');
-  const bound = await isBrowserServiceReachable();
-  const sessionCount = listAllProfileSnapshots().filter((s) => s.pidAlive && s.daemonAlive).length;
-  return { bound, socketPath: getSocketPath(), sessionCount, record };
-}
-
 // ─── Scheduler summary (routine count / next fire / failing count) ──────────
 
 interface SchedulerSummary {
@@ -466,7 +450,7 @@ async function runStatus(opts: { json?: boolean }): Promise<void> {
   const stale = staleTiers.visible;
   const ownerEntryGone = owner ? entryIsGone(owner) : false;
 
-  const [secrets, browserIpc] = await Promise.all([probeSecretsBroker(), probeBrowserIPC()]);
+  const secrets = await probeSecretsBroker();
   const scheduler = schedulerSummary();
 
   if (opts.json) {
@@ -497,12 +481,6 @@ async function runStatus(opts: { json?: boolean }): Promise<void> {
           socketPath: secrets.socketPath,
           heldBundles: secrets.heldBundles,
           health: secrets.record,
-        },
-        browserIpc: {
-          bound: browserIpc.bound,
-          socketPath: browserIpc.socketPath,
-          sessionCount: browserIpc.sessionCount,
-          health: browserIpc.record,
         },
       },
       scheduler: {
@@ -567,7 +545,6 @@ async function runStatus(opts: { json?: boolean }): Promise<void> {
 
   console.log(chalk.bold('\nHealth\n'));
   console.log(healthLine(`secrets broker  ${secrets.reachable ? `(${secrets.socketPath}, ${secrets.heldBundles} bundle(s) held)` : '(unreachable)'}`, secrets.reachable, secrets.record));
-  console.log(healthLine(`browser IPC     ${browserIpc.bound ? `(${browserIpc.socketPath}, ${browserIpc.sessionCount} session(s))` : '(unbound)'}`, browserIpc.bound, browserIpc.record));
 
   const schedulerEnabled = getConfigValue('scheduler.enabled').value !== false;
   console.log(`  ${schedulerEnabled ? chalk.green('enabled') : chalk.yellow('disabled')}  scheduler — ${scheduler.enabledCount}/${scheduler.routineCount} routine(s) enabled` +
@@ -647,13 +624,12 @@ function serviceStateLabel(state: string): string {
 }
 
 async function runServices(opts: { json?: boolean }): Promise<void> {
-  const [secrets, browserIpc] = await Promise.all([probeSecretsBroker(), probeBrowserIPC()]);
+  const secrets = await probeSecretsBroker();
   const rows = buildServiceRows(isDaemonRunning());
   if (opts.json) {
     console.log(JSON.stringify({
       // Existing fields — unchanged shape, agents/CI consume these directly.
       secretsBroker: { reachable: secrets.reachable, socketPath: secrets.socketPath, heldBundles: secrets.heldBundles, health: secrets.record },
-      browserIpc: { bound: browserIpc.bound, socketPath: browserIpc.socketPath, sessionCount: browserIpc.sessionCount, health: browserIpc.record },
       // Additive: every registered service, supervised or legacy.
       services: rows,
     }, null, 2));
@@ -670,7 +646,6 @@ async function runServices(opts: { json?: boolean }): Promise<void> {
   }
   console.log(chalk.bold('\nHosted sockets\n'));
   console.log(healthLine(`secrets broker  ${secrets.reachable ? `(${secrets.socketPath}, ${secrets.heldBundles} bundle(s) held)` : '(unreachable)'}`, secrets.reachable, secrets.record));
-  console.log(healthLine(`browser IPC     ${browserIpc.bound ? `(${browserIpc.socketPath}, ${browserIpc.sessionCount} session(s))` : '(unbound)'}`, browserIpc.bound, browserIpc.record));
   console.log(chalk.gray('\nScheduled routines run through `agents routines` — see: agents routines stats'));
   console.log(chalk.gray('agents daemon services enable|disable|restart <id> apply live for supervised services.'));
 }
@@ -796,12 +771,6 @@ async function runDoctor(opts: { json?: boolean }): Promise<void> {
   if (!secrets.reachable) problems.push('Secrets broker is unreachable.');
   if (secrets.record && secrets.record.consecutiveFailures > 0) {
     problems.push(`Secrets broker has ${secrets.record.consecutiveFailures} consecutive failure(s): ${secrets.record.lastError}`);
-  }
-
-  const browserIpc = await probeBrowserIPC();
-  if (!browserIpc.bound) problems.push('Browser IPC is unbound.');
-  if (browserIpc.record && browserIpc.record.consecutiveFailures > 0) {
-    problems.push(`Browser IPC has ${browserIpc.record.consecutiveFailures} consecutive failure(s): ${browserIpc.record.lastError}`);
   }
 
   const scheduler = schedulerSummary();
@@ -972,7 +941,7 @@ function runWebhooksList(json: boolean): void {
 export function registerDaemonCommand(program: Command): void {
   const cmd = program
     .command('daemon')
-    .description('The always-on daemon: browser IPC, watchdog, and the routines scheduler. Bare `agents daemon` shows status.')
+    .description('The always-on daemon: watchdog, session/usage sync, and the routines scheduler. Bare `agents daemon` shows status.')
     .option('--json', 'Emit as JSON')
     .action(async (opts, command) => {
       await runStatus({ json: command.optsWithGlobals().json === true });
@@ -1002,12 +971,12 @@ export function registerDaemonCommand(program: Command): void {
       agents daemon services
 
       # Toggle or restart a service live — applies without a daemon restart
-      # for supervisor-managed services (browser-ipc, account-state,
-      # session-index, monitors' off-transition, watchdog, device-probe,
-      # self-heal, state-dir-check)
-      agents daemon services disable browser-ipc
-      agents daemon services enable browser-ipc
-      agents daemon services restart browser-ipc
+      # for supervisor-managed services (account-state, session-index,
+      # monitors' off-transition, watchdog, device-probe, self-heal,
+      # state-dir-check)
+      agents daemon services disable account-state
+      agents daemon services enable account-state
+      agents daemon services restart account-state
 
       # Host a signed webhook receiver here, supervised and restarted on crash
       agents daemon webhooks add --secrets-bundle linear-webhook
@@ -1044,12 +1013,10 @@ export function registerDaemonCommand(program: Command): void {
 
       'agents daemon services enable|disable|restart <id>' applies live (no
       daemon restart) for supervisor-managed services that were registered at
-      boot. browser-ipc is also registered while disabled, specifically so a
-      browser client can enable it live. The inline scheduler re-evaluates its
-      toggle on every reload as well. A boot-disabled service other than
-      browser-ipc, the monitor on-transition, and webhook-receiver still need an
-      operator 'agents daemon restart'. 'agents daemon services' names which
-      case you're in per row.
+      boot. The inline scheduler re-evaluates its toggle on every reload as
+      well. A boot-disabled service other than the monitor on-transition and
+      webhook-receiver still needs an operator 'agents daemon restart'. 'agents
+      daemon services' names which case you're in per row.
     `,
   });
 
@@ -1165,16 +1132,15 @@ export function registerDaemonCommand(program: Command): void {
       agents daemon services list
 
       # Toggle or restart live — no daemon restart for a supervisor-managed
-      # service (browser-ipc, account-state, session-index)
-      agents daemon services disable browser-ipc
-      agents daemon services enable browser-ipc
-      agents daemon services restart browser-ipc
+      # service (account-state, session-index)
+      agents daemon services disable account-state
+      agents daemon services enable account-state
+      agents daemon services restart account-state
     `,
     notes: `
       A service disabled at daemon boot is normally not registered on the
-      supervisor, so enabling it needs an operator restart. browser-ipc is the
-      exception: it is registered stopped and can be enabled live. The inline
-      scheduler also applies enable/disable on reload; webhook-receiver and the
+      supervisor, so enabling it needs an operator restart. The inline
+      scheduler applies enable/disable on reload; webhook-receiver and the
       monitor on-transition still require 'agents daemon restart'. Each row in
       the plain-text view names which case it is; 'supervised: true/false' does
       the same in --json.
@@ -1211,9 +1177,8 @@ export function registerDaemonCommand(program: Command): void {
    * Apply an enable/disable toggle live (RUSH-3193 P4): persist it, then signal
    * the running daemon to reload — its handler diffs the toggle and drives
    * `supervisor.start/stop(id)` for a supervised service, so no restart is
-   * needed for supervisor-managed services registered at boot. browser-ipc is
-   * registered even when disabled so it can be enabled live; the inline
-   * scheduler also re-evaluates its toggle on reload. webhook-receiver,
+   * needed for supervisor-managed services registered at boot. The inline
+   * scheduler re-evaluates its toggle on reload. webhook-receiver,
    * monitors' on-transition, and other boot-disabled services still need a
    * deliberate operator restart — the daemon's own reload log says so.
    */

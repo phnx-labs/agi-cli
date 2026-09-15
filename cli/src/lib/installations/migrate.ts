@@ -19,10 +19,14 @@ import { enabledRoutineNames, replaceEnabledRoutines } from '../routine-activati
 import { evaluateActivationReadiness } from '../routine-readiness.js';
 import { migrateDeviceConfigStores } from '../devices/config-migration.js';
 import { detrackViaGitExclude } from '../project-resources.js';
-// Two constants only, never the read/write API — migrations still operate on raw
-// YAML so they never take the meta lock or prime the meta cache mid-migration.
-import { LEGACY_DEFAULT_BROWSER_PROFILE_NAME } from '../browser/profiles.js';
+// Migrations operate on raw YAML so they never take the meta lock or prime the
+// meta cache mid-migration.
 import { META_HEADER as DEVICE_META_HEADER } from '../state.js';
+
+/** The pre-device-scope central browser profile name this one-shot migration
+ *  folds into the device doc. Inlined (the in-repo browser engine that defined it
+ *  was removed with PHNX-4101); the legacy on-disk name is unchanged. */
+const LEGACY_DEFAULT_BROWSER_PROFILE_NAME = 'default';
 import { COMPILED_HEADER_PROJECT } from '../rules/compile.js';
 
 const HOME = process.env.HOME ?? os.homedir();

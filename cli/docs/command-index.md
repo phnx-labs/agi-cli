@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_65 command groups · 486 commands._
+_65 command groups · 467 commands._
 
 ## accounts — Browse and manage harness accounts
 
@@ -56,67 +56,48 @@ agents auth space role <email> <role>  Change a member's role (owner only for ad
 agents auth whoami                     Show the signed-in account
 ```
 
-## browser — Launch and drive browser profiles via the Chrome DevTools Protocol. Power-tool for the `browser` skill.
+## browser — Drive a real browser (Chrome/Brave/Edge/Firefox/Arc) over CDP/BiDi — navigate, screenshot, click, capture; --device to drive a remote box
 
 ```
-agents browser                                Launch and drive browser profiles via the Chrome DevTools Protocol. Power-tool for the `browser` skill.
-agents browser click [ref]                    Click an element by ref, or raw coordinates with --at X,Y
-agents browser console                        Read console logs from a tab
-agents browser devices                        List available device presets
-agents browser done                           Complete a task and close its tabs (resolves from caller identity when --task is omitted)
-agents browser download                       Set the download directory for a task (defaults to the profile's downloads dir)
-agents browser errors                         Read page errors from a tab
-agents browser evaluate [expression]          Evaluate JavaScript in current tab
-agents browser history                        Show recent browser task history
-agents browser hover <ref>                    Hover over an element by ref
-agents browser logs                           Read merged rush-app + rush-cli JSONL logs for a task
-agents browser navigate [url]                 Navigate current tab to URL (creates a task and tab when none exist)
-agents browser pdf [output]                   Export the current tab as PDF via CDP Page.printToPDF — auto-saved under sessions/<task>/ when [output] is omitted
-agents browser press <key>                    Press a key (Enter, Tab, Escape, etc)
-agents browser profiles                       Manage browser profiles
-agents browser profiles claim [name]          Move leftover central browser: profiles into this device's declaration file. Only profiles this machine can host are claimed; the rest stay central. Run on the machine that actually has the browser.
-agents browser profiles create <name>         Create a new browser profile on this device
-agents browser profiles doctor <name>         Diagnose a browser profile: where it is declared, binary, port, user-data-dir, onboarding state
-agents browser profiles edit <name>           Edit an existing profile in place (stays in the store it already lives in)
-agents browser profiles list                  List all browser profiles and the devices declaring each one (WHERE)
-agents browser profiles logins                Show which login-gated services each profile has a live session for, the account signed in, and whether login creds are available in the profile's secrets bundle (reads cookie/username presence only, never decrypts).
-agents browser profiles prune                 Remove dead profiles this device declares: browser not installed here, or never started
-agents browser profiles remove <name>         Remove the agents-cli profile alias and cached runtime dirs (never deletes native Arc data)
-agents browser profiles rename <from> <to>    Rename a profile, moving its browser data with it (logins survive)
-agents browser profiles seed                  Create a machine-local profile for each installed browser (named <browser>-local), so you can pick or use one instead of hand-crafting each. Idempotent — existing profiles are left untouched.
-agents browser profiles show <name>           Show profile details
-agents browser profiles use [name]            Pick the profile `agents browser start` uses when no --profile is passed. No name opens a picker on a TTY or prints the current default headlessly.
-agents browser prune                          Close tabs for abandoned tasks — owning agent session exited, or idle past the window — and mark them done. The same reaper the daemon already runs every 5 minutes; use this to run it now.
-agents browser ps                             List every browser/electron/tunnel process agents has tracked (alive or stale) — works without the daemon
-agents browser record                         Record a video of the page
-agents browser record start                   Start recording — auto-saved under sessions/<task>/recordings/. Bounded by --fps, --duration, --max-mb.
-agents browser record stop                    Stop an in-progress recording
-agents browser refs                           Get DOM refs for interactive elements
-agents browser remote-control [state]         Allow or deny other fleet machines driving THIS machine's browser over `browser --device` or `agents ssh …` (`agents browser` / `ag browser` / standalone `browser`). `on`/`off` to set (device-local, never synced); no argument prints the current value. Default off.
-agents browser requests                       Read captured network requests. --format har emits a HAR 1.2 JSON document.
-agents browser responsebody <url-pattern>     Wait for and read a response body by URL pattern
-agents browser screenshot                     Take a screenshot — auto-saved per task; --output only needed when you want a specific path
-agents browser scroll                         Scroll the page by pixel amount (negatives scroll up/left)
-agents browser sessions                       Browse a profile's captured screenshots, PDFs, recordings, and downloads, grouped by task
-agents browser set                            Set browser emulation options
-agents browser set device <device-name>       Emulate a device (iPhone 14, iPad, MacBook Pro)
-agents browser set viewport <width> <height>  Set viewport size
-agents browser show <url>                     Open a URL or local file for a human to read: goes to browser.viewer (default: browser.profile), and binds no task
-agents browser start                          Start a browser task. Pass --profile <name>; omit to use your configured default (set it with `agents browser use <name>` or `agents setup`). Page verbs (navigate/screenshot/…) create a task implicitly when none exists — start is for --profile/--url/--record/--title.
-agents browser status                         Show browser service state and running browser tasks
-agents browser stop                           Stop a browser task and close its tabs; with --profile, detach the whole profile; with --service, stop only browser IPC while the shared daemon stays up
-agents browser stream                         Keep one process and daemon IPC socket open; read NDJSON requests from stdin and write NDJSON responses
-agents browser tab                            Manage tabs
-agents browser tab add                        Open URL in new tab (becomes current)
-agents browser tab close [tabId]              Close tab(s) — omit tabId to close all
-agents browser tab focus <tabId>              Switch to tab (by ID, prefix, or URL substring)
-agents browser tabs                           List tabs open for the current task; --all shows every tab open in the profile browser, yours included
-agents browser tasks                          List all browser tasks
-agents browser type <ref>                     Type text into an element by ref
-agents browser upload                         Upload file(s) — supports hidden file inputs, drag-drop targets, and OS chooser interception
-agents browser use [name]                     Pick the profile `agents browser start` uses when no --profile is passed. No name opens a picker on a TTY or prints the current default headlessly.
-agents browser wait                           Wait for a condition
-agents browser waitdownload                   Wait for a download to complete
+agents browser                 Drive a real browser (Chrome/Brave/Edge/Firefox/Arc) over CDP/BiDi — navigate, screenshot, click, capture; --device to drive a remote box
+agents browser click           Click an element by ref, or raw coordinates with --at X,Y
+agents browser console         Read console logs from a tab
+agents browser devices         List available device emulation presets
+agents browser done            Complete a task and close its tabs (resolves from caller identity when --task is omitted)
+agents browser download        Set the download directory for a task
+agents browser errors          Read page errors from a tab
+agents browser evaluate        Evaluate JavaScript in the current tab
+agents browser history         Show recent browser task history
+agents browser hover           Hover over an element by ref
+agents browser logs            Read merged rush-app + rush-cli logs for a task
+agents browser navigate        Navigate the current tab to a URL (creates a task and tab when none exist)
+agents browser pdf             Export the current tab as PDF via CDP — auto-saved under sessions/<task>/ when omitted
+agents browser press           Press a key (Enter, Tab, Escape, …)
+agents browser profiles        Manage browser profiles (create / list / edit / rename / show / remove / use / …)
+agents browser prune           Close tabs for abandoned tasks and mark them done — the reaper the daemon runs, on demand
+agents browser ps              List every browser/electron/tunnel process agents has tracked — works without the daemon
+agents browser record          Record a video of the page (record start / record stop)
+agents browser refs            Get DOM refs for interactive elements
+agents browser remote-control  Allow or deny other fleet machines driving THIS machine's browser (on/off; default off)
+agents browser requests        Read captured network requests; --format har emits a HAR 1.2 document
+agents browser responsebody    Wait for and read a response body by URL pattern
+agents browser screenshot      Take a screenshot — auto-saved per task; --output only to pick a specific path
+agents browser scroll          Scroll the page by a pixel amount (negatives scroll up/left)
+agents browser sessions        Browse a profile's captured screenshots, PDFs, recordings, and downloads, grouped by task
+agents browser set             Set browser emulation options (set viewport / set device / set devices)
+agents browser show            Open a URL for a human to read (goes to browser.viewer; binds no task)
+agents browser start           Start a browser task — --profile/--url/--record/--title, and --device <name> to bind a remote box
+agents browser status          Show browser service state and running browser tasks
+agents browser stop            Stop a task and close its tabs; --profile detaches the profile; --service stops the IPC service
+agents browser stream          Keep one process + IPC socket open; read NDJSON requests from stdin, write NDJSON responses
+agents browser tab             Manage tabs (tab add / tab focus <id> / tab close [id])
+agents browser tabs            List tabs open for the current task; --all shows every tab in the profile browser
+agents browser tasks           List all browser tasks
+agents browser type            Type text into an element by ref
+agents browser upload          Upload file(s) — hidden inputs, drag-drop targets, and OS chooser interception
+agents browser use             Pick the profile `agents browser start` uses when no --profile is passed
+agents browser wait            Wait for a condition
+agents browser waitdownload    Wait for a download to complete
 ```
 
 ## clis — Declare and install host CLI binaries (gh, higgsfield, glab, ...)
@@ -181,10 +162,10 @@ agents config set <key> <value>          Set a config key
 agents config unset <key>                Unset a config key (restore default behavior)
 ```
 
-## daemon — The always-on daemon: browser IPC, watchdog, and the routines scheduler. Bare `agents daemon` shows status.
+## daemon — The always-on daemon: watchdog, session/usage sync, and the routines scheduler. Bare `agents daemon` shows status.
 
 ```
-agents daemon                             The always-on daemon: browser IPC, watchdog, and the routines scheduler. Bare `agents daemon` shows status.
+agents daemon                             The always-on daemon: watchdog, session/usage sync, and the routines scheduler. Bare `agents daemon` shows status.
 agents daemon disable                     Persist daemon.enabled: false — nothing auto-starts the daemon until re-enabled. Does not stop a running daemon.
 agents daemon doctor                      One-shot health check: identity, duplicates, hosted services, scheduler. Non-zero exit on problems.
 agents daemon enable                      Clear the daemon.enabled kill switch. Does not start the daemon by itself.
@@ -661,7 +642,7 @@ agents setup beta                             Enable or disable preview features
 agents setup beta disable <features...>       Disable one or more beta features.
 agents setup beta enable <features...>        Enable one or more beta features.
 agents setup beta list                        Show available beta features and whether they are enabled.
-agents setup browser                          Set up `agents browser` — detect an installed browser and create the default profile.
+agents setup browser                          Set up `agents browser` — install the Browser CLI, seed profiles, and pick this machine's default.
 agents setup computer                         Set up `agents computer` (macOS) — install the signed helper and grant control permissions.
 agents setup fleet                            Set up `agents fleet` — discover Tailscale devices, choose auth, render SSH config, and test connectivity.
 agents setup mine                             White-label the CLI — mint your own personally-named binary (e.g. `jack`).

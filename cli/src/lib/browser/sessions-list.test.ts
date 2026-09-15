@@ -15,7 +15,7 @@ import {
   type TaskIdentity,
   type LaunchSessionIndex,
 } from './sessions-list.js';
-import { getProfileRuntimeDir } from './profiles.js';
+import { getProfileRuntimeDir } from './paths.js';
 import type { SessionMeta } from '../session/types.js';
 
 function makeSession(overrides: Partial<SessionMeta> = {}): SessionMeta {

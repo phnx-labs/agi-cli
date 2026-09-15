@@ -24,7 +24,6 @@ const mocks = vi.hoisted(() => ({
   consumeUsage: vi.fn(),
   publishMirror: vi.fn(),
   consumeMirror: vi.fn(),
-  publishProfiles: vi.fn(),
   publishAuthVerdict: vi.fn(),
   reconcileSlots: vi.fn(),
   syncAuthBundle: vi.fn(),
@@ -41,9 +40,6 @@ vi.mock('../accounting/usage-sync.js', () => ({
 vi.mock('../session/mirror.js', () => ({
   publishSessionMirrorToSharedStore: mocks.publishMirror,
   consumeSessionMirrorFromSharedStore: mocks.consumeMirror,
-}));
-vi.mock('../browser/profiles.js', () => ({
-  publishDiscoveredProfiles: mocks.publishProfiles,
 }));
 vi.mock('../secrets-policy.js', () => ({
   publishReservedAuthVerdict: mocks.publishAuthVerdict,
@@ -74,7 +70,6 @@ beforeEach(() => {
   mocks.consumeUsage.mockReturnValue({ merged: 0, sources: [], errors: [] });
   mocks.publishMirror.mockResolvedValue({ changed: false, count: 0, error: null });
   mocks.consumeMirror.mockReturnValue({ merged: 0, pruned: 0, sources: [], errors: [] });
-  mocks.publishProfiles.mockResolvedValue({ published: [], errors: {} });
   mocks.publishAuthVerdict.mockResolvedValue({ error: null });
   mocks.reconcileSlots.mockReturnValue({ provisioned: [], errors: [], skipped: [] });
   mocks.syncAuthBundle.mockResolvedValue({ pushed: [], errors: [] });

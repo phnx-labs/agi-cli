@@ -36,7 +36,8 @@ describeDaemon('agents daemon — doctor, logs, stop, reload', () => {
     expect(payload.duplicates).toEqual([]);
     expect(payload.daemonEnabled).toBe(true);
     expect(payload.services.secretsBroker).toHaveProperty('reachable', false);
-    expect(payload.services.browserIpc).toHaveProperty('bound', false);
+    // browserIpc left the daemon status with the standalone browser CLI (PHNX-4101).
+    expect(payload.services.browserIpc).toBeUndefined();
     // Daemon housekeeping (watchdog, device-probe, ...) are plain daemon-core
     // timers, NOT routines (RUSH-2495), so a fresh install with nothing on disk
     // carries zero scheduled routines.

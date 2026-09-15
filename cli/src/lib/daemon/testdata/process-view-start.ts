@@ -18,7 +18,10 @@ assert.ok(started.pid);
 fs.writeFileSync(path.join(process.env.HOME!, 'test-child.pid'), String(started.pid));
 try {
   if (!cold) assert.ok(fs.existsSync(path.join(getDaemonDir(), 'health.json')), 'ordinary launcher publishes health before daemon starts');
-  const socket = path.join(getCacheDir(), 'helpers', 'browser', 'browser.sock');
+  // Daemon-liveness socket: the browser IPC socket left with the standalone
+  // browser CLI (PHNX-4101), so this waits on the feed-stream hub socket the
+  // daemon binds unconditionally on boot.
+  const socket = path.join(getCacheDir(), 'helpers', 'feed', 'feed-stream.sock');
   let ready = false;
   for (let i = 0; i < 80 && !ready; i++) {
     ready = await new Promise<boolean>(resolve => {
@@ -30,7 +33,7 @@ try {
     });
     if (!ready) await new Promise(resolve => setTimeout(resolve, 100));
   }
-  assert.ok(ready, 'ordinary fresh-home daemon must serve its actual browser socket');
+  assert.ok(ready, 'ordinary fresh-home daemon must serve its feed-stream hub socket');
   assert.equal(fs.readFileSync(path.join(getDaemonDir(), 'daemon.pid'), 'utf8').trim(), String(started.pid));
   const owner = JSON.parse(fs.readFileSync(path.join(getTerminalsDir(), 'process-view.json'), 'utf8'));
   assert.equal(owner.pidNamespace, fs.readlinkSync('/proc/self/ns/pid'));
