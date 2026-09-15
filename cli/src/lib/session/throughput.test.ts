@@ -49,21 +49,9 @@ describe('computeTokPerSec', () => {
     expect(computeTokPerSec(content, 'codex', 60, NOW)).toBe(2);
   });
 
-  it('sums Gemini output + thoughts from the whole-file messages array', () => {
-    const content = JSON.stringify({
-      messages: [
-        { type: 'gemini', timestamp: at(15), tokens: { output: 200, thoughts: 100 } },
-        { type: 'gemini', timestamp: at(90), tokens: { output: 9000, thoughts: 9000 } }, // out of window
-        { type: 'user', timestamp: at(5) },
-      ],
-    });
-    // (200 + 100) / 60 = 5 tok/s; the 90s-old entry and the user row are excluded.
-    expect(computeTokPerSec(content, 'gemini', 60, NOW)).toBe(5);
-  });
-
   it('returns 0 for empty or unparseable content', () => {
     expect(computeTokPerSec('', 'claude', 60, NOW)).toBe(0);
     expect(computeTokPerSec('not json\n{bad', 'codex', 60, NOW)).toBe(0);
-    expect(computeTokPerSec('{', 'gemini', 60, NOW)).toBe(0);
+    expect(computeTokPerSec('{', 'codex', 60, NOW)).toBe(0);
   });
 });

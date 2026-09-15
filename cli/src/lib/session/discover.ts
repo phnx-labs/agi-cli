@@ -667,7 +667,6 @@ function dispatchAgentScan(
   switch (agent) {
     case 'claude': return scanClaudeIncremental(onProgress);
     case 'codex': return scanCodexIncremental(onProgress);
-    case 'gemini': return scanGeminiIncremental(onProgress);
     case 'antigravity': return scanAntigravityIncremental(onProgress);
     case 'opencode': return scanOpenCodeIncremental(onProgress);
     case 'openclaw': return scanOpenClawIncremental(onProgress);
@@ -1265,7 +1264,6 @@ export function getAgentSessionDirs(agent: string, subdir: string): string[] {
 const SESSION_ROOT_SPECS: ReadonlyArray<{ agent: SessionAgentId; subdir: string }> = [
   { agent: 'claude', subdir: 'projects' },
   { agent: 'codex', subdir: 'sessions' },
-  { agent: 'gemini', subdir: 'tmp' },
   { agent: 'antigravity', subdir: 'conversations' },
   { agent: 'droid', subdir: 'sessions' },
   { agent: 'kimi', subdir: 'sessions' },
@@ -1402,7 +1400,7 @@ async function scanRoutineArchivesIncremental(
   const subdir = sessionRootSubdir(agent);
   if (!subdir) return;
 
-  const ext = agent === 'gemini' ? '.json' : '.jsonl';
+  const ext = '.jsonl';
   const prestat: PreStatEntry[] = [];
   for (const sessionsDir of getRoutineArchiveSessionDirs(agent, subdir)) {
     for (const f of walkForFilesWithStat(sessionsDir, ext, 100_000)) {
@@ -2119,266 +2117,6 @@ function pickLatestCodexTimestamp(metaTimestamp: string | undefined, filePath: s
   if (candidates.length === 0) return fallback;
 
   return candidates.reduce((best, cur) => (cur > best ? cur : best));
-}
-
-// ---------------------------------------------------------------------------
-// Gemini
-// ---------------------------------------------------------------------------
-
-/** Incrementally re-scan changed Gemini session files and upsert into the DB. */
-async function scanGeminiIncremental(onProgress?: (p: ScanProgress) => void): Promise<void> {
-  const currentVersion = await getCurrentAgentVersion('gemini');
-  const projectMap = buildGeminiProjectMap();
-
-  // Each `<tmpDir>/<hashDir>/chats` is a leaf dir of Gemini transcripts. The
-  // FIRST tmp root is the live `~/.gemini/tmp` — its chats dirs are live roots;
-  // version-home + backup roots are immutable and short-circuit when unchanged.
-  const tmpRoots = getAgentSessionDirs('gemini', 'tmp');
-  const leafDirs: LeafDir[] = [];
-  const seenLeaf = new Set<string>();
-  tmpRoots.forEach((tmpDir, rootIdx) => {
-    const isLiveRoot = rootIdx === 0;
-    let hashDirs: string[];
-    try {
-      hashDirs = fs.readdirSync(tmpDir);
-    } catch {
-      return;
-    }
-    for (const hashDir of hashDirs) {
-      const chatsDir = path.join(tmpDir, hashDir, 'chats');
-      if (!fs.existsSync(chatsDir)) continue;
-      const key = safeRealpathSync(chatsDir) || chatsDir;
-      if (seenLeaf.has(key)) continue;
-      seenLeaf.add(key);
-      leafDirs.push({ dirPath: chatsDir, isLiveRoot });
-    }
-  });
-
-  const { changed } = collectChangedFilesInLeafDirs(leafDirs, '.json');
-  const changedByPath = new Map(changed.map(c => [c.filePath, c.scan]));
-  if (changedByPath.size === 0) return;
-
-  onProgress?.({ agent: 'gemini', parsed: 0, total: changedByPath.size });
-
-  const entries: ScanEntry[] = [];
-  const touched: Array<{ filePath: string; scan: ScanStamp }> = [];
-  const seen = new Set<string>();
-  let parsed = 0;
-  for (const { filePath, scan } of changed) {
-    // The hashDir is the directory two levels up: <hashDir>/chats/<file>.json.
-    const hashDir = path.basename(path.dirname(path.dirname(filePath)));
-    try {
-      const result = readGeminiMeta(filePath, hashDir, projectMap, currentVersion);
-      if (result && !seen.has(result.meta.id)) {
-        seen.add(result.meta.id);
-        entries.push({ meta: result.meta, content: result.content, assistantContent: result.assistantContent, scan });
-      } else {
-        // Gemini file without a sessionId — record scan so we don't re-parse it next run.
-        touched.push({ filePath, scan });
-      }
-    } catch {
-      touched.push({ filePath, scan });
-    }
-    parsed++;
-    onProgress?.({ agent: 'gemini', parsed, total: changedByPath.size });
-  }
-
-  upsertSessionsBatch(entries);
-  recordScans(touched);
-}
-
-/** Parse a single Gemini JSON session file to extract session metadata. */
-function readGeminiMeta(
-  filePath: string,
-  hashDir: string,
-  projectMap: Map<string, { name: string; path: string }>,
-  currentVersion?: string,
-): { meta: SessionMeta; content: string; assistantContent: string } | null {
-  let session: any;
-  try {
-    session = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-  } catch {
-    return null;
-  }
-
-  const sessionId = typeof session.sessionId === 'string' ? session.sessionId : '';
-  const startTime = typeof session.startTime === 'string' ? session.startTime : '';
-  const projectHash = typeof session.projectHash === 'string' ? session.projectHash : '';
-  const embeddedVersion = typeof session.version === 'string'
-    ? session.version
-    : typeof session.cliVersion === 'string'
-      ? session.cliVersion
-      : undefined;
-  if (!sessionId) return null;
-
-  const projectInfo = projectMap.get(projectHash || hashDir);
-  const project = projectInfo?.name || hashDir.slice(0, 12);
-  const cwd = projectInfo?.path ? normalizeCwd(projectInfo.path) : undefined;
-
-  const stat = safeStatSync(filePath);
-
-  const messages = Array.isArray(session.messages) ? session.messages : [];
-  const sessionModel = typeof session.model === 'string' ? session.model : undefined;
-  let topic: string | undefined;
-  let messageCount = 0;
-  let tokenCount = 0;
-  let outputTokens = 0;
-  let inputTokens = 0;
-  let cacheReadTokens = 0;
-  let sawTokenCount = false;
-  let costUsd = 0;
-  let costUsdNoCache = 0;
-  let sawCost = false;
-  let firstTsMs: number | undefined;
-  let lastTsMs: number | undefined;
-  const userTexts: string[] = [];
-  const assistantTexts: string[] = [];
-
-  for (const message of messages) {
-    if (message.type === 'user') {
-      const text = extractGeminiMessageText(message.content);
-      if (text) {
-        messageCount++;
-        userTexts.push(text);
-        if (!topic) topic = extractSessionTopic(text);
-      }
-    } else if (message.type === 'gemini') {
-      const text = extractGeminiMessageText(message.content);
-      if (text) {
-        messageCount++;
-        assistantTexts.push(text);
-      }
-    }
-
-    // Duration: messages carry a `timestamp` on most Gemini CLI versions.
-    const tsRaw = message.timestamp ?? message.time;
-    if (typeof tsRaw === 'string' || typeof tsRaw === 'number') {
-      const ms = new Date(tsRaw).getTime();
-      if (!Number.isNaN(ms)) {
-        if (firstTsMs === undefined || ms < firstTsMs) firstTsMs = ms;
-        if (lastTsMs === undefined || ms > lastTsMs) lastTsMs = ms;
-      }
-    }
-
-    const total = getGeminiTokenCount(message.tokens);
-    if (total !== null) {
-      tokenCount += total;
-      sawTokenCount = true;
-    }
-    // Output tokens: sum directional generation fields per message (output +
-    // thoughts + tool), mirroring the cost path — never `tokens.total`, which
-    // may be cumulative and would double-count when summed.
-    const gtk = message.tokens;
-    if (gtk && typeof gtk === 'object') {
-      outputTokens +=
-        (typeof gtk.output === 'number' ? gtk.output : 0) +
-        (typeof gtk.thoughts === 'number' ? gtk.thoughts : 0) +
-        (typeof gtk.tool === 'number' ? gtk.tool : 0);
-      // Burn split (RUSH-2287): Gemini has uncached input + cache-read, no cache-write.
-      if (typeof gtk.input === 'number') inputTokens += gtk.input;
-      if (typeof gtk.cached === 'number') cacheReadTokens += gtk.cached;
-    }
-
-    // Per-message cost: directional tokens × this message's model price.
-    const msgModel = (typeof message.model === 'string' ? message.model : undefined) || sessionModel;
-    const tk = message.tokens;
-    if (msgModel && tk && typeof tk === 'object') {
-      const usage = {
-        model: msgModel,
-        inputTokens: typeof tk.input === 'number' ? tk.input : undefined,
-        outputTokens:
-          (typeof tk.output === 'number' ? tk.output : 0) +
-          (typeof tk.thoughts === 'number' ? tk.thoughts : 0) +
-          (typeof tk.tool === 'number' ? tk.tool : 0),
-        cacheReadTokens: typeof tk.cached === 'number' ? tk.cached : undefined,
-      };
-      const c = costOfUsage(usage);
-      if (c > 0) {
-        costUsd += c;
-        costUsdNoCache += costOfUsageNoCache(usage);
-        sawCost = true;
-      }
-    }
-  }
-
-  const durationMs =
-    firstTsMs !== undefined && lastTsMs !== undefined && lastTsMs > firstTsMs
-      ? lastTsMs - firstTsMs
-      : undefined;
-
-  const meta: SessionMeta = {
-    id: sessionId,
-    shortId: deriveShortId(sessionId),
-    agent: 'gemini',
-    timestamp: startTime || (stat ? stat.mtime.toISOString() : new Date().toISOString()),
-    lastActivity: lastTsMs !== undefined ? new Date(lastTsMs).toISOString() : undefined,
-    project,
-    cwd,
-    filePath,
-    version: resolveSessionVersion('gemini', filePath, embeddedVersion, currentVersion),
-    model: sessionModel,
-    topic,
-    firstUserMessage: userTexts.map(cleanFirstUserMessage).find((text): text is string => !!text),
-    messageCount,
-    tokenCount: sawTokenCount ? tokenCount : undefined,
-    outputTokens: sawTokenCount ? outputTokens : undefined,
-    inputTokens: sawTokenCount ? inputTokens : undefined,
-    cacheReadTokens: sawTokenCount ? cacheReadTokens : undefined,
-    costUsd: sawCost ? costUsd : undefined,
-    costUsdNoCache: sawCost ? costUsdNoCache : undefined,
-    durationMs,
-  };
-  return { meta, content: userTexts.join('\n'), assistantContent: assistantTexts.join('\n') };
-}
-
-/** Build a hash-to-project mapping from Gemini's projects.json and history directories. */
-function buildGeminiProjectMap(): Map<string, { name: string; path: string }> {
-  const map = new Map<string, { name: string; path: string }>();
-  const projectsJsonPath = path.join(HOME, '.gemini', 'projects.json');
-
-  if (fs.existsSync(projectsJsonPath)) {
-    try {
-      const data = JSON.parse(fs.readFileSync(projectsJsonPath, 'utf-8'));
-      const projects = data.projects;
-
-      if (typeof projects === 'object' && projects !== null) {
-        if (Array.isArray(projects)) {
-          for (const p of projects) {
-            if (typeof p === 'string') {
-              const hash = sha256(p);
-              map.set(hash, { name: path.basename(p), path: p });
-              map.set(p, { name: path.basename(p), path: p });
-            }
-          }
-        } else {
-          for (const [p, name] of Object.entries(projects)) {
-            const hash = sha256(p);
-            map.set(hash, { name: String(name), path: p });
-          }
-        }
-      }
-    } catch { /* projects.json missing or malformed */ }
-  }
-
-  const historyDir = path.join(HOME, '.gemini', 'history');
-  if (fs.existsSync(historyDir)) {
-    try {
-      for (const name of fs.readdirSync(historyDir)) {
-        const rootFile = path.join(historyDir, name, '.project_root');
-        if (fs.existsSync(rootFile)) {
-          try {
-            const projectPath = fs.readFileSync(rootFile, 'utf-8').trim();
-            if (projectPath) {
-              const hash = sha256(projectPath);
-              map.set(hash, { name, path: projectPath });
-            }
-          } catch { /* history entry unreadable */ }
-        }
-      }
-    } catch { /* history entry unreadable */ }
-  }
-
-  return map;
 }
 
 // ---------------------------------------------------------------------------
@@ -5290,35 +5028,6 @@ function getCodexTokenCount(totalTokenUsage: any): number | null {
     totalTokenUsage.cached_input_tokens,
     totalTokenUsage.output_tokens,
     totalTokenUsage.reasoning_output_tokens,
-  ]);
-}
-
-/** Extract text from a Gemini message content field (string or array of parts). */
-function extractGeminiMessageText(content: any): string {
-  if (typeof content === 'string') return content.trim();
-  if (Array.isArray(content)) {
-    return content
-      .map((part: any) => {
-        if (typeof part === 'string') return part;
-        if (typeof part?.text === 'string') return part.text;
-        return '';
-      })
-      .join('\n')
-      .trim();
-  }
-  return '';
-}
-
-/** Extract the total token count from a Gemini message's tokens object. */
-function getGeminiTokenCount(tokens: any): number | null {
-  if (!tokens || typeof tokens !== 'object') return null;
-  if (typeof tokens.total === 'number') return tokens.total;
-  return sumKnownNumbers([
-    tokens.input,
-    tokens.output,
-    tokens.cached,
-    tokens.thoughts,
-    tokens.tool,
   ]);
 }
 

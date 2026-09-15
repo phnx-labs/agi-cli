@@ -73,7 +73,7 @@ const ADAPTERS = new Map<string, AccountProviderAdapter>([
   )],
   ['openai', fixed('openai', ['api-key'], { codex: 'OPENAI_API_KEY', opencode: 'OPENAI_API_KEY' }, {}, { codex: 'OPENAI_BASE_URL', opencode: 'OPENAI_BASE_URL' })],
   ['xai', fixed('xai', ['api-key'], { grok: 'XAI_API_KEY', claude: 'ANTHROPIC_AUTH_TOKEN' })],
-  ['google', fixed('google', ['api-key'], { gemini: 'GEMINI_API_KEY', antigravity: 'ANTIGRAVITY_API_KEY' })],
+  ['google', fixed('google', ['api-key'], { antigravity: 'ANTIGRAVITY_API_KEY' })],
   ['opencode', fixed('opencode', ['api-key'], { opencode: 'OPENCODE_API_KEY' })],
   ['proxy', fixed('proxy', ['api-key', 'bearer-token'], { claude: 'ANTHROPIC_AUTH_TOKEN', codex: 'OPENAI_API_KEY' }, {}, { claude: 'ANTHROPIC_BASE_URL', codex: 'OPENAI_BASE_URL' })],
   ['truefoundry', fixed('truefoundry', ['api-key', 'bearer-token'], { claude: 'ANTHROPIC_AUTH_TOKEN' }, {}, { claude: 'ANTHROPIC_BASE_URL' })],

@@ -1,7 +1,6 @@
 import { describe } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as crypto from 'crypto';
 import { spawnSync } from 'child_process';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
@@ -156,62 +155,6 @@ export function writeCodexSession(
   ];
 
   fs.writeFileSync(filePath, lines.join('\n') + '\n', 'utf-8');
-}
-
-export function writeGeminiSession(
-  tempHome: string,
-  sessionId: string,
-  cwd: string,
-  prompt: string,
-  timestamp: string,
-  version = '0.29.5',
-): void {
-  const versionHome = path.join(tempHome, '.agents', '.history', 'versions', 'gemini', version, 'home');
-  const geminiHome = path.join(versionHome, '.gemini');
-  const projectHash = crypto.createHash('sha256').update(cwd).digest('hex');
-  const chatsDir = path.join(geminiHome, 'tmp', projectHash, 'chats');
-
-  fs.mkdirSync(cwd, { recursive: true });
-  fs.mkdirSync(chatsDir, { recursive: true });
-  fs.mkdirSync(path.dirname(path.join(tempHome, '.gemini')), { recursive: true });
-
-  const activeGeminiHome = path.join(tempHome, '.gemini');
-  if (!fs.existsSync(activeGeminiHome)) {
-    fs.symlinkSync(geminiHome, activeGeminiHome);
-  }
-
-  fs.writeFileSync(
-    path.join(geminiHome, 'projects.json'),
-    JSON.stringify({ projects: [cwd] }),
-    'utf-8'
-  );
-
-  fs.writeFileSync(
-    path.join(chatsDir, `session-${timestamp.replace(/[:.]/g, '-')}-${sessionId.slice(0, 8)}.json`),
-    JSON.stringify({
-      sessionId,
-      projectHash,
-      startTime: timestamp,
-      lastUpdated: timestamp,
-      messages: [
-        {
-          id: `${sessionId}-user`,
-          timestamp,
-          type: 'user',
-          content: [{ text: prompt }],
-        },
-        {
-          id: `${sessionId}-assistant`,
-          timestamp,
-          type: 'gemini',
-          content: 'Investigating now.',
-          model: 'gemini-3-flash-preview',
-          tokens: { total: 1234 },
-        },
-      ],
-    }, null, 2),
-    'utf-8'
-  );
 }
 
 export function writeOpenClawSetup(tempHome: string, version = '2026.3.8'): string {

@@ -722,7 +722,6 @@ export interface CallerIdentity {
 const TERMINAL_CALLERS: Readonly<Record<string, string>> = {
   cc: 'claude', cl: 'claude',
   cx: 'codex',
-  gx: 'gemini', gm: 'gemini',
   cr: 'cursor',
   oc: 'opencode',
   sh: 'shell',

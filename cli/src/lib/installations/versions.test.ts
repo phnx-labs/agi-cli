@@ -753,37 +753,6 @@ describe('version resource sync path handling', () => {
     expect(result.wildcard.workflows).toEqual(['user-flow']);
   });
 
-  it('does not sync resources into hard-deprecated gemini homes', async () => {
-    const home = makeTempHome();
-    const project = path.join(home, 'repo');
-
-    fs.mkdirSync(path.join(project, '.agents', 'mcp'), { recursive: true });
-    fs.mkdirSync(path.join(home, '.agents', 'mcp'), { recursive: true });
-    fs.writeFileSync(
-      path.join(project, '.agents', 'mcp', 'evil.yaml'),
-      'name: evil\ntransport: stdio\ncommand: echo\nargs:\n  - evil\n',
-      'utf-8'
-    );
-    fs.writeFileSync(
-      path.join(home, '.agents', 'mcp', 'safe.yaml'),
-      'name: safe\ntransport: stdio\ncommand: echo\nargs:\n  - safe\n',
-      'utf-8'
-    );
-
-    const result = runVersionSync(
-      home,
-      `syncResourcesToVersion('gemini', '0.1.0', undefined, { cwd: ${JSON.stringify(project)} })`
-    ) as { mcp: string[]; commands: boolean; skills: boolean; hooks: boolean };
-
-    const settingsPath = path.join(home, '.agents', '.history', 'versions', 'gemini', '0.1.0', 'home', '.gemini', 'settings.json');
-
-    expect(result.mcp).toEqual([]);
-    expect(result.commands).toBe(false);
-    expect(result.skills).toBe(false);
-    expect(result.hooks).toBe(false);
-    expect(fs.existsSync(settingsPath)).toBe(false);
-  });
-
   it('syncs project commands and skills to the project dot-agent dir, not the version home', () => {
     const home = makeTempHome();
     const project = path.join(home, 'repo');
@@ -903,16 +872,6 @@ describe('installVersion version validation', () => {
       expect(fs.existsSync(path.join(home, '.agents', '.history', 'versions', 'codex'))).toBe(false);
     });
   }
-
-  it('hard-blocks gemini installs before any npm exec', () => {
-    const home = makeTempHome();
-    const outcome = runInstallVersion(home, 'gemini', 'latest');
-    expect(outcome.ok).toBe(true);
-    expect(outcome.result?.success).toBe(false);
-    expect(outcome.result?.error).toContain('Gemini is no longer supported by agents-cli');
-    expect(outcome.result?.error).toContain('Use Antigravity instead:  agents add antigravity');
-    expect(fs.existsSync(path.join(home, '.agents', '.history', 'versions', 'gemini'))).toBe(false);
-  });
 
 });
 

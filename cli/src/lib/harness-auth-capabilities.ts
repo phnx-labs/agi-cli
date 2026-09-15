@@ -60,7 +60,6 @@ export const HARNESS_AUTH: Record<AgentId, HarnessAuthCapability> = {
   kimi: { login: null, status: null, identity: 'opaque', worker: 'none', slotEnv: 'KIMI_CODE_HOME' },
   antigravity: { login: null, status: null, identity: 'opaque', worker: 'none', slotEnv: null },
   droid: { login: null, status: null, identity: 'opaque', worker: 'api-key:FACTORY_API_KEY', slotEnv: null },
-  gemini: { login: null, status: null, identity: 'email', worker: 'none', slotEnv: null },
   copilot: { login: null, status: null, identity: 'opaque', worker: 'none', slotEnv: 'COPILOT_HOME' },
   openclaw: { login: null, status: null, identity: 'opaque', worker: 'none', slotEnv: null },
   amp: { login: null, status: null, identity: 'opaque', worker: 'none', slotEnv: null },

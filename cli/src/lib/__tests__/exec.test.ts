@@ -113,23 +113,6 @@ describeExec('buildExecCommand', () => {
       expect(cmd).not.toContain('--sandbox');
     });
 
-    it('gemini plan produces --approval-mode plan', () => {
-      const cmd = buildExecCommand(opts({ agent: 'gemini', mode: 'plan' }));
-      expect(cmd).toContain('--approval-mode');
-      expect(cmd[cmd.indexOf('--approval-mode') + 1]).toBe('plan');
-    });
-
-    it('gemini edit produces --approval-mode auto_edit', () => {
-      const cmd = buildExecCommand(opts({ agent: 'gemini', mode: 'edit' }));
-      expect(cmd).toContain('--approval-mode');
-      expect(cmd[cmd.indexOf('--approval-mode') + 1]).toBe('auto_edit');
-    });
-
-    it('gemini skip produces --yolo', () => {
-      const cmd = buildExecCommand(opts({ agent: 'gemini', mode: 'skip' }));
-      expect(cmd).toContain('--yolo');
-    });
-
     it('cursor plan produces --plan', () => {
       const cmd = buildExecCommand(opts({ agent: 'cursor', mode: 'plan' }));
       expect(cmd).toContain('--plan');
@@ -494,11 +477,6 @@ describeExec('buildExecCommand', () => {
       expect(cmd).not.toContain('--print');
     });
 
-    it('gemini headless adds nothing', () => {
-      const cmd = buildExecCommand(opts({ agent: 'gemini', headless: true }));
-      expect(cmd).not.toContain('--print');
-    });
-
     it('antigravity headless prompts use --print before the prompt', () => {
       const cmd = buildExecCommand(opts({ agent: 'antigravity', mode: 'edit', headless: true }));
       expect(cmd).toEqual(['agy', '--print', 'do the thing']);
@@ -657,11 +635,6 @@ describeExec('buildExecCommand', () => {
 
     it('codex ignores sessionId', () => {
       const cmd = buildExecCommand(opts({ agent: 'codex', sessionId: 'abc-123' }));
-      expect(cmd).not.toContain('--session-id');
-    });
-
-    it('gemini ignores sessionId', () => {
-      const cmd = buildExecCommand(opts({ agent: 'gemini', sessionId: 'abc-123' }));
       expect(cmd).not.toContain('--session-id');
     });
 
@@ -835,11 +808,6 @@ describeExec('buildExecCommand', () => {
       expect(cmd).not.toContain('model_reasoning_effort=high');
     });
 
-    it('gemini ignores effort (no reasoning flags)', () => {
-      const cmd = buildExecCommand(opts({ agent: 'gemini', effort: 'high' }));
-      expect(cmd).not.toContain('--effort');
-      expect(cmd).not.toContain('-c');
-    });
   });
 
   // --- Prompt positioning ---
@@ -858,11 +826,6 @@ describeExec('buildExecCommand', () => {
       expect(cmd).toContain('hello world');
     });
 
-    it('gemini uses positional prompt', () => {
-      const cmd = buildExecCommand(opts({ agent: 'gemini', prompt: 'hello world' }));
-      expect(cmd).not.toContain('-p');
-      expect(cmd).toContain('hello world');
-    });
   });
 
   // --- Add dirs ---
@@ -911,11 +874,6 @@ describeExec('buildExecCommand', () => {
       const cmd = buildExecCommand(opts({
         agent: 'codex', addDirs: ['/a'], resume: true, sessionId: 'xyz-9', prompt: 'go',
       }));
-      expect(cmd).not.toContain('--add-dir');
-    });
-
-    it('gemini ignores addDirs', () => {
-      const cmd = buildExecCommand(opts({ agent: 'gemini', addDirs: ['/a'] }));
       expect(cmd).not.toContain('--add-dir');
     });
 
@@ -1381,7 +1339,7 @@ describeExec('buildFallbackPrompt', () => {
   });
 
   it('falls back to context note without session reference when no session ID is known', () => {
-    const prompt = buildFallbackPrompt('codex', undefined, 'gemini', 'write tests');
+    const prompt = buildFallbackPrompt('codex', undefined, 'antigravity', 'write tests');
     expect(prompt).toContain('previous codex session was interrupted by a rate limit');
     expect(prompt).not.toContain('agents sessions');
     expect(prompt).toContain('Original request: write tests');
@@ -1567,7 +1525,7 @@ describeExec('implicitModeFor', () => {
   it('defaults Codex to safe writable and other harnesses to plan', () => {
     expect(implicitModeFor('codex')).toBe('edit');
     expect(implicitModeFor('claude')).toBe('plan');
-    expect(implicitModeFor('gemini')).toBe('plan');
+    expect(implicitModeFor('grok')).toBe('plan');
   });
 });
 

@@ -38,14 +38,13 @@ interface RuntimeCred {
 export const LEASE_RUNTIMES: RuntimeCred[] = [
   { id: 'claude', label: 'Claude Code', localCandidates: ['.claude/.claude.json', '.claude.json'], remote: '.claude.json' },
   { id: 'codex', label: 'Codex CLI', localCandidates: ['.codex/auth.json'], remote: '.codex/auth.json' },
-  { id: 'gemini', label: 'Gemini CLI', localCandidates: ['.gemini/google_accounts.json'], remote: '.gemini/google_accounts.json' },
   { id: 'grok', label: 'Grok CLI', localCandidates: ['.grok/auth.json'], remote: '.grok/auth.json' },
 ];
 
 /**
  * Every runtime whose login this module can serialize (`LEASE_RUNTIMES`) is a
  * native, rotating OAuth / session credential (Claude OAuth token, codex/grok
- * `auth.json`, gemini `google_accounts.json`). The fleet-auth contract forbids
+ * `auth.json`). The fleet-auth contract forbids
  * copying any of them between devices — including to an ephemeral leased box —
  * because a shared refresh token rotates server-side on the next refresh and
  * invalidates every other copy (`docs/specifications.md` SING-1b,
@@ -176,7 +175,6 @@ const PROFILE_AUTH_ENV_KEYS_BY_RUNTIME: Partial<Record<AgentId, readonly string[
     'ANTHROPIC_FOUNDRY_API_KEY',
   ],
   codex: ['OPENAI_API_KEY'],
-  gemini: ['GEMINI_API_KEY', 'GOOGLE_API_KEY'],
   grok: ['XAI_API_KEY', 'GROK_API_KEY'],
 };
 

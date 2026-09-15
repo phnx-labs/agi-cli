@@ -43,7 +43,7 @@ function sampleRouter(name = 'research'): Router {
     name,
     task: 'research',
     harnesses: {
-      gemini: { models: ['cheap', 'default'], accounts: ['personal'] },
+      grok: { models: ['cheap', 'default'], accounts: ['personal'] },
       kimi: { models: ['kimi-k2'], accounts: ['work'] },
     },
     weights: { cost: 0.5, success: 0.3, headroom: 0.2 },
@@ -107,7 +107,7 @@ describe('validateRouter', () => {
   it('accepts tier tokens on any known harness with no install required', () => {
     const router: Router = {
       name: 'research',
-      harnesses: { gemini: { models: ['cheap', 'default'] }, kimi: { models: ['best'] } },
+      harnesses: { grok: { models: ['cheap', 'default'] }, kimi: { models: ['best'] } },
     };
     expect(() => validateRouter(router)).not.toThrow();
   });

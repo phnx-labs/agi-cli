@@ -167,7 +167,6 @@ function nextOccurrenceMs(
 export const ROTATE_EXIT_SEQUENCES: Record<string, string[]> = {
   claude: ['\x1b', '\x03', '\x03'], // Esc, Ctrl+C, Ctrl+C (Esc first for Claude)
   codex: ['\x03', '\x03'], // Ctrl+C twice
-  gemini: ['\x03', '\x03'],
   cursor: ['\x03', '\x03'],
   opencode: ['\x03', '\x03'],
 };
@@ -414,7 +413,7 @@ export async function defaultRotateGate(): Promise<RotateGateResult> {
 // --- readiness --------------------------------------------------------------------
 
 /** Transcript layouts to probe for the new session (mirrors read.ts's table). */
-const ROTATE_TRANSCRIPT_AGENTS = ['claude', 'codex', 'gemini', 'droid'];
+const ROTATE_TRANSCRIPT_AGENTS = ['claude', 'codex', 'droid'];
 
 /**
  * Default TUI-liveness probe for the relaunched session: the new session's

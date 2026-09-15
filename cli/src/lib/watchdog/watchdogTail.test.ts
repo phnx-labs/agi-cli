@@ -48,18 +48,6 @@ describe('summarizeWatchdogTail (codex)', () => {
   });
 });
 
-describe('summarizeWatchdogTail (gemini)', () => {
-  it('reads user_message and agent_message events', () => {
-    const tail = [
-      JSON.stringify({ type: 'user_message', text: 'gemini user' }),
-      JSON.stringify({ type: 'agent_message', text: 'gemini reply' }),
-    ];
-    const summary = summarizeWatchdogTail(tail, 'gemini');
-    expect(summary.lastUserMessage).toBe('gemini user');
-    expect(summary.lastAssistantMessage).toBe('gemini reply');
-  });
-});
-
 describe('summarizeWatchdogTail (resilience)', () => {
   it('skips malformed JSON lines', () => {
     const tail = [
@@ -86,6 +74,6 @@ describe('summarizeWatchdogTail (resilience)', () => {
 
   it('returns empty summary when no messages present', () => {
     const tail = [JSON.stringify({ type: 'tool_call', tool_name: 'Read' })];
-    expect(summarizeWatchdogTail(tail, 'gemini')).toEqual({});
+    expect(summarizeWatchdogTail(tail, 'codex')).toEqual({});
   });
 });

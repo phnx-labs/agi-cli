@@ -192,9 +192,6 @@ export function locateModelSource(
     return null;
   }
 
-  // gemini is hard-deprecated (no launch path left to validate a model
-  // against), so its bundle is deliberately not parsed for a catalog here.
-
   if (agent === 'opencode') {
     // The `opencode` shim under node_modules/.bin dispatches to a platform-
     // specific native binary. We don't parse the 100MB binary; we let the CLI

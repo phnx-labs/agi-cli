@@ -111,13 +111,13 @@ export function registerRouteCommands(program: Command): void {
   setHelpSections(routeCmd, {
     examples: `
       # Create a router scoped to two harnesses, capped at a tier
-      agents route add research --harness gemini,kimi --tier cheap,default
+      agents route add research --harness grok,kimi --tier cheap,default
 
       # Narrow one harness's model set
       agents route allow research kimi kimi-k2
 
       # Link accounts so routing under this router only ever picks them
-      agents route link-account research gemini personal
+      agents route link-account research grok personal
       agents route link-account research kimi work
 
       # Inspect, rename, remove it
@@ -143,7 +143,7 @@ export function registerRouteCommands(program: Command): void {
     .command('add <name>')
     .alias('create')
     .description('Create a named router with an initial harness + tier allowlist.')
-    .option('--harness <list>', 'Comma-separated harness ids to allow, e.g. gemini,kimi')
+    .option('--harness <list>', 'Comma-separated harness ids to allow, e.g. grok,kimi')
     .option('--tier <list>', 'Comma-separated tier tokens applied to every listed harness, e.g. cheap,default')
     .option('--task <type>', 'Free-text task type this router serves, e.g. research')
     .action((name: string, opts: { harness?: string; tier?: string; task?: string }) => {
@@ -151,7 +151,7 @@ export function registerRouteCommands(program: Command): void {
         die(`Router '${name}' already exists. Use 'agents route allow ${name} <harness> <model|tier>...' to edit it.`);
       }
       if (!opts.harness) {
-        die("Missing --harness. Example: agents route add research --harness gemini,kimi --tier cheap,default");
+        die("Missing --harness. Example: agents route add research --harness grok,kimi --tier cheap,default");
       }
       const harnesses = opts.harness.split(',').map((h) => h.trim()).filter(Boolean);
       const tiers = (opts.tier ?? '').split(',').map((t) => t.trim()).filter(Boolean);
@@ -191,7 +191,7 @@ export function registerRouteCommands(program: Command): void {
       }
       if (routers.length === 0) {
         console.log(chalk.gray('No routers configured.'));
-        console.log(chalk.gray('Try: agents route add research --harness gemini,kimi --tier cheap,default'));
+        console.log(chalk.gray('Try: agents route add research --harness grok,kimi --tier cheap,default'));
         return;
       }
       for (const router of routers) console.log(renderRouterRow(router));

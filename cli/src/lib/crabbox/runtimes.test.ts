@@ -59,11 +59,11 @@ describe('buildCredentialScript — native OAuth transfer is refused (SING-1b)',
 
   it('classifies every LEASE_RUNTIMES entry as native OAuth (nothing slips through)', () => {
     for (const cred of LEASE_RUNTIMES) expect(isNativeOAuthRuntime(cred.id)).toBe(true);
-    expect(LEASE_RUNTIMES.map((c) => c.id).sort()).toEqual(['claude', 'codex', 'gemini', 'grok']);
+    expect(LEASE_RUNTIMES.map((c) => c.id).sort()).toEqual(['claude', 'codex', 'grok']);
   });
 
-  it('refuses each native runtime (claude/codex/gemini/grok) instead of serializing its login', () => {
-    for (const id of ['claude', 'codex', 'gemini', 'grok'] as AgentId[]) {
+  it('refuses each native runtime (claude/codex/grok) instead of serializing its login', () => {
+    for (const id of ['claude', 'codex', 'grok'] as AgentId[]) {
       expect(() => buildCredentialScript([id], [detected(id)])).toThrow(/Refusing to copy native OAuth/i);
     }
   });
@@ -140,7 +140,6 @@ describe('profileNeedsBaseRuntimeCredentials', () => {
   it('recognizes host-specific API keys for non-Claude profile hosts', () => {
     expect(profileNeedsBaseRuntimeCredentials('codex', { OPENAI_API_KEY: 'sk-profile' })).toBe(false);
     expect(profileNeedsBaseRuntimeCredentials('grok', { XAI_API_KEY: 'xai-profile' })).toBe(false);
-    expect(profileNeedsBaseRuntimeCredentials('gemini', { GOOGLE_API_KEY: 'google-profile' })).toBe(false);
   });
 
   it('does not require base credentials for profile hosts with no lease credential to copy', () => {

@@ -17,7 +17,6 @@ import {
   deprecationNotice,
   formatClaudeOrgLabel,
   getAccountInfo,
-  hardDeprecationError,
   hardDeprecationNotice,
   isClaudeCredentialFileBlank,
   resolveAgentName,
@@ -37,7 +36,6 @@ describe('account inspection support', () => {
     expect(ACCOUNT_INSPECTION_AGENT_IDS).toEqual([
       'claude',
       'codex',
-      'gemini',
       'cursor',
       'grok',
       'antigravity',
@@ -306,19 +304,6 @@ describe.skipIf(IS_WINDOWS)('MCP CLI execution', () => {
     expect(log).not.toContain('ARG:--\n');
   });
 
-  it('blocks MCP registration for hard-deprecated gemini', async () => {
-    const dir = makeTempDir();
-    const { binary, logPath } = writeArgLogger(dir);
-
-    const result = runAgentsModule(
-      `registerMcp('gemini', 'docs', 'https://developers.openai.com/mcp', 'project', 'http', { binary: ${JSON.stringify(binary)}, home: ${JSON.stringify(dir)} })`
-    ) as { success: boolean; error?: string };
-
-    expect(result.success).toBe(false);
-    expect(result.error).toBe('Agent does not support MCP');
-    expect(fs.existsSync(logPath)).toBe(false);
-  });
-
   it('skips HTTP MCP registration for agents without native HTTP support', async () => {
     const dir = makeTempDir();
     const { binary } = writeArgLogger(dir);
@@ -343,17 +328,6 @@ describe.skipIf(IS_WINDOWS)('MCP CLI execution', () => {
     expect(result.error).toBe('skipped: HTTP MCP headers are only supported for Claude registration');
   });
 
-  it('blocks HTTP MCP headers for hard-deprecated gemini before registration', async () => {
-    const dir = makeTempDir();
-    const { binary } = writeArgLogger(dir);
-
-    const result = runAgentsModule(
-      `registerMcp('gemini', 'docs', 'https://developers.openai.com/mcp', 'project', 'http', { binary: ${JSON.stringify(binary)}, home: ${JSON.stringify(dir)}, headers: { Authorization: 'Bearer token' } })`
-    ) as { success: boolean; error?: string };
-
-    expect(result.success).toBe(false);
-    expect(result.error).toBe('Agent does not support MCP');
-  });
 });
 
 describe('AGENTS capability matrix', () => {
@@ -411,8 +385,6 @@ describe('AGENTS capability matrix', () => {
     expect(AGENTS.claude.sessionDir).toEqual(['.claude', 'projects']);
     expect(AGENTS.claude.sessionFileExt).toBe('.jsonl');
     expect(AGENTS.codex.sessionDir).toEqual(['.codex', 'sessions']);
-    expect(AGENTS.gemini.sessionDir).toEqual(['.gemini', 'tmp']);
-    expect(AGENTS.gemini.sessionFileExt).toBe('.json');
     expect(AGENTS.grok.sessionDir).toEqual(['.grok', 'sessions']);
     expect(AGENTS.grok.sessionFileExt).toBe('.json');
     expect(AGENTS.copilot.sessionDir).toEqual(['.copilot', 'session-state']);
@@ -426,7 +398,7 @@ describe('AGENTS capability matrix', () => {
       ALL_AGENT_IDS.filter((id) => AGENTS[id].sessionDir !== null),
     );
     expect(new Set(UNMANAGED_DETECTION_CANDIDATES)).toEqual(
-      new Set(['claude', 'codex', 'gemini', 'grok', 'copilot', 'droid', 'muse']),
+      new Set(['claude', 'codex', 'grok', 'copilot', 'droid', 'muse']),
     );
   });
 
@@ -561,7 +533,6 @@ describe('resolveAgentName', () => {
     expect(resolveAgentName('clude')).toBe('claude'); // deletion
     expect(resolveAgentName('codx')).toBe('codex');
     expect(resolveAgentName('kim')).toBe('kimi');
-    expect(resolveAgentName('gemni')).toBe('gemini');
     expect(resolveAgentName('grook')).toBe('grok');
   });
 
@@ -1199,55 +1170,14 @@ describe('getAccountInfo — claude credential floor (blanked .credentials.json)
 });
 
 describe('agent deprecation warnings', () => {
-  it('marks gemini hard-deprecated by Google with a dated notice and antigravity successor', () => {
-    const dep = AGENTS.gemini.deprecated;
-    expect(dep).toBeDefined();
-    expect(dep?.by).toBe('Google');
-    expect(dep?.date).toBe('June 18, 2026');
-    expect(dep?.replacement).toBe('antigravity');
-    expect(dep?.hard).toBe(true);
-  });
-
-  it('builds a notice whose header names the agent, vendor, and date and points at the successor', () => {
-    const lines = deprecationNotice('gemini');
-    expect(lines).not.toBeNull();
-    expect(lines![0]).toBe('Warning: Gemini was deprecated by Google (June 18, 2026).');
-    // The successor line uses the replacement's display name + install command, not a hardcoded string.
-    expect(lines!.some((l) => l.includes('Consider using Antigravity instead:  agents add antigravity'))).toBe(true);
-    expect(lines!.some((l) => l.includes('developers.googleblog.com'))).toBe(true);
-  });
-
-  it('returns null for agents that are not deprecated', () => {
+  it('no agent currently carries a deprecation marker', () => {
     for (const id of ALL_AGENT_IDS) {
-      if (id === 'gemini') continue;
       expect(deprecationNotice(id)).toBeNull();
+      expect(warnAgentDeprecated(id)).toBeUndefined();
+      expect(hardDeprecationNotice(id)).toBeNull();
     }
-    // Sanity: only gemini carries a marker today, so exactly one agent warns.
     const deprecated = ALL_AGENT_IDS.filter((id) => AGENTS[id].deprecated);
-    expect(deprecated).toEqual(['gemini']);
-  });
-
-  it('warnAgentDeprecated prints the gemini notice and stays silent for others', () => {
-    const printed: string[] = [];
-    const original = console.log;
-    console.log = (...args: unknown[]) => { printed.push(args.join(' ')); };
-    try {
-      warnAgentDeprecated('claude');
-      expect(printed).toHaveLength(0);
-      warnAgentDeprecated('gemini');
-    } finally {
-      console.log = original;
-    }
-    expect(printed.length).toBeGreaterThan(0);
-    // chalk wraps in ANSI codes; assert the visible substring survives.
-    expect(printed.join('\n')).toContain('was deprecated by Google');
-  });
-
-  it('builds a hard-deprecation error that tells users to install antigravity', () => {
-    const lines = hardDeprecationNotice('gemini');
-    expect(lines).not.toBeNull();
-    expect(lines![0]).toBe('Gemini is no longer supported by agents-cli because Google retired it (June 18, 2026).');
-    expect(hardDeprecationError('gemini')).toContain('Use Antigravity instead:  agents add antigravity');
+    expect(deprecated).toEqual([]);
   });
 });
 
@@ -1521,12 +1451,5 @@ describe('parseAgentVersionSpec — the agents run launch-target split at the ro
     expect('error' in empty && empty.error).toMatch(/Invalid version ''/);
     const bad = parseAgentVersionSpec('claude@..');
     expect('error' in bad && bad.error).toMatch(/Invalid version/);
-  });
-
-  it('a hard-deprecated harness still parses so callers can run their own deprecation gate on the BARE id', () => {
-    // The RUSH-2719 quiet bug: resolveAgentName('gemini@1.2.3') is null, so the
-    // add-time deprecation check silently passed a pinned deprecated harness.
-    const r = parseAgentVersionSpec('gemini@1.2.3');
-    expect(r).toEqual({ agent: 'gemini', version: '1.2.3' });
   });
 });

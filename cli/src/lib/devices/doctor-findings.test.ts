@@ -790,7 +790,7 @@ describe('remediationFor', () => {
       .toBe('agents run kimi@0.19.2');
   });
 
-  it.each(['gemini', 'antigravity', 'droid'] as const)(
+  it.each(['antigravity', 'droid'] as const)(
     '%s has NO per-version isolation → shared login (no fake per-version fix)',
     (agent) => {
       const r = remediationFor({ ...base, kind: 'logged-out', agent, version: '9.9.9' });

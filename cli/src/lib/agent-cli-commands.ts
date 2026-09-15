@@ -12,7 +12,6 @@
 export const AGENT_CLI_COMMANDS: readonly string[] = [
   'claude',
   'codex',
-  'gemini',
   'cursor-agent',
   'opencode',
   'openclaw',

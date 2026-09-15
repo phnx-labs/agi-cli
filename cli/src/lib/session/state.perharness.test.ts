@@ -21,7 +21,6 @@ const CASES: Array<{ agent: SessionAgentId; fixture: string; expect: SessionActi
   // Other harnesses with a parser — one state each, for cross-harness coverage.
   { agent: 'droid', fixture: 'droid-working.jsonl', expect: 'working' },
   { agent: 'rush', fixture: 'rush-waiting.jsonl', expect: 'waiting_input' },
-  { agent: 'gemini', fixture: 'gemini-idle.json', expect: 'idle' },
 ];
 
 /**

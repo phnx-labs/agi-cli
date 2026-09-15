@@ -17,7 +17,6 @@ import { selectSessions } from './sessions-export.js';
 export const MARKDOWN_RENDER_AGENTS = [
   'claude',
   'codex',
-  'gemini',
   'antigravity',
   'opencode',
   'grok',

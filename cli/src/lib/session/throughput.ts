@@ -9,7 +9,7 @@
  */
 
 /** Agents whose transcript formats report per-turn output-token usage. */
-type ThroughputAgent = 'claude' | 'codex' | 'gemini';
+type ThroughputAgent = 'claude' | 'codex';
 
 /** Rolling window (seconds) the throughput average is computed over. */
 const DEFAULT_THROUGHPUT_WINDOW_SEC = 60;
@@ -27,8 +27,6 @@ const DEFAULT_THROUGHPUT_WINDOW_SEC = 60;
  *   - Codex:  JSONL. Each token_count event is `{type: 'event_msg', timestamp,
  *     payload: {type: 'token_count', info: {last_token_usage: {output_tokens,
  *     reasoning_output_tokens}}}}`. `last_token_usage` is per-turn (not cumulative).
- *   - Gemini: single JSON object. `{messages: [{type: 'gemini', timestamp,
- *     tokens: {output, thoughts}}]}`. Caller must pass the whole file.
  */
 export function computeTokPerSec(
   sessionContent: string,
@@ -38,21 +36,6 @@ export function computeTokPerSec(
 ): number {
   const cutoff = now - windowSec * 1000;
   let total = 0;
-  if (agent === 'gemini') {
-    try {
-      const d = JSON.parse(sessionContent);
-      const messages = Array.isArray(d?.messages) ? d.messages : [];
-      for (const m of messages) {
-        if (m?.type !== 'gemini') continue;
-        const ts = typeof m.timestamp === 'string' ? Date.parse(m.timestamp) : 0;
-        if (!ts || ts < cutoff) continue;
-        const out = typeof m?.tokens?.output === 'number' ? m.tokens.output : 0;
-        const thoughts = typeof m?.tokens?.thoughts === 'number' ? m.tokens.thoughts : 0;
-        total += out + thoughts;
-      }
-    } catch { /* malformed gemini file → 0 */ }
-    return total / windowSec;
-  }
   const lines = sessionContent.split(/\r?\n/);
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i];

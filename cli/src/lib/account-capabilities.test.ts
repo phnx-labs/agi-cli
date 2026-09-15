@@ -59,7 +59,6 @@ describe('native account capability registry', () => {
   it('exposes nameability for the supported + conditional set only', () => {
     expect(nativeAccountNameable('claude')).toBe(true);
     expect(nativeAccountNameable('muse')).toBe(true); // conditional
-    expect(nativeAccountNameable('gemini')).toBe(false); // discovery-only
     expect(nativeAccountNameable('copilot')).toBe(false); // unsupported
   });
 

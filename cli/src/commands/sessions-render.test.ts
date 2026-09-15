@@ -107,7 +107,6 @@ describe('sessions render harness parity', () => {
     expect(MARKDOWN_RENDER_AGENTS).toEqual([
       'claude',
       'codex',
-      'gemini',
       'antigravity',
       'opencode',
       'grok',

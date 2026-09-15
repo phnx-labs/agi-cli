@@ -110,7 +110,6 @@ import {
 const AGENT_NAMES: Record<AgentType, string> = {
   claude: 'Claude',
   codex: 'Codex',
-  gemini: 'Gemini',
   cursor: 'Cursor',
   opencode: 'OpenCode',
   grok: 'Grok',

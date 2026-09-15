@@ -35,20 +35,6 @@ describe('syncProjectResourcesToAgent', () => {
     expect(fs.readFileSync(path.join(project, '.cursor', 'skills', 'ping', 'SKILL.md'), 'utf-8')).toContain('agents_command: "ping"');
   });
 
-  it('skips hard-deprecated gemini when syncing project resources', () => {
-    const project = makeTempProject();
-    const projectAgentsDir = path.join(project, '.agents');
-    const skillDir = path.join(projectAgentsDir, 'skills', 'myskill');
-    fs.mkdirSync(skillDir, { recursive: true });
-    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), 'Project skill.', 'utf-8');
-
-    const gemini = syncProjectResourcesToAgent('gemini', '0.36.0', projectAgentsDir);
-
-    expect(gemini.synced).toEqual([]);
-    expect(gemini.skipped).toEqual([]);
-    expect(fs.existsSync(path.join(project, '.gemini'))).toBe(false);
-  });
-
   it('syncs project skills into native skill agents project config dirs', () => {
     const project = makeTempProject();
     const projectAgentsDir = path.join(project, '.agents');

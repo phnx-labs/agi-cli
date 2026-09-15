@@ -56,7 +56,6 @@ describe('isSymlinkAdoptedHarness', () => {
   it('is the slotEnv-null set that is not CONFIG_ENV isolated', () => {
     expect(isSymlinkAdoptedHarness('droid')).toBe(true);
     expect(isSymlinkAdoptedHarness('antigravity')).toBe(true);
-    expect(isSymlinkAdoptedHarness('gemini')).toBe(true);
     expect(isSymlinkAdoptedHarness('openclaw')).toBe(true);
     expect(isSymlinkAdoptedHarness('amp')).toBe(true);
     expect(isSymlinkAdoptedHarness('goose')).toBe(true);

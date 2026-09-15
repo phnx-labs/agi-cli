@@ -92,7 +92,7 @@ describe('detectAuthFailureEvent — Claude-compatible stream-json structural si
 
   it('is false for agents that do not emit these markers', () => {
     expect(detectAuthFailureEvent(LOGGED_OUT_CLAUDE_LOG, 'codex')).toBe(false);
-    expect(detectAuthFailureEvent(LOGGED_OUT_CLAUDE_LOG, 'gemini')).toBe(false);
+    expect(detectAuthFailureEvent(LOGGED_OUT_CLAUDE_LOG, 'antigravity')).toBe(false);
   });
 });
 
@@ -426,9 +426,8 @@ describe('nativeResume (Tier-1 capability derives from the command template)', (
     expect(nativeResume('claude')).toBe(true);
     expect(nativeResume('codex')).toBe(true);
   });
-  it('opencode and gemini do not (they fall back to /continue replay)', () => {
+  it('opencode does not (it falls back to /continue replay)', () => {
     expect(nativeResume('opencode')).toBe(false);
-    expect(nativeResume('gemini')).toBe(false);
   });
   it('gates newly verified harnesses by the exact installed-version threshold', () => {
     expect(nativeResume('grok', '0.2.90')).toBe(false);
@@ -577,7 +576,7 @@ describe('buildExecCommand — native resume wiring', () => {
   });
 
   it('non-native agent ignores resume in the arg builder (Tier-2 handles it via the prompt)', () => {
-    const cmd = buildExecCommand(execOpts({ agent: 'gemini', resume: true, sessionId: 'qqq', headless: true, prompt: 'go' }));
+    const cmd = buildExecCommand(execOpts({ agent: 'opencode', resume: true, sessionId: 'qqq', headless: true, prompt: 'go' }));
     expect(cmd).not.toContain('--resume');
     expect(cmd).not.toContain('qqq');
   });
