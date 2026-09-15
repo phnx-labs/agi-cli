@@ -12,12 +12,13 @@
   run. The placement-failure hint names `--local`. Source: `cli/src/commands/exec.ts`
   (`pinLocalWhenTargetIsSelf`), `cli/src/lib/placement.ts`, `cli/src/lib/hosts/remote-cmd.ts`.
 - **`agents sessions` filter/sort queries take the standalone fast path when it's new enough.**
-  `--project`/`-p`, `--since`, `--until`, `--sort`, the `--agent name@version` suffix, and the
-  harness shorthands (`--claude`/`--codex`/…) now route to the standalone `sessions` binary when
-  the installed one is ≥ 0.2.0 (which implements them), and stay on the in-process engine
-  otherwise — a version probe (`sessions --version`, cached) gates it, so an older binary never
-  gets a flag it would mis-read as an FTS token. Behavior is unchanged; the fast path just covers
-  more queries. Source: `cli/src/lib/sessions-client.ts`, `cli/src/index.ts`.
+  `--project`/`-p`, `--since`, `--until`, `--sort`, and the harness shorthands
+  (`--claude`/`--codex`/…) now route to the standalone `sessions` binary when the installed one is
+  ≥ 0.2.0 (which implements them), and stay on the in-process engine otherwise — a version probe
+  (`sessions --version`, cached, run only when such a flag is present) gates it, so an older binary
+  never gets a flag it would mis-read as an FTS token. `--json`/`--limit`/`--agent` and a bare
+  query/id already route unconditionally, unchanged. Behavior is unchanged; the fast path just
+  covers more queries. Source: `cli/src/lib/sessions-client.ts`, `cli/src/index.ts`.
 
 ## 1.22.116
 
