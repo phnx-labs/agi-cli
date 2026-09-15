@@ -245,13 +245,13 @@ describe('parseAgentSpec', () => {
   });
 
   it('handles explicit latest', () => {
-    const result = parseAgentSpec('gemini@latest');
-    expect(result).toEqual({ agent: 'gemini', version: 'latest' });
+    const result = parseAgentSpec('codex@latest');
+    expect(result).toEqual({ agent: 'codex', version: 'latest' });
   });
 
   it('handles explicit oldest', () => {
-    const result = parseAgentSpec('gemini@oldest');
-    expect(result).toEqual({ agent: 'gemini', version: 'oldest' });
+    const result = parseAgentSpec('codex@oldest');
+    expect(result).toEqual({ agent: 'codex', version: 'oldest' });
   });
 
   it('normalizes agent name to lowercase', () => {
@@ -273,7 +273,7 @@ describe('parseAgentSpec', () => {
   });
 
   it('parses all valid agents', () => {
-    for (const agent of ['claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw']) {
+    for (const agent of ['claude', 'codex', 'cursor', 'opencode', 'openclaw']) {
       const result = parseAgentSpec(`${agent}@1.0.0`);
       expect(result).not.toBeNull();
       expect(result!.agent).toBe(agent);
@@ -869,19 +869,6 @@ describe('syncResourcesToVersion', () => {
       expect(content).toContain('Debug prompt');
     });
 
-    it('does not sync commands for hard-deprecated gemini', () => {
-      setupCentralResources();
-      const versionHome = path.join(AGENTS_DIR, 'versions', 'gemini', '1.0.0', 'home');
-      fs.mkdirSync(versionHome, { recursive: true });
-
-      const result = syncResourcesToVersion('gemini', '1.0.0');
-
-      const commandsDir = path.join(versionHome, '.gemini', 'commands');
-      expect(result.commands).toBe(false);
-      expect(fs.existsSync(path.join(commandsDir, 'debug.toml'))).toBe(false);
-      expect(fs.existsSync(path.join(commandsDir, 'debug.md'))).toBe(false);
-    });
-
     it('skips commands for agents without command capability', () => {
       setupCentralResources();
       const versionHome = path.join(AGENTS_DIR, 'versions', 'openclaw', '1.0.0', 'home');
@@ -1078,17 +1065,6 @@ describe('syncResourcesToVersion', () => {
       // The default preset includes both subrules — both bodies should be inlined.
       expect(content).toContain('Agent Instructions');
       expect(content).toContain('Be kind');
-    });
-
-    it('does not write memory for hard-deprecated gemini', () => {
-      setupCentralResources();
-      const versionHome = path.join(AGENTS_DIR, 'versions', 'gemini', '1.0.0', 'home');
-      fs.mkdirSync(versionHome, { recursive: true });
-
-      const result = syncResourcesToVersion('gemini', '1.0.0');
-
-      expect(result.memory).toEqual([]);
-      expect(fs.existsSync(path.join(versionHome, '.gemini', 'GEMINI.md'))).toBe(false);
     });
 
     it('inlines all subrules listed in the active preset', () => {
@@ -1303,17 +1279,6 @@ describe('getActuallySyncedResources', () => {
     expect(synced.commands).toContain('debug');
     expect(synced.commands).toContain('plan');
     expect(synced.commands).not.toContain('notes');
-  });
-
-  it('does not detect commands for hard-deprecated gemini', () => {
-    const { agentDir } = setupVersionHome('gemini', '1.0.0');
-    const commandsDir = path.join(agentDir, 'commands');
-    fs.mkdirSync(commandsDir, { recursive: true });
-    fs.writeFileSync(path.join(commandsDir, 'debug.toml'), 'name = "debug"');
-    fs.writeFileSync(path.join(commandsDir, 'plan.md'), '# legacy command');
-
-    const synced = getActuallySyncedResources('gemini', '1.0.0');
-    expect(synced.commands).toEqual([]);
   });
 
   it('detects skills when content matches central source', () => {

@@ -515,7 +515,7 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
     expect(pins).not.toMatch(/"agents"\s*:\s*\{[^}]*"codex"/);
   });
 
-  it('blocks `agents add gemini` before installation or resource sync', () => {
+  it('blocks `agents add gemini` (removed agent) before installation or resource sync', () => {
     const home = makeTempHome();
     tempHomes.push(home);
 
@@ -523,8 +523,8 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
     const geminiVersionsDir = path.join(home, '.agents', '.history', 'versions', 'gemini');
 
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain('Gemini is no longer supported by agents-cli');
-    expect(result.stderr).toContain('Use Antigravity instead:  agents add antigravity');
+    expect(result.stderr).toContain('Unknown agent');
+    expect(result.stderr).toContain('gemini');
     expect(fs.existsSync(geminiVersionsDir)).toBe(false);
   });
 

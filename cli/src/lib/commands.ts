@@ -745,7 +745,7 @@ function commandContentMatches(
  * Get the project-scoped commands directory for an agent.
  * Claude: .claude/commands/
  * Codex: .codex/prompts/
- * Gemini: .gemini/commands/
+ * Cursor: .cursor/commands/
  */
 function getProjectCommandsDirs(agentId: AgentId, cwd: string = process.cwd()): string[] {
   const agent = AGENTS[agentId];

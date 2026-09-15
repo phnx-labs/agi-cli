@@ -29,7 +29,7 @@ describe('buildHostCredentialScript — native OAuth transfer is refused (SING-1
     for (const cred of LEASE_RUNTIMES) {
       expect(isNativeOAuthRuntime(cred.id)).toBe(true);
     }
-    expect(LEASE_RUNTIMES.map((c) => c.id).sort()).toEqual(['claude', 'codex', 'gemini', 'grok']);
+    expect(LEASE_RUNTIMES.map((c) => c.id).sort()).toEqual(['claude', 'codex', 'grok']);
   });
 
   it('throws for a native runtime instead of serializing its login, and steers to accounts sync', () => {
@@ -55,8 +55,8 @@ describe('buildHostCredentialScript — native OAuth transfer is refused (SING-1
     }
   });
 
-  it('refuses codex / grok / gemini native auth files too', () => {
-    for (const id of ['codex', 'grok', 'gemini'] as AgentId[]) {
+  it('refuses codex / grok native auth files too', () => {
+    for (const id of ['codex', 'grok'] as AgentId[]) {
       expect(() => buildHostCredentialScript({ runtimes: [id], detected: [detected(id)] })).toThrow(
         /Refusing to copy native OAuth/i,
       );

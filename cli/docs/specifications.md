@@ -162,7 +162,7 @@ SSH access (§7); rendering sessions that no harness produced.
 #### 3.1 Discovery & harness parsing
 
 - **SES-1 (MUST).** The canonical session-capable harness set is
-  `SESSION_AGENTS` — exactly these 13, in display order: `claude, codex, gemini,
+  `SESSION_AGENTS` — exactly these 12, in display order: `claude, codex,
   antigravity, opencode, openclaw, rush, hermes, grok, kimi, droid, cursor, muse`
   (`lib/session/types.ts:17`). Adding harness discovery MUST extend this set (and
   its parser + `dispatchAgentScan` arm), not special-case a caller.
@@ -2293,8 +2293,8 @@ schema (`--json` passes through each agent's native stream format).
   there no literal `HOME=` assignment exists (verified: no `HOME="` writer in
   `lib/installations/shims.ts` — only `AGENTS_USER_DIR`/`GROK_DOWNLOADS` etc. *read* `$HOME`).
 - **EXEC-16.** The remaining registered agents
-  (gemini, opencode, openclaw, amp,  goose, antigravity, grok,
-  droid, hermes, pi — the 16 in `AgentId`, `lib/types.ts:13`, minus the
+  (opencode, openclaw, amp,  goose, antigravity, grok,
+  droid, hermes, pi — the 15 in `AgentId`, `lib/types.ts:13`, minus the
   EXEC-14 isolates and the XDG-isolated agents below) get **no** per-version config-dir var from
   `buildExecEnv` itself — its per-agent branch has no arm for them
   (`buildExecEnv`'s per-agent branch, `lib/exec.ts:407-564`; the `else` at `:559-564` only deletes the four known vars).
