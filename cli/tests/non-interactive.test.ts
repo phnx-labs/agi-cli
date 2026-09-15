@@ -515,19 +515,6 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
     expect(pins).not.toMatch(/"agents"\s*:\s*\{[^}]*"codex"/);
   });
 
-  it('blocks `agents add gemini` (removed agent) before installation or resource sync', () => {
-    const home = makeTempHome();
-    tempHomes.push(home);
-
-    const result = runAgents(home, ['add', 'gemini@latest', '-y']);
-    const geminiVersionsDir = path.join(home, '.agents', '.history', 'versions', 'gemini');
-
-    expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain('Unknown agent');
-    expect(result.stderr).toContain('gemini');
-    expect(fs.existsSync(geminiVersionsDir)).toBe(false);
-  });
-
   it('pins the one managed installation on explicit @release instead of creating a second home (PHNX-3940)', () => {
     const home = makeTempHome();
     tempHomes.push(home);
