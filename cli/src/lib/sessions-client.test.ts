@@ -166,6 +166,41 @@ describe('planDeviceHostRead', () => {
     expect(planDeviceHostRead(['watch', '--device', 'box', '--json'])).toBeNull();
     expect(planDeviceHostRead(['stats', '--device', 'box'])).toBeNull();
   });
+
+  it('never collapses a MULTI-device query — --host is point-to-one (stays on the in-repo fan-out)', () => {
+    // A trailing bare token is commander's variadic second device.
+    expect(planDeviceHostRead(['auth', '--device', 'box', 'mac-mini', '--json'])).toBeNull();
+    expect(planDeviceHostRead(['auth', '--device=box', 'mac-mini'])).toBeNull();
+    expect(planDeviceHostRead(['auth', '-D', 'box', 'mac-mini'])).toBeNull();
+    // The flag repeated is multi-device too.
+    expect(planDeviceHostRead(['auth', '--device', 'box', '--device', 'mac-mini'])).toBeNull();
+    expect(planDeviceHostRead(['auth', '-D', 'box', '-D', 'mac-mini'])).toBeNull();
+    // Fan-out sentinels, case-insensitive.
+    expect(planDeviceHostRead(['auth', '--device', 'all'])).toBeNull();
+    expect(planDeviceHostRead(['auth', '--device', 'fleet', '--json'])).toBeNull();
+    expect(planDeviceHostRead(['auth', '--device', 'ALL'])).toBeNull();
+    expect(planDeviceHostRead(['auth', '--device=Fleet'])).toBeNull();
+    // A missing / flag-shaped value is not a device.
+    expect(planDeviceHostRead(['auth', '--device'])).toBeNull();
+    expect(planDeviceHostRead(['auth', '--device', '--json'])).toBeNull();
+  });
+
+  it('still collapses the clean single-device forms (one occurrence, one value, no trailing bare token)', () => {
+    // A following FLAG (not a bare token) is fine — variadic stops at the flag.
+    expect(planDeviceHostRead(['auth', '--device', 'box', '--json'])).toEqual({
+      device: 'box',
+      readArgs: ['auth', '--json'],
+    });
+    expect(planDeviceHostRead(['auth', '--device', 'box'])).toEqual({
+      device: 'box',
+      readArgs: ['auth'],
+    });
+    expect(planDeviceHostRead(['auth', '--device=box', '--json'])).toEqual({
+      device: 'box',
+      readArgs: ['auth', '--json'],
+    });
+    expect(planDeviceHostRead(['auth', '-Dbox'])).toEqual({ device: 'box', readArgs: ['auth'] });
+  });
 });
 
 describe('usesHostFlag', () => {

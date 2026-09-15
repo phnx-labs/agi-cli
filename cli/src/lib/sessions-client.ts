@@ -15,7 +15,6 @@
 import { spawnSync } from 'node:child_process';
 import { findInPath } from './agent-spec/agents.js';
 import { compareVersions } from './agent-spec/primitives.js';
-import { flagValue } from './hosts/routing-flag.js';
 import { stripRoutingFlags } from './hosts/remote-cmd.js';
 
 const INSTALL_HINT = 'npm i -g @phnx-labs/sessions-cli';
@@ -233,20 +232,70 @@ export function isReadQuery(args: string[], opts: { filters?: boolean; host?: bo
 }
 
 /**
- * Plan the rewrite of a `sessions` READ query that carries `--device <name>`
- * (and no explicit `--host`) into the standalone's point-to-one remote read: the
- * caller resolves the device to an ssh target and appends `--host ssh://<target>`
- * to `readArgs`, forwarding it to the LOCAL standalone (which owns the ssh hop).
- * This is the local-orchestration collapse (secrets-cli model): `sessions` owns
- * the remote read, replacing the in-repo `--device` peer fan-out — WHEN it is
- * safe (the caller gates on the LOCAL standalone supporting `--host`, >=0.3.0,
- * and falls through to the in-repo fan-out if the PEER lacks the standalone).
+ * Scan an argv for the `sessions` `--device`/`-D` flag, which commander defines
+ * as VARIADIC (`-D, --device <target...>`) — so it can appear more than once and
+ * a space-form value greedily consumes following bare tokens as extra devices.
+ * Returns how many times it occurs, the FIRST value, and the index of the last
+ * argv token that value occupies (the flag token itself for the `=`/glued forms,
+ * the following value token for the space form). Pure; no imports.
+ */
+function scanDeviceFlag(args: string[]): { count: number; value?: string; valueEndIndex?: number } {
+  let count = 0;
+  let value: string | undefined;
+  let valueEndIndex: number | undefined;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    let matched = false;
+    let v: string | undefined;
+    let endIdx = i;
+    if (a === '--device' || a === '-D') {
+      matched = true;
+      v = args[i + 1];
+      endIdx = i + 1;
+    } else if (a.startsWith('--device=')) {
+      matched = true;
+      v = a.slice('--device='.length);
+    } else if (a.startsWith('-D=')) {
+      matched = true;
+      v = a.slice(3);
+    } else if (/^-D.+/.test(a)) {
+      matched = true;
+      v = a.slice(2);
+    }
+    if (matched) {
+      count += 1;
+      if (count === 1) {
+        value = v;
+        valueEndIndex = endIdx;
+      }
+    }
+  }
+  return { count, value, valueEndIndex };
+}
+
+/**
+ * Plan the rewrite of a `sessions` READ query that names EXACTLY ONE device via
+ * `--device <name>` (and no explicit `--host`) into the standalone's
+ * point-to-one remote read: the caller resolves the device to an ssh target and
+ * appends `--host ssh://<target>` to `readArgs`, forwarding it to the LOCAL
+ * standalone (which owns the ssh hop). This is the local-orchestration collapse
+ * (secrets-cli model): `sessions` owns the remote read, replacing the in-repo
+ * `--device` peer fan-out — WHEN it is safe (the caller gates on the LOCAL
+ * standalone supporting `--host`, >=0.3.0, and falls through to the in-repo
+ * fan-out if the PEER lacks the standalone).
  *
- * Returns null when the query is NOT a device-scoped read, in which case the
- * existing path is unchanged:
- *   - no `--device`/`-D` present;
- *   - an explicit `--host` is already on the argv — it wins, matching
- *     `secrets`' `rewriteDeviceToHost`, so we never add a second `--host`;
+ * `sessions --host` is point-to-one, so ONLY a single unambiguous device may
+ * collapse; a multi-device query MUST stay on the in-repo fan-out, which parses
+ * commander's variadic `--device` correctly. Returns null (→ in-repo path,
+ * unchanged) when the query is not a single-device read:
+ *   - no `--device`/`-D`, or a missing/flag-shaped value;
+ *   - `--device`/`-D` appears more than once (`--device box --device mac-mini`);
+ *   - the value is a fan-out sentinel `all`/`fleet` (case-insensitive);
+ *   - a bare token immediately follows the value (`--device box mac-mini`) —
+ *     commander's variadic would take it as a second device, so this is
+ *     multi-device too;
+ *   - an explicit `--host` is already on the argv — it wins, matching `secrets`'
+ *     `rewriteDeviceToHost`, so we never add a second `--host`;
  *   - the remaining query (with `--device` stripped) is not a read — a lifecycle
  *     `--device` (resume/watch/inject/focus/…) keeps its in-repo/`runOnPeer`
  *     behavior exactly.
@@ -261,12 +310,19 @@ export function planDeviceHostRead(
   args: string[],
   opts: { filters?: boolean } = {},
 ): { device: string; readArgs: string[] } | null {
-  const device = flagValue(args, 'device', 'D');
-  if (device === undefined || device === '') return null;
+  const { count, value, valueEndIndex } = scanDeviceFlag(args);
+  // Exactly one occurrence, with a real (non-flag) value — else fall through.
+  if (count !== 1) return null;
+  if (value === undefined || value === '' || value.startsWith('-')) return null;
   if (usesHostFlag(args)) return null;
+  const lower = value.toLowerCase();
+  if (lower === 'all' || lower === 'fleet') return null;
+  // A bare token after the value is a second variadic device (multi-device).
+  const next = valueEndIndex !== undefined ? args[valueEndIndex + 1] : undefined;
+  if (next !== undefined && !next.startsWith('-')) return null;
   const readArgs = stripRoutingFlags(args, [{ long: 'device', short: 'D', takesValue: true }]);
   if (!isReadQuery(readArgs, { filters: opts.filters })) return null;
-  return { device, readArgs };
+  return { device: value, readArgs };
 }
 
 /** Test seam: drop the memoized bin so PATH fixtures can re-resolve. */
