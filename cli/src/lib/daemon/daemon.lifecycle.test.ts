@@ -52,13 +52,13 @@ describe('startDetached (integration: daemon stays alive)', () => {
       execFileSync('npm', ['run', 'build'], { cwd: REPO_ROOT, stdio: 'ignore' });
     }
 
-    // The daemon's browser IPC binds an AF_UNIX socket at
-    // <HOME>/.agents/.cache/helpers/browser/browser.sock. macOS caps AF_UNIX
-    // paths at 104 bytes (sun_path); os.tmpdir() there is the long
-    // /var/folders/…/T/… (~48 chars), so nesting the socket under it overflows
-    // to ~116 chars and bind() fails with EADDRINUSE. Root the fake HOME at a
-    // short base on POSIX so the socket path stays well under the limit. Windows
-    // uses named pipes (no path-length limit), so os.tmpdir() is fine there.
+    // The daemon binds the feed-stream hub as an AF_UNIX socket at
+    // <HOME>/.agents/.cache/helpers/feed/feed-stream.sock (the browser IPC socket
+    // left with the standalone browser CLI, PHNX-4101). macOS caps AF_UNIX paths
+    // at 104 bytes (sun_path); os.tmpdir() there is the long /var/folders/…/T/…
+    // (~48 chars), so nesting the socket under it overflows and bind() fails.
+    // Root the fake HOME at a short base on POSIX so the socket path stays well
+    // under the limit. Windows uses named pipes (no path-length limit).
     const tmpRoot = process.platform === 'win32' ? os.tmpdir() : '/tmp';
     const tmpHome = fs.mkdtempSync(path.join(tmpRoot, 'agd-'));
     // Satisfy the setup gate (`ensureInitialized`): ~/.agents/.system must be a repo.
@@ -67,7 +67,7 @@ describe('startDetached (integration: daemon stays alive)', () => {
     execFileSync('git', ['init', '-q', systemDir]);
 
     const logPath = path.join(tmpHome, 'daemon-stdio.log');
-    const socketPath = path.join(tmpHome, '.agents', '.cache', 'helpers', 'browser', 'browser.sock');
+    const socketPath = path.join(tmpHome, '.agents', '.cache', 'helpers', 'feed', 'feed-stream.sock');
     const endpoint = ipcEndpoint(socketPath);
     const daemonLog = path.join(tmpHome, '.agents', '.cache', 'helpers', 'daemon', 'logs.jsonl');
 
@@ -79,7 +79,7 @@ describe('startDetached (integration: daemon stays alive)', () => {
     const alive = () => { try { process.kill(pid!, 0); return true; } catch { return false; } };
 
     try {
-      // Wait for the browser IPC socket to accept connections (issue: ~400ms).
+      // Wait for the feed-stream hub socket to accept connections (issue: ~400ms).
       let up = false;
       for (let i = 0; i < 80 && !up; i++) {
         up = await probeEndpoint(endpoint);
@@ -95,7 +95,7 @@ describe('startDetached (integration: daemon stays alive)', () => {
 
       // The daemon's own structured log confirms it came up and never shut down.
       const logText = fs.existsSync(daemonLog) ? fs.readFileSync(daemonLog, 'utf-8') : '';
-      expect(logText).toContain('Browser IPC server started');
+      expect(logText).toContain('Feed stream hub listening');
       expect(logText).not.toContain('Daemon shutting down');
     } finally {
       try {

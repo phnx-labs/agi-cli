@@ -28,7 +28,6 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { getBrowserRuntimeDir } from '../state.js';
 import { getEventsDir } from './events.js';
-import { listTaskBindings } from '../browser/task-index.js';
 import { buildBrowserSessionRows, type BrowserSessionRow } from '../browser/sessions-list.js';
 import { buildComputerSessionRows, standaloneComputerActionsDir, type ComputerRunRow } from '../computer/sessions-list.js';
 import type { LiveBrowserTask, ToolTab } from './tools.js';
@@ -78,8 +77,12 @@ export function collectToolRows(scope: string, sources: ToolSources = {}): ToolS
     try { return source(); } catch { complete = false; return empty; }
   };
 
+  // Task→device binding is browser-cli's now (bound at `start`, PHNX-4101), so
+  // agents-cli keeps no separate binding index. Cross-device tasks are driven by
+  // browser-cli from THIS box, so their `tasks.json` is local and reached by
+  // `readLiveBrowserTasks` below. The `bindings` source stays a test seam.
   const bindings = new Map<string, { device?: string; profile?: string; url?: string; createdAt?: number; sessionId?: string; launchId?: string }>();
-  for (const binding of read(sources.bindings ?? listTaskBindings, [])) bindings.set(binding.name, binding);
+  for (const binding of read(sources.bindings ?? (() => []), [])) bindings.set(binding.name, binding);
   const liveTasks = new Map<string, LiveBrowserTask>();
   for (const task of read(sources.liveTasks ?? (() => readLiveBrowserTasks()), [])) liveTasks.set(task.task, task);
 

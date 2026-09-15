@@ -126,54 +126,19 @@ export async function resolveViewer(opts: ShowOptions = {}): Promise<'os' | { pr
   if (opts.osBrowser) return 'os';
 
   const { getConfigValue } = await import('./device-config.js');
-  const configured =
-    opts.profile ?? ((getConfigValue('browser.viewer').value as string | undefined) || undefined);
+  // A configured viewer, else the profile agents drive (`browser.profile`) — the
+  // whole point is that a machine with a configured browser stops leaking pages
+  // to the OS handler. Both keys are shared with the standalone `browser` CLI,
+  // whose `show` verb applies exactly this precedence itself; agents-cli resolves
+  // the NAME only to decide viewer-vs-OS, then delegates suitability (Arc/Firefox/
+  // launchable-here) to the engine (PHNX-4101).
+  const name =
+    opts.profile
+    ?? ((getConfigValue('browser.viewer').value as string | undefined) || undefined)
+    ?? ((getConfigValue('browser.profile').value as string | undefined) || undefined);
 
-  // Unset means "follow the profile agents drive" — the whole point is that a
-  // machine with a configured browser stops leaking pages to the OS handler.
-  const { getConfiguredDefaultProfileName, resolveProfileRef, getProfile, isProfileLaunchableHere } =
-    await import('./browser/profiles.js');
-  const name = configured ?? getConfiguredDefaultProfileName();
-
-  if (!name) return 'os';
-  if (name === 'os') return 'os';
-
-  let resolved: string | undefined;
-  try {
-    resolved = await resolveProfileRef(name);
-  } catch (err) {
-    console.error(`[viewer] ${name}: ${err instanceof Error ? err.message : String(err)} — using the OS browser.`);
-    return 'os';
-  }
-
-  if (!resolved) {
-    console.error(`[viewer] "${name}" does not resolve to a profile — using the OS browser.`);
-    return 'os';
-  }
-  const profile = await getProfile(resolved);
-  if (!profile) {
-    console.error(`[viewer] profile "${resolved}" is not configured — using the OS browser.`);
-    return 'os';
-  }
-  if (profile.browser === 'arc') {
-    // agents browser can drive an attached Arc's existing tabs, but showing the
-    // user a page needs its OWN fresh tab, and Arc crashes on tab creation over
-    // CDP (Target.createTarget). So Arc is a fine automation profile but never a
-    // viewer — fall back to the OS browser for anything a human is meant to read.
-    console.error(`[viewer] "${resolved}" is Arc, which cannot open a new viewer tab — using the OS browser.`);
-    return 'os';
-  }
-  if (profile.browser === 'firefox') {
-    // agents drives Firefox headless over BiDi for its own read-back; a page a
-    // human is meant to read goes to the visible OS browser, not the headless one.
-    console.error(`[viewer] "${resolved}" is a headless-automation Firefox profile — using the OS browser.`);
-    return 'os';
-  }
-  if (!isProfileLaunchableHere(profile)) {
-    console.error(`[viewer] "${resolved}" cannot launch on this machine — using the OS browser.`);
-    return 'os';
-  }
-  return { profile: resolved };
+  if (!name || name === 'os') return 'os';
+  return { profile: name };
 }
 
 /** Show a URL to the human at this machine. Never throws. */
@@ -181,19 +146,23 @@ export async function showUrl(url: string, opts: ShowOptions = {}): Promise<Show
   const viewer = await resolveViewer(opts);
   if (viewer === 'os') return osOpen(url, opts.spawnOpen);
 
+  // Delegate to the standalone `browser show`, which opens the URL in the viewer
+  // profile (or `browser.viewer`/`browser.profile`) and owns its own service
+  // lifecycle and viewer-suitability fallbacks. When the engine is not installed,
+  // or the call fails, degrade to the OS handler with one stderr line.
   try {
-    const { sendIPCRequest } = await import('./browser/ipc.js');
-    // Deliberately does NOT auto-start the browser daemon. Showing a page is a
-    // side errand — `devices lease` opens a console and immediately prompts for
-    // a pasted key — so blocking that on a daemon cold start is a surprising
-    // multi-second stall. Daemon already up: use the viewer. Not up: the OS
-    // handler is the fast, correct answer.
-    const response = await sendIPCRequest(
-      { action: 'show', url, profile: viewer.profile },
-      { autoStartDaemon: false },
-    );
-    if (response.ok) return { via: 'profile', profile: viewer.profile, tabId: response.tabId };
-    console.error(`[viewer] ${viewer.profile}: ${response.error} — using the OS browser.`);
+    const { browserInstalled, runBrowser } = await import('./browser-client.js');
+    if (!browserInstalled()) {
+      console.error(`[viewer] the standalone browser CLI is not installed — using the OS browser.`);
+      return osOpen(url, opts.spawnOpen);
+    }
+    const { buildBrowserContext } = await import('./browser/context.js');
+    const { exitCode } = await runBrowser({
+      argv: ['show', url, '--profile', viewer.profile],
+      context: await buildBrowserContext(),
+    });
+    if (exitCode === 0) return { via: 'profile', profile: viewer.profile };
+    console.error(`[viewer] ${viewer.profile}: browser show exited ${exitCode} — using the OS browser.`);
   } catch (err) {
     console.error(
       `[viewer] ${viewer.profile}: ${err instanceof Error ? err.message : String(err)} — using the OS browser.`,

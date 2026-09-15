@@ -25,7 +25,6 @@ import { detectOverdueJobs, notifyOverdue } from '../overdue.js';
 import { runCatchup } from '../catchup.js';
 import { notifyRoutineStart, notifyRoutineFinish, notifyRoutineStartFailed } from '../routine-notify.js';
 import { notifyOwnerRoutineFinish, notifyOwnerRoutineStartFailed } from '../routine-notify-owner.js';
-import { getSocketPath as getBrowserIpcSocketPath } from '../browser/ipc.js';
 import { redactSecrets } from '../redact.js';
 import { getAgentsBinPath, getCliLaunch, BUN_VIRTUAL_ROOT } from '../cli-entry.js';
 import { localBinDir } from '../platform/posixpath.js';
@@ -896,14 +895,12 @@ export async function runDaemon(): Promise<void> {
   // Lifecycle readers and launchers do not run services. Load their code only
   // in the daemon process, before it claims or publishes lifecycle state.
   const [
-    { BrowserService },
     { SessionIndexService },
     { SessionSummarizerService },
     { SessionTitleService },
     { MonitorEngineService },
     { AccountUsageService, AccountAuthService },
     { CatchupService },
-    { BrowserIPCService },
     { WatchdogService },
     { DeviceProbeService },
     { SelfHealService },
@@ -918,16 +915,13 @@ export async function runDaemon(): Promise<void> {
     { WebhookReceiverService },
     { HeartbeatService },
     { TmuxReapService },
-    { BrowserTaskReapService },
   ] = await Promise.all([
-    import('../browser/service.js'),
     import('./session-index-service.js'),
     import('./session-summarizer-service.js'),
     import('./session-title-service.js'),
     import('./monitor-engine-service.js'),
     import('./account-state-daemon-service.js'),
     import('./catchup-service.js'),
-    import('./browser-ipc-service.js'),
     import('./watchdog-service.js'),
     import('./device-probe-service.js'),
     import('./self-heal-service.js'),
@@ -942,7 +936,6 @@ export async function runDaemon(): Promise<void> {
     import('./webhook-receiver-service.js'),
     import('./heartbeat-service.js'),
     import('./tmux-reap-service.js'),
-    import('./browser-task-reap-service.js'),
   ]);
 
   // Install the shared-daemon reload signal boundary BEFORE publishing our PID
@@ -1106,16 +1099,11 @@ export async function runDaemon(): Promise<void> {
     log('INFO', 'Catch-up recovery service disabled');
   }
 
-  // BrowserIPCService and BrowserTaskReapService share one long-lived
-  // BrowserService. Browser IPC is registered even when disabled at boot so an
-  // explicit later `agents browser start` can enable it live over SIGHUP — the
-  // client owns a service transition, never a whole-daemon restart (PHNX-3605).
-  const browserService = new BrowserService();
-  supervisor.register(
-    new BrowserIPCService(browserService),
-    { enabled: isEnabled('browser-ipc') },
-  );
-  if (!isEnabled('browser-ipc')) log('INFO', 'Browser IPC service disabled');
+  // The browser IPC service and its task reaper are the standalone `browser`
+  // CLI's now (@phnx-labs/browser-cli, PHNX-4101): it hosts its own IPC service
+  // and runs its own `prune` reaper. agents-cli no longer constructs a
+  // BrowserService, binds a browser socket, or reaps browser tasks — see
+  // `commands/browser.ts` and `docs/browser.md`.
 
   if (isEnabled('session-index')) supervisor.register(new SessionIndexService());
   else log('INFO', 'Session-index warm service disabled');
@@ -1171,12 +1159,6 @@ export async function runDaemon(): Promise<void> {
 
   if (isEnabled('tmux-reap')) supervisor.register(new TmuxReapService());
   else log('INFO', 'Tmux reap service disabled');
-
-  if (isEnabled('browser-task-reap')) {
-    supervisor.register(new BrowserTaskReapService(browserService));
-  } else {
-    log('INFO', 'Browser-task reap service disabled');
-  }
 
   await supervisor.startAll({ log });
   activeServiceSupervisor = supervisor;
@@ -2445,16 +2427,6 @@ function stopDaemonLocked(): DaemonStopResult {
   // excluded. resolveLiveDaemonPid(true) rejects a reused/non-daemon pid before
   // any service-manager teardown or direct signal and repairs only under lock.
   const pid = resolveLiveDaemonPid(true);
-  const browserSock = process.platform === 'win32' ? null : getBrowserIpcSocketPath();
-  // Capture the socket's inode INDEPENDENTLY of whether a live pid resolved
-  // (PHNX-3618). A daemon that died between the CLI liveness precheck and this
-  // locked read leaves resolveLiveDaemonPid() returning null while its ungraceful
-  // exit left the binding on disk — capturing only when `pid !== null` meant that
-  // genuinely stale socket could never be reclaimed and was reported "ownership
-  // could not be verified". The inode is the successor guard: a fresh daemon that
-  // rebinds during the stop gets a new inode, so a later identity match still
-  // proves this exact binding is the one we captured, never a successor's.
-  const browserSockOwner = browserSock ? readPathIdentity(browserSock) : null;
 
   if (platform === 'darwin') {
     const plistPath = getLaunchdPlistPath();
@@ -2567,40 +2539,9 @@ function stopDaemonLocked(): DaemonStopResult {
     surviving.push(`daemon pid registration changed to ${currentPid} during stop`);
   }
 
-  // Browser IPC binding: on POSIX the listening socket is a filesystem object.
-  // A graceful handleShutdown unlinks it; if it survives, the daemon exited
-  // ungracefully (killTree) and left a stale binding — the owner is provably
-  // dead, so reclaim it and report.
-  if (process.platform !== 'win32') {
-    // A binding is provably stale — and reclaimable — when the inode on disk is
-    // still the exact one captured under this lock AND no daemon (the signalled
-    // target OR any successor for this state dir) survives to own it. Keying the
-    // "a daemon still owns it" test on the whole survivor set rather than only the
-    // captured target is what lets a daemon that died BEFORE this stop (pid ===
-    // null, PHNX-3618) still have its stale socket reclaimed, while a live
-    // successor — which either rebound the inode or shows up as a survivor — is
-    // never touched (PHNX-3607's never-delete-a-successor invariant).
-    const aDaemonSurvives = survivors.length > 0 || unverifiedSurvivors.length > 0;
-    if (browserSock && fs.existsSync(browserSock)) {
-      const ownsCapturedBinding = browserSockOwner !== null
-        && pathIdentityMatches(browserSock, browserSockOwner);
-      if (ownsCapturedBinding && !aDaemonSurvives) {
-        try { fs.unlinkSync(browserSock); } catch { /* failed to reclaim the captured binding */ }
-        if (pathIdentityMatches(browserSock, browserSockOwner)) surviving.push('browser IPC socket not released');
-        else if (fs.existsSync(browserSock)) surviving.push('browser IPC socket ownership changed during stop');
-        else released.push('browser IPC socket (reclaimed)');
-      } else if (aDaemonSurvives) {
-        surviving.push('browser IPC socket still owned by a surviving daemon');
-      } else {
-        // The path was absent when this transaction captured the target (a
-        // successor bound it afterward) or a successor replaced the inode. Either
-        // way this invocation does not own the current binding and must leave it.
-        surviving.push('browser IPC socket ownership could not be verified');
-      }
-    } else {
-      released.push('browser IPC socket');
-    }
-  }
+  // The browser IPC socket is the standalone `browser` CLI's now (PHNX-4101):
+  // the daemon no longer binds it, so there is nothing to reclaim here. browser-cli
+  // owns its own socket lifecycle under `~/.agents/.cache/helpers/browser/`.
 
   // ── The state files a killed daemon cannot clean up itself (RUSH-2421) ─────
   // handleShutdown removes the lifetime marker, the heartbeat and this pid's

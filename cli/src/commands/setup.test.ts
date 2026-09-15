@@ -10,7 +10,6 @@ process.env.HOME = TEST_HOME;
 
 const { Command } = await import('commander');
 const { getSetupStatus, registerSetupCommand, runSetup, runSetupHub } = await import('./setup.js');
-const { listInstalledBrowsers } = await import('../lib/browser/chrome.js');
 
 describe('agents setup command group', () => {
   it('registers the browser/computer/fleet/mine/secrets/accounts/alias/beta capability subcommands', () => {
@@ -120,35 +119,25 @@ describe('agents setup command group', () => {
     expect(promptCount).toBe(2);
   });
 
-  it('uses the configured named browser profile for readiness', async () => {
-    const { createProfile } = await import('../lib/browser/profiles.js');
+  it('is ready when the Browser CLI is installed and a default profile is configured', async () => {
+    // Readiness is config + standalone presence now (PHNX-4101): the engine owns
+    // profile declarations and launchability. BROWSER_BIN points at a resolvable
+    // executable so `browserInstalled()` is true deterministically.
     const { setConfigValue } = await import('../lib/device-config.js');
-    await createProfile({
-      name: 'work',
-      browser: 'custom',
-      binary: process.execPath,
-      endpoints: ['cdp://127.0.0.1:9333'],
-      viewport: { width: 1280, height: 720 },
-    });
-    setConfigValue('browser.profile', 'work');
-    const rows = await getSetupStatus();
-    expect(rows.find((row) => row.phase === 'browser')).toMatchObject({ state: 'ready', detail: 'profile work' });
-  });
-
-  it('reports a configured browser profile with a missing binary as unavailable', async () => {
-    const { updateProfile } = await import('../lib/browser/profiles.js');
-    await updateProfile({
-      name: 'work',
-      browser: 'custom',
-      binary: path.join(TEST_HOME, 'missing-browser'),
-      endpoints: ['cdp://127.0.0.1:9333'],
-      viewport: { width: 1280, height: 720 },
-    });
-    const rows = await getSetupStatus();
-    expect(rows.find((row) => row.phase === 'browser')).toMatchObject({
-      state: 'missing',
-      detail: 'profile work cannot launch here',
-    });
+    const prevBin = process.env.BROWSER_BIN;
+    process.env.BROWSER_BIN = process.execPath;
+    try {
+      const { _resetBrowserClientForTest } = await import('../lib/browser-client.js');
+      _resetBrowserClientForTest();
+      setConfigValue('browser.profile', 'work');
+      const rows = await getSetupStatus();
+      expect(rows.find((row) => row.phase === 'browser')).toMatchObject({ state: 'ready', detail: 'profile work' });
+    } finally {
+      if (prevBin === undefined) delete process.env.BROWSER_BIN;
+      else process.env.BROWSER_BIN = prevBin;
+      const { _resetBrowserClientForTest } = await import('../lib/browser-client.js');
+      _resetBrowserClientForTest();
+    }
   });
 
   it('prints status, returns without prompting, and exits nonzero for missing phases outside a TTY', async () => {
@@ -229,11 +218,5 @@ describe('agents setup fleet', () => {
       process.env.PATH = originalPath;
       process.exitCode = undefined;
     }
-  });
-});
-
-describe('listInstalledBrowsers', () => {
-  it('returns [] on an unknown platform (no crash on non-mac/linux/win)', () => {
-    expect(listInstalledBrowsers('sunos')).toEqual([]);
   });
 });

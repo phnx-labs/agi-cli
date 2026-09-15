@@ -41,11 +41,11 @@ describe('daemon-services', () => {
   });
 
   it('persists a disabled toggle and reads it back', () => {
-    setDaemonServiceEnabled('browser-ipc', false);
-    expect(isDaemonServiceEnabled('browser-ipc')).toBe(false);
+    setDaemonServiceEnabled('monitors', false);
+    expect(isDaemonServiceEnabled('monitors')).toBe(false);
 
     const cfg = readDaemonServicesConfig();
-    expect(cfg.services['browser-ipc']).toBe(false);
+    expect(cfg.services['monitors']).toBe(false);
     // Other services stay enabled.
     expect(cfg.services['scheduler']).toBe(true);
   });
@@ -57,25 +57,28 @@ describe('daemon-services', () => {
     expect(scheduler).toBeDefined();
     expect(scheduler!.enabled).toBe(false);
 
-    const browserIpc = states.find((s) => s.id === 'browser-ipc');
-    expect(browserIpc!.enabled).toBe(true);
+    const monitors = states.find((s) => s.id === 'monitors');
+    expect(monitors!.enabled).toBe(true);
   });
 
   it('ignores unknown service ids without throwing', () => {
     const filePath = getDaemonServicesConfigPath();
-    fs.writeFileSync(filePath, 'services:\n  browser-ipc: false\n  unknown-service: false\n', 'utf-8');
+    // `browser-ipc` is a now-removed id (PHNX-4101), so it is exactly an unknown
+    // key: read must ignore it, never resurrect it.
+    fs.writeFileSync(filePath, 'services:\n  monitors: false\n  browser-ipc: false\n  unknown-service: false\n', 'utf-8');
     const cfg = readDaemonServicesConfig();
-    expect(cfg.services['browser-ipc']).toBe(false);
+    expect(cfg.services['monitors']).toBe(false);
+    expect((cfg.services as Record<string, boolean>)['browser-ipc']).toBeUndefined();
     // Unknown key is ignored, not crashed on.
     expect(cfg.services['scheduler']).toBe(true);
   });
 
   it('writeDaemonServicesConfig preserves extra top-level fields', () => {
     const filePath = getDaemonServicesConfigPath();
-    fs.writeFileSync(filePath, 'notes: "do not clobber"\nservices:\n  browser-ipc: false\n', 'utf-8');
-    setDaemonServiceEnabled('browser-ipc', true);
+    fs.writeFileSync(filePath, 'notes: "do not clobber"\nservices:\n  monitors: false\n', 'utf-8');
+    setDaemonServiceEnabled('monitors', true);
     const raw = fs.readFileSync(filePath, 'utf-8');
     expect(raw).toContain('notes: do not clobber');
-    expect(raw).toContain('browser-ipc: true');
+    expect(raw).toContain('monitors: true');
   });
 });

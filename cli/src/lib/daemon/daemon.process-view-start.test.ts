@@ -9,7 +9,7 @@ function exerciseStartup(legacy?: 'absent' | 'old-boot'): void {
   const home = fs.mkdtempSync('/tmp/agd-start-pv-');
   const config = path.join(home, '.agents', 'daemon');
   fs.mkdirSync(config, { recursive: true });
-  fs.writeFileSync(path.join(config, 'services.yaml'), `services:\n${DAEMON_SERVICES.map(({ id }) => `  ${id}: ${id === 'browser-ipc'}`).join('\n')}\n`);
+  fs.writeFileSync(path.join(config, 'services.yaml'), `services:\n${DAEMON_SERVICES.map(({ id }) => `  ${id}: ${id === 'feed-stream'}`).join('\n')}\n`);
   const daemon = fileURLToPath(new URL('./testdata/process-view-daemon.ts', import.meta.url));
   const starter = fileURLToPath(new URL('./testdata/process-view-start.ts', import.meta.url));
   const launcher = path.join(home, 'test-agents');

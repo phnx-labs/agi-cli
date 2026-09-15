@@ -41,11 +41,14 @@ describe.skipIf(process.platform !== 'linux')('daemon process-view startup with 
         const home = fs.mkdtempSync('/tmp/agd-pv-');
         const cache = path.join(home, '.agents', '.cache');
         const daemonDir = path.join(cache, 'helpers', 'daemon');
-        const socket = path.join(cache, 'helpers', 'browser', 'browser.sock');
+        // Daemon-liveness vehicle: a socket the daemon binds unconditionally on
+        // boot. The browser IPC socket left with the standalone browser CLI
+        // (PHNX-4101), so this waits on the feed-stream hub socket instead.
+        const socket = path.join(cache, 'helpers', 'feed', 'feed-stream.sock');
         const marker = path.join(cache, 'terminals', 'process-view.json');
         const config = path.join(home, '.agents', 'daemon');
         fs.mkdirSync(config, { recursive: true });
-        fs.writeFileSync(path.join(config, 'services.yaml'), `services:\n${DAEMON_SERVICES.map(({ id }) => `  ${id}: ${id === 'browser-ipc'}`).join('\n')}\n`);
+        fs.writeFileSync(path.join(config, 'services.yaml'), `services:\n${DAEMON_SERVICES.map(({ id }) => `  ${id}: ${id === 'feed-stream'}`).join('\n')}\n`);
         const env: NodeJS.ProcessEnv = { ...process.env, HOME: home, AGENTS_REAL_HOME: home, AGENTS_DAEMON_TEST_HOME: home, AGENTS_SECRETS_NO_AGENT: '1', AGENTS_CLI_DISABLE_AUTO_UPDATE: '1' };
         delete env.AGENTS_DAEMON_DIR;
         const children: ChildProcess[] = [];

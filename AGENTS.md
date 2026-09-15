@@ -350,10 +350,11 @@ Hard rules:
   dangling. `install.sh` publishes `agents-dev` / `ag-dev` instead, and removes
   any such shadow link an older revision of it left behind.
 - **The daemon is shared.** `install.sh` leaves it on production code; pass
-  `--bounce-daemon` only when you specifically need the browser IPC and routines
-  scheduler running your build — that affects the user's everyday `agents`, not
-  just `agents-dev`. (The secrets broker is a separate process the standalone
-  `secrets` CLI owns, PHNX-3989 — this daemon never hosts it.)
+  `--bounce-daemon` only when you specifically need the routines scheduler, feed
+  stream, or session sync running your build — that affects the user's everyday
+  `agents`, not just `agents-dev`. (The secrets broker is a separate process the
+  standalone `secrets` CLI owns, PHNX-3989, and the browser IPC service the
+  standalone `browser` CLI owns, PHNX-4101 — this daemon hosts neither.)
 - `agents doctor` reports a `binary-shadow` warning when something has taken the
   name; `agents fleet update` reports a dev-shadowed box as **not upgraded**.
 

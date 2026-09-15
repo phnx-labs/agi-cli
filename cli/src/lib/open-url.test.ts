@@ -3,29 +3,22 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Drives the REAL viewer policy against a real profile store under a temp HOME.
-// Nothing here spawns a browser or an OS opener: the OS branch goes through the
-// injected `spawnOpen`, and the profile branch is never reached in these cases
-// (or is asserted only up to the routing decision via resolveViewer).
+// Drives the REAL viewer policy against a real device-config store under a temp
+// HOME. Profile DECLARATIONS and viewer suitability (Arc/Firefox/launchable) are
+// the standalone `browser` CLI's now (PHNX-4101); agents-cli's `resolveViewer`
+// only resolves the viewer NAME from config, then `showUrl` delegates the actual
+// open to `browser show`. Nothing here spawns a browser or an OS opener: the OS
+// branch goes through the injected `spawnOpen`, and the `browser show` branch is
+// forced to fail (a nonexistent BROWSER_BIN) so it deterministically falls back.
 
 let testHome = '';
 
 async function fresh() {
   vi.resetModules();
   const openUrl = await import('./open-url.js');
-  const profiles = await import('./browser/profiles.js');
   const config = await import('./device-config.js');
-  return { ...openUrl, ...profiles, ...config };
+  return { ...openUrl, ...config };
 }
-
-const CHROME = {
-  name: 'work',
-  browser: 'chrome' as const,
-  binary: process.execPath,
-  // NOT 9222: that is the standard Chrome debug port, and a test that dials it
-  // can attach to a real browser on the developer's machine.
-  endpoints: ['cdp://127.0.0.1:39871'],
-};
 
 beforeEach(() => {
   testHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-viewer-'));
@@ -35,12 +28,13 @@ beforeEach(() => {
 
 afterEach(() => {
   delete process.env.AGENTS_SYNC_MACHINE_ID;
+  delete process.env.BROWSER_BIN;
   vi.restoreAllMocks();
   fs.rmSync(testHome, { recursive: true, force: true });
 });
 
 describe('resolveViewer', () => {
-  it('falls back to the OS handler when no profile is configured at all', async () => {
+  it('falls back to the OS handler when no viewer is configured at all', async () => {
     const { resolveViewer } = await fresh();
     expect(await resolveViewer()).toBe('os');
   });
@@ -48,59 +42,37 @@ describe('resolveViewer', () => {
   it('follows browser.profile when browser.viewer is unset — the whole point', async () => {
     // The original bug: a machine with a configured browser still leaked every
     // artifact to the OS handler. Unset viewer must mean "the profile agents drive".
-    const { createProfile, setConfigValue, resolveViewer } = await fresh();
-    await createProfile(CHROME);
+    const { setConfigValue, resolveViewer } = await fresh();
     setConfigValue('browser.profile', 'work');
-
     expect(await resolveViewer()).toEqual({ profile: 'work' });
   });
 
   it('browser.viewer overrides browser.profile', async () => {
-    const { createProfile, setConfigValue, resolveViewer } = await fresh();
-    await createProfile(CHROME);
-      await createProfile({ ...CHROME, name: 'reading', endpoints: ['cdp://127.0.0.1:39872'] });
+    const { setConfigValue, resolveViewer } = await fresh();
     setConfigValue('browser.profile', 'work');
     setConfigValue('browser.viewer', 'reading');
-
     expect(await resolveViewer()).toEqual({ profile: 'reading' });
   });
 
   it('browser.viewer=os opts out entirely', async () => {
-    const { createProfile, setConfigValue, resolveViewer } = await fresh();
-    await createProfile(CHROME);
+    const { setConfigValue, resolveViewer } = await fresh();
     setConfigValue('browser.profile', 'work');
     setConfigValue('browser.viewer', 'os');
-
     expect(await resolveViewer()).toBe('os');
+  });
+
+  it('an explicit profile option beats configured keys', async () => {
+    const { setConfigValue, resolveViewer } = await fresh();
+    setConfigValue('browser.viewer', 'work');
+    expect(await resolveViewer({ profile: 'chosen' })).toEqual({ profile: 'chosen' });
   });
 
   it('the osBrowser option beats a configured viewer', async () => {
     // If this ever stops winning, a caller that explicitly asked for the user's
     // own browser silently gets the agent profile instead.
-    const { createProfile, setConfigValue, resolveViewer } = await fresh();
-    await createProfile(CHROME);
-    setConfigValue('browser.viewer', 'work');
-
-    expect(await resolveViewer({ osBrowser: true })).toBe('os');
-  });
-
-  it('refuses Arc and says so — it is configurable but not drivable', async () => {
-    const { createProfile, setConfigValue, resolveViewer } = await fresh();
-    await createProfile({ ...CHROME, name: 'arcy', browser: 'arc' });
-    setConfigValue('browser.viewer', 'arcy');
-    const err = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-
-    expect(await resolveViewer()).toBe('os');
-    expect(err).toHaveBeenCalledWith(expect.stringContaining('Arc'));
-  });
-
-  it('falls back loudly, never silently, when the named profile does not exist', async () => {
     const { setConfigValue, resolveViewer } = await fresh();
-    setConfigValue('browser.viewer', 'ghost');
-    const err = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-
-    expect(await resolveViewer()).toBe('os');
-    expect(err).toHaveBeenCalledWith(expect.stringContaining('ghost'));
+    setConfigValue('browser.viewer', 'work');
+    expect(await resolveViewer({ osBrowser: true })).toBe('os');
   });
 });
 
@@ -113,15 +85,17 @@ describe('showFile — which kinds a browser tab is right for', () => {
 
   beforeEach(() => {
     opened.length = 0;
+    // Force the `browser show` delegation to FAIL deterministically so the viewer
+    // branch always falls back to the OS handler in the test — resolvable (so
+    // browserInstalled() is true) but not spawnable.
+    process.env.BROWSER_BIN = path.join(testHome, 'no-such-browser');
   });
 
-  it('sends a screenshot to the OS app, not a CDP tab', async () => {
+  it('sends a screenshot to the OS app, not the browser viewer', async () => {
     // Preview/QuickTime are the better viewer for these; a browser tab is a
-    // downgrade. EXT_KIND in sessions-list.ts is png/jpg/webp/pdf/webm.
-    const { createProfile, setConfigValue, showFile } = await fresh();
-    await createProfile(CHROME);
+    // downgrade. BROWSER_RENDERABLE is html/htm/svg/xhtml only.
+    const { setConfigValue, showFile } = await fresh();
     setConfigValue('browser.viewer', 'work');
-
     for (const ext of ['.png', '.jpg', '.webp', '.pdf', '.webm']) {
       const out = await showFile(`/tmp/capture${ext}`, { spawnOpen });
       expect(out.via, `${ext} should go to the OS app`).toBe('os');
@@ -129,12 +103,11 @@ describe('showFile — which kinds a browser tab is right for', () => {
   });
 
   it('tries the viewer for an .html artifact, and says so when it cannot reach it', async () => {
-    // With no daemon reachable the profile attempt FALLS BACK to the OS handler
-    // — that is correct, and it is why this asserts the attempt rather than the
-    // absence of an OS open. The stderr line names the profile, so it is proof
-    // the .html went to the viewer branch; a .png never produces one.
-    const { createProfile, setConfigValue, showFile } = await fresh();
-    await createProfile(CHROME);
+    // The `browser show` attempt fails here (nonexistent BROWSER_BIN) and falls
+    // back to the OS handler — that is correct, and the stderr line names the
+    // profile, so it is proof the .html went to the viewer branch; a .png never
+    // produces one.
+    const { setConfigValue, showFile } = await fresh();
     setConfigValue('browser.viewer', 'work');
     const err = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
@@ -167,17 +140,11 @@ describe('trySpawn — detection without blocking', () => {
   // (or provably do not) and open nothing.
 
   it('detects a missing binary instead of reporting success', async () => {
-    // The whole reason this is not a bare detached spawn: `spawn` does not throw
-    // for ENOENT, it emits `error` asynchronously, so a fire-and-forget spawn
-    // cannot tell "opened" from "xdg-open is not installed".
     const { trySpawn } = await fresh();
     expect(await trySpawn('definitely-not-a-real-opener-binary', ['x'])).toBe(false);
   });
 
   it('resolves on spawn without waiting for the child to exit', async () => {
-    // The reason this is not spawnSync: that waited for the child's whole
-    // lifetime, which would stall `devices lease` behind the browser right
-    // before it prompts for a pasted key.
     const { trySpawn } = await fresh();
     const started = Date.now();
     expect(await trySpawn('/bin/sleep', ['2'])).toBe(true);
@@ -192,9 +159,6 @@ describe('trySpawn — detection without blocking', () => {
   });
 
   it('tries every platform candidate before giving up', async () => {
-    // `toBeGreaterThanOrEqual(1)` could not fail — darwin and win32 have exactly
-    // one candidate, so a mutant that stopped after the first still passed.
-    // Assert the actual list for this platform.
     const { showUrl } = await fresh();
     const tried: string[] = [];
     await showUrl('https://example.com', {

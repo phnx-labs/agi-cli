@@ -274,88 +274,9 @@ describe('agents daemon stop — asserts its postcondition (RUSH-2355)', () => {
     45_000,
   );
 
-  // PHNX-3618: the daemon dies between the CLI liveness precheck
-  // (`isDaemonRunning()` was true) and `stopDaemonLocked`, so
-  // `resolveLiveDaemonPid()` inside the stop returns null — yet the daemon's
-  // ungraceful death left its browser IPC binding on disk. Before the fix the
-  // socket owner was captured ONLY when a live pid resolved
-  // (`pid !== null && browserSock ? …`), so this genuinely stale socket hit the
-  // else branch, was reported "ownership could not be verified", and was left
-  // behind — a leak that keeps the next daemon start racing a dead binding. The
-  // socket inode is now captured independently of the pid, and reclaimed once no
-  // live daemon (target or successor) is proven to own it.
-  //
-  // The precheck→stop race is not reproducible through the `agents daemon stop`
-  // command (its `!isDaemonRunning()` guard would short-circuit on a daemon that
-  // is ALREADY dead, which is not this scenario), so this drives the real
-  // `stopDaemon()` in a subprocess under its own HOME — the exact function that
-  // runs after the precheck, entered with the daemon already gone as the race
-  // leaves it. Real AF_UNIX socket, real process that binds it then dies
-  // ungracefully — no mocks.
-  it.skipIf(process.platform === 'win32')(
-    'daemon died mid-stop: stopDaemon reclaims the stale browser.sock a dead owner left, ownership proven',
-    async () => {
-      const home = mkHome();
-      const daemonDir = path.join(home, '.agents', '.cache', 'helpers', 'daemon');
-      const browserSock = path.join(home, '.agents', '.cache', 'helpers', 'browser', 'browser.sock');
-      fs.mkdirSync(daemonDir, { recursive: true });
-      fs.mkdirSync(path.dirname(browserSock), { recursive: true });
-
-      // A real daemon: binds the browser IPC socket as AF_UNIX and idles. SIGKILL
-      // (below) runs no cleanup, so the socket file survives on disk exactly as an
-      // ungraceful death leaves it — the stale binding this reclaims.
-      const socketDaemonScript = [
-        "const fs = require('fs');",
-        "const net = require('net');",
-        "const sock = process.argv[1];",
-        "try { fs.unlinkSync(sock); } catch {}",
-        "net.createServer(() => {}).listen(sock);",
-        "setInterval(() => {}, 1000);",
-      ].join(' ');
-      const daemon = spawn(process.execPath, ['-e', socketDaemonScript, browserSock, '__daemon-run'], { stdio: 'ignore' });
-      try {
-        expect(daemon.pid).toBeTruthy();
-        expect(await waitFor(() => fs.existsSync(browserSock), 5_000)).toBe(true);
-        const boundIno = fs.lstatSync(browserSock).ino;
-        // Registered as this state dir's daemon, the way a live daemon records
-        // itself, so the pre-stop pid file names the (about-to-die) daemon.
-        fs.writeFileSync(daemonPidFile(home), String(daemon.pid));
-
-        // The daemon dies in the precheck→stop window. The socket file it bound
-        // stays on disk.
-        daemon.kill('SIGKILL');
-        expect(await waitFor(() => !alive(daemon.pid!), 5_000)).toBe(true);
-        expect(fs.existsSync(browserSock)).toBe(true);
-        expect(fs.lstatSync(browserSock).ino).toBe(boundIno);
-
-        // Call the real stopDaemon() (the body reached after the CLI precheck)
-        // in a subprocess bound to this HOME, so every daemon path constant
-        // resolves inside the temp state dir.
-        const daemonMod = path.join(REPO_ROOT, 'dist', 'lib', 'daemon', 'daemon.js');
-        const runner = [
-          `const { stopDaemon } = await import(${JSON.stringify(daemonMod)});`,
-          'const r = stopDaemon();',
-          'process.stdout.write(JSON.stringify(r));',
-        ].join('\n');
-        const env = { ...envFor(home) };
-        const r = spawnSync(process.execPath, ['--input-type=module', '-e', runner], { env, encoding: 'utf-8' });
-        const result = parseStopResult(r.stdout || '');
-
-        expect(result, `stop produced no JSON result: ${r.stdout}\n${r.stderr}`).toBeTruthy();
-        // No live daemon owns the captured inode, so it is reclaimed and reported
-        // — never left as "ownership could not be verified".
-        expect(result.released).toContain('browser IPC socket (reclaimed)');
-        expect(result.surviving).not.toContain('browser IPC socket ownership could not be verified');
-        expect(fs.existsSync(browserSock)).toBe(false);
-        expect(result.ok).toBe(true);
-      } finally {
-        try { if (daemon.pid) daemon.kill('SIGKILL'); } catch { /* already gone */ }
-        if (daemon.pid) await waitFor(() => !alive(daemon.pid!), 5_000);
-        await rmHome(home);
-      }
-    },
-    30_000,
-  );
+  // (The former "daemon died mid-stop reclaims the stale browser.sock" test was
+  // removed with PHNX-4101: the browser IPC socket left with the standalone
+  // browser CLI, so the daemon no longer binds or reclaims it.)
 
   it.skipIf(process.platform === 'win32')(
     'clean stop: releases the daemon, exits 0, and REPORTS an in-flight detached child rather than killing it',
@@ -543,16 +464,17 @@ describe('agents daemon stop — asserts its postcondition (RUSH-2355)', () => {
     60_000,
   );
 
-  // THE regression the awaited close introduced (RUSH-2421 review). A browser
-  // client holds its IPC connection open on purpose — the socket stays warm
-  // between actions — and `net.Server.close()` does not complete while any
-  // connection is open. With the close bounded at the SAME 5s as the daemon's
-  // SIGTERM grace window, `handleShutdown` was still inside `browserIPC.stop()`
-  // when `stopDaemon` gave up waiting and escalated to killTree. Every graceful
-  // stop of a daemon with a browser session attached became a kill, and the
-  // residue reclamation added by that same change quietly papered over it.
+  // THE regression the awaited close introduced (RUSH-2421 review). A socket
+  // client holds its connection open on purpose — the socket stays warm between
+  // messages — and `net.Server.close()` does not complete while any connection
+  // is open. With the close bounded at the SAME 5s as the daemon's SIGTERM grace
+  // window, `handleShutdown` was still inside a service `stop()` when `stopDaemon`
+  // gave up waiting and escalated to killTree. The browser IPC socket this
+  // originally exercised left with the standalone browser CLI (PHNX-4101), so the
+  // same invariant is now pinned against the feed-stream hub — a socket the daemon
+  // still hosts and that likewise keeps subscriber connections warm.
   it.skipIf(process.platform === 'win32')(
-    'graceful stop STAYS graceful when a browser client is holding its IPC connection',
+    'graceful stop STAYS graceful when a socket client is holding a warm hub connection',
     async () => {
       if (!fs.existsSync(DIST_ENTRY)) execFileSync('npm', ['run', 'build'], { cwd: REPO_ROOT, stdio: 'ignore' });
       const home = mkHome();
@@ -562,15 +484,17 @@ describe('agents daemon stop — asserts its postcondition (RUSH-2355)', () => {
         daemonPid = startDetached({ agentsBin: DIST_ENTRY, logPath: path.join(home, 'd.log'), env: envFor(home) }).pid!;
         expect(await waitFor(() => readDaemonPidOf(home) === daemonPid, 20_000)).toBe(true);
 
-        // Wait for the daemon's browser IPC to be accepting, then hold a real
-        // connection open exactly as a warm browser client does.
-        const sock = path.join(home, '.agents', '.cache', 'helpers', 'browser', 'browser.sock');
+        // Wait for the feed-stream hub to be accepting, then hold a real
+        // connection open exactly as a warm reader does: send the mandatory
+        // scope handshake so the hub keeps the connection instead of rejecting it.
+        const sock = path.join(home, '.agents', '.cache', 'helpers', 'feed', 'feed-stream.sock');
         expect(await waitFor(() => fs.existsSync(sock), 20_000)).toBe(true);
         held = net.createConnection(ipcEndpoint(sock));
         await new Promise<void>((resolve, reject) => {
           held!.on('connect', () => resolve());
           held!.on('error', reject);
         });
+        held.write(JSON.stringify({ v: 1, scope: 'local' }) + '\n');
 
         const started = Date.now();
         const { status, result } = runStop(home);

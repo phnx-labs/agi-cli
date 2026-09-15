@@ -29,8 +29,6 @@ import { atomicWriteFileSync, ensureLockTarget, withFileLock } from './fs-atomic
 
 const HEALTH_FILE = 'health.json';
 
-/** Stable subsystem identifiers shared by the daemon (writer) and `agents daemon` (reader). */
-export const SUBSYSTEM_BROWSER_IPC = 'browser-ipc';
 /**
  * Daemon startup itself (RUSH-2418). Unlike the two above, this record is
  * written from BOTH sides: the launching CLI records a start that produced no

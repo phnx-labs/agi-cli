@@ -14,17 +14,8 @@
  */
 
 import chalk from 'chalk';
-import { listInstalledBrowsers } from '../lib/browser/chrome.js';
-import {
-  DEFAULT_BROWSER_PROFILE_NAME,
-  getAutoDetectedProfile,
-  createProfile,
-  findFreeProfilePort,
-  getConfiguredDefaultProfileName,
-  getProfile,
-  type BrowserProfile,
-} from '../lib/browser/profiles.js';
-import { DEFAULT_VIEWPORT } from '../lib/browser/devices.js';
+import { browserInstalled, runBrowser } from '../lib/browser-client.js';
+import { buildBrowserContext } from '../lib/browser/context.js';
 import { getConfigValue, setConfigValue } from '../lib/device-config.js';
 import { loadDevices, type DeviceRegistry } from '../lib/devices/registry.js';
 import { machineId } from '../lib/machine-id.js';
@@ -48,15 +39,6 @@ export function macDeviceNames(reg: DeviceRegistry): string[] {
 export function defaultInteractiveHostChoice(candidates: string[], self: string = machineId()): string | null {
   if (candidates.length === 0) return null;
   return candidates.includes(self) ? self : candidates[0];
-}
-
-/**
- * The browser picker's highlighted default — the same browser auto-detect
- * would win, since `listInstalledBrowsers` returns platform priority order
- * (macOS: chrome first). null when nothing is installed.
- */
-export function defaultBrowserChoice<T extends { browserType: string }>(installed: T[]): T['browserType'] | null {
-  return installed.length > 0 ? installed[0].browserType : null;
 }
 
 /**
@@ -104,51 +86,28 @@ export async function maybePickInteractiveHost(): Promise<boolean> {
 export async function maybePickBrowserProfile(deps: {
   /** Force interactivity in a test; defaults to a real TTY probe. */
   interactive?: boolean;
-  /** Inject the prompt so the pick is testable without a TTY. */
-  select?: (config: { message: string; default?: string; choices: Array<{ name: string; value: string }> }) => Promise<string>;
 } = {}): Promise<boolean> {
   const interactive = deps.interactive ?? isInteractiveTerminal();
   if (!interactive) return false;
-  if (getConfiguredDefaultProfileName()) return false;
-  if (await getAutoDetectedProfile()) return false;
-  const installed = listInstalledBrowsers();
-  if (installed.length === 0) return false;
+  // Already chosen (by an earlier setup, `agents browser use`, or browser-cli
+  // directly) — never re-pin behind the user's back.
+  if ((getConfigValue('browser.profile').value as string | undefined)) return false;
+  // The engine owns detection and profile creation (PHNX-4101); it is optional,
+  // so skip the pick quietly when it is not installed rather than nagging.
+  if (!browserInstalled()) return false;
 
-  const config = {
-    message: 'Which browser should agents drive on THIS machine?',
-    default: defaultBrowserChoice(installed) ?? SKIP,
-    choices: [
-      ...installed.map((b) => ({ name: `${b.browserType}  ${chalk.dim(b.binary)}`, value: b.browserType })),
-      { name: `None ${chalk.dim('— this box uses the fleet hub (agents config set browser.device <host>)')}`, value: SKIP },
-    ],
-  };
-  // The prompt is the only non-testable boundary here, so it is injectable —
-  // everything after (createProfile, setConfigValue) runs for real.
-  let picked: string;
-  if (deps.select) {
-    picked = await deps.select(config);
-  } else {
-    const { select } = await import('@inquirer/prompts');
-    picked = await select<string>(config);
-  }
-  if (picked === SKIP) return false;
+  // Let the engine detect installed browsers and create a machine-local profile
+  // for each (idempotent), then open its own picker to set this machine's default.
+  const context = await buildBrowserContext();
+  const seed = await runBrowser({ argv: ['profiles', 'seed'], context });
+  if (seed.exitCode !== 0) return false;
+  await runBrowser({ argv: ['use'], context });
 
-  const chosen = installed.find((b) => b.browserType === picked) ?? installed[0];
-  const freePort = await findFreeProfilePort();
-  const profile: BrowserProfile = {
-    name: DEFAULT_BROWSER_PROFILE_NAME,
-    description: `${chosen.browserType} profile (chosen during setup)`,
-    browser: chosen.browserType,
-    binary: chosen.binary,
-    endpoints: [`cdp://127.0.0.1:${freePort}`],
-    viewport: { width: DEFAULT_VIEWPORT.width, height: DEFAULT_VIEWPORT.height },
-  };
-  await createProfile(profile);
-  // The same key `agents browser use` writes (device-local).
-  setConfigValue('browser.profile', profile.name);
+  const chosen = getConfigValue('browser.profile').value as string | undefined;
+  if (!chosen) return false;
   console.log(
-    chalk.green(`Browser: '${chosen.browserType}'`) +
-      chalk.dim(` — profile "${profile.name}" is this machine's default (agents browser use to change).`),
+    chalk.green(`Browser: '${chosen}'`) +
+      chalk.dim(' — this machine\'s default (agents browser use to change).'),
   );
   return true;
 }

@@ -1664,7 +1664,13 @@ src/
     workflows-registry.ts  # WORKFLOW_TARGETS — declarative per-agent workflow shape (dir/layout/transform/marker); generic sync/list/remove/drift engine the staleness detector also reads
     installations/     # versions.ts (install, remove, syncResourcesToVersion), migrate.ts (one-shot idempotent migrations), store/resolve/strategies, shims.ts (shim generation, config symlink switching)
     hooks/             # hooks.yaml parser + per-agent registrar (install.ts), `matches:` evaluator (match.ts), cache/profile adapters
-    browser/           # browser IPC service hosted by the shared daemon + existing CDP connection pool; browser clients may enable/disable this service but never stop/restart the shared daemon; registry.ts is the leaf (who declared what — never whether this machine should); resolve-target.ts is three outcomes (local / tunnel / loud undeclared); task-index.ts binds --device at start so later verbs resolve the task; ipc.ts owns one-shot and persistent socket clients, stream.ts owns the NDJSON action loop; hygiene.ts is the abandoned-task reaper (session-dead + idle, RUSH-2622) the daemon's 5-min tick and `agents browser prune` (alias `gc`) both call
+    browser/           # `agents browser` CONSUMER of the standalone `browser` engine (@phnx-labs/browser-cli, PHNX-4101):
+                       #   context.ts (the fd-3 JSON handed to the engine — the --device target resolved against the fleet,
+                       #   session identity, remote-control consent), record.ts (fd-4 action events → the durable browser_sessions
+                       #   row), sessions-list.ts (the on-disk capture reader behind `agents browser sessions`), paths.ts (the
+                       #   preserved on-disk layout it reads). The CDP/BiDi/Arc drivers, the IPC service, the chrome-data/profile
+                       #   store, the task index AND the whole remote SSH path live in the engine. The subprocess client is
+                       #   `lib/browser-client.ts` (fd-3/fd-4, no fallback), mirroring `computer-client.ts`.
     monitors/          # event-triggered watchers; architecture in docs/automation.md
     projects.ts        # named multi-repo definitions and status projection; domain model in docs/concepts.md
     project-pull.ts    # fleet pull with fast-forward, clean-tree, branch, and repository-identity guards
@@ -1861,12 +1867,13 @@ regressions are caught on the nightly lane instead; a risky release can still ru
 it on demand via `workflow_dispatch`. CI runs from `cli` via
 `defaults.run.working-directory`.
 
-**Live Windows `--device` e2e (opt-in):** `src/lib/browser/drivers/ssh.e2e.test.ts`
-drives a real Windows box end-to-end (tunnel + remote browser launch/stop). Gated
-on `AGENTS_TEST_WIN_HOST=<registered device>`; it skips cleanly when the var is
-unset, so CI needs no Windows runner. The computer half of this suite (exe push +
-LOGON task, RPC, screenshot, type/get-text round-trip) moved to the standalone
-`computer` engine's repo with the helper itself (PHNX-4075).
+**Browser `--device` e2e moved with the engine (PHNX-4101).** The live remote
+browser-drive suite (tunnel + remote launch/stop) left with the CDP/BiDi/Arc
+drivers into the standalone `@phnx-labs/browser-cli` repo, the same way the
+computer half of it moved to the `computer` engine's repo (PHNX-4075). agents-cli
+now tests only its consumer seam — `browser-client.ts` fd resolution/framing,
+the fd-3 context shape, the fd-4 → `browser_sessions` recorder, and the verb
+catalog — none of which needs a live browser or a Windows runner.
 
 **Local dev build:** `scripts/install.sh --skip-tests` builds the working tree,
 installs it at `$HOME/.local/agents-cli-dev/`, and exposes it as
@@ -1880,11 +1887,13 @@ which is what a cleaned dev prefix leaves behind). A dev build that answered to
 `agents` made PATH order decide which code ran — see the root
 [AGENTS.md](../../AGENTS.md) §Never install a dev build over the user's `agents`.
 
-The routines daemon is **shared** (browser IPC, scheduler, and more), so
-the install leaves it on production code. `--bounce-daemon` restarts it onto the
-dev build when you need that, and says plainly that it changes what the user's
-everyday `agents` talks to. (The secrets broker is a separate process the
-standalone `secrets` CLI owns, PHNX-3989 — this daemon never hosts it.)
+The routines daemon is **shared** (scheduler, feed stream, session/usage sync,
+and more), so the install leaves it on production code. `--bounce-daemon`
+restarts it onto the dev build when you need that, and says plainly that it
+changes what the user's everyday `agents` talks to. (The secrets broker is a
+separate process the standalone `secrets` CLI owns, PHNX-3989, and the browser
+IPC service the standalone `browser` CLI owns, PHNX-4101 — this daemon hosts
+neither.)
 
 **Bin entrypoints need `chmod 755`.** [`scripts/build.sh`](scripts/build.sh) chmods
 every `package.json#bin` entry after `tsc` emits. Newer npm preserves tarball file

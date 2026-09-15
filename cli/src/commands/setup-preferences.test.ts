@@ -5,7 +5,6 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-  defaultBrowserChoice,
   defaultInteractiveHostChoice,
   macDeviceNames,
 } from './setup-preferences.js';
@@ -50,17 +49,5 @@ describe('defaultInteractiveHostChoice', () => {
 
   it('falls back to the first candidate when this machine is not one', () => {
     expect(defaultInteractiveHostChoice(['mac-mini', 'zion'], 'laptop')).toBe('mac-mini');
-  });
-});
-
-describe('defaultBrowserChoice', () => {
-  it('is null when nothing is installed', () => {
-    expect(defaultBrowserChoice([])).toBeNull();
-  });
-
-  it('highlights the first candidate — the same browser auto-detect would win (priority order)', () => {
-    // listInstalledBrowsers returns platform priority order (macOS: chrome first).
-    expect(defaultBrowserChoice([{ browserType: 'chrome' }, { browserType: 'comet' }])).toBe('chrome');
-    expect(defaultBrowserChoice([{ browserType: 'comet' }])).toBe('comet');
   });
 });

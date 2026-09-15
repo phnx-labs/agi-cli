@@ -5,7 +5,7 @@ import { getCacheDir, getDeviceMetaPath, getHelpersDir, getUserAgentsDir } from 
 import { atomicWriteJsonSync, withFileLockAsync } from './fs-atomic.js';
 import { probeCapture } from './probe.js';
 import { invocation, isStandaloneComputer } from './computer-client.js';
-import { getSocketPath as browserSocketPath } from './browser/ipc.js';
+import { isStandaloneBrowser } from './browser-client.js';
 
 export const SETUP_TOOLS = ['browser', 'computer', 'secrets', 'term'] as const;
 export type SetupTool = typeof SETUP_TOOLS[number];
@@ -30,7 +30,8 @@ function cachePath(tool: SetupTool, options: ToolSetupOptions): string {
 
 function setupInputs(tool: SetupTool): string[] {
   const inputs = [path.join(getUserAgentsDir(), 'agents.yaml'), getDeviceMetaPath()];
-  if (tool === 'browser') inputs.push(browserSocketPath());
+  // browser-cli's IPC socket (integration contract §4). computer's is the helper socket.
+  if (tool === 'browser') inputs.push(path.join(getHelpersDir(), 'browser', 'browser.sock'));
   if (tool === 'computer') inputs.push(process.env.COMPUTER_HELPER_SOCKET || path.join(getHelpersDir(), 'computer.sock'));
   return inputs;
 }
@@ -48,9 +49,7 @@ function binaryMetadata(tool: SetupTool): { row: ToolSetupRow; fingerprint: stri
     const explicit = process.env[`${tool.toUpperCase()}_BIN`]?.trim();
     const accept = (candidate: string): boolean => {
       if (tool === 'computer') return isStandaloneComputer(candidate);
-      if (tool === 'browser') {
-        try { return !fs.realpathSync(candidate).endsWith(path.join('dist', 'browser.js')); } catch { return false; }
-      }
+      if (tool === 'browser') return isStandaloneBrowser(candidate);
       return true;
     };
     let executable = explicit ? (accept(explicit) ? explicit : null) : findInPath(tool, { accept });

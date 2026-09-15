@@ -37,7 +37,7 @@ const {
 
 const { groupIntoRows } = await import('../browser/sessions-list.js');
 const { loadDurableTaskIdentities } = await import('../browser/sessions-list.js');
-const { getProfileRuntimeDir } = await import('../browser/profiles.js');
+const { getProfileRuntimeDir } = await import('../browser/paths.js');
 
 type SessionMetaLike = Parameters<typeof upsertSession>[0];
 

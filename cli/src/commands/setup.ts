@@ -34,8 +34,7 @@ import { registerAliasCommand } from './alias.js';
 import { registerBetaCommands } from './beta.js';
 import { addUrlSchemeSubcommands } from './open.js';
 import { runPreferencesStep } from './setup-preferences.js';
-import { getConfiguredDefaultProfileName, getProfile, getAutoDetectedProfile, isProfileLaunchableHere } from '../lib/browser/profiles.js';
-import { listInstalledBrowsers } from '../lib/browser/chrome.js';
+import { browserInstalled } from '../lib/browser-client.js';
 import { probeComputerTrust } from './computer.js';
 import { loadDevices } from '../lib/devices/registry.js';
 import { getConfigValue } from '../lib/device-config.js';
@@ -324,12 +323,13 @@ interface SetupStatusRow {
 }
 
 export async function getSetupStatus(): Promise<SetupStatusRow[]> {
-  const configuredBrowserProfile = getConfiguredDefaultProfileName();
-  const browserProfile = configuredBrowserProfile
-    ? await getProfile(configuredBrowserProfile)
-    : await getAutoDetectedProfile();
-  const browserReady = browserProfile !== null && isProfileLaunchableHere(browserProfile);
-  const installedBrowsers = listInstalledBrowsers();
+  // Browser readiness is now config + standalone presence (PHNX-4101): the engine
+  // (@phnx-labs/browser-cli) owns profile declarations and launchability, so
+  // agents-cli reads the shared default-profile key it and browser-cli both write
+  // rather than resolving a profile through a deleted in-repo engine.
+  const browserCliInstalled = browserInstalled();
+  const configuredBrowserProfile = getConfigValue('browser.profile').value as string | undefined;
+  const browserReady = browserCliInstalled && !!configuredBrowserProfile;
   const computerState = process.platform === 'darwin' ? (await probeComputerTrust() ? 'ready' : 'missing') : 'n/a';
   const devices = await loadDevices();
   const coreReady = isGitRepo(getAgentsDir());
@@ -341,7 +341,7 @@ export async function getSetupStatus(): Promise<SetupStatusRow[]> {
   const defaultBrowser = getConfigValue('browser.profile').value;
   return [
     { phase: 'core', state: coreReady ? 'ready' : 'missing', detail: coreReady ? 'system repo ready' : 'system repo missing' },
-    { phase: 'browser', state: browserReady ? 'ready' : 'missing', detail: browserReady ? `profile ${browserProfile.name}` : browserProfile ? `profile ${browserProfile.name} cannot launch here` : installedBrowsers.length ? 'no default profile' : 'no supported browser found' },
+    { phase: 'browser', state: browserReady ? 'ready' : 'missing', detail: browserReady ? `profile ${configuredBrowserProfile}` : !browserCliInstalled ? 'browser CLI not installed (npm i -g @phnx-labs/browser-cli)' : 'no default profile (agents setup browser)' },
     { phase: 'computer', state: computerState, detail: computerState === 'ready' ? 'helper trusted' : computerState === 'n/a' ? 'macOS local setup only' : 'helper not running or not trusted' },
     { phase: 'secrets', state: secretsReady ? 'ready' : 'missing', detail: secretsReady ? 'defaults chosen' : 'defaults not chosen' },
     { phase: 'term', state: termReady ? 'ready' : 'missing', detail: termReady ? 'installed' : 'not installed (accounts add/login spawn it)' },
