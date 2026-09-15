@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_65 command groups · 485 commands._
+_65 command groups · 486 commands._
 
 ## accounts — Browse and manage harness accounts
 
@@ -670,7 +670,8 @@ agents setup mine list                        Show your brands and what each has
 agents setup mine remove <name>               Remove a brand (its shim + config)
 agents setup mine toggle <name>               Enable/disable features for a brand
 agents setup secrets                          Install the standalone `secrets` CLI if missing, then run its `secrets migrate` onboarding.
-agents setup status                           Show setup readiness for core, browser, computer, secrets, accounts, fleet, watchdog, and preferences.
+agents setup status                           Show setup readiness for core, browser, computer, secrets, term, accounts, fleet, watchdog, and preferences.
+agents setup term                             Install the standalone `term` CLI (the PTY engine fleet login and auth mint spawn) if missing.
 agents setup url-scheme                       Register/unregister/status the agents:// OS URL-scheme handler for artifact session deep links.
 agents setup url-scheme register              Register the agents:// URL scheme with the OS so artifact links resume sessions (idempotent).
 agents setup url-scheme status                Report whether the agents:// URL scheme handler is registered.

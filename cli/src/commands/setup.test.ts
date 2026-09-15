@@ -22,7 +22,7 @@ describe('agents setup command group', () => {
     // `share` is deliberately absent: artifact sharing moved out to the standalone
     // `artifacts` CLI (PHNX-3992), so the `share` phase is gone from the hub too.
     // `url-scheme` is the agents:// OS deep-link handler home (PHNX-3949).
-    expect(subs).toEqual(['accounts', 'alias', 'beta', 'browser', 'computer', 'fleet', 'mine', 'secrets', 'status', 'url-scheme', 'watchdog']);
+    expect(subs).toEqual(['accounts', 'alias', 'beta', 'browser', 'computer', 'fleet', 'mine', 'secrets', 'status', 'term', 'url-scheme', 'watchdog']);
   });
 
   it('keeps the bare `setup` command with its force / no-system-repo flags', () => {
@@ -44,7 +44,7 @@ describe('agents setup command group', () => {
     expect(rows.find((row) => row.phase === 'browser')?.state).toBe('missing');
     expect(rows.find((row) => row.phase === 'computer')).toBeDefined();
     expect(rows.map((row) => row.phase)).toEqual([
-      'core', 'browser', 'computer', 'secrets', 'accounts', 'fleet', 'watchdog', 'preferences',
+      'core', 'browser', 'computer', 'secrets', 'term', 'accounts', 'fleet', 'watchdog', 'preferences',
     ]);
   });
 

@@ -25,6 +25,7 @@ import { registerSetupBrowserCommand, runBrowserWizard } from './setup-browser.j
 import { registerSetupComputerCommand, runComputerWizard } from './setup-computer.js';
 import { registerSetupMineCommand } from './setup-mine.js';
 import { registerSetupSecretsCommand } from './setup-secrets.js';
+import { registerSetupTermCommand, runTermWizard, isTermCliInstalled } from './setup-term.js';
 import { registerSetupFleetCommand } from './setup-fleet.js';
 import { registerSetupAccountsCommand, runAccountsSetupWizard } from './setup-accounts.js';
 import { registerSetupWatchdogCommand, runWatchdogSetupWizard } from './setup-watchdog.js';
@@ -314,7 +315,7 @@ export async function ensureInitialized(program: Command): Promise<void> {
  * wizard. Never throws — a cancel or an optional wizard's error just skips the
  * rest and lets core setup complete.
  */
-type SetupPhase = 'browser' | 'computer' | 'secrets' | 'accounts' | 'fleet' | 'watchdog' | 'preferences';
+type SetupPhase = 'browser' | 'computer' | 'secrets' | 'term' | 'accounts' | 'fleet' | 'watchdog' | 'preferences';
 type SetupStatusState = 'ready' | 'missing' | 'n/a';
 interface SetupStatusRow {
   phase: 'core' | SetupPhase;
@@ -333,6 +334,7 @@ export async function getSetupStatus(): Promise<SetupStatusRow[]> {
   const devices = await loadDevices();
   const coreReady = isGitRepo(getAgentsDir());
   const secretsReady = fs.existsSync(setupSecretsPrefsPath());
+  const termReady = isTermCliInstalled();
   const minted = hasMintedSetupToken();
   const watchdogEnabled = getConfigValue('watchdog.enabled').value === true;
   const interactiveHost = getConfigValue('interactive.host').value;
@@ -342,6 +344,7 @@ export async function getSetupStatus(): Promise<SetupStatusRow[]> {
     { phase: 'browser', state: browserReady ? 'ready' : 'missing', detail: browserReady ? `profile ${browserProfile.name}` : browserProfile ? `profile ${browserProfile.name} cannot launch here` : installedBrowsers.length ? 'no default profile' : 'no supported browser found' },
     { phase: 'computer', state: computerState, detail: computerState === 'ready' ? 'helper trusted' : computerState === 'n/a' ? 'macOS local setup only' : 'helper not running or not trusted' },
     { phase: 'secrets', state: secretsReady ? 'ready' : 'missing', detail: secretsReady ? 'defaults chosen' : 'defaults not chosen' },
+    { phase: 'term', state: termReady ? 'ready' : 'missing', detail: termReady ? 'installed' : 'not installed (fleet login / auth mint spawn it)' },
     { phase: 'accounts', state: minted.ready ? 'ready' : 'missing', detail: minted.detail },
     { phase: 'fleet', state: Object.keys(devices).length ? 'ready' : 'missing', detail: Object.keys(devices).length ? `${Object.keys(devices).length} device${Object.keys(devices).length === 1 ? '' : 's'} registered` : 'no devices registered' },
     { phase: 'watchdog', state: watchdogEnabled ? 'ready' : 'missing', detail: watchdogEnabled ? 'enabled on this device' : 'disabled on this device' },
@@ -362,6 +365,7 @@ async function runSetupPhase(phase: SetupPhase): Promise<void> {
   if (phase === 'browser') await runBrowserWizard();
   else if (phase === 'computer') await runComputerWizard();
   else if (phase === 'secrets') await import('./setup-secrets.js').then((m) => m.runSecretsSetupWizard());
+  else if (phase === 'term') await runTermWizard();
   else if (phase === 'accounts') await runAccountsSetupWizard();
   else if (phase === 'fleet') await import('./setup-fleet.js').then((m) => m.runFleetSetupWizard());
   else if (phase === 'watchdog') await runWatchdogSetupWizard();
@@ -418,11 +422,12 @@ export function registerSetupCommand(program: Command): void {
     .option('-f, --force', 'Re-run setup even if ~/.agents/.system/ already exists (use with caution)')
     .option('--no-system-repo', 'Skip cloning the system repo (you must populate ~/.agents/.system/ yourself)');
 
-  // Capability subcommands: `agents setup browser|computer|mine|secrets|accounts|fleet|alias|beta`.
+  // Capability subcommands: `agents setup browser|computer|term|mine|secrets|accounts|fleet|alias|beta`.
   // Artifact publishing is no longer set up here — it lives in the standalone
   // `artifacts` CLI (`artifacts share setup`/`join`, PHNX-3992).
   registerSetupBrowserCommand(setupCmd);
   registerSetupComputerCommand(setupCmd);
+  registerSetupTermCommand(setupCmd);
   registerSetupMineCommand(setupCmd);
   registerSetupSecretsCommand(setupCmd);
   registerSetupAccountsCommand(setupCmd);
@@ -453,14 +458,14 @@ export function registerSetupCommand(program: Command): void {
   });
 
   setupCmd.command('status')
-    .description('Show setup readiness for core, browser, computer, secrets, accounts, fleet, watchdog, and preferences.')
+    .description('Show setup readiness for core, browser, computer, secrets, term, accounts, fleet, watchdog, and preferences.')
     .option('--json', 'print machine-readable JSON')
-    .option('--tool <name>', 'Read cached standalone tool status: browser, computer, secrets, or all')
+    .option('--tool <name>', 'Read cached standalone tool status: browser, computer, secrets, term, or all')
     .option('--refresh', 'Explicitly refresh only the selected standalone tool health checks')
     .action(async (options: { json?: boolean; tool?: string; refresh?: boolean }) => {
       if (options.tool || options.refresh) {
         const selected = options.tool ?? 'all';
-        if (selected !== 'all' && !SETUP_TOOLS.includes(selected as SetupTool)) throw new Error('Unknown tool. Choose browser, computer, secrets, or all.');
+        if (selected !== 'all' && !SETUP_TOOLS.includes(selected as SetupTool)) throw new Error('Unknown tool. Choose browser, computer, secrets, term, or all.');
         const rows = options.refresh
           ? await refreshToolSetup(selected as SetupTool | 'all')
           : getCachedToolSetup().filter((row) => selected === 'all' || row.tool === selected);

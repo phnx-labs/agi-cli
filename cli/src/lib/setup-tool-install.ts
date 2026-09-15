@@ -4,6 +4,7 @@ import { getCachedToolSetup, refreshToolSetup, type SetupTool } from './setup-to
 const PACKAGES = {
   browser: '@phnx-labs/browser-cli@0.1.5',
   computer: '@phnx-labs/computer-cli@0.1.5',
+  term: '@phnx-labs/term-cli@0.1.0',
 } as const;
 
 /** Use the host installer; setup must not install or start a tool from a read. */

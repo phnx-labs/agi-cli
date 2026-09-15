@@ -12,13 +12,13 @@ describe('standalone setup metadata and explicit health checks', () => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'tool-setup-'));
     process.env.PATH = path.join(root, 'bin');
     fs.mkdirSync(process.env.PATH);
-    for (const tool of ['BROWSER', 'COMPUTER', 'SECRETS']) delete process.env[`${tool}_BIN`];
+    for (const tool of ['BROWSER', 'COMPUTER', 'SECRETS', 'TERM']) delete process.env[`${tool}_BIN`];
   });
   afterEach(() => { process.env = saved; fs.rmSync(root, { recursive: true, force: true }); });
   const opts = () => ({ cacheDir: root });
 
   it.skipIf(process.platform === 'win32')('detects missing tools without running commands and rejects the legacy browser shim', () => {
-    expect(getCachedToolSetup(opts()).map((r) => r.installed)).toEqual([false, false, false]);
+    expect(getCachedToolSetup(opts()).map((r) => r.installed)).toEqual([false, false, false, false]);
     const legacy = path.join(root, 'dist', 'browser.js');
     fs.mkdirSync(path.dirname(legacy));
     fs.writeFileSync(legacy, '#!/bin/sh\nexit 88\n', { mode: 0o755 });
@@ -74,6 +74,20 @@ describe('standalone setup metadata and explicit health checks', () => {
     fs.writeFileSync(launcher, '@node "%~dp0/node_modules/@phnx-labs/secrets-cli/dist/index.js" %*\n');
     process.env.SECRETS_BIN = launcher;
     expect(getCachedToolSetup(opts())[2]).toMatchObject({ installed: true, executable: entry, version: '1.2.3' });
+  });
+
+  it.skipIf(process.platform === 'win32')('reports term ready on presence without probing a health surface', async () => {
+    const dir = path.join(root, 'term-pkg');
+    fs.mkdirSync(path.join(dir, 'bin'), { recursive: true });
+    const executable = path.join(dir, 'bin', 'term');
+    fs.writeFileSync(executable, '#!/bin/sh\nexit 88\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: '@phnx-labs/term-cli', version: '0.1.0' }));
+    fs.symlinkSync(executable, path.join(root, 'bin', 'term'));
+    // term is index 3 in SETUP_TOOLS (browser, computer, secrets, term).
+    const [checked] = await refreshToolSetup('term', opts());
+    expect(checked).toMatchObject({ tool: 'term', installed: true, version: '0.1.0', readiness: 'ready' });
+    expect(checked.checkedAtMs).toBeTypeOf('number');
+    expect(getCachedToolSetup(opts())[3]).toMatchObject({ tool: 'term', installed: true, readiness: 'ready' });
   });
 
   it('keeps install, helper state and permission results distinct', () => {
