@@ -133,19 +133,22 @@ describe('project-resources: compileRulesForProject', () => {
     expect(compiled.startsWith('<!-- Auto-compiled by agents-cli')).toBe(true);
   });
 
-  it('creates per-agent symlinks (CLAUDE.md, GEMINI.md) → AGENTS.md', async () => {
+  it('creates per-agent symlinks for live agents (CLAUDE.md) → AGENTS.md, not hard-deprecated ones (GEMINI.md)', async () => {
     const { repoRoot } = setupFixture();
     const { compileRulesForProject } = await import('../src/lib/rules/compile.js');
 
     compileRulesForProject(repoRoot);
 
-    for (const fname of ['CLAUDE.md', 'GEMINI.md']) {
+    for (const fname of ['CLAUDE.md']) {
       const p = path.join(repoRoot, fname);
       expect(fs.existsSync(p)).toBe(true);
       const st = fs.lstatSync(p);
       expect(st.isSymbolicLink()).toBe(true);
       expect(fs.readlinkSync(p)).toBe('AGENTS.md');
     }
+    // Gemini is hard-deprecated (Google retired the CLI) — its GEMINI.md alias
+    // must never be created.
+    expect(fs.existsSync(path.join(repoRoot, 'GEMINI.md'))).toBe(false);
   });
 
   it('is idempotent — second run does not rewrite when content is unchanged', async () => {
