@@ -70,14 +70,14 @@ describe('isReadQuery', () => {
     expect(isReadQuery(['watch', '--json'], { filters: true })).toBe(false);
   });
 
-  it('routes the 0.3.0 `--host` flag only when the binary supports it', () => {
+  it('routes the 0.2.1 `--host` flag only when the binary supports it', () => {
     // Conservative default (host:false) — an old/absent binary keeps `--host` in-repo.
     expect(isReadQuery(['auth', '--host', 'box'])).toBe(false);
     expect(isReadQuery(['auth', '--host=box'])).toBe(false);
     // filters:true but host:false — a 0.2.0 binary takes filters, NOT `--host`.
     expect(isReadQuery(['auth', '--host', 'box'], { filters: true })).toBe(false);
 
-    // host:true (binary >= 0.3.0) — the query routes to the standalone.
+    // host:true (binary >= 0.2.1) — the query routes to the standalone.
     expect(isReadQuery(['auth', '--host', 'box'], { host: true })).toBe(true);
     expect(isReadQuery(['auth', '--host=box', '--json'], { host: true })).toBe(true);
     expect(isReadQuery(['a1b2c3d4', '--host', 'box'], { host: true })).toBe(true);
@@ -204,7 +204,7 @@ describe('planDeviceHostRead', () => {
 });
 
 describe('usesHostFlag', () => {
-  it('detects the 0.3.0 `--host` flag and nothing else', () => {
+  it('detects the 0.2.1 `--host` flag and nothing else', () => {
     for (const args of [['--host', 'box'], ['--host=box'], ['auth', '--host', 'box', '--json']]) {
       expect(usesHostFlag(args)).toBe(true);
     }
@@ -273,9 +273,9 @@ describe.skipIf(process.platform === 'win32')('sessionsBinSupportsHost', () => {
     _resetSessionsClientForTest();
   });
 
-  it('is true for a binary at or above the 0.3.0 floor', () => {
+  it('is true for a binary at or above the 0.2.1 floor', () => {
     _resetSessionsClientForTest();
-    expect(sessionsBinSupportsHost(fakeSessions('0.3.0'))).toBe(true);
+    expect(sessionsBinSupportsHost(fakeSessions('0.2.1'))).toBe(true);
     _resetSessionsClientForTest();
     expect(sessionsBinSupportsHost(fakeSessions('1.4.2'))).toBe(true);
   });

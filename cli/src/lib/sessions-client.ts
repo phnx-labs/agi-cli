@@ -34,10 +34,10 @@ const SESSIONS_FILTERS_MIN_VERSION = '0.2.0';
  * An older binary would treat `--host` as an FTS token, so a box with `sessions`
  * below this floor keeps a `--host` query on the in-repo engine (which resolves
  * `--device` against the fleet) rather than mis-routing it. Kept separate from the
- * filter floor above even though 0.3.0 ≥ 0.2.0 — a 0.2.0 binary supports the
+ * filter floor above even though 0.2.1 ≥ 0.2.0 — a 0.2.0 binary supports the
  * filters but NOT `--host`, so the two gates are checked independently.
  */
-const SESSIONS_HOST_MIN_VERSION = '0.3.0';
+const SESSIONS_HOST_MIN_VERSION = '0.2.1';
 
 export class SessionsClientError extends Error {
   code: string;
@@ -121,7 +121,7 @@ export function usesFilterFlags(args: string[]): boolean {
 }
 
 /**
- * True if the 0.3.0 point-to-one remote read flag `--host <value>` (or `--host=value`)
+ * True if the 0.2.1 point-to-one remote read flag `--host <value>` (or `--host=value`)
  * is present — the other case that needs the version probe, gated on its own floor.
  */
 export function usesHostFlag(args: string[]): boolean {
@@ -160,7 +160,7 @@ export function sessionsBinSupportsFilters(bin: string): boolean {
   return sessionsBinSupports(bin, SESSIONS_FILTERS_MIN_VERSION);
 }
 
-/** Whether the resolved `sessions` binary is new enough for the 0.3.0 `--host` flag. */
+/** Whether the resolved `sessions` binary is new enough for the 0.2.1 `--host` flag. */
 export function sessionsBinSupportsHost(bin: string): boolean {
   return sessionsBinSupports(bin, SESSIONS_HOST_MIN_VERSION);
 }
@@ -193,7 +193,7 @@ const ENGINE_VERBS = new Set([
 export function isReadQuery(args: string[], opts: { filters?: boolean; host?: boolean } = {}): boolean {
   if (args.length === 0) return false;
   // Base (0.1.x) value flags, always recognized; the 0.2.0 filter value flags
-  // join them only when the binary supports filters, and the 0.3.0 `--host`
+  // join them only when the binary supports filters, and the 0.2.1 `--host`
   // value flag only when the binary supports it (its own, higher floor).
   const valueFlags = new Set(['--limit', '--agent']);
   const boolFlags = new Set(READ_FLAGS);
@@ -281,7 +281,7 @@ function scanDeviceFlag(args: string[]): { count: number; value?: string; valueE
  * standalone (which owns the ssh hop). This is the local-orchestration collapse
  * (secrets-cli model): `sessions` owns the remote read, replacing the in-repo
  * `--device` peer fan-out — WHEN it is safe (the caller gates on the LOCAL
- * standalone supporting `--host`, >=0.3.0, and falls through to the in-repo
+ * standalone supporting `--host`, >=0.2.1, and falls through to the in-repo
  * fan-out if the PEER lacks the standalone).
  *
  * `sessions --host` is point-to-one, so ONLY a single unambiguous device may
