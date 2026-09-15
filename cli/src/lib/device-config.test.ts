@@ -510,15 +510,22 @@ describe('tmux gate (tmux.enabled on this device)', () => {
   });
 });
 
-// The `browser.task-idle-minutes` device key survives PHNX-4101 (browser-cli
-// reads it from the shared `browser:` block); the agents-cli resolver that used
-// it was removed with the in-repo reaper, so these pin the key's write/validation
-// surface only.
-describe('browser.task-idle-minutes config key (RUSH-2622)', () => {
-  it('stores a value on this box’s own doc, never the fleet-shared file', async () => {
-    const { setConfigValue } = await freshModules();
+describe('resolveBrowserTaskIdleMs (browser.task-idle-minutes, RUSH-2622)', () => {
+  it('defaults to 30 minutes in ms when unset', async () => {
+    const { resolveBrowserTaskIdleMs } = await freshModules();
+    expect(await resolveBrowserTaskIdleMs()).toBe(30 * 60_000);
+  });
+
+  it('reflects a stored value, in ms', async () => {
+    const { resolveBrowserTaskIdleMs, setConfigValue } = await freshModules();
     setConfigValue('browser.task-idle-minutes', 15);
-    expect(readCentral()).not.toMatch(/browserTaskIdleMinutes/);
+    expect(await resolveBrowserTaskIdleMs()).toBe(15 * 60_000);
+  });
+
+  it('0 resolves to null — the "idle reaping is off" signal, not a zero-ms window', async () => {
+    const { resolveBrowserTaskIdleMs, setConfigValue } = await freshModules();
+    setConfigValue('browser.task-idle-minutes', 0);
+    expect(await resolveBrowserTaskIdleMs()).toBeNull();
   });
 
   it('rejects a negative value', async () => {
@@ -526,10 +533,17 @@ describe('browser.task-idle-minutes config key (RUSH-2622)', () => {
     expect(() => setConfigValue('browser.task-idle-minutes', -1)).toThrow(/must be >= 0/);
   });
 
-  it('cannot be set for a peer at all — it is machine-local', async () => {
+  it('persists to this box’s own doc, never the fleet-shared file', async () => {
     const { setConfigValue } = await freshModules();
+    setConfigValue('browser.task-idle-minutes', 15);
+    expect(readCentral()).not.toMatch(/browserTaskIdleMinutes/);
+  });
+
+  it('cannot be set for a peer at all — it is machine-local', async () => {
+    const { resolveBrowserTaskIdleMs, setConfigValue } = await freshModules();
     expect(() => setConfigValue('browser.task-idle-minutes', 15, { device: 'mac-mini' }))
       .toThrow(/machine-local/);
+    expect(await resolveBrowserTaskIdleMs()).toBe(30 * 60_000);
   });
 });
 
