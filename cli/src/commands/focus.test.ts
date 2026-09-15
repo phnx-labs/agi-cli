@@ -23,7 +23,7 @@ import {
 } from './focus.js';
 import { refuseFallback } from './go.js';
 import type { ActiveSession } from '../lib/session/active.js';
-import type { SessionMeta } from '../lib/session/types.js';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import type { SurfaceItem, LaunchResult } from '../lib/terminal/index.js';
 
 function hasTmux(): boolean {

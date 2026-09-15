@@ -2,8 +2,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { describe, expect, it } from 'vitest';
 import { redactEmails } from '../lib/redact.js';
-import { renderSessionHtmlDocument } from '../lib/session/share-html.js';
-import type { SessionMeta } from '../lib/session/types.js';
+import { renderSessionHtmlDocument } from '@phnx-labs/sessions-cli/reader';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import { buildArtifactsShareArgs, defaultSessionSlug } from './sessions-share.js';
 
 const TESTDATA = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../lib/session/testdata/render');

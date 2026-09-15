@@ -4,7 +4,7 @@ import { setHelpSections } from '../lib/help.js';
 import { gatherRemoteAgentsJson, type RemoteAgentsJsonParseResult } from '../lib/remote-agents-json.js';
 import { discoverSessions, parseTimeFilter } from '../lib/session/discover.js';
 import { machineId } from '../lib/session/sync/config.js';
-import { SESSION_AGENTS, type SessionAgentId } from '../lib/session/types.js';
+import { SESSION_AGENTS, type SessionAgentId } from '@phnx-labs/sessions-cli/reader';
 import { ensureToolIndex, readToolIndexCoverage, type ToolIndexCoverage } from '../lib/session/tool-index.js';
 import { NO_FANOUT_ENV } from '../lib/session/remote-active.js';
 import { backfillResourceUsage, type QueryOptions } from '../lib/session/db.js';

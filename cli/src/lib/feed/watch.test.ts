@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ActiveSession } from '../session/active.js';
-import type { SessionMeta } from '../session/types.js';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import { SessionWatchState, toSessionWatchRow } from '../session/watch.js';
 import { FeedSessionProjection, FeedWatchState, normalizePeerEnvelope, projectSessionEnvelope, type FeedWatchEnvelope } from './watch.js';
 

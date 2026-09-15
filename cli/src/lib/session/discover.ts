@@ -19,20 +19,20 @@ import { getAgentsDir, getUserAgentsDir, getHistoryDir, getRunsDir } from '../st
 import { parseTimeFilter } from './relative-time.js';
 
 const execFileAsync = promisify(execFile);
-import type { SessionAgentId, SessionEvent, SessionMeta, TodoProgress } from './types.js';
+import type { SessionAgentId, SessionEvent, SessionMeta, TodoProgress } from '@phnx-labs/sessions-cli/reader';
 import type { AgentId } from '../types.js';
 import { AGENTS, agentConfigDirName, getCliVersion, resolveOpenCodeAccountId } from '../agents.js';
 import { walkForFilesWithStat } from '../fs-walk.js';
 import { hasCommand } from '../cli-resources.js';
 import { execFileShellSpec } from '../platform/exec.js';
 import { getConfigSymlinkVersion } from '../installations/shims.js';
-import { SESSION_AGENTS } from './types.js';
+import { SESSION_AGENTS } from '@phnx-labs/sessions-cli/reader';
 import { deriveShortId } from './short-id.js';
 import { buildClaudeAccountIndex, resolveClaudeAccount, type ClaudeAccountIndex } from './claude-accounts.js';
-import { cleanFirstUserMessage, extractSessionTopic, extractSlashCommandName, extractSlashCommandFromToolInput, cleanGeneratedSessionLabel } from './prompt.js';
-import { isBackgroundShellStart, isSkillInvocation, extractSkills, extractSlashCommands, isSubAgentTool } from './highlights.js';
-import { parseAntigravity, parseCursor, splitSessionFilePath } from './parse.js';
-import { extractPrUrl, detectWorktree, detectTicket, isPrCreateCommand, detectSpawnedTeam, isTicketCreateTool, extractCreatedTicket, extractRecentDirectoriesTouched, extractTodoProgressFromEvents } from './state.js';
+import { cleanFirstUserMessage, extractSessionTopic, extractSlashCommandName, extractSlashCommandFromToolInput, cleanGeneratedSessionLabel } from '@phnx-labs/sessions-cli/reader';
+import { isBackgroundShellStart, isSkillInvocation, extractSkills, extractSlashCommands, isSubAgentTool } from '@phnx-labs/sessions-cli/reader';
+import { parseAntigravity, parseCursor, splitSessionFilePath } from '@phnx-labs/sessions-cli/reader';
+import { extractPrUrl, detectWorktree, detectTicket, isPrCreateCommand, detectSpawnedTeam, isTicketCreateTool, extractCreatedTicket, extractRecentDirectoriesTouched, extractTodoProgressFromEvents } from '@phnx-labs/sessions-cli/reader';
 import { costOfUsage, costOfUsageNoCache } from '../pricing/index.js';
 import { machineId } from './sync/config.js';
 import { isSelfHost } from '../devices/self-host.js';
@@ -73,7 +73,7 @@ import {
   collectCodexToolCalls,
   type IndexedToolCall,
   type ToolCallCollectorSnapshot,
-} from './tool-calls.js';
+} from '@phnx-labs/sessions-cli/reader';
 import { purgeMissingToolCallsInDirectory } from './tool-store.js';
 
 const HOME = os.homedir();

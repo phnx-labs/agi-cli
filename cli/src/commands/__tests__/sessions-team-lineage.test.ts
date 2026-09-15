@@ -12,7 +12,7 @@ import { describe, it, expect } from 'vitest';
 import { applyScopeFilters, artifactLookupScope, buildRoutineChoices, buildRoutineRunGroups, filterSessionsByRoutine, formatPickerLabel, hasNoBrowserDisqualifyingFlags, matchesTeam, resolveRoutineName, teamBadge } from '../sessions.js';
 import { resolveSessionById } from '../../lib/session/discover.js';
 import { formatTeamLineage } from '../sessions-picker.js';
-import type { SessionMeta } from '../../lib/session/types.js';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 
 const strip = (s: string) => s.replace(/\[[0-9;]*m/g, '');
 

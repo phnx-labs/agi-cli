@@ -6,7 +6,7 @@ import {
 } from './sessions.js';
 import { stringWidth } from '../lib/session/width.js';
 import type { ActiveSession } from '../lib/session/active.js';
-import type { SessionMeta } from '../lib/session/types.js';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 
 /**
  * RUSH-2205 enriched the live `--orphan`/`--active` row: agent version, a human

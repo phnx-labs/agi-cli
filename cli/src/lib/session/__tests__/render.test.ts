@@ -18,8 +18,8 @@ import {
   parseRoleList,
   renderConversationMarkdown,
   renderJson,
-} from '../render.js';
-import type { SessionEvent } from '../types.js';
+} from '@phnx-labs/sessions-cli/reader';
+import type { SessionEvent } from '@phnx-labs/sessions-cli/reader';
 
 // ── filterEvents ──────────────────────────────────────────────────────────────
 

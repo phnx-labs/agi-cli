@@ -19,11 +19,11 @@ const {
   upsertMirrorSession,
   writeSessionTimeline,
 } = await import('./db.js');
-const { emptyTimelineState, foldTimeline, projectSessionFiles, projectTimeline } = await import('./timeline.js');
+const { emptyTimelineState, foldTimeline, projectSessionFiles, projectTimeline } = await import('@phnx-labs/sessions-cli/reader');
 const { mergeSessionTimeline } = await import('./session-cache.js');
 const { toPreviousSessionWatchRow, toSessionWatchRow } = await import('./remote/watch.js');
 import type { ActiveSession } from './active.js';
-import type { SessionEvent, SessionMeta } from './types.js';
+import type { SessionEvent, SessionMeta } from '@phnx-labs/sessions-cli/reader';
 
 const AT = (s: number): string => new Date(Date.UTC(2026, 8, 6, 0, 0, s)).toISOString();
 const EVENTS: SessionEvent[] = [

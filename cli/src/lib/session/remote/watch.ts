@@ -10,9 +10,9 @@ import { streamFromPeer } from './peer-stream.js';
 import { buildWindowsAgentsCommand, remoteShellFor } from '../../hosts/remote-cmd.js';
 import { isReapableOrphan, type ActiveSession } from '../active.js';
 import { querySessions, readSessionSummaryAny, readSessionTimelineAny } from '../db.js';
-import { linearIssueUrl } from '../linear.js';
+import { linearIssueUrl } from '@phnx-labs/sessions-cli/reader';
 import { sessionAgentSupportsResume } from '../recovery.js';
-import { SESSION_AGENTS, type SessionMeta } from '../types.js';
+import { SESSION_AGENTS, type SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import {
   activeSessionsJournalPath,
   activeSessionJournalIdentity,

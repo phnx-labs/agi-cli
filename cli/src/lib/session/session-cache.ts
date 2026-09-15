@@ -553,9 +553,9 @@ function mergeSessionSummary(s: ActiveSession): ActiveSession {
  * the readiness flag is read on the read path, and it is memoized (PHNX-3939).
  */
 export function resolveStreamSummaryState(
-  current: import('./types.js').SummaryState | undefined,
+  current: import('@phnx-labs/sessions-cli/reader').SummaryState | undefined,
   nowMs: number = Date.now(),
-): import('./types.js').SummaryState {
+): import('@phnx-labs/sessions-cli/reader').SummaryState {
   if (current) return current;
   return isSummarizerReady(nowMs) ? 'pending' : 'skipped';
 }

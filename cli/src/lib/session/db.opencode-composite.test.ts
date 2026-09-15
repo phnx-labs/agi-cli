@@ -10,7 +10,7 @@ process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 
 const { upsertSession, querySessions, getSessionById } = await import('./db.js');
-type SessionMeta = import('./types.js').SessionMeta;
+type SessionMeta = import('@phnx-labs/sessions-cli/reader').SessionMeta;
 
 // A composite OpenCode-shaped file_path: one shared SQLite container, an in-DB id.
 function opencodeMeta(id: string, containerDbPath: string): SessionMeta {

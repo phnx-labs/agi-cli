@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { computeBehavioralPatterns, computeInsights, normalizeErrorKey } from './insights.js';
 import type { SyncRow, ToolCallRow } from './sync.js';
-import type { InsightFacets } from '../session/insights.js';
+import type { InsightFacets } from '@phnx-labs/sessions-cli/reader';
 
 function makeRow(id: string, timestamp: string): SyncRow {
   return {

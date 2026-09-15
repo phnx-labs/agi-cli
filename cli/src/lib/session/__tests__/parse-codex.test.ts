@@ -10,8 +10,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { parseCodex, parseCodexContent, summarizeToolUse, applyPatchTargetPaths } from '../parse.js';
-import { commandsFromCodexExec } from '../tool-calls.js';
+import { parseCodex, parseCodexContent, summarizeToolUse, applyPatchTargetPaths } from '@phnx-labs/sessions-cli/reader';
+import { commandsFromCodexExec } from '@phnx-labs/sessions-cli/reader';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixture = path.join(here, '..', 'testdata', 'codex-custom-tools.jsonl');

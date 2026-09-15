@@ -18,8 +18,8 @@
  */
 
 import { upsertSession } from '../session/db.js';
-import type { SessionAgentId } from '../session/types.js';
-import { isSessionTrackedAgent } from '../session/types.js';
+import type { SessionAgentId } from '@phnx-labs/sessions-cli/reader';
+import { isSessionTrackedAgent } from '@phnx-labs/sessions-cli/reader';
 import { deriveShortId } from '../session/short-id.js';
 import type { CloudTask } from './types.js';
 

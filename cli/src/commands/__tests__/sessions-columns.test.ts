@@ -19,7 +19,7 @@ import {
   linkTicketCell,
   linkCwdCell,
 } from '../sessions.js';
-import type { SessionMeta } from '../../lib/session/types.js';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import { stringWidth } from '../../lib/session/width.js';
 
 const strip = (s: string) => s.replace(/\[[0-9;]*m/g, '');

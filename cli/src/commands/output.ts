@@ -26,7 +26,7 @@ import { addHostOption } from '../lib/hosts/option.js';
 import { discoverSessions, parseTimeFilter } from '../lib/session/discover.js';
 import { queryUsageRollup, type UsageRollupGroup, type QueryOptions } from '../lib/session/db.js';
 import { formatUsd, PRICING_VERSION } from '../lib/pricing/index.js';
-import { formatDuration } from '../lib/session/render.js';
+import { formatDuration } from '@phnx-labs/sessions-cli/reader';
 import { terminalWidth, truncateToWidth, padToWidth } from '../lib/session/width.js';
 import { collectGitOutput } from '../lib/output/git-output.js';
 import { loadDevices } from '../lib/devices/registry.js';

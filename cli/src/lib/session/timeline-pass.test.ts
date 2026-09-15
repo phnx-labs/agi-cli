@@ -15,7 +15,7 @@ const CLAUDE_FIXTURE = path.join(TESTDATA, 'timeline-claude.jsonl');
 
 let db: typeof import('./db.js');
 let pass: typeof import('./timeline-pass.js');
-let timeline: typeof import('./timeline.js');
+let timeline: typeof import('@phnx-labs/sessions-cli/reader');
 type ActiveSession = import('./active.js').ActiveSession;
 
 /** A live row shaped exactly as the daemon's gather produces it. */
@@ -26,7 +26,7 @@ function row(sessionId: string, sessionFile: string, kind = 'claude'): ActiveSes
 beforeAll(async () => {
   db = await import('./db.js');
   pass = await import('./timeline-pass.js');
-  timeline = await import('./timeline.js');
+  timeline = await import('@phnx-labs/sessions-cli/reader');
   db.getDB();
 });
 
