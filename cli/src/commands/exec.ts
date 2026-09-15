@@ -302,9 +302,13 @@ export { RUN_AUTO_KEYWORD };
  * fleet. Pure so the pinning matrix is unit-testable.
  */
 export function runAutoDefaultsToAffinity(
-  options: { host?: string; device?: string; on?: string; computer?: string },
+  options: { host?: string; device?: string; on?: string; computer?: string; local?: boolean },
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
+  // An explicit local pin (--local, --where local, --device <this machine>)
+  // is a decided host layer with an empty host set; read it here so the
+  // `run auto` and bare-interactive defaults share one rule.
+  if (options.local) return false;
   if (hostTargetGiven(options).length > 0) return false;
   if (env.AGENTS_RUN_AUTO_HOST_RESOLVED === '1') return false;
   return env.AGENTS_REMOTE_INTERACTIVE !== '1';
@@ -348,7 +352,6 @@ export function bareInteractiveRunDefaultsToDeviceAuto(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   if (run.prompt !== undefined) return false;
-  if (options.local) return false;
   if (!isHumanFacingRun({ tty: surface.tty, json: surface.json === true })) return false;
   if (run.devicePickerRequested) return false;
   if (options.resume !== undefined || options.lease || options.box || options.cloud) return false;
