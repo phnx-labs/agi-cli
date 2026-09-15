@@ -671,7 +671,7 @@ agents setup mine remove <name>               Remove a brand (its shim + config)
 agents setup mine toggle <name>               Enable/disable features for a brand
 agents setup secrets                          Install the standalone `secrets` CLI if missing, then run its `secrets migrate` onboarding.
 agents setup status                           Show setup readiness for core, browser, computer, secrets, term, accounts, fleet, watchdog, and preferences.
-agents setup term                             Install the standalone `term` CLI (the PTY engine fleet login and auth mint spawn) if missing.
+agents setup term                             Install the standalone `term` CLI (the PTY engine `agents accounts add`/`login` spawn) if missing.
 agents setup url-scheme                       Register/unregister/status the agents:// OS URL-scheme handler for artifact session deep links.
 agents setup url-scheme register              Register the agents:// URL scheme with the OS so artifact links resume sessions (idempotent).
 agents setup url-scheme status                Report whether the agents:// URL scheme handler is registered.

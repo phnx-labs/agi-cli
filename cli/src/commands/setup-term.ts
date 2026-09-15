@@ -2,9 +2,10 @@
  * `agents setup term` — install the standalone `term` CLI if missing (PHNX-4092).
  *
  * The PTY engine lives in `@phnx-labs/term-cli` (extracted PHNX-4091);
- * agents-cli never rebundles it. The OAuth device-code driver (`agents fleet
- * login`, `agents auth mint`) spawns `term` on demand and fails loud when it is
- * absent, so onboarding installs it here like every other standalone tool.
+ * agents-cli never rebundles it. The setup-token mint behind `agents accounts
+ * add` / `agents accounts login` (auth-mint.ts → term-driver.ts) spawns `term`
+ * on demand and fails loud when it is absent, so onboarding installs it here
+ * like every other standalone tool.
  *
  * Unlike browser/computer/secrets there is nothing to configure — no profile,
  * no OS permission, no migrate step. A missing binary is a routine install
@@ -51,7 +52,7 @@ export async function runTermWizard(): Promise<boolean> {
 export function registerSetupTermCommand(setupCmd: Command): void {
   setupCmd
     .command('term')
-    .description('Install the standalone `term` CLI (the PTY engine fleet login and auth mint spawn) if missing.')
+    .description('Install the standalone `term` CLI (the PTY engine `agents accounts add`/`login` spawn) if missing.')
     .option('--install-only', 'Install the standalone term CLI (identical to the wizard; term needs no further setup)')
     .option('--terminal [backend]', 'Open interactive setup in a detected or selected terminal')
     .action(async (options: { installOnly?: boolean; terminal?: boolean | string }) => {
