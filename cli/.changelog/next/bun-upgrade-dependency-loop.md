@@ -8,6 +8,9 @@
   entry before the install and writes it back as the version actually on disk
   afterwards; the second half matters too, since bun otherwise records the
   tarball's path under the upgrade's temp directory, which is deleted on the way
-  out and breaks the next `bun install -g`. Neither `bun.lock` nor
-  `trustedDependencies` is involved, and the npm install path is unchanged.
+  out and breaks the next `bun install -g`. An install that fails or is aborted
+  puts the entry back, so a failed upgrade no longer leaves the CLI installed
+  but unpinned — a state in which `bun remove -g` reports success and removes
+  nothing. Neither `bun.lock` nor `trustedDependencies` is involved, and the
+  npm install path is unchanged.
   Source: `cli/src/lib/self-update.ts`, `cli/src/lib/self-update.test.ts`.

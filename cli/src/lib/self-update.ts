@@ -24,6 +24,7 @@ const execFileAsync = promisify(execFile);
 // Leaf comparator only — do not pull the full versions.ts graph into every
 // bootstrap that imports self-update (RUSH-2331).
 import { compareVersions } from './agent-spec/primitives.js';
+import { atomicWriteJsonSync } from './fs-atomic.js';
 import { needsWindowsShell } from './platform/index.js';
 
 export const NPM_PACKAGE_NAME = '@phnx-labs/agents-cli';
@@ -485,8 +486,8 @@ export function installLooksSettled(packageRoot: string, settleMs: number = INST
 }
 
 /** Path to the manifest bun keeps its global installs in. */
-function bunGlobalManifest(): string {
-  return path.join(bunGlobalDir(), 'package.json');
+function bunGlobalManifest(globalDir: string): string {
+  return path.join(globalDir, 'package.json');
 }
 
 /**
@@ -494,9 +495,9 @@ function bunGlobalManifest(): string {
  * installed globally yet) or unparseable — the caller then leaves it alone and
  * lets bun write whatever it wants, rather than replacing a file it cannot read.
  */
-function readBunGlobalManifest(): Record<string, unknown> | null {
+function readBunGlobalManifest(globalDir: string): Record<string, unknown> | null {
   try {
-    const parsed: unknown = JSON.parse(fs.readFileSync(bunGlobalManifest(), 'utf-8'));
+    const parsed: unknown = JSON.parse(fs.readFileSync(bunGlobalManifest(globalDir), 'utf-8'));
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
       ? (parsed as Record<string, unknown>)
       : null;
@@ -505,15 +506,12 @@ function readBunGlobalManifest(): Record<string, unknown> | null {
   }
 }
 
-function writeBunGlobalManifest(manifest: Record<string, unknown>): void {
-  fs.writeFileSync(bunGlobalManifest(), `${JSON.stringify(manifest, null, 2)}\n`);
-}
-
 /**
  * Set this package's entry in bun's global `dependencies` to `spec`, or delete
- * it when `spec` is null. Every other field — the other globally installed
- * packages, `trustedDependencies` — is carried through untouched. Best-effort:
- * a missing or unreadable manifest is left as it is.
+ * it when `spec` is null, and return whatever was there before so a caller can
+ * put it back. Every other field — the other globally installed packages,
+ * `trustedDependencies` — is carried through untouched. Best-effort: a missing
+ * or unreadable manifest is left as it is.
  *
  * This exists because `bun add -g <tarball>` refuses to install at all while
  * that entry pins an exact registry version. bun resolves the root dependency
@@ -529,38 +527,55 @@ function writeBunGlobalManifest(manifest: Record<string, unknown>): void {
  * Neither the lockfile nor `trustedDependencies` takes part: deleting
  * `bun.lock` alone still loops, and clearing this one entry still installs
  * with the lockfile in place.
+ *
+ * The write goes through {@link atomicWriteJsonSync} because bun cannot read
+ * past a truncated manifest — it fails the parse and installs nothing, and
+ * this code would not repair it either (an unparseable manifest reads back as
+ * null and every later edit silently no-ops).
  */
-function setBunGlobalDependency(spec: string | null): void {
-  const manifest = readBunGlobalManifest();
-  if (!manifest) return;
+function setBunGlobalDependency(globalDir: string, spec: string | null): string | null {
+  const manifest = readBunGlobalManifest(globalDir);
+  if (!manifest) return null;
   const deps = manifest.dependencies;
-  if (!deps || typeof deps !== 'object' || Array.isArray(deps)) return;
+  if (!deps || typeof deps !== 'object' || Array.isArray(deps)) return null;
   const entries = deps as Record<string, string>;
+  const previous = entries[NPM_PACKAGE_NAME] ?? null;
   if (spec === null) {
-    if (!(NPM_PACKAGE_NAME in entries)) return;
+    if (!(NPM_PACKAGE_NAME in entries)) return previous;
     delete entries[NPM_PACKAGE_NAME];
   } else {
-    if (entries[NPM_PACKAGE_NAME] === spec) return;
+    if (entries[NPM_PACKAGE_NAME] === spec) return previous;
     entries[NPM_PACKAGE_NAME] = spec;
   }
-  writeBunGlobalManifest(manifest);
+  atomicWriteJsonSync(bunGlobalManifest(globalDir), manifest);
+  return previous;
 }
 
 /**
- * Install `spec` into bun's global store with `bun add -g`. bun writes to
- * `<bunGlobalDir>/node_modules/<pkg>`, which is exactly the running package
- * root for a bun install — so verifyInstalledVersion() sees the new version
- * in place. bun skips untrusted lifecycle scripts, so the caller refreshes
- * alias shims afterwards via refreshAliasShims() rather than relying on the
- * package's postinstall hook.
+ * Install `spec` into bun's global store at `globalDir` with `bun add -g`. bun
+ * writes to `<globalDir>/node_modules/<pkg>`, which is exactly the running
+ * package root for a bun install — so verifyInstalledVersion() sees the new
+ * version in place. bun skips untrusted lifecycle scripts, so the caller
+ * refreshes alias shims afterwards via refreshAliasShims() rather than relying
+ * on the package's postinstall hook.
+ *
+ * `globalDir` is passed in rather than read from `BUN_INSTALL` because
+ * detectPackageManager() also routes a relocated bun install here — one whose
+ * `BUN_INSTALL` this process never saw (see its structural `.bun/install/
+ * global` fallback). It directs BOTH halves of the operation: the manifest
+ * edited here, and — via `BUN_INSTALL` in the child's environment — the
+ * directory bun installs into. Letting bun pick its own target while this code
+ * edits another manifest is the divergent-prefix bug this module exists to
+ * prevent: the install lands somewhere else, its pin is never cleared, and the
+ * loop is not fixed.
  *
  * The manifest is edited on both sides of the install: the stale exact-version
  * pin comes out first so bun will accept the tarball at all (see
- * {@link setBunGlobalDependency}), and the tarball path bun leaves behind goes back
- * to the version actually on disk afterwards. That second step matters as much
- * as the first — `spec` is a download under a temp directory that is deleted
- * once the upgrade finishes, so a manifest still naming it points at a file
- * that no longer exists, and the next `bun install -g` of anything at all
+ * {@link setBunGlobalDependency}), and the tarball path bun leaves behind is
+ * replaced afterwards by the version actually on disk. That second step matters
+ * as much as the first — `spec` is a download under a temp directory the caller
+ * deletes once the upgrade finishes, so a manifest still naming it points at a
+ * file that no longer exists, and the next `bun install -g` of anything at all
  * fails to resolve it.
  *
  * Unlike npm's arborist (see {@link sweepStaleInstallStaging}: retire-rename,
@@ -572,21 +587,39 @@ function setBunGlobalDependency(spec: string | null): void {
  *
  * `signal` behaves exactly as documented on {@link installPackageIntoPrefix}.
  */
-export async function installPackageWithBun(spec: string, signal?: AbortSignal): Promise<void> {
+export async function installPackageWithBun(spec: string, globalDir: string, signal?: AbortSignal): Promise<void> {
   const { execFile } = await import('child_process');
   const { promisify } = await import('util');
   const execFileAsync = promisify(execFile);
-  setBunGlobalDependency(null);
-  // On Windows `bun` resolves to `bun.exe`/`bun.cmd`; force shell for the .cmd case.
-  // --ignore-scripts: the tarball has already been integrity-verified, but its
-  // lifecycle scripts must not run at install time (the caller refreshes shims
-  // explicitly via refreshAliasShims()) — same fail-closed posture as the npm path.
-  await execFileAsync('bun', ['add', '-g', spec, '--ignore-scripts'], { shell: needsWindowsShell('bun'), signal });
+  const previous = setBunGlobalDependency(globalDir, null);
   try {
-    setBunGlobalDependency(await readInstalledVersion(path.join(bunGlobalDir(), 'node_modules', NPM_PACKAGE_NAME)));
+    // On Windows `bun` resolves to `bun.exe`/`bun.cmd`; force shell for the .cmd case.
+    // --ignore-scripts: the tarball has already been integrity-verified, but its
+    // lifecycle scripts must not run at install time (the caller refreshes shims
+    // explicitly via refreshAliasShims()) — same fail-closed posture as the npm path.
+    await execFileAsync('bun', ['add', '-g', spec, '--ignore-scripts'], {
+      shell: needsWindowsShell('bun'),
+      signal,
+      // bunGlobalDir() inverted: `<BUN_INSTALL>/install/global` back to the root.
+      env: { ...process.env, BUN_INSTALL: path.dirname(path.dirname(globalDir)) },
+    });
+  } catch (err) {
+    // A failed or aborted install leaves the package installed but unpinned,
+    // and bun treats an unpinned package as not installed: `bun remove -g`
+    // then reports success and removes nothing, and `bun pm ls -g` stops
+    // listing it. Put back what was there.
+    setBunGlobalDependency(globalDir, previous);
+    throw err;
+  }
+  try {
+    setBunGlobalDependency(globalDir, await readInstalledVersion(path.join(globalDir, 'node_modules', NPM_PACKAGE_NAME)));
   } catch {
-    // The install itself succeeded. A manifest still naming the tarball is a
-    // problem for the next bun command, not a reason to fail this upgrade.
+    // The install itself succeeded and must not be failed over an unreadable
+    // version. Clearing the entry is the safe landing of the two: bun recorded
+    // the tarball, the caller is about to delete it, and a manifest naming a
+    // missing file breaks every later `bun add -g`, while an absent entry
+    // leaves the installed package and its bin links working.
+    setBunGlobalDependency(globalDir, null);
   }
 }
 

@@ -1328,7 +1328,7 @@ describe.skipIf(!hasBun())('installPackageWithBun', () => {
       trustedDependencies: ['@homebridge/node-pty-prebuilt-multiarch', NPM_PACKAGE_NAME],
     });
 
-    await installPackageWithBun(packAgentsCli('1.22.117'));
+    await installPackageWithBun(packAgentsCli('1.22.117'), bunGlobalDir());
 
     const installedRoot = path.join(bunGlobalDir(), 'node_modules', NPM_PACKAGE_NAME);
     expect(await readInstalledVersion(installedRoot)).toBe('1.22.117');
@@ -1340,13 +1340,12 @@ describe.skipIf(!hasBun())('installPackageWithBun', () => {
     seedBunPrefix({ dependencies: { [NPM_PACKAGE_NAME]: '1.22.115' } });
     const tarball = packAgentsCli('1.22.117');
 
-    await installPackageWithBun(tarball);
+    await installPackageWithBun(tarball, bunGlobalDir());
 
     // bun records whatever spec it was handed. Left alone, the manifest names a
     // download under a temp dir the upgrade deletes on its way out, and every
     // later `bun install -g` fails to resolve it.
-    const recorded = readManifest().dependencies?.[NPM_PACKAGE_NAME];
-    expect(recorded).not.toBe(tarball);
+    expect(readManifest().dependencies?.[NPM_PACKAGE_NAME]).toBe('1.22.117');
     expect(fs.existsSync(path.join(bunGlobalDir(), 'node_modules', NPM_PACKAGE_NAME, 'package.json'))).toBe(true);
   });
 
@@ -1354,9 +1353,41 @@ describe.skipIf(!hasBun())('installPackageWithBun', () => {
     const trusted = ['@homebridge/node-pty-prebuilt-multiarch', NPM_PACKAGE_NAME];
     seedBunPrefix({ dependencies: { [NPM_PACKAGE_NAME]: '1.22.115' }, trustedDependencies: trusted });
 
-    await installPackageWithBun(packAgentsCli('1.22.117'));
+    await installPackageWithBun(packAgentsCli('1.22.117'), bunGlobalDir());
 
     expect(readManifest().trustedDependencies).toEqual(trusted);
+  });
+
+  it('installs into the directory it is given, not the one BUN_INSTALL names', { timeout: 120_000 }, async () => {
+    // detectPackageManager() routes a relocated bun install here whose
+    // BUN_INSTALL this process never saw. If the parameter steered only the
+    // manifest edit, bun would install into the env's directory instead: the
+    // real pin would never be cleared, the loop would not be fixed, and the
+    // upgrade would land somewhere other than the running copy.
+    const target = seedBunPrefix({ dependencies: { [NPM_PACKAGE_NAME]: '1.22.115' } });
+    const targetGlobalDir = bunGlobalDir();
+    const decoy = makeTempDir('bun-decoy');
+    fs.mkdirSync(path.join(decoy, 'install', 'global'), { recursive: true });
+    process.env.BUN_INSTALL = decoy;
+
+    await installPackageWithBun(packAgentsCli('1.22.117'), targetGlobalDir);
+
+    expect(await readInstalledVersion(path.join(targetGlobalDir, 'node_modules', NPM_PACKAGE_NAME))).toBe('1.22.117');
+    expect(fs.existsSync(path.join(decoy, 'install', 'global', 'node_modules'))).toBe(false);
+    expect(target).not.toBe(decoy);
+  });
+
+  it('puts the pin back when the install fails', { timeout: 120_000 }, async () => {
+    // The package stays installed when `bun add` fails, and bun treats an
+    // unpinned package as absent: `bun remove -g` would report success and
+    // remove nothing. A failed upgrade must not leave that behind.
+    seedBunPrefix({ dependencies: { [NPM_PACKAGE_NAME]: '1.22.115' } });
+
+    await expect(
+      installPackageWithBun(path.join(makeTempDir('bun-missing'), 'nonexistent.tgz'), bunGlobalDir()),
+    ).rejects.toThrow();
+
+    expect(readManifest().dependencies?.[NPM_PACKAGE_NAME]).toBe('1.22.115');
   });
 
   it('installs into a prefix whose manifest has no dependencies yet', { timeout: 120_000 }, async () => {
@@ -1365,7 +1396,7 @@ describe.skipIf(!hasBun())('installPackageWithBun', () => {
     // than throw on the missing key, or the upgrade dies before it installs.
     seedBunPrefix({ trustedDependencies: [NPM_PACKAGE_NAME] });
 
-    await installPackageWithBun(packAgentsCli('1.22.117'));
+    await installPackageWithBun(packAgentsCli('1.22.117'), bunGlobalDir());
 
     expect(await readInstalledVersion(path.join(bunGlobalDir(), 'node_modules', NPM_PACKAGE_NAME))).toBe('1.22.117');
     expect(readManifest().dependencies?.[NPM_PACKAGE_NAME]).toBe('1.22.117');
@@ -1376,7 +1407,7 @@ describe.skipIf(!hasBun())('installPackageWithBun', () => {
     process.env.BUN_INSTALL = bunInstall;
     fs.mkdirSync(bunGlobalDir(), { recursive: true });
 
-    await installPackageWithBun(packAgentsCli('1.22.117'));
+    await installPackageWithBun(packAgentsCli('1.22.117'), bunGlobalDir());
 
     expect(await readInstalledVersion(path.join(bunGlobalDir(), 'node_modules', NPM_PACKAGE_NAME))).toBe('1.22.117');
   });
