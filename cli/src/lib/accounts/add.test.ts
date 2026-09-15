@@ -53,7 +53,7 @@ describe('add support gating', () => {
   it('refuses a per-device harness with no finite login command, naming the per-device path', () => {
     expect(addSupported('kimi')).toBe(false);
     expect(addRefusal('kimi')).toMatch(/no finite login command/);
-    expect(addRefusal('kimi')).toMatch(/fleet login kimi/);
+    expect(addRefusal('kimi')).toMatch(/agents run kimi --device/);
   });
 
   it('the supported list is the registry-driven truth (claude, codex, cursor, grok)', () => {

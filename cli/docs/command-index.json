@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 65,
-  "commands": 486,
+  "commands": 485,
   "root": {
     "name": "agents",
     "path": "",
@@ -7034,71 +7034,6 @@
               "flags": "--all",
               "description": "also show ephemeral leased boxes (live crabbox call; may need bundle secrets)",
               "long": "--all",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "login",
-          "path": "devices login",
-          "aliases": [],
-          "description": "Log agent CLIs into fleet boxes over SSH: drive each box's device-code OAuth, scrape the URL + code, and surface every pending login in one local browser page. Default drives all codes at once; --interactive walks one box at a time (codes requested just-in-time so they don't expire).",
-          "args": [],
-          "options": [
-            {
-              "flags": "--agents <csv>",
-              "description": "only these agents (comma-separated); default: every agent with a device-code flow",
-              "long": "--agents",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--devices <csv>",
-              "description": "only these devices (comma-separated); default: every online box",
-              "long": "--devices",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--all",
-              "description": "target every device-code pair regardless of cached login state (cold cache / forced re-login)",
-              "long": "--all",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--interactive",
-              "description": "guided one-box-at-a-time wizard (codes requested just-in-time)",
-              "long": "--interactive",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--json",
-              "description": "output the final result matrix as JSON",
-              "long": "--json",
               "required": false,
               "optional": false,
               "variadic": false,

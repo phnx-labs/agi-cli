@@ -141,7 +141,6 @@ import {
   type AuthProbeRow,
   type VerdictSummary,
 } from '../lib/auth-health.js';
-import { runFleetLogin, type LoginStatus } from '../lib/fleet/remote-login.js';
 import {
   getConfigValue,
   listConfig,
@@ -1262,35 +1261,6 @@ function renderAuthMatrix(results: FleetPingHostResult[], opts?: { verbose?: boo
   return lines;
 }
 
-/** Render the final `fleet login` result summary in the house auth-matrix style. */
-function renderLoginMatrix(results: LoginStatus[]): string[] {
-  const lines: string[] = [chalk.bold('Fleet login')];
-  if (results.length === 0) {
-    lines.push(chalk.gray('  Nothing pending — every requested account is already logged in.'));
-    return lines;
-  }
-  const nameW = Math.max(6, ...results.map((r) => `${r.agent}@${r.device}`.length));
-  for (const r of results) {
-    const who = `${r.agent}@${r.device}`.padEnd(nameW);
-    let badge: string;
-    switch (r.state) {
-      case 'authorized': badge = chalk.green('authorized'); break;
-      case 'ready': badge = chalk.cyan('code ready'); break;
-      case 'driving': badge = chalk.yellow('driving'); break;
-      case 'skipped': badge = chalk.gray('not remotable'); break;
-      case 'error': badge = chalk.red('error'); break;
-      default: badge = chalk.gray(r.state); break;
-    }
-    const note = r.detail ? chalk.dim(`  ${r.detail}`) : (r.reason && !r.remotable ? chalk.dim(`  ${r.reason}`) : '');
-    lines.push(`  ${who}  ${badge}${note}`);
-  }
-  const auth = results.filter((r) => r.state === 'authorized').length;
-  const remotable = results.filter((r) => r.remotable).length;
-  lines.push('');
-  lines.push(chalk.gray(`  ${auth}/${remotable} remotable logins authorized`));
-  return lines;
-}
-
 /** Register the `agents devices` command tree (also aliased as `fleet`). */
 function registerDevicesCommands(program: Command): void {
   const devicesCmd = program
@@ -1340,7 +1310,7 @@ function registerDevicesCommands(program: Command): void {
     { title: 'Inspect', names: ['list', 'show', 'status', 'ping', 'harnesses', 'accounts', 'snapshot'] },
     { title: 'Disposable devices', names: ['lease'] },
     { title: 'Configure a device', names: ['config', 'describe', 'render'] },
-    { title: 'Fleet operations', names: ['update', 'run', 'login', 'capture', 'apply', 'worktrees'] },
+    { title: 'Fleet operations', names: ['update', 'run', 'capture', 'apply', 'worktrees'] },
   ]);
 
   devicesCmd
@@ -2228,31 +2198,6 @@ agents devices accounts --json           # machine-readable, per-host account gr
 Collapses the installs that share one account (e.g. five claude versions on one
 email) into a single row. Use \`agents devices harnesses\` for the per-install view.`,
   });
-
-  devicesCmd
-    .command('login')
-    .description('Log agent CLIs into fleet boxes over SSH: drive each box\'s device-code OAuth, scrape the URL + code, and surface every pending login in one local browser page. Default drives all codes at once; --interactive walks one box at a time (codes requested just-in-time so they don\'t expire).')
-    .option('--agents <csv>', 'only these agents (comma-separated); default: every agent with a device-code flow')
-    .option('--devices <csv>', 'only these devices (comma-separated); default: every online box')
-    .option('--all', 'target every device-code pair regardless of cached login state (cold cache / forced re-login)')
-    .option('--interactive', 'guided one-box-at-a-time wizard (codes requested just-in-time)')
-    .option('--json', 'output the final result matrix as JSON')
-    .action(async (opts: { agents?: string; devices?: string; all?: boolean; interactive?: boolean; json?: boolean }) => {
-      const csv = (s?: string) => (s ? s.split(',').map((x) => x.trim()).filter(Boolean) : undefined);
-      const results = await runFleetLogin({
-        agents: csv(opts.agents),
-        devices: csv(opts.devices),
-        all: opts.all,
-        interactive: opts.interactive,
-        json: opts.json,
-      });
-      if (opts.json) {
-        console.log(JSON.stringify(results, null, 2));
-      } else {
-        for (const line of renderLoginMatrix(results)) console.log(line);
-      }
-      if (results.some((r) => r.remotable && r.state !== 'authorized')) process.exitCode = 1;
-    });
 
   devicesCmd
     .command('show <name>')

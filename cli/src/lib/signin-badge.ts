@@ -71,7 +71,8 @@ export function loginSubcommand(agent: AgentId): string | null {
 /**
  * Exact action shown beside a non-live account. Every emitted command exists
  * today — never a planned surface and never a hidden verb:
- * - Per-device harnesses repair per box via `agents devices login`.
+ * - Per-device harnesses (kimi/antigravity) repair on the box itself: run the
+ *   harness there (`loginHint`) and complete its native login.
  * - Named accounts re-auth through `agents accounts login <harness>#<name>`.
  *   A known account with no slot on a headed device is onboarded with
  *   `agents accounts add <harness> <name>`. A worker never runs an
@@ -94,7 +95,7 @@ export function fixFor(input: {
   const { agent, verdict } = input;
   if (verdict === 'live' || verdict === 'rate_limited' || verdict === 'unverified' || verdict === 'ready') return null;
   if (input.provisioning === 'per-device' || verdict === 'per-device') {
-    return `agents devices login --agents ${agent}`;
+    return loginHint(agent);
   }
   if (input.name) {
     const worker = addWorkerRefusal(agent, input.name);

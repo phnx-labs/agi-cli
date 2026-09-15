@@ -17,8 +17,9 @@ Two failures follow from treating that login as fleet state:
 1. **Fleet-wide logout.** `agents fleet apply` copies the login file across machines
    (`FLEET_AUTH_FILES`). When one box refreshes, the server rotates the refresh
    token and invalidates every other copy — the whole fleet drops to "run /login"
-   (the codebase already documents this: `fleet/remote-login.ts` — "droid collapsed
-   10 boxes → 1 overnight").
+   (the codebase already documents this: `fleet/auth-sync.ts`
+   `SINGLE_USE_ROTATING_REFRESH_AGENTS` — "droid/WorkOS collapsed 10 boxes → 1
+   overnight").
 2. **Touch ID storm.** On macOS the login lives in the login Keychain, ACL-bound to
    the harness (Claude Code, etc.). agents-cli isn't on that ACL, so every time it
    reads the token — to draw `ag view` usage bars, to select an account — macOS
@@ -209,10 +210,11 @@ credential** (see the per-harness map):
 2. **Token-less harnesses → log in per box (cannot be copied).** `kimi` (no env
    auth, `config.toml` only) and `antigravity` (opaque keychain login, no working
    portable key) expose no shareable credential, so each box that runs them must
-   hold its own login — `agents fleet login` (per-box device-code over SSH, writes
-   the credential locally, never transports it). This is a harness limitation, not
-   a bug, and it is why the fleet holds e.g. two separate antigravity subs on two
-   boxes rather than one copied everywhere.
+   hold its own login — sign in on that box itself (`agents run <harness> --device
+   <box>`, then the harness's native login: kimi `/login` in its TUI, antigravity
+   on launch), which writes the credential locally and never transports it. This
+   is a harness limitation, not a bug, and it is why the fleet holds e.g. two
+   separate antigravity subs on two boxes rather than one copied everywhere.
 
 **Forbidden (the reverse of the above):** running an interactive OAuth flow on a
 worker; treating a copied long-term token as a headed device's own runtime
@@ -298,7 +300,7 @@ whose identity can't be proven unique across synced metadata is marked
 | Harness | Native account naming |
 |---|---|
 | Claude, Codex, Grok, Cursor | **supported** — version-scoped, strong account key; `accounts add <harness> [name]` drives the login |
-| Kimi | **supported** for naming (version-scoped, stable opaque id, no email), but `add` cannot drive its login (in-TUI `/login` only) — it logs in per box (`agents fleet login kimi`) |
+| Kimi | **supported** for naming (version-scoped, stable opaque id, no email), but `add` cannot drive its login (in-TUI `/login` only) — it logs in per box (run `kimi` on that device and `/login` in its TUI) |
 | Muse | **conditional** — version-scoped, email-only; nameable only when the login exposes an email |
 | Antigravity, Droid, OpenCode | **unsupported** — device-scoped but opaque/singleton; the identity can't be proven distinct across devices (Droid exposes no account key; Antigravity/OpenCode can alias two credentials as one) |
 | everything else | **unsupported** / discovery-only |
@@ -306,7 +308,8 @@ whose identity can't be proven unique across synced metadata is marked
 `accounts add`/`login` (and the hidden `name`/`attach`) refuse an unsupported
 harness with a named
 reason (for example, `kimi has no finite login command — kimi has no portable
-credential — it logs in per box (agents fleet login kimi).`). That gate
+credential — it logs in per box (run \`agents run kimi --device <box>\` on the
+worker and complete its native login).`). That gate
 applies only to native naming/attachment. Provider `accounts add <name>
 --provider <p>` stays unrestricted.
 
@@ -371,14 +374,15 @@ crosses only when the user runs `agents accounts sync <name> --device <device>`.
 
 - **`agents fleet apply`** does not copy login files. `FLEET_AUTH_FILES` is inventory
   metadata only; fleet apply has no native-login materialization path. Per
-  agent per box `apply` surfaces: "logged in" / "log in on this box" (interactive or
-  `agents fleet login`) / "add or sync a provider account (`agents accounts add` /
-  `sync`)" — driven by whether the box has its own login or a declared account
-  bundle, never by agent identity.
-- **`agents fleet login`** (per-box device-code over SSH, writes the credential on
-  the box, never transports it) stays as the per-machine login path. Onboarding a
-  new device syncs the needed provider account bundle (`agents accounts sync`)
-  instead of copying logins.
+  agent per box `apply` surfaces: "logged in" / "log in on this box" (interactively,
+  by running the harness on that box and completing its native login) / "add or
+  sync a provider account (`agents accounts add` / `sync`)" — driven by whether the
+  box has its own login or a declared account bundle, never by agent identity.
+- **Per-box native login** — for a token-less harness, sign in on the box itself
+  (`agents run <harness> --device <box>`, then the harness's native login), which
+  writes the credential on that box and never transports it. Onboarding a new
+  device syncs the needed provider account bundle (`agents accounts sync`) instead
+  of copying logins.
 - **`ag view` / usage** (`usage.ts`) reads the shared per-account usage cache.
   Interactive Claude sessions feed that cache through Claude Code's native
   status-line payload; explicit network probes read the setup-token from its

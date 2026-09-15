@@ -1,5 +1,5 @@
 /**
- * Native-login inventory for `agents apply` and `agents fleet login`.
+ * Native-login inventory for `agents apply`.
  * Native OAuth/session files are identified only to report device readiness;
  * agents-cli never serializes or materializes them on another device.
  *
@@ -46,7 +46,7 @@ export const KEYCHAIN_BOUND_ON_MAC: ReadonlySet<string> = new Set(['claude', 'an
  * collapsing the fleet to a single working login (droid/WorkOS collapsed 10 boxes
  * to 1 overnight — RUSH-1958). Add any newly-discovered single-use-rotation
  * harness here; the predicate below is the one place the propagation decision is
- * made. See also `remote-login.ts` and `usage.ts` for the per-machine-login policy.
+ * made. See also `usage.ts` for the per-machine-login policy.
  */
 export const SINGLE_USE_ROTATING_REFRESH_AGENTS: ReadonlySet<string> = new Set(['droid']);
 
@@ -75,145 +75,6 @@ export function hasPortableAuthFiles(agent: string): boolean {
 export function isPropagatableAgent(agent: string): boolean {
   return hasPortableAuthFiles(agent) && isCredentialSafeToPropagate(agent);
 }
-
-/**
- * The shape of a login flow — enough for `agents fleet login` to drive a remote
- * box's device-code OAuth over SSH and scrape the verification URL + user code.
- *
- * `flowType` decides remotability:
- *  - `device-code` — the remote box prints a URL + short code the human enters in
- *    a browser on THIS machine. The only flow `fleet login` can orchestrate.
- *  - `loopback`    — the CLI opens a browser and listens on 127.0.0.1 on the
- *    remote box; the redirect must reach that box's own loopback, so it can only
- *    be completed with a browser on the same machine. Non-remotable.
- *  - `api-key`     — a pasted key, not an OAuth handshake. Non-remotable.
- *  - `unknown`     — flow not yet characterized (no captured output). Non-remotable
- *    until someone captures the real pattern and fills the regexes.
- */
-export type LoginFlowType = 'device-code' | 'loopback' | 'api-key' | 'unknown';
-
-export interface LoginFlow {
-  /**
-   * The exact command that starts the login flow on the remote box, run as
-   * `ssh -tt <box> <loginCommand>`. Bare `<cli>` for agents whose device flow
-   * starts on launch (droid, kimi, antigravity), `<cli> login` for
-   * codex/grok, `<cli> auth login` for opencode.
-   */
-  loginCommand: string;
-  flowType: LoginFlowType;
-  /**
-   * Keystrokes sent after launch to force the device-code path when the CLI
-   * presents a menu (codex: pick "Sign in with Device Code") or requires a
-   * sub-command inside a TUI (kimi: `/login`). Sent verbatim through the PTY,
-   * so it must include the submitting CR (`\r`). Absent when the flow needs no
-   * steering.
-   */
-  deviceCodeSelect?: string;
-  /** Captures the verification URL from scraped login output (group 1 preferred). */
-  verificationUrlRegex?: RegExp;
-  /** Captures the user code from scraped login output (group 1 preferred). */
-  userCodeRegex?: RegExp;
-  /**
-   * Home-relative credential file that appears / bumps mtime on success — the
-   * completion signal. Mirrors {@link FLEET_AUTH_FILES} (first entry for agents
-   * with several).
-   */
-  successFile: string;
-}
-
-/** The success-file for an agent — the primary portable credential (first spec). */
-function successFileFor(agent: string): string {
-  const specs = FLEET_AUTH_FILES[agent];
-  if (!specs || specs.length === 0) throw new Error(`no auth file spec for agent '${agent}'`);
-  return specs[0].rel;
-}
-
-/**
- * Per-agent login flows, populated from live login-output captures (the only
- * ground truth — no fixtures exist upstream). Agents whose real device-code
- * output has not been captured are marked honestly (`unknown` / no regexes) so
- * `fleet login` flags them non-remotable instead of guessing.
- *
- * Only the `device-code` entries are ones `fleet login` drives; the rest are
- * carried so the command can explain WHY a logged-out pair is not remotable.
- */
-export const FLEET_LOGIN_FLOWS: Record<string, LoginFlow> = {
-  // droid: launches its TUI and prints, verbatim:
-  //   "If the link does not open automatically, please visit
-  //    https://auth.factory.ai/device and enter code MJQW-NQRM to complete
-  //    authentication." then "Waiting for authentication to complete...".
-  droid: {
-    loginCommand: 'droid',
-    flowType: 'device-code',
-    verificationUrlRegex: /please visit\s+(https:\/\/\S+?)\s+and enter code/i,
-    userCodeRegex: /enter code\s+([A-Z0-9]{4}-[A-Z0-9]{4})/i,
-    successFile: successFileFor('droid'),
-  },
-  // codex login shows a numbered menu; option 2 ("Sign in with Device Code",
-  // "Sign in from another device with a one-time code") is the remotable one.
-  // The post-selection URL/code output was not captured this session, so the
-  // regexes are best-effort generic device-code patterns — TODO: tighten once a
-  // real codex device-code screen is captured.
-  codex: {
-    loginCommand: 'codex login',
-    flowType: 'device-code',
-    deviceCodeSelect: '\x1b[B\r', // down-arrow once (to option 2) + Enter
-    verificationUrlRegex: /(https:\/\/\S*(?:device|activate|login|auth)\S*)/i,
-    userCodeRegex: /\b([A-Z0-9]{4}-[A-Z0-9]{4})\b/,
-    successFile: successFileFor('codex'),
-  },
-  // kimi: launch bare `kimi`, then `/login` inside the TUI, which prints
-  // "Select a platform and authenticate". Post-selection URL/code not captured —
-  // best-effort regexes, TODO: tighten with a real capture.
-  kimi: {
-    loginCommand: 'kimi',
-    flowType: 'device-code',
-    deviceCodeSelect: '/login\r',
-    verificationUrlRegex: /(https:\/\/\S+)/i,
-    userCodeRegex: /\b([A-Z0-9]{4}-[A-Z0-9]{4})\b/,
-    successFile: successFileFor('kimi'),
-  },
-  // grok: `grok login --device-auth` (grok 1.0.30, captured 2026-09-14) prints:
-  //   "To sign in, open this URL in your browser:
-  //      https://accounts.x.ai/oauth2/device?user_code=CSXW-TMHH
-  //    Confirm this code in your browser:
-  //      CSXW-TMHH
-  //    ... Waiting for authorization..." then "✓ Signed in as <email>".
-  // Bare `grok login` defaults to `--oauth`, the loopback browser flow, so the
-  // flag is what guarantees the device-code screen over SSH.
-  grok: {
-    loginCommand: 'grok login --device-auth',
-    flowType: 'device-code',
-    verificationUrlRegex: /open this URL in your browser:\s+(https:\/\/\S+)/i,
-    userCodeRegex: /Confirm this code in your browser:\s+([A-Z0-9]{4}-[A-Z0-9]{4})/i,
-    successFile: successFileFor('grok'),
-  },
-  // antigravity: bare `agy`, Google OAuth. Keychain-bound on macOS and loopback
-  // (browser + 127.0.0.1 listener on the box itself) — non-remotable.
-  antigravity: {
-    loginCommand: 'agy',
-    flowType: 'loopback',
-    successFile: successFileFor('antigravity'),
-  },
-  // opencode: `opencode auth login`. No captured pattern — unknown/non-remotable.
-  opencode: {
-    loginCommand: 'opencode auth login',
-    flowType: 'unknown',
-    successFile: successFileFor('opencode'),
-  },
-  // claude: interactive `/login` inside the TUI is a loopback browser flow, and
-  // the token is keychain-bound on macOS. That native login stays per-box and
-  // is never copied. The shareable `claude setup-token` mint is a different
-  // credential class — minted by `agents accounts add claude [name]` /
-  // `agents accounts login claude#<name>` (`lib/auth-mint.ts`), not as a
-  // fleet-login device-code flow (a setup-token is account-scoped, not
-  // per-machine).
-  claude: {
-    loginCommand: 'claude',
-    flowType: 'loopback',
-    successFile: successFileFor('claude'),
-  },
-};
 
 export interface SnapshotOptions {
   /** Home directory to read credential files from. */

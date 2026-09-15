@@ -96,11 +96,13 @@ describe('fixFor', () => {
     expect(fixFor({ agent: 'kimi', name: 'work', verdict: 'live', provisioning: 'per-device' })).toBeNull();
   });
 
-  it('uses the real fleet device-login command for per-device harnesses needing attention', () => {
+  it('points per-device harnesses at the harness\'s own login on the box', () => {
+    // No fleet-login orchestration: a per-device harness logs in on the box
+    // itself, so the fix is `loginHint` — run the harness there and log in.
     expect(fixFor({ agent: 'kimi', name: 'work', verdict: 'per-device', provisioning: 'per-device' }))
-      .toBe('agents devices login --agents kimi');
+      .toBe(loginHint('kimi'));
     expect(fixFor({ agent: 'antigravity', verdict: 'missing', provisioning: 'per-device' }))
-      .toBe('agents devices login --agents antigravity');
+      .toBe(loginHint('antigravity'));
   });
 });
 

@@ -1,7 +1,0 @@
-  Factory CLI
-
-  Sign in to Factory to continue.
-
-  If the link does not open automatically, please visit https://auth.factory.ai/device and enter code MJQW-NQRM to complete authentication.
-
-  Waiting for authentication to complete...
