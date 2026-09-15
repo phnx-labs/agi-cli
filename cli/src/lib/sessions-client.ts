@@ -15,6 +15,8 @@
 import { spawnSync } from 'node:child_process';
 import { findInPath } from './agent-spec/agents.js';
 import { compareVersions } from './agent-spec/primitives.js';
+import { flagValue } from './hosts/routing-flag.js';
+import { stripRoutingFlags } from './hosts/remote-cmd.js';
 
 const INSTALL_HINT = 'npm i -g @phnx-labs/sessions-cli';
 
@@ -228,6 +230,43 @@ export function isReadQuery(args: string[], opts: { filters?: boolean; host?: bo
     if (ENGINE_VERBS.has(arg)) return false;
   }
   return true;
+}
+
+/**
+ * Plan the rewrite of a `sessions` READ query that carries `--device <name>`
+ * (and no explicit `--host`) into the standalone's point-to-one remote read: the
+ * caller resolves the device to an ssh target and appends `--host ssh://<target>`
+ * to `readArgs`, forwarding it to the LOCAL standalone (which owns the ssh hop).
+ * This is the local-orchestration collapse (secrets-cli model): `sessions` owns
+ * the remote read, replacing the in-repo `--device` peer fan-out — WHEN it is
+ * safe (the caller gates on the LOCAL standalone supporting `--host`, >=0.3.0,
+ * and falls through to the in-repo fan-out if the PEER lacks the standalone).
+ *
+ * Returns null when the query is NOT a device-scoped read, in which case the
+ * existing path is unchanged:
+ *   - no `--device`/`-D` present;
+ *   - an explicit `--host` is already on the argv — it wins, matching
+ *     `secrets`' `rewriteDeviceToHost`, so we never add a second `--host`;
+ *   - the remaining query (with `--device` stripped) is not a read — a lifecycle
+ *     `--device` (resume/watch/inject/focus/…) keeps its in-repo/`runOnPeer`
+ *     behavior exactly.
+ *
+ * Pure and argv-only: fleet resolution (device → ssh target, via
+ * `resolveRemoteDevice`) and the version gate live in the caller so this is unit
+ * testable with real inputs. `filters` mirrors the caller's version gate for the
+ * 0.2.0 filter flags (the `--device` token is not a filter flag, so it is
+ * computed identically on the original argv and on `readArgs`).
+ */
+export function planDeviceHostRead(
+  args: string[],
+  opts: { filters?: boolean } = {},
+): { device: string; readArgs: string[] } | null {
+  const device = flagValue(args, 'device', 'D');
+  if (device === undefined || device === '') return null;
+  if (usesHostFlag(args)) return null;
+  const readArgs = stripRoutingFlags(args, [{ long: 'device', short: 'D', takesValue: true }]);
+  if (!isReadQuery(readArgs, { filters: opts.filters })) return null;
+  return { device, readArgs };
 }
 
 /** Test seam: drop the memoized bin so PATH fixtures can re-resolve. */

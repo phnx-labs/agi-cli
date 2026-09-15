@@ -7,6 +7,7 @@ import {
   SessionsClientError,
   _resetSessionsClientForTest,
   isReadQuery,
+  planDeviceHostRead,
   resolveSessionsBin,
   sessionsBinSupportsFilters,
   sessionsBinSupportsHost,
@@ -114,6 +115,56 @@ describe('usesFilterFlags', () => {
     ]) {
       expect(usesFilterFlags(args)).toBe(false);
     }
+  });
+});
+
+describe('planDeviceHostRead', () => {
+  it('strips --device from a read query and returns the device + read args', () => {
+    expect(planDeviceHostRead(['auth', '--device', 'box', '--json'])).toEqual({
+      device: 'box',
+      readArgs: ['auth', '--json'],
+    });
+    // -D short form, and the device value positioned last.
+    expect(planDeviceHostRead(['a1b2c3d4', '-D', 'box'])).toEqual({
+      device: 'box',
+      readArgs: ['a1b2c3d4'],
+    });
+    // --device=value and -Dvalue glued forms.
+    expect(planDeviceHostRead(['auth', '--device=box', '--json'])).toEqual({
+      device: 'box',
+      readArgs: ['auth', '--json'],
+    });
+    expect(planDeviceHostRead(['auth', '-Dbox'])).toEqual({
+      device: 'box',
+      readArgs: ['auth'],
+    });
+  });
+
+  it('routes the 0.2.0 filter flags alongside --device only when filters are supported', () => {
+    // filters:false (old/absent binary) — a device query using a 0.2.0 filter is
+    // NOT a standalone read; it stays on the in-repo engine.
+    expect(planDeviceHostRead(['--since', '7d', '--device', 'box'])).toBeNull();
+    // filters:true — the stripped read is recognized, so it plans the rewrite.
+    expect(planDeviceHostRead(['--since', '7d', '--device', 'box'], { filters: true })).toEqual({
+      device: 'box',
+      readArgs: ['--since', '7d'],
+    });
+  });
+
+  it('returns null when there is no --device to rewrite', () => {
+    expect(planDeviceHostRead(['auth', '--json'])).toBeNull();
+    expect(planDeviceHostRead([])).toBeNull();
+  });
+
+  it('returns null when an explicit --host is already present (--host wins)', () => {
+    expect(planDeviceHostRead(['auth', '--device', 'box', '--host', 'other'])).toBeNull();
+    expect(planDeviceHostRead(['auth', '--device', 'box', '--host=other'])).toBeNull();
+  });
+
+  it('never rewrites a lifecycle --device (resume/watch/etc.)', () => {
+    expect(planDeviceHostRead(['resume', 'a1b2c3d4', '--device', 'box'])).toBeNull();
+    expect(planDeviceHostRead(['watch', '--device', 'box', '--json'])).toBeNull();
+    expect(planDeviceHostRead(['stats', '--device', 'box'])).toBeNull();
   });
 });
 

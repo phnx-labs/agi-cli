@@ -40,6 +40,46 @@ function stubSessionsVersioned(version: string): string {
   return bin;
 }
 
+/** A stub `sessions` reporting `version` for `--version` but exiting 127 (with a
+ *  unique marker on stderr) for any real invocation — the exact signal the
+ *  standalone's `--host` transport returns when the PEER has no `sessions` on
+ *  PATH (`bash -lc` command-not-found). */
+function stubSessionsHost127(version: string): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sessions-fastpath-'));
+  temps.push(dir);
+  const bin = path.join(dir, 'sessions');
+  fs.writeFileSync(
+    bin,
+    `#!/bin/sh\nif [ "$1" = "--version" ]; then echo "${version}"; exit 0; fi\nprintf '%s\\n' "$@" > "${dir}/argv"\necho "bash: sessions: STUB_HOST_127_NOTFOUND" >&2\nexit 127\n`,
+    { mode: 0o755 },
+  );
+  return bin;
+}
+
+/** Register a single device in an isolated registry dir so the fast-path's
+ *  `resolveRemoteDevice(<name>)` resolves to `user@dnsName`. Returns the dir to
+ *  pass as `AGENTS_DEVICES_DIR` (the state.ts test escape hatch). `.invalid`
+ *  never resolves in DNS, so the in-repo fan-out's fall-through SSH fails fast. */
+function writeDeviceRegistry(home: string, name: string, user: string, dnsName: string): string {
+  const dir = path.join(home, 'devices-reg');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, 'registry.json'),
+    JSON.stringify({
+      [name]: {
+        name,
+        platform: 'linux',
+        shell: 'posix',
+        user,
+        address: { via: 'manual', dnsName },
+        auth: { method: 'key' },
+      },
+    }),
+    'utf-8',
+  );
+  return dir;
+}
+
 describe('index.ts sessions read fast-path (PHNX-4012)', () => {
   it('execs SESSIONS_BIN for a search without loading the sessions command module', () => {
     const bin = stubSessions();
@@ -89,6 +129,78 @@ describe('index.ts sessions read fast-path (PHNX-4012)', () => {
     expect(r.stdout).toContain('STUB_SESSIONS_OK');
     const argv = fs.readFileSync(path.join(path.dirname(bin), 'argv'), 'utf-8').trim().split('\n');
     expect(argv).toEqual(['auth', '--host', 'box', '--json']);
+  });
+
+  it('routes a read --device query through the standalone --host (>=0.3.0), --device stripped', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-device-host-'));
+    temps.push(home);
+    writeUpdateCache(home);
+    const devicesDir = writeDeviceRegistry(home, 'box', 'me', 'box.invalid');
+    const bin = stubSessionsVersioned('0.3.0');
+    const r = runAgents(['sessions', 'auth', '--device', 'box', '--json'], REPO_ROOT, home, {
+      SESSIONS_BIN: bin,
+      AGENTS_DEVICES_DIR: devicesDir,
+      AGENTS_NO_AUTOPULL: '1',
+    });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toContain('STUB_SESSIONS_OK');
+    const argv = fs.readFileSync(path.join(path.dirname(bin), 'argv'), 'utf-8').trim().split('\n');
+    expect(argv).toEqual(['auth', '--json', '--host', 'ssh://me@box.invalid']);
+  });
+
+  it('falls through to the in-repo --device path when the peer lacks the standalone (exit 127)', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-device-host-127-'));
+    temps.push(home);
+    writeUpdateCache(home);
+    const devicesDir = writeDeviceRegistry(home, 'box', 'me', 'box.invalid');
+    const bin = stubSessionsHost127('0.3.0');
+    const r = runAgents(['sessions', 'auth', '--device', 'box', '--json'], REPO_ROOT, home, {
+      SESSIONS_BIN: bin,
+      AGENTS_DEVICES_DIR: devicesDir,
+      AGENTS_NO_AUTOPULL: '1',
+    });
+    // The read still succeeds: the in-repo fan-out answers with a valid JSON
+    // array (a dead peer contributes []), exit 0. Crucially the standalone's
+    // command-not-found is NOT surfaced — it was captured and discarded on 127.
+    expect(r.status, r.stderr).toBe(0);
+    expect(() => JSON.parse(r.stdout)).not.toThrow();
+    expect(r.stdout).not.toContain('STUB_HOST_127_NOTFOUND');
+    expect(r.stderr).not.toContain('STUB_HOST_127_NOTFOUND');
+  });
+
+  it('leaves a read --device query on the in-repo path when the standalone is below the --host floor (0.2.0)', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-device-host-floor-'));
+    temps.push(home);
+    writeUpdateCache(home);
+    const devicesDir = writeDeviceRegistry(home, 'box', 'me', 'box.invalid');
+    const bin = stubSessionsVersioned('0.2.0');
+    const r = runAgents(['sessions', 'auth', '--device', 'box', '--json'], REPO_ROOT, home, {
+      SESSIONS_BIN: bin,
+      AGENTS_DEVICES_DIR: devicesDir,
+      AGENTS_NO_AUTOPULL: '1',
+    });
+    expect(r.status, r.stderr).toBe(0);
+    expect(() => JSON.parse(r.stdout)).not.toThrow();
+    // A 0.2.0 standalone must never receive a `--host` read — only its --version
+    // was probed, so the argv-recording branch never ran.
+    expect(fs.existsSync(path.join(path.dirname(bin), 'argv'))).toBe(false);
+  });
+
+  it('never rewrites a lifecycle --device (resume) to --host, even at >=0.3.0', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-device-host-life-'));
+    temps.push(home);
+    writeUpdateCache(home);
+    const devicesDir = writeDeviceRegistry(home, 'box', 'me', 'box.invalid');
+    const bin = stubSessionsVersioned('0.3.0');
+    const r = runAgents(['sessions', 'resume', '--help', '--device', 'box'], REPO_ROOT, home, {
+      SESSIONS_BIN: bin,
+      AGENTS_DEVICES_DIR: devicesDir,
+      AGENTS_NO_AUTOPULL: '1',
+    });
+    // The standalone is never invoked for a lifecycle verb — not even --version,
+    // since the device-read plan bails before the version probe.
+    expect(r.stdout).not.toContain('STUB_SESSIONS_OK');
+    expect(fs.existsSync(path.join(path.dirname(bin), 'argv'))).toBe(false);
   });
 
   it('does not intercept resume — that stays on the in-repo engine', () => {
