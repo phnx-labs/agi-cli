@@ -48,6 +48,8 @@ interface RunPlacementFlags {
   cloud?: boolean;
   /** --provider: refines the cloud placement; not a placement on its own. */
   provider?: string;
+  /** --local: this machine, said explicitly — the pin a bare interactive run needs to stay off `--device auto`. */
+  local?: boolean;
 }
 
 export class PlacementError extends Error {
@@ -137,9 +139,11 @@ export function placementFromRunFlags(flags: RunPlacementFlags): Placement {
   const hasLease = flags.lease !== undefined && flags.lease !== false;
   const hasBox = !!flags.box;
   const hasCloud = flags.cloud === true;
+  const hasLocal = flags.local === true;
 
   const placementFlags: string[] = [];
   if (where) placementFlags.push('--where');
+  if (hasLocal) placementFlags.push('--local');
   if (hostT) placementFlags.push('--device');
   if (hasLease) placementFlags.push('--lease');
   if (hasBox) placementFlags.push('--box');
@@ -153,6 +157,7 @@ export function placementFromRunFlags(flags: RunPlacementFlags): Placement {
   }
 
   if (where) return parseWhereSpec(where, '--where');
+  if (hasLocal) return { kind: 'local', source: '--local' };
   if (hasCloud) return { kind: 'cloud', target: flags.provider, source: '--cloud' };
   if (hasBox) return { kind: 'lease', target: flags.box, source: '--box' };
   if (hasLease) {

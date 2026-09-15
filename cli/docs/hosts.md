@@ -48,17 +48,18 @@ checks, the same `[agents] device=auto → <box>` banner, with the TUI forwarded
 over SSH. A marker you leave off is decided for you: no `#` means balanced
 rotation, no `@` means automatic device placement. Headless runs are
 unchanged — any prompt (`agents run claude "fix it"`), `--json`, no TTY,
-teams/routines/hooks — those keep running in place. Two spellings stay local:
+teams/routines/hooks — those keep running in place. Three spellings stay local:
 
 ```
-agents run claude --device $(hostname -s)   # pin this machine explicitly
+agents run claude --local                   # pin this machine explicitly
+agents run claude --device $(hostname -s)   # …the same pin, by name (never a self-SSH)
 agents run claude@                          # …or pick "this machine" (listed first) in the @ menu
 ```
 
 Placement failure never silently becomes a local launch: with no healthy
 device (an empty pool, or every candidate refused — e.g. the PHNX-4051
 stale-usage gate) the run exits nonzero with the placement error plus one
-line naming the local spelling: `Run here instead: agents run claude --device <this machine>`.
+line naming the local spelling: `Run here instead: agents run claude --local`.
 
 ### Which devices `auto` may pick — device roles
 
@@ -184,9 +185,9 @@ agents run claude# --device yosemite-s0  # choose from yosemite-s0 only
 A trailing `@` opens the device picker instead: every registered fleet device,
 rendered from the last cached fleet state (this machine first, offline rows
 disabled, state age in the prompt). The pick becomes the run's `--device`;
-choosing this machine is a plain local run — one of the two spellings that
-keep a bare interactive run off the automatic-placement path (the other is
-`--device <this machine>`). `#@` (or `@#`) asks both, in
+choosing this machine is a plain local run — one of the spellings that keep
+a bare interactive run off the automatic-placement path (the others are
+`--local` and `--device <this machine>`). `#@` (or `@#`) asks both, in
 order — the account picker runs first against this machine's slots, then the
 device picker shows a ✓/– mark for the picked account on each device, and the
 run dispatches to the chosen device with `claude#<label>` so the peer

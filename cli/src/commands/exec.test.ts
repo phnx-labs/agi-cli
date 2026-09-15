@@ -15,6 +15,7 @@ import {
   resolveRunCwd,
   gitToplevel,
   hostTargetGiven,
+  pinLocalWhenTargetIsSelf,
   isAlwaysFreshRepo,
   isInsideGitWorkTree,
   parseRunPickerMarkers,
@@ -271,7 +272,33 @@ describe('run picker markers (# account, @ device)', () => {
     expect(runDevicePickerConflicts({ on: 'worker-1', computer: 'worker-2' }))
       .toEqual(['--device worker-1', '--device worker-2']);
     expect(runDevicePickerConflicts({ lease: true, box: 'warm-one' })).toEqual(['--lease', '--box']);
+    expect(runDevicePickerConflicts({ local: true })).toEqual(['--local']);
     expect(runDevicePickerConflicts({})).toEqual([]);
+  });
+});
+
+describe('pinLocalWhenTargetIsSelf — a --device naming this machine is a local run, not a self-SSH', () => {
+  const isSelf = (name: string) => ['testbox', 'testbox.tail1a85a1.ts.net', 'localhost'].includes(name.toLowerCase());
+
+  it.each([
+    ['--device <short id>', { device: 'testbox' }],
+    ['--host <MagicDNS name>', { host: 'TESTBOX.tail1a85a1.ts.net' }],
+    ['--on localhost', { on: 'localhost' }],
+    ['--computer <short id>', { computer: 'testbox' }],
+  ])('%s clears the host flags and pins local', (_label, options) => {
+    const o: { host?: string; device?: string; on?: string; computer?: string; local?: boolean } = { ...options };
+    expect(pinLocalWhenTargetIsSelf(o, isSelf)).toBe(true);
+    expect(hostTargetGiven(o)).toEqual([]);
+    expect(o.local).toBe(true);
+  });
+
+  it('a peer, auto, or an empty host set is left for the dispatch path', () => {
+    for (const options of [{ device: 'yosemite-s0' }, { device: 'auto' }, {}]) {
+      const o: { device?: string; local?: boolean } = { ...options };
+      expect(pinLocalWhenTargetIsSelf(o, isSelf)).toBe(false);
+      expect(o.device).toBe(options.device);
+      expect(o.local).toBeUndefined();
+    }
   });
 });
 
@@ -466,6 +493,10 @@ describe('bare interactive run defaults to --device auto (PHNX-4083)', () => {
 
   it('the @ device-picker marker is an explicit device choice — never overridden', () => {
     expect(bareInteractiveRunDefaultsToDeviceAuto(bare, { ...human, devicePickerRequested: true }, tty)).toBe(false);
+  });
+
+  it('--local (and --where local, --device <this machine>, which pin the same field) is an explicit local choice', () => {
+    expect(bareInteractiveRunDefaultsToDeviceAuto({ ...bare, local: true }, human, tty)).toBe(false);
   });
 
   it.each([

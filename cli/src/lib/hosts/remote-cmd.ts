@@ -132,6 +132,7 @@ export const RUN_OPTION_FORWARDING: Record<string, RunOptionForwarding> = {
   disableTmux: 'local-only',
   device: 'local-only',
   where: 'local-only', // expands into host/lease before dispatch; never re-forwarded
+  local: 'local-only', // this machine by definition — a local run never reaches the SSH boundary
   on: 'local-only',
   computer: 'local-only',
   any: 'local-only',

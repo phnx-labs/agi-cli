@@ -96,6 +96,7 @@ interface ExecCommandActionOptions {
   // `--where` is the unified placement alias (lib/placement.ts) — expands into
   // device/lease before dispatch; do not combine with those flags.
   where?: string;
+  local?: boolean;
   host?: string;
   device?: string;
   on?: string;
@@ -210,6 +211,27 @@ export function hostTargetGiven(options: {
 }
 
 /**
+ * Turn a host target that names THIS machine into an explicit local pin: the
+ * host-family flags are cleared and `local` is set, so no dispatch path
+ * self-SSHes and the bare-interactive default (`bareInteractiveRunDefaultsToDeviceAuto`)
+ * sees a decided placement. Returns true when the pin was applied. Pure over
+ * the `isSelf` predicate so the rule is testable without a device registry.
+ */
+export function pinLocalWhenTargetIsSelf(
+  options: { host?: string; device?: string; on?: string; computer?: string; local?: boolean },
+  isSelf: (name: string) => boolean,
+): boolean {
+  const targets = hostTargetGiven(options);
+  if (targets.length === 0 || !targets.every(isSelf)) return false;
+  options.host = undefined;
+  options.device = undefined;
+  options.on = undefined;
+  options.computer = undefined;
+  options.local = true;
+  return true;
+}
+
+/**
  * Return every option whose selection semantics conflict with an account
  * choice (`agent#`). Device routing is deliberately absent: the marker rides
  * the hop and the peer picks from ITS slots.
@@ -248,8 +270,10 @@ export function runDevicePickerConflicts(options: {
   device?: string;
   on?: string;
   computer?: string;
+  local?: boolean;
 }): string[] {
   const conflicts = hostTargetGiven(options).map((h) => `--device ${h}`);
+  if (options.local) conflicts.push('--local');
   if (options.lease) conflicts.push('--lease');
   if (options.box) conflicts.push('--box');
   return conflicts;
@@ -317,12 +341,14 @@ export function bareInteractiveRunDefaultsToDeviceAuto(
     lease?: string | boolean;
     box?: string;
     cloud?: boolean;
+    local?: boolean;
   },
   run: { prompt?: string; devicePickerRequested?: boolean },
   surface: { tty: boolean; json?: boolean },
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   if (run.prompt !== undefined) return false;
+  if (options.local) return false;
   if (!isHumanFacingRun({ tty: surface.tty, json: surface.json === true })) return false;
   if (run.devicePickerRequested) return false;
   if (options.resume !== undefined || options.lease || options.box || options.cloud) return false;
@@ -900,8 +926,12 @@ export function registerRunCommand(program: Command): void {
       'Where this run\'s body executes (one placement door): local | device:<name> | auto | lease[:backend] | cloud[:provider]. Expands to --device/--lease/--cloud. Do not combine with those flags. See docs/00-concepts.md#placement.',
     )
     .option(
+      '--local',
+      'Run on this machine. A bare interactive run otherwise places itself like --device auto; --local pins it here. Same as --where local or --device <this machine>.',
+    )
+    .option(
       '-D, --device <name>',
-      'Offload this run onto another machine over SSH — a registered device, or user@host. Pass "auto" to pick the least-loaded reachable device where the requested agent is installed and signed in, keeping the run local when no remote is better, or "interactive" for the machine pinned as interactive.host (the box a human is sitting at). Same as --where device:<name>. See `agents devices`.',
+      'Offload this run onto another machine over SSH — a registered device, or user@host. Pass "auto" to pick the least-loaded reachable device where the requested agent is installed and signed in, keeping the run local when no remote is better, or "interactive" for the machine pinned as interactive.host (the box a human is sitting at). Naming this machine runs locally, no SSH. Same as --where device:<name>. See `agents devices`.',
     )
     .option('--remote-cwd <dir>', "Explicit device working directory for --device runs, used VERBATIM (overrides --cwd; usually --cwd suffices — it re-roots a local-home path onto the remote home). Pass a single-quoted '$HOME/…' or a valid remote absolute path; a local ~ expands here and won't exist there (/Users/you vs /home/you).")
     .option('--no-follow', 'With --device, dispatch detached and return immediately (track via `agents hosts ps/logs`).')
@@ -970,9 +1000,9 @@ export function registerRunCommand(program: Command): void {
       agents run claude "fix lint errors in src/" --mode edit
 
       # Interactive (TUI): a bare run places itself like --device auto (a fleet
-      # worker, TUI forwarded over SSH); pin the device to stay on this machine
+      # worker, TUI forwarded over SSH); --local keeps it on this machine
       agents run claude
-      agents run claude --device zion      # stay local (or pick this machine in claude@)
+      agents run claude --local            # stay local (or pick this machine in claude@)
 
       # Pick a signed-in account/version for only this run (# = account picker)
       agents run claude#
@@ -1080,10 +1110,10 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
       Interactive placement: a bare 'agents run <harness>' (no prompt, real TTY)
         places itself like --device auto — a fleet worker runs it, with the TUI
         forwarded over SSH. Headless runs (any prompt, --json, no TTY) are
-        unchanged: they run in place. To stay on this machine, pass
-        --device <this machine>, or pick this machine (listed first) in the
-        '<harness>@' device picker. When placement finds no healthy device the
-        run fails loud and names the local spellings.
+        unchanged: they run in place. To stay on this machine, pass --local
+        (--device <this machine> means the same), or pick this machine (listed
+        first) in the '<harness>@' device picker. When placement finds no
+        healthy device the run fails loud and names the local spelling.
 
       Fallback: --fallback codex,antigravity retries on rate-limit failure via /continue handoff. Each entry accepts @version.
 
@@ -1192,6 +1222,10 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           await import('../lib/placement.js');
         try {
           const placement = placementFromRunFlags(options);
+          // An explicit local placement (--local, --where local) must outlive
+          // this block: expansion yields no host flag, and the bare-interactive
+          // default below reads an empty host set as "decide for me".
+          if (placement.kind === 'local' && placement.source !== 'default') options.local = true;
           if (options.where) {
             const expanded = expandPlacementToRunFlags(placement);
             if (expanded.host !== undefined) options.host = expanded.host;
@@ -1211,6 +1245,18 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           }
           throw err;
         }
+      }
+
+      // --device naming this machine (short id, MagicDNS name, loopback, or the
+      // `interactive` sentinel pinned here) is a local run, not a self-SSH: the
+      // hop probes its own login shell and times out under load. Pinned here,
+      // ahead of every placement gate, so the bare-interactive default sees an
+      // explicit local choice rather than an empty host set.
+      {
+        const { isSelfHost } = await import('../lib/devices/self-host.js');
+        const { isDeviceInteractive, resolveInteractiveDevice } = await import('../lib/devices/interactive-host.js');
+        pinLocalWhenTargetIsSelf(options, (name) =>
+          isSelfHost(isDeviceInteractive(name) ? resolveInteractiveDevice() ?? name : name));
       }
 
       // Cloud refinement flags without the placement are a typo, not a no-op.
@@ -1420,14 +1466,14 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         } = await import('../lib/session/recovery.js');
         const sourceMachine = resolvedResumeSource.machine;
         const sourcePeer = sessionRecoveryPeer(resolvedResumeSource);
-        const explicitPlacement = hostTargetGiven(options).length > 0;
+        const explicitPlacement = hostTargetGiven(options).length > 0 || options.local === true;
         if (sourcePeer && !explicitPlacement) {
           options.host = sourcePeer;
         } else if (sourcePeer && explicitPlacement && !hostTargetGiven(options).some((host) =>
           sessionRecoveryDestinationMatches(resolvedResumeSource!, host))) {
           console.error(chalk.red(
             `Session ${resolvedResumeSource.shortId} must recover on ${sourcePeer}, where its conversation state is stored; ` +
-            `the requested device was ${hostTargetGiven(options).join(', ')}.`,
+            `the requested device was ${hostTargetGiven(options).join(', ') || 'this machine'}.`,
           ));
           process.exit(1);
         }
@@ -1582,9 +1628,8 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           // escape hatch — never silently fall back to a local launch.
           if (!defaultPlacement) throw err;
           console.error(chalk.red((err as Error).message));
-          const { machineId } = await import('../lib/machine-id.js');
           console.error(chalk.gray(
-            `Run here instead: agents run ${runBaseAgentName} --device ${machineId()}`,
+            `Run here instead: agents run ${runBaseAgentName} --local`,
           ));
           process.exit(1);
         }

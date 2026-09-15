@@ -57,6 +57,7 @@ describe('parseWhereSpec', () => {
 describe('placementFromRunFlags', () => {
   it('defaults to local', () => {
     expect(placementFromRunFlags({})).toEqual({ kind: 'local', source: 'default' });
+    expect(placementFromRunFlags({ local: true })).toEqual({ kind: 'local', source: '--local' });
   });
 
   it('maps host family and lease', () => {
@@ -107,6 +108,9 @@ describe('placementFromRunFlags', () => {
       source: '--where',
     });
     expect(() => placementFromRunFlags({ where: 'local', host: 'zion' })).toThrow(/Conflicting placement/);
+    expect(() => placementFromRunFlags({ local: true, host: 'zion' })).toThrow(/Conflicting placement/);
+    expect(() => placementFromRunFlags({ local: true, where: 'auto' })).toThrow(/Conflicting placement/);
+    expect(() => placementFromRunFlags({ local: true, cloud: true })).toThrow(/Conflicting placement/);
     expect(() => placementFromRunFlags({ where: 'lease', lease: true })).toThrow(/Conflicting placement/);
     expect(() => placementFromRunFlags({ host: 'a', lease: true })).toThrow(/Conflicting placement/);
     // Placements are mutually exclusive by definition: --cloud with any
