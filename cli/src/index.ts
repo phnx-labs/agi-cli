@@ -158,6 +158,7 @@ if (process.argv[2] === 'sessions') {
     usesHostFlag,
     sessionsBinSupportsFilters,
     sessionsBinSupportsHost,
+    planDeviceHostRead,
     resolveSessionsBin,
     invocation,
     SessionsClientError,
@@ -183,6 +184,72 @@ if (process.argv[2] === 'sessions') {
   }
   const filters = bin !== null && usesFilterFlags(forwarded) ? sessionsBinSupportsFilters(bin) : false;
   const host = bin !== null && usesHostFlag(forwarded) ? sessionsBinSupportsHost(bin) : false;
+
+  // PHNX-4012 local-orchestration collapse: a read query carrying `--device
+  // <name>` (and no explicit `--host`) routes through the standalone's
+  // point-to-one remote read — `sessions <read args> --host ssh://<resolved>` —
+  // instead of the in-repo `--device` peer fan-out, WHEN this box's standalone
+  // supports `--host` (>=0.3.0). `planDeviceHostRead` is pure and probes nothing,
+  // so a non-device read never pays a `sessions --version` spawn (the probe fires
+  // only after a device read is detected). If the PEER lacks the standalone the
+  // ssh `bash -lc` command-not-found surfaces as exit 127 — a CAPABILITY gate
+  // (same spirit as #3687's version gate, keyed on a specific documented signal),
+  // on which we FALL THROUGH to the in-repo `--device` fan-out below so the read
+  // still succeeds. Everything else (e.g. 255 unreachable) propagates verbatim.
+  // The in-repo fan-out is deliberately KEPT here as the path for un-upgraded
+  // peers; its eventual removal is a follow-up gated on fleet-wide 0.3.0 (a
+  // separate PHNX-4012 follow-up, see the PR body), not this PR.
+  if (bin !== null) {
+    const deviceRead = planDeviceHostRead(forwarded, { filters });
+    if (deviceRead && sessionsBinSupportsHost(bin)) {
+      let target: string | null = null;
+      try {
+        const { resolveRemoteDevice } = await import('./lib/ssh-tunnel.js');
+        target = (await resolveRemoteDevice(deviceRead.device, {})).target;
+      } catch {
+        // Unknown/unresolvable device — fall through to the in-repo path, which
+        // resolves `--device` against the same fleet registry and emits the
+        // canonical error; do not duplicate that error here.
+        target = null;
+      }
+      if (target !== null) {
+        const { spawnSync } = await import('node:child_process');
+        const { command, prefix } = invocation(bin);
+        const hostArgs = [...deviceRead.readArgs, '--host', `ssh://${target}`];
+        // Capture (not `stdio: 'inherit'`) so a 127 capability miss can fall
+        // through silently instead of leaking the peer's command-not-found before
+        // the in-repo read re-answers. Reads are bounded, so buffering is fine;
+        // force color + geometry through the capture when the caller is at a real
+        // terminal and not asking for `--json`, matching the passthrough renderer.
+        const childEnv: NodeJS.ProcessEnv = { ...process.env };
+        if (process.stdout.isTTY && !hostArgs.includes('--json')) {
+          if (childEnv.FORCE_COLOR === undefined) childEnv.FORCE_COLOR = '1';
+          if (process.stdout.columns) childEnv.COLUMNS = String(process.stdout.columns);
+          if (process.stdout.rows) childEnv.LINES = String(process.stdout.rows);
+        }
+        const res = spawnSync(command, [...prefix, ...hostArgs], {
+          encoding: 'utf8',
+          env: childEnv,
+          maxBuffer: 256 * 1024 * 1024,
+        });
+        if (res.error) {
+          process.stderr.write(`Failed to run \`sessions\`: ${res.error.message}\n`);
+          process.exit(1);
+        }
+        // Exit 127 = the peer has no standalone `sessions` on PATH (ssh/`bash
+        // -lc` command-not-found). Fall through to the in-repo fan-out rather
+        // than surfacing a broken read.
+        if (res.status !== 127) {
+          if (res.stdout) process.stdout.write(res.stdout);
+          if (res.stderr) process.stderr.write(res.stderr);
+          process.exit(res.status ?? 1);
+        }
+        // 127: fall through. `forwarded` still carries `--device`, so the
+        // `isReadQuery` check below is false and bootstrap's in-repo path answers.
+      }
+    }
+  }
+
   if (isReadQuery(forwarded, { filters, host })) {
     if (bin) {
       const { spawnSync } = await import('node:child_process');
