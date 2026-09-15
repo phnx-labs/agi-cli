@@ -47,6 +47,23 @@ groups:
     budget_sec: 420
     budget_min_selected_cli_tests: 250
 
+  # The core agent registry — AGENT_IDS in lib/types.ts and the AGENTS spec in
+  # agent-spec/agents.ts — fans out via `related` (areas: cli/src/) to every
+  # static importer across the CLI, because nearly every module resolves an
+  # AgentId. Removing the retired Gemini agent (run 34930857687) measured 337s of
+  # impact with zero test failures — over any leaf group's ceiling, and it landed
+  # on the sessions group's 240s only incidentally. Grant an explicit 420s
+  # allowance, matching the shared-config-state foundational budget; cli-full's
+  # 1200s would over-allow. No budget_min: an AGENT_IDS/AGENTS edit is inherently
+  # cross-cutting, never a narrow change. Lower against a measured run once the
+  # registry's importer set is trimmed.
+  - id: agent-registry
+    when:
+      - cli/src/lib/types.ts
+      - cli/src/lib/agent-spec/agents.ts
+    checks: [typecheck]
+    budget_sec: 420
+
   # 120s, not the default 85s. The grouped --help text lives in bootstrap.ts;
   # any one-line surface edit selects non-interactive.test.ts (54s of vitest)
   # plus command-surface tests pulled in by the same PR. PR #2826 run
