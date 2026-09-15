@@ -420,6 +420,10 @@ describe('agents run auto — the reserved harness keyword (RUSH-2132)', () => {
     expect(runAutoDefaultsToAffinity({ computer: 'yosemite-s0' })).toBe(false);
   });
 
+  it('runAutoDefaultsToAffinity: an explicit local pin is a decided host layer — run auto never overrides it with auto', () => {
+    expect(runAutoDefaultsToAffinity({ local: true })).toBe(false);
+  });
+
   it('runAutoDefaultsToAffinity: a host-dispatched run never re-runs affinity (no chain-hopping)', () => {
     expect(runAutoDefaultsToAffinity({}, { AGENTS_RUN_AUTO_HOST_RESOLVED: '1' })).toBe(false);
   });
@@ -497,6 +501,11 @@ describe('bare interactive run defaults to --device auto (PHNX-4083)', () => {
 
   it('--local (and --where local, --device <this machine>, which pin the same field) is an explicit local choice', () => {
     expect(bareInteractiveRunDefaultsToDeviceAuto({ ...bare, local: true }, human, tty)).toBe(false);
+    // The same pin, seen through pinLocalWhenTargetIsSelf, holds for both defaults.
+    const pinned: { device?: string; local?: boolean } = { device: 'testbox' };
+    pinLocalWhenTargetIsSelf(pinned, (n) => n === 'testbox');
+    expect(runAutoDefaultsToAffinity(pinned)).toBe(false);
+    expect(bareInteractiveRunDefaultsToDeviceAuto({ ...bare, ...pinned }, human, tty)).toBe(false);
   });
 
   it.each([
