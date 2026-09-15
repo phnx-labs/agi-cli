@@ -1,6 +1,0 @@
-To sign in, open this URL in your browser:
-  https://accounts.x.ai/oauth2/device?user_code=CSXW-TMHH
-Confirm this code in your browser:
-  CSXW-TMHH
-Only continue with a code you requested. Don't share it with anyone.
-Waiting for authorization...

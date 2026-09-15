@@ -2042,8 +2042,8 @@ Credential account selection adds three requirements to that funnel:
   only the machine-readable result on stdout — no progress / Authorize lines,
   never the token (`commands/auth-mint.ts`, `lib/auth-mint.ts` `mintAndSeed` /
   `driveSetupTokenMint`). Interactive mint is Claude-only; any other harness
-  MUST fail loud with the command that actually provisions it
-  (`agents fleet login` or `agents accounts add`).
+  MUST fail loud with the path that actually provisions it (a token-less
+  harness's per-box native login, or `agents accounts add`).
 - **EXEC-ACCOUNT-3 (MUST).** `agents run --account <name>`, profile `account:`,
   and a routine `account:` that names a provider bundle MUST use the same provider
   adapter and fail before spawn when the provider cannot authenticate the host or

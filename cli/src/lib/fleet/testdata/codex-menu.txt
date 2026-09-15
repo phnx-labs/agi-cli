@@ -1,8 +1,0 @@
-  Sign in to Codex
-
-> 1. Sign in with ChatGPT
-  2. Sign in with Device Code
-     Sign in from another device with a one-time code
-  3. Provide your own API key
-
-  Use arrow keys to navigate, Enter to select.

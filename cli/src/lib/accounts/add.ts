@@ -93,10 +93,10 @@ export function workerProvisioningHint(agent: AgentId): string {
       const env = kind.slice('api-key:'.length);
       parts.push(env === 'provider' ? 'a provider API key collected by add (--api-key)' : `the ${env} collected by add (--api-key)`);
     } else if (kind.startsWith('per-device')) {
-      parts.push(`per-device login on each worker (--per-device / agents fleet login ${agent})`);
+      parts.push(`per-device login on each worker (--per-device; run \`agents run ${agent} --device <box>\` there and complete its native login)`);
     }
   }
-  if (parts.length === 0) return `${agent} has no portable credential — it logs in per box (agents fleet login ${agent})`;
+  if (parts.length === 0) return `${agent} has no portable credential — it logs in per box (run \`agents run ${agent} --device <box>\` on the worker and complete its native login)`;
   return parts.join(', or ');
 }
 

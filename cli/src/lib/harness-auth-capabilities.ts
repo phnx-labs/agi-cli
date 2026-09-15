@@ -47,8 +47,8 @@ export const HARNESS_AUTH: Record<AgentId, HarnessAuthCapability> = {
   // `--device-auth` pins the device-code flow: bare `grok login` defaults to
   // `--oauth`, the loopback browser flow, which opens whatever browser profile
   // the OS defaults to. The device-code screen prints the URL + code instead,
-  // so the human finishes it in the browser profile they choose and
-  // `fleet login` can drive it over SSH.
+  // so the human finishes it in the browser profile they choose — which is
+  // what makes it usable over an SSH shell on a worker.
   grok: { login: ['login', '--device-auth'], status: null, identity: 'strong', worker: 'api-key:XAI_API_KEY', slotEnv: 'GROK_HOME' },
   // auth.json has no email claim; identity is the sorted provider-id join
   // (`resolveOpenCodeAccountId`). NATIVE_ACCOUNT_CAPABILITIES.opencode.inspection
@@ -56,7 +56,7 @@ export const HARNESS_AUTH: Record<AgentId, HarnessAuthCapability> = {
   opencode: { login: ['auth', 'login'], status: ['auth', 'list'], identity: 'opaque', worker: 'api-key:provider', slotEnv: 'XDG_DATA_HOME' },
   cursor: { login: ['login'], status: ['status'], identity: 'strong', worker: 'api-key:CURSOR_API_KEY', slotEnv: null },
   // No finite login argv — launch bare `kimi`, then `/login` in the TUI
-  // (`loginHint('kimi') === 'kimi'`, fleet/auth-sync `loginCommand: 'kimi'`).
+  // (`loginHint('kimi') === 'kimi'`).
   kimi: { login: null, status: null, identity: 'opaque', worker: 'none', slotEnv: 'KIMI_CODE_HOME' },
   antigravity: { login: null, status: null, identity: 'opaque', worker: 'none', slotEnv: null },
   droid: { login: null, status: null, identity: 'opaque', worker: 'api-key:FACTORY_API_KEY', slotEnv: null },

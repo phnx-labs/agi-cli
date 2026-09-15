@@ -41,7 +41,7 @@ import {
 import { findAccount } from './account-registry.js';
 import { _resetSecretsClientForTest, bundleBackendSync, bundleExistsSync, readAndResolveBundleEnvSync, secretsKeychainItem, storeSetSync } from './secrets-client.js';
 import { standaloneKeychainIsFileBacked, useFreshSecretsHome } from '../../tests/secrets-standalone.js';
-import type { TermDriver } from './fleet/remote-login.js';
+import type { TermDriver } from './term-driver.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixture = (name: string): string => fs.readFileSync(path.join(here, 'testdata', name), 'utf-8');

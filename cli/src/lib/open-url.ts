@@ -9,10 +9,10 @@
  * The OS handler has none of that.
  *
  * Before this seam existed, `agents browser navigate` honoured the configured
- * profile and nothing else did: `fleet login`, `devices lease`, `feedback`, and
+ * profile and nothing else did: `devices lease`, `feedback`, and
  * the browser-session artifact opener each shelled straight to `open`/`xdg-open`,
  * so every one of them landed in whatever the OS handler happened to be. This
- * module replaces all of those call sites; do not add a sixth raw `open`.
+ * module replaces all of those call sites; do not add a new raw `open`.
  *
  * Never throws. A viewer that cannot be reached degrades to the OS handler with
  * one stderr line naming the reason, and a total failure returns `via: 'none'`

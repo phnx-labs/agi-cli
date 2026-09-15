@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_65 command groups · 486 commands._
+_65 command groups · 485 commands._
 
 ## accounts — Browse and manage harness accounts
 
@@ -231,7 +231,6 @@ agents devices lease prune                     Stop expired, idle lease boxes th
 agents devices lease setup                     One-time credential setup so `agents run --lease` works with no env var or flag.
 agents devices lease stop <slug>               Stop (release) a leased crabbox box now.
 agents devices list                            List registered devices with platform, spec (cores/RAM/disk), live load/mem/disk headroom, role, and description.
-agents devices login                           Log agent CLIs into fleet boxes over SSH: drive each box's device-code OAuth, scrape the URL + code, and surface every pending login in one local browser page. Default drives all codes at once; --interactive walks one box at a time (codes requested just-in-time so they don't expire).
 agents devices pick                            Print the device automatic placement would choose for offloaded machine work (the suite, a build) — least-loaded, reachable, POSIX, never the box you are sitting at. Writes just the name to stdout so scripts can consume it.
 agents devices ping                            Live auth health: complete a real request for every agent account across the fleet (unlike the cached "signed in" flag). Writes the shared auth-health cache read by `agents view` and `fleet status`.
 agents devices ps                              List agent tasks dispatched to devices with `agents run --device <name> --no-follow`. Reconciles each still-`running` record against the remote before listing. View a log with `agents logs <id>`.

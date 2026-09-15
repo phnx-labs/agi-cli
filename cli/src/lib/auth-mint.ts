@@ -1,8 +1,8 @@
 /**
  * First-class setup-token mint + seed (PHNX-2364).
  *
- * Closes the mint-auth manual recipe: drive `claude setup-token` through the
- * same injectable term driver `agents fleet login` uses, capture a well-formed
+ * Closes the mint-auth manual recipe: drive `claude setup-token` through an
+ * injectable term driver (`lib/term-driver.ts`), capture a well-formed
  * `sk-ant-oat01-…` token (the #1767 ANSI-banner guard), and seed BOTH:
  *
  *   1. a named provider account (`agents accounts add` shape, policy never)
@@ -48,7 +48,7 @@ import {
   defaultTermDriver,
   type DriveOptions,
   type TermDriver,
-} from './fleet/remote-login.js';
+} from './term-driver.js';
 import { showUrl } from './open-url.js';
 import { loadDevices } from './devices/registry.js';
 import { isSelfHost } from './devices/self-host.js';
@@ -80,7 +80,8 @@ export interface MintFlow {
  * key, COLLECTED via `--api-key` or a prompt by `accounts add` (never derived
  * from OAuth). The api-key entries describe collection only — they have no
  * mint argv, and `mintAndSeed` refuses them with the `accounts add` pointer.
- * Native device-code login (kimi/antigravity) stays on `agents fleet login`.
+ * A token-less harness (kimi/antigravity) has no portable credential and logs
+ * in per box (run it there and complete its native login).
  * The apiKeyEnv values are pinned to HARNESS_AUTH's `api-key:<ENV>` worker
  * kinds by auth-mint.test.ts — keep them in lockstep.
  */
@@ -128,7 +129,7 @@ export function unmintableMessage(harness: string): string {
   return [
     `Cannot mint a setup-token for '${harness}'.`,
     `Interactive setup-token mint is implemented for: ${listMintableHarnesses().join(', ')}.`,
-    `Device-code native login is \`agents fleet login --agent ${harness}\`.`,
+    `A token-less harness like '${harness}' logs in per box — run it on that device and complete its native login.`,
     `API-key / pasted-token accounts use \`agents accounts add <name> --provider <provider> --auth api-key\`.`,
   ].join(' ');
 }

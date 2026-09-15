@@ -1448,7 +1448,8 @@ instead" fallback on a headed device — that inverts the rule.
 a slot, installing, or opening a browser. Add the account on a personal/desktop
 device; workers are provisioned from the durable credential the add mints
 (claude: a `setup-token` driven in the account's slot; api-key harnesses:
-`--api-key` or a prompt; `fleet login` for a token-less harness). `accounts
+`--api-key` or a prompt; a token-less harness logs in per box — run it on that
+device and complete its native login). `accounts
 login <harness>#<name>` re-auths into the same slot and re-mints; `accounts
 default <harness> [name]` is the one default write path.
 
@@ -1606,7 +1607,8 @@ exists, and the rest are discovery-only/unsupported. The worker credential kind 
 [`docs/credential-management.md` §Slots and reserved stores](docs/credential-management.md#slots-and-reserved-stores-phnx-3940)):
 claude mints a `setup-token`; codex/grok/cursor/opencode/droid carry a provider
 API key; kimi and antigravity have no portable credential and log in per box
-(`agents fleet login`). `agents accounts add <harness> [name]` is the one
+(run the harness on that box and complete its native login). `agents accounts add
+<harness> [name]` is the one
 onboarding verb across all of them — headed devices only; workers are provisioned
 automatically from the minted credential.
 
