@@ -167,6 +167,7 @@ describe('compileRulesForProject', () => {
     for (const agent of Object.values(AGENTS)) {
       const f = agent.instructionsFile;
       if (f === 'AGENTS.md') continue;
+      if (agent.deprecated?.hard) continue; // hard-deprecated agents get no symlink (e.g. Gemini)
       if (f.includes('/') || f.includes('\\')) continue;
       expected.add(f);
     }
@@ -179,6 +180,15 @@ describe('compileRulesForProject', () => {
       }
     }
     expect(new Set(result.symlinks)).toEqual(expected);
+  });
+
+  it('never creates a symlink for a hard-deprecated agent (GEMINI.md)', () => {
+    setupProject();
+    const result = compileRulesForProject(tmpDir, { layers: projectOnlyLayers(tmpDir) });
+
+    expect(result.compiled).toBe(true);
+    expect(result.symlinks).not.toContain('GEMINI.md');
+    expect(fs.existsSync(path.join(tmpDir, 'GEMINI.md'))).toBe(false);
   });
 
   it("doesn't clobber a user-authored cwd/AGENTS.md", () => {

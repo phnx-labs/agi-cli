@@ -352,6 +352,11 @@ export function compileRulesForProject(
     for (const agent of Object.values(AGENTS)) {
       const fname = agent.instructionsFile;
       if (seen.has(fname)) continue;
+      // Hard-deprecated agents (e.g. Gemini, retired by Google) never get an
+      // instruction-file symlink — the harness is gone, so GEMINI.md would only
+      // litter the tree. Mirrors the deprecated?.hard skip used everywhere else
+      // (capabilities.ts, MANAGED_AGENT_IDS, modes.ts).
+      if (agent.deprecated?.hard) continue;
       // Skip agents whose instructions live at a nested path (e.g. OpenClaw's
       // workspace/AGENTS.md) — those are managed by their own setup paths.
       if (fname.includes('/') || fname.includes('\\')) continue;
