@@ -491,6 +491,7 @@ export function registerSetupCommand(program: Command): void {
       agents setup browser
       agents setup computer
       agents setup secrets
+      agents setup term
       agents setup accounts
       agents setup fleet
       agents setup watchdog
@@ -508,6 +509,7 @@ export function registerSetupCommand(program: Command): void {
         agents setup browser    # detect a browser + create the default profile
         agents setup computer    # install the signed macOS helper + grant permissions
         agents setup secrets     # choose secrets backend/policy defaults + import
+        agents setup term        # install the standalone term CLI (PTY engine for fleet login / auth mint)
         agents setup accounts    # mint a Claude setup-token for unattended usage/probe
         agents setup fleet       # discover Tailscale devices + configure SSH access
         agents setup watchdog    # choose which devices run the daemon watchdog pass
