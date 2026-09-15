@@ -239,17 +239,6 @@ describe('extractReport', () => {
     expect(extractReport(logPath, 'codex')).toBe('Second report');
   });
 
-  it('extracts last text from gemini output', () => {
-    const lines = [
-      JSON.stringify({ type: 'text', text: 'First' }),
-      JSON.stringify({ type: 'text', text: 'Gemini final report' }),
-    ];
-    const logPath = join(TEST_DIR, 'gemini.log');
-    writeFileSync(logPath, lines.join('\n'), 'utf-8');
-
-    expect(extractReport(logPath, 'gemini')).toBe('Gemini final report');
-  });
-
   it('extracts the last assistant text from cursor stream-json', () => {
     const lines = [
       JSON.stringify({

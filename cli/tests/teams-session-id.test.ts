@@ -118,14 +118,9 @@ describe('AgentProcess: remoteSessionId extraction', () => {
     expect(agent.remoteSessionId).toBe('4ef5cf27-f5be-4bc0-bae4-9082783b803a');
   });
 
-  // These two use synthetic fixtures shaped to match what the parsers declare
-  // they expect (see src/lib/teams/parsers.ts normalizeGemini / normalizeOpencode).
-  // No real live-session fixtures existed in the upstream repo for these agents.
-  it('picks up session_id from a Gemini init event (synthetic fixture)', async () => {
-    const agent = await runAgainstFixture('gemini', 'gemini-session.jsonl', tmpBase);
-    expect(agent.remoteSessionId).toBe('7b9d3c2e-4a1f-4e85-91c2-8f4a6c3d2e1b');
-  });
-
+  // This uses a synthetic fixture shaped to match what the parser declares it
+  // expects (see src/lib/teams/parsers.ts normalizeOpencode). No real
+  // live-session fixture existed in the upstream repo for this agent.
   it('picks up part.sessionID from an OpenCode step_start event (synthetic fixture)', async () => {
     // OpenCode's parser maps part.sessionID (camelCase) → session_id (snake_case).
     const agent = await runAgainstFixture('opencode', 'opencode-session.jsonl', tmpBase);
@@ -140,7 +135,7 @@ describe('AgentProcess: remoteSessionId extraction', () => {
     const agent = new AgentProcess(
       agentId,
       'test-team',
-      'gemini',
+      'antigravity',
       'irrelevant',
       null,
       'plan',
@@ -156,8 +151,8 @@ describe('AgentProcess: remoteSessionId extraction', () => {
     await fs.writeFile(
       stdoutPath,
       [
-        '{"type":"init","model":"gemini-3-flash","session_id":"first-session"}',
-        '{"type":"init","model":"gemini-3-flash","session_id":"second-session"}',
+        '{"type":"init","sessionId":"first-session"}',
+        '{"type":"init","sessionId":"second-session"}',
       ].join('\n') + '\n'
     );
     await agent.readNewEvents();

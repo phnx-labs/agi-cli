@@ -74,25 +74,25 @@ async function runRoute(args: string[], noun: 'route' | 'routes' = 'route'): Pro
 
 describe.skipIf(!fileBacked)('agents route add (alias create)', () => {
   it('writes a router yml with the given harnesses and tiers', async () => {
-    const result = await runRoute(['add', 'research', '--harness', 'gemini,kimi', '--tier', 'cheap,default', '--task', 'research']);
+    const result = await runRoute(['add', 'research', '--harness', 'grok,kimi', '--tier', 'cheap,default', '--task', 'research']);
     expect(result.exitCode).toBeNull();
     expect(routerExists('research')).toBe(true);
     expect(fs.existsSync(path.join(USER_DIR, 'routers', 'research.yml'))).toBe(true);
 
     const router = readRouter('research');
     expect(router.task).toBe('research');
-    expect(router.harnesses.gemini.models).toEqual(['cheap', 'default']);
+    expect(router.harnesses.grok.models).toEqual(['cheap', 'default']);
     expect(router.harnesses.kimi.models).toEqual(['cheap', 'default']);
   });
 
   it('the create alias behaves identically to add', async () => {
-    const result = await runRoute(['create', 'research', '--harness', 'gemini', '--tier', 'cheap']);
+    const result = await runRoute(['create', 'research', '--harness', 'grok', '--tier', 'cheap']);
     expect(result.exitCode).toBeNull();
-    expect(readRouter('research').harnesses.gemini.models).toEqual(['cheap']);
+    expect(readRouter('research').harnesses.grok.models).toEqual(['cheap']);
   });
 
   it('fails loud (writes nothing) when the router already exists', async () => {
-    await runRoute(['create', 'research', '--harness', 'gemini']);
+    await runRoute(['create', 'research', '--harness', 'grok']);
     const before = readRouter('research');
     const result = await runRoute(['create', 'research', '--harness', 'kimi']);
     expect(result.exitCode).toBe(1);
@@ -122,7 +122,7 @@ describe.skipIf(!fileBacked)('agents route add (alias create)', () => {
 
 describe.skipIf(!fileBacked)('agents route allow', () => {
   it('replaces (narrows) a harness model set, preserving existing accounts', async () => {
-    await runRoute(['create', 'research', '--harness', 'gemini,kimi', '--tier', 'cheap,default']);
+    await runRoute(['create', 'research', '--harness', 'grok,kimi', '--tier', 'cheap,default']);
     await runRoute(['link-account', 'research', 'kimi', 'work']);
 
     const result = await runRoute(['allow', 'research', 'kimi', 'best']);
@@ -131,64 +131,64 @@ describe.skipIf(!fileBacked)('agents route allow', () => {
     const router = readRouter('research');
     expect(router.harnesses.kimi.models).toEqual(['best']);
     expect(router.harnesses.kimi.accounts).toEqual(['work']);
-    // gemini is untouched by narrowing kimi
-    expect(router.harnesses.gemini.models).toEqual(['cheap', 'default']);
+    // grok is untouched by narrowing kimi
+    expect(router.harnesses.grok.models).toEqual(['cheap', 'default']);
   });
 
   it('can allow a brand-new harness not present at create time', async () => {
-    await runRoute(['create', 'research', '--harness', 'gemini']);
+    await runRoute(['create', 'research', '--harness', 'grok']);
     await runRoute(['allow', 'research', 'claude', 'best']);
     expect(readRouter('research').harnesses.claude.models).toEqual(['best']);
   });
 
   it('rejects an unverifiable model token and leaves the router unchanged', async () => {
-    await runRoute(['create', 'research', '--harness', 'gemini', '--tier', 'cheap']);
+    await runRoute(['create', 'research', '--harness', 'grok', '--tier', 'cheap']);
     const before = readRouter('research');
 
-    const result = await runRoute(['allow', 'research', 'gemini', 'made-up-model-xyz']);
+    const result = await runRoute(['allow', 'research', 'grok', 'made-up-model-xyz']);
     expect(result.exitCode).toBe(1);
-    expect(result.stdout).toContain("unknown model 'made-up-model-xyz' for harness 'gemini'");
+    expect(result.stdout).toContain("unknown model 'made-up-model-xyz' for harness 'grok'");
     expect(readRouter('research')).toEqual(before);
   });
 });
 
 describe.skipIf(!fileBacked)('agents route link-account / unlink-account', () => {
   it('link-account adds an account; unlink-account removes it', async () => {
-    await runRoute(['create', 'research', '--harness', 'gemini']);
+    await runRoute(['create', 'research', '--harness', 'grok']);
 
-    await runRoute(['link-account', 'research', 'gemini', 'personal']);
-    expect(readRouter('research').harnesses.gemini.accounts).toEqual(['personal']);
+    await runRoute(['link-account', 'research', 'grok', 'personal']);
+    expect(readRouter('research').harnesses.grok.accounts).toEqual(['personal']);
 
     // linking the same account twice does not duplicate it
-    await runRoute(['link-account', 'research', 'gemini', 'personal']);
-    expect(readRouter('research').harnesses.gemini.accounts).toEqual(['personal']);
+    await runRoute(['link-account', 'research', 'grok', 'personal']);
+    expect(readRouter('research').harnesses.grok.accounts).toEqual(['personal']);
 
-    await runRoute(['unlink-account', 'research', 'gemini', 'personal']);
-    expect(readRouter('research').harnesses.gemini.accounts).toEqual([]);
+    await runRoute(['unlink-account', 'research', 'grok', 'personal']);
+    expect(readRouter('research').harnesses.grok.accounts).toEqual([]);
   });
 
   it('fails loud linking an account to a harness that is not part of the router', async () => {
-    await runRoute(['create', 'research', '--harness', 'gemini']);
+    await runRoute(['create', 'research', '--harness', 'grok']);
     const result = await runRoute(['link-account', 'research', 'kimi', 'work']);
     expect(result.exitCode).toBe(1);
     expect(readRouter('research').harnesses.kimi).toBeUndefined();
   });
 
   it('fails loud linking an account that does not exist in the account registry', async () => {
-    await runRoute(['create', 'research', '--harness', 'gemini']);
-    const result = await runRoute(['link-account', 'research', 'gemini', 'not-a-real-account']);
+    await runRoute(['create', 'research', '--harness', 'grok']);
+    const result = await runRoute(['link-account', 'research', 'grok', 'not-a-real-account']);
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain("Unknown account 'not-a-real-account'");
-    expect(readRouter('research').harnesses.gemini.accounts ?? []).toEqual([]);
+    expect(readRouter('research').harnesses.grok.accounts ?? []).toEqual([]);
   });
 
   it('fails loud unlinking an account that does not exist in the account registry', async () => {
-    await runRoute(['create', 'research', '--harness', 'gemini']);
-    await runRoute(['link-account', 'research', 'gemini', 'personal']);
-    const result = await runRoute(['unlink-account', 'research', 'gemini', 'not-a-real-account']);
+    await runRoute(['create', 'research', '--harness', 'grok']);
+    await runRoute(['link-account', 'research', 'grok', 'personal']);
+    const result = await runRoute(['unlink-account', 'research', 'grok', 'not-a-real-account']);
     expect(result.exitCode).toBe(1);
     // the real, already-linked account is untouched
-    expect(readRouter('research').harnesses.gemini.accounts).toEqual(['personal']);
+    expect(readRouter('research').harnesses.grok.accounts).toEqual(['personal']);
   });
 });
 
@@ -197,7 +197,7 @@ describe.skipIf(!fileBacked)('agents route edit verbs refuse a non-user-layer ro
     fs.mkdirSync(path.join(PROJECT_DIR, 'routers'), { recursive: true });
     fs.writeFileSync(
       path.join(PROJECT_DIR, 'routers', 'shared.yml'),
-      yaml.stringify({ name: 'shared', harnesses: { gemini: { models: ['cheap'] } } }),
+      yaml.stringify({ name: 'shared', harnesses: { grok: { models: ['cheap'] } } }),
     );
   }
 
@@ -205,11 +205,11 @@ describe.skipIf(!fileBacked)('agents route edit verbs refuse a non-user-layer ro
     vi.spyOn(state, 'getProjectAgentsDir').mockReturnValue(PROJECT_DIR);
     writeProjectRouter();
 
-    const result = await runRoute(['allow', 'shared', 'gemini', 'best']);
+    const result = await runRoute(['allow', 'shared', 'grok', 'best']);
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain("resolves from the 'project' layer");
     // the project-layer file is untouched, and no shadowing user-layer file was created
-    expect(readRouter('shared', TEST_ROOT).harnesses.gemini.models).toEqual(['cheap']);
+    expect(readRouter('shared', TEST_ROOT).harnesses.grok.models).toEqual(['cheap']);
     expect(fs.existsSync(path.join(USER_DIR, 'routers', 'shared.yml'))).toBe(false);
   });
 
@@ -217,7 +217,7 @@ describe.skipIf(!fileBacked)('agents route edit verbs refuse a non-user-layer ro
     vi.spyOn(state, 'getProjectAgentsDir').mockReturnValue(PROJECT_DIR);
     writeProjectRouter();
 
-    const result = await runRoute(['link-account', 'shared', 'gemini', 'personal']);
+    const result = await runRoute(['link-account', 'shared', 'grok', 'personal']);
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain("resolves from the 'project' layer");
     expect(fs.existsSync(path.join(USER_DIR, 'routers', 'shared.yml'))).toBe(false);
@@ -236,7 +236,7 @@ describe.skipIf(!fileBacked)('agents route edit verbs refuse a non-user-layer ro
 
 describe.skipIf(!fileBacked)('agents route list --json', () => {
   it('emits one summary object per router', async () => {
-    await runRoute(['create', 'zeta', '--harness', 'gemini', '--tier', 'cheap']);
+    await runRoute(['create', 'zeta', '--harness', 'grok', '--tier', 'cheap']);
     await runRoute(['create', 'alpha', '--harness', 'kimi,claude', '--tier', 'best']);
 
     const result = await runRoute(['list', '--json']);
@@ -248,13 +248,13 @@ describe.skipIf(!fileBacked)('agents route list --json', () => {
   });
 
   it('the ls alias behaves identically to list', async () => {
-    await runRoute(['create', 'alpha', '--harness', 'gemini']);
+    await runRoute(['create', 'alpha', '--harness', 'grok']);
     const result = await runRoute(['ls', '--json']);
     expect(JSON.parse(result.stdout).map((r: { name: string }) => r.name)).toEqual(['alpha']);
   });
 
   it('the plural noun routes resolves the whole command tree', async () => {
-    const addResult = await runRoute(['add', 'alpha', '--harness', 'gemini'], 'routes');
+    const addResult = await runRoute(['add', 'alpha', '--harness', 'grok'], 'routes');
     expect(addResult.exitCode).toBeNull();
     const listResult = await runRoute(['list', '--json'], 'routes');
     expect(JSON.parse(listResult.stdout).map((r: { name: string }) => r.name)).toEqual(['alpha']);
@@ -270,19 +270,19 @@ describe.skipIf(!fileBacked)('agents route list --json', () => {
 
 describe.skipIf(!fileBacked)('agents route view --json (alias show)', () => {
   it('emits the full router object', async () => {
-    await runRoute(['add', 'research', '--harness', 'gemini,kimi', '--tier', 'cheap,default', '--task', 'research']);
-    await runRoute(['link-account', 'research', 'gemini', 'personal']);
+    await runRoute(['add', 'research', '--harness', 'grok,kimi', '--tier', 'cheap,default', '--task', 'research']);
+    await runRoute(['link-account', 'research', 'grok', 'personal']);
 
     const result = await runRoute(['view', 'research', '--json']);
     const payload = JSON.parse(result.stdout);
     expect(payload.name).toBe('research');
     expect(payload.task).toBe('research');
-    expect(payload.harnesses.gemini).toEqual({ models: ['cheap', 'default'], accounts: ['personal'] });
+    expect(payload.harnesses.grok).toEqual({ models: ['cheap', 'default'], accounts: ['personal'] });
     expect(payload.harnesses.kimi).toEqual({ models: ['cheap', 'default'] });
   });
 
   it('the show alias behaves identically to view', async () => {
-    await runRoute(['add', 'research', '--harness', 'gemini']);
+    await runRoute(['add', 'research', '--harness', 'grok']);
     const result = await runRoute(['show', 'research', '--json']);
     expect(JSON.parse(result.stdout).name).toBe('research');
   });
@@ -295,8 +295,8 @@ describe.skipIf(!fileBacked)('agents route view --json (alias show)', () => {
 
 describe.skipIf(!fileBacked)('agents route rename', () => {
   it('re-keys the stored router, preserving every field', async () => {
-    await runRoute(['add', 'research', '--harness', 'gemini,kimi', '--tier', 'cheap,default', '--task', 'research']);
-    await runRoute(['link-account', 'research', 'gemini', 'personal']);
+    await runRoute(['add', 'research', '--harness', 'grok,kimi', '--tier', 'cheap,default', '--task', 'research']);
+    await runRoute(['link-account', 'research', 'grok', 'personal']);
     // weights + hijack have no CLI setter yet -- write them into the file directly
     const file = path.join(USER_DIR, 'routers', 'research.yml');
     const withExtras = { ...readRouter('research'), weights: { cost: 0.7, success: 0.3 }, hijack: true };
@@ -310,7 +310,7 @@ describe.skipIf(!fileBacked)('agents route rename', () => {
     const renamed = readRouter('deep-research');
     expect(renamed.name).toBe('deep-research');
     expect(renamed.task).toBe('research');
-    expect(renamed.harnesses.gemini).toEqual({ models: ['cheap', 'default'], accounts: ['personal'] });
+    expect(renamed.harnesses.grok).toEqual({ models: ['cheap', 'default'], accounts: ['personal'] });
     expect(renamed.harnesses.kimi).toEqual({ models: ['cheap', 'default'] });
     expect(renamed.weights).toEqual({ cost: 0.7, success: 0.3 });
     expect(renamed.hijack).toBe(true);
@@ -323,7 +323,7 @@ describe.skipIf(!fileBacked)('agents route rename', () => {
   });
 
   it('fails loud on a name collision and leaves both routers untouched', async () => {
-    await runRoute(['add', 'alpha', '--harness', 'gemini']);
+    await runRoute(['add', 'alpha', '--harness', 'grok']);
     await runRoute(['add', 'beta', '--harness', 'kimi']);
     const before = readRouter('beta');
 
@@ -339,7 +339,7 @@ describe.skipIf(!fileBacked)('agents route rename', () => {
     fs.mkdirSync(path.join(PROJECT_DIR, 'routers'), { recursive: true });
     fs.writeFileSync(
       path.join(PROJECT_DIR, 'routers', 'shared.yml'),
-      yaml.stringify({ name: 'shared', harnesses: { gemini: { models: ['cheap'] } } }),
+      yaml.stringify({ name: 'shared', harnesses: { grok: { models: ['cheap'] } } }),
     );
 
     const result = await runRoute(['rename', 'shared', 'renamed']);
@@ -352,14 +352,14 @@ describe.skipIf(!fileBacked)('agents route rename', () => {
 
 describe.skipIf(!fileBacked)('agents route remove (alias rm)', () => {
   it('removes the router file via the canonical verb', async () => {
-    await runRoute(['create', 'research', '--harness', 'gemini']);
+    await runRoute(['create', 'research', '--harness', 'grok']);
     const result = await runRoute(['remove', 'research']);
     expect(result.exitCode).toBeNull();
     expect(routerExists('research')).toBe(false);
   });
 
   it('the rm alias still removes the router file', async () => {
-    await runRoute(['create', 'research', '--harness', 'gemini']);
+    await runRoute(['create', 'research', '--harness', 'grok']);
     const result = await runRoute(['rm', 'research']);
     expect(result.exitCode).toBeNull();
     expect(routerExists('research')).toBe(false);

@@ -234,7 +234,7 @@ export function buildBootstrapScript(opts: LeaseRunOptions): string {
   // Runs regardless of --keep-box (it's in the box body, not teardown), so a kept
   // box still loses the token after the run — minimizing the credential window.
   const shredPaths = credentialRuntimes.flatMap((id) => {
-    const paths = { claude: ['.claude.json', CLAUDE_TOKEN_REMOTE], codex: ['.codex/auth.json'], gemini: ['.gemini/google_accounts.json'], grok: ['.grok/auth.json'] }[id as string];
+    const paths = { claude: ['.claude.json', CLAUDE_TOKEN_REMOTE], codex: ['.codex/auth.json'], grok: ['.grok/auth.json'] }[id as string];
     return paths ?? [];
   });
   if (opts.dispatchProfile) shredPaths.push(profileRemotePath(opts.dispatchProfile.name));

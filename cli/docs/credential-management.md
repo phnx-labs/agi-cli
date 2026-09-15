@@ -415,7 +415,6 @@ are already mapped in `profiles.ts:324-329` for BYOK profiles.
 |---|---|---|---|
 | claude | **keychain-ACL** | `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token`, 1yr) / `ANTHROPIC_API_KEY` | daemon-inject removed (PR1); `ANTHROPIC_AUTH_TOKEN` via profiles; Linux shim reads `.oauth_token` |
 | codex | file (`.codex/auth.json`) | `OPENAI_API_KEY` | yes (`profiles.ts:326`) |
-| gemini | file | `GEMINI_API_KEY` | yes (`profiles.ts:327`) |
 | grok | file | `XAI_API_KEY` | yes (`profiles.ts:328`) |
 | opencode | file | `OPENCODE_API_KEY` | yes (`profiles.ts:329`) |
 | droid | file (locally-decrypted, no keychain) | `FACTORY_API_KEY` (`fk-…`) | **no** — unwired anywhere |

@@ -46,10 +46,6 @@ const PROBES: Probe[] = [
     id: 'codex',
     args: (p) => ['exec', '--skip-git-repo-check', '--sandbox', 'read-only', p],
   },
-  {
-    id: 'gemini',
-    args: (p) => ['-p', p, '--approval-mode', 'plan'],
-  },
 ];
 
 function resolveBinary(agent: AgentId): string {

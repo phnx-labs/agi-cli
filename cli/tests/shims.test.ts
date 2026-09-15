@@ -294,9 +294,9 @@ describe('codex shim launch flags', () => {
 
   test('does not add the codex-only flag to other shims', () => {
     const claudeScript = generateShimScript('claude');
-    const geminiScript = generateShimScript('gemini');
+    const cursorScript = generateShimScript('cursor');
     expect(claudeScript).not.toContain('check_for_update_on_startup=false');
-    expect(geminiScript).not.toContain('check_for_update_on_startup=false');
+    expect(cursorScript).not.toContain('check_for_update_on_startup=false');
   });
 });
 
@@ -388,7 +388,7 @@ describe('shims - generateShimScript', () => {
     // `--version <value>` before subcommands see it — passing --version to
     // `sync` or `refresh-rules` would silently print the CLI version and
     // exit 0 instead of running the subcommand. Guard against regression.
-    for (const agent of ['claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw'] as const) {
+    for (const agent of ['claude', 'codex', 'cursor', 'opencode', 'openclaw'] as const) {
       const script = generateShimScript(agent);
       expect(script, `${agent} shim must not pass --version to subcommands`).not.toMatch(/--version[ =]"?\$VERSION/);
     }
@@ -397,8 +397,8 @@ describe('shims - generateShimScript', () => {
   test('@-capable agents do NOT get a refresh-rules shim hook', () => {
     const claudeScript = generateShimScript('claude');
     expect(claudeScript).not.toContain('refresh-rules');
-    const geminiScript = generateShimScript('gemini');
-    expect(geminiScript).not.toContain('refresh-rules');
+    const grokScript = generateShimScript('grok');
+    expect(grokScript).not.toContain('refresh-rules');
   });
 
   test('scopes Claude keychain auth to the selected version config dir', () => {
