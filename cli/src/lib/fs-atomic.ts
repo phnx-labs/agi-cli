@@ -128,6 +128,19 @@ export function withFileLock<T>(filePath: string, fn: (heartbeat: () => void) =>
       break;
     } catch (err) {
       lastError = err;
+      // proper-lockfile breaks stale locks with rmdir, which fails with ENOTDIR
+      // when a prior crash left a regular file instead of the expected directory.
+      // Remove the stale file so the next attempt can succeed. Match
+      // proper-lockfile's own path resolution: realpath when the option is on
+      // (the default), raw path when it is off.
+      if (err instanceof Error && (err as any).code === 'ENOTDIR') {
+        try {
+          const base = (opts.realpath ?? true) ? fs.realpathSync(filePath) : filePath;
+          const lockPath = `${base}.lock`;
+          const st = fs.statSync(lockPath);
+          if (st.isFile()) fs.unlinkSync(lockPath);
+        } catch { /* best effort */ }
+      }
       if (Date.now() >= deadline) break;
       const backoff = Math.min(LOCK_RETRY_MIN_MS * (attempt + 1), LOCK_RETRY_MAX_MS);
       sleepSync(Math.min(backoff, Math.max(0, deadline - Date.now())));
@@ -192,6 +205,14 @@ export async function withFileLockAsync<T>(filePath: string, fn: (heartbeat: () 
       break;
     } catch (err) {
       lastError = err;
+      if (err instanceof Error && (err as any).code === 'ENOTDIR') {
+        try {
+          const base = (opts.realpath ?? true) ? fs.realpathSync(filePath) : filePath;
+          const lockPath = `${base}.lock`;
+          const st = fs.statSync(lockPath);
+          if (st.isFile()) fs.unlinkSync(lockPath);
+        } catch { /* best effort */ }
+      }
       if (Date.now() >= deadline) break;
       const backoff = Math.min(LOCK_RETRY_MIN_MS * (attempt + 1), LOCK_RETRY_MAX_MS);
       await new Promise((r) => setTimeout(r, Math.min(backoff, Math.max(0, deadline - Date.now()))));

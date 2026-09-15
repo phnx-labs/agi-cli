@@ -38,6 +38,8 @@ import {
 } from './secrets-client.js';
 import { getAccountProvider, type AccountAuthKind } from './account-provider-registry.js';
 import { accountSecretItem, buildAccountBundle, parseAccountBundle, secretVarFor, type AccountSchemaRecord } from './account-schema.js';
+import { readClaudeHomeConfig } from './agent-spec/agents.js';
+import { getVersionHomePath, listInstalledVersions } from './installations/store.js';
 
 export interface CredentialAccount {
   id: string;
@@ -732,6 +734,36 @@ export type SpawnAccount =
   | { kind: 'native'; id: string; name: string; agent: AgentId; identityKey: string; scope: 'version' | 'device' };
 
 /**
+ * Sync fallback: scan installed version homes to discover a native identity
+ * that matches the given email, for accounts that predate the registration
+ * system (empty `accounts.native`). Returns a synthetic SpawnAccount or null.
+ */
+function discoverUnregisteredNativeAccount(
+  email: string,
+  agent: AgentId,
+): NativeAccount | null {
+  if (agent !== 'claude') return null;
+  const needle = email.toLowerCase();
+  for (const label of listInstalledVersions(agent)) {
+    const home = getVersionHomePath(agent, label);
+    if (!fs.existsSync(home)) continue;
+    const config = readClaudeHomeConfig(home);
+    if (!config?.identity?.email) continue;
+    if (config.identity.email.toLowerCase() === needle) {
+      return {
+        kind: 'native',
+        id: email,
+        name: email,
+        agent,
+        identityKey: config.identity.accountKey ?? email.toLowerCase(),
+        scope: 'version',
+      };
+    }
+  }
+  return null;
+}
+
+/**
  * Resolve the account a run should launch under, following the binding order
  * (explicit → exact `agent@version` → device-scoped `agent` → per-harness
  * default) and classifying the result:
@@ -762,7 +794,10 @@ export function resolveSpawnAccount(
   // Scope the lookup to the harness being launched: a bare identity selector
   // (`claude#muqsitnawaz@gmail.com`) matches every harness that identity is signed
   // into, and only this one can authenticate the spawn.
-  const unified = findUnifiedAccount(selection.id, meta, undefined, agent);
+  let unified = findUnifiedAccount(selection.id, meta, undefined, agent);
+  if (!unified && selection.source === 'explicit' && selection.id.includes('@')) {
+    unified = discoverUnregisteredNativeAccount(selection.id, agent);
+  }
   if (!unified) {
     // A stale per-harness default is a preference, not a hard requirement: the
     // machine stays runnable by falling back to balanced rotation. Bindings and
