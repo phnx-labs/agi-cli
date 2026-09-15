@@ -154,30 +154,32 @@ if (process.argv[2] === 'sessions') {
   const forwarded = process.argv.slice(3);
   const {
     isReadQuery,
+    usesFilterFlags,
+    sessionsBinSupportsFilters,
     resolveSessionsBin,
     invocation,
     SessionsClientError,
     SESSIONS_INSTALL_HINT,
   } = await import('./lib/sessions-client.js');
-  if (isReadQuery(forwarded)) {
-    const { spawnSync } = await import('node:child_process');
-    let bin: string | null = null;
-    try {
-      bin = resolveSessionsBin();
-    } catch (err) {
-      // No standalone on this box: fall through to the in-repo engine below
-      // rather than refusing the query. The fast path is an optimization for a
-      // box that has `sessions` installed (skips bootstrap and the sessions
-      // module); a box without it must still answer `agents sessions --json`
-      // exactly as it did before PHNX-4012 — every worker in the fleet and
-      // every CI runner is such a box until @phnx-labs/sessions-cli is
-      // published, and refusing here turned main's full suite red.
-      if (!(err instanceof SessionsClientError && err.code === 'SESSIONS_BIN_MISSING')) throw err;
-      if (process.env.AGENTS_SESSIONS_FASTPATH_HINT !== '0') {
-        process.stderr.write(`agents: standalone \`sessions\` not installed; using the in-process engine (${SESSIONS_INSTALL_HINT})\n`);
-      }
-    }
+  // Resolve the bin up front (a cheap PATH lookup): its presence decides whether
+  // we can route at all, and its VERSION decides whether the 0.2.0 filter flags
+  // (`--project`/`--since`/`--until`/`--sort`, `@version`, the shorthands) are
+  // recognized — an older `sessions` would mis-read them as FTS tokens, so those
+  // queries stay on the in-repo engine (which implements the same filters).
+  let bin: string | null = null;
+  try {
+    bin = resolveSessionsBin();
+  } catch (err) {
+    // No standalone on this box: fall through to the in-repo engine below rather
+    // than refusing the query. The fast path is an optimization for a box that
+    // has `sessions` installed (skips bootstrap and the sessions module); a box
+    // without it must still answer `agents sessions --json` exactly as before.
+    if (!(err instanceof SessionsClientError && err.code === 'SESSIONS_BIN_MISSING')) throw err;
+  }
+  const filters = bin !== null && usesFilterFlags(forwarded) ? sessionsBinSupportsFilters(bin) : false;
+  if (isReadQuery(forwarded, { filters })) {
     if (bin) {
+      const { spawnSync } = await import('node:child_process');
       const { command, prefix } = invocation(bin);
       const res = spawnSync(command, [...prefix, ...forwarded], { stdio: 'inherit' });
       if (res.error) {
@@ -185,6 +187,10 @@ if (process.argv[2] === 'sessions') {
         process.exit(1);
       }
       process.exit(res.status ?? 1);
+    }
+    // A read query on a box with no standalone: hint once, then fall through.
+    if (process.env.AGENTS_SESSIONS_FASTPATH_HINT !== '0') {
+      process.stderr.write(`agents: standalone \`sessions\` not installed; using the in-process engine (${SESSIONS_INSTALL_HINT})\n`);
     }
   }
 }
