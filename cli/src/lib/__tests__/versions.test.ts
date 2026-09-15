@@ -98,7 +98,6 @@ describe('removeVersion soft-deletes the entire version dir to trash', () => {
   const cases: { agent: AgentId; historyDir: string; binaryName: string }[] = [
     { agent: 'claude',   historyDir: path.join('home', '.claude',   'projects'), binaryName: 'claude' },
     { agent: 'codex',    historyDir: path.join('home', '.codex',    'sessions'), binaryName: 'codex' },
-    { agent: 'gemini',   historyDir: path.join('home', '.gemini',   'sessions'), binaryName: 'gemini' },
     { agent: 'cursor',   historyDir: path.join('home', '.cursor',   'sessions'), binaryName: 'cursor-agent' },
     { agent: 'opencode', historyDir: path.join('home', '.opencode', 'sessions'), binaryName: 'opencode' },
     { agent: 'openclaw', historyDir: path.join('home', '.openclaw', 'sessions'), binaryName: 'openclaw' },

@@ -35,10 +35,6 @@ export function summarizeWatchdogTail(
       const claim = readCodex(raw as Record<string, unknown>);
       if (claim?.role === 'user' && !lastUser) lastUser = claim.text;
       else if (claim?.role === 'assistant' && !lastAssistant) lastAssistant = claim.text;
-    } else if (agentType === 'gemini') {
-      const claim = readGemini(raw as Record<string, unknown>);
-      if (claim?.role === 'user' && !lastUser) lastUser = claim.text;
-      else if (claim?.role === 'assistant' && !lastAssistant) lastAssistant = claim.text;
     }
   }
 
@@ -69,30 +65,6 @@ function readCodex(raw: Record<string, unknown>): Claim | null {
   const text = pickContentText(payload.content);
   if (!text) return null;
   return { role, text };
-}
-
-// Gemini stores chats as a single pretty-printed JSON document — readTailLines
-// returns partial fragments that JSON.parse rejects. So in practice this
-// branch only fires for the JSONL-style events that some Gemini wrappers emit
-// during a live session. Acceptable: the result is an empty summary, which
-// the UI handles gracefully.
-function readGemini(raw: Record<string, unknown>): Claim | null {
-  const t = raw.type;
-  if (t === 'user_message') {
-    const text = typeof raw.text === 'string' ? raw.text : null;
-    return text ? { role: 'user', text } : null;
-  }
-  if (t === 'agent_message' || t === 'model_message') {
-    const text = typeof raw.text === 'string' ? raw.text : null;
-    return text ? { role: 'assistant', text } : null;
-  }
-  if (t === 'message') {
-    const role = raw.role === 'user' ? 'user' : raw.role === 'assistant' ? 'assistant' : null;
-    if (!role) return null;
-    const text = typeof raw.text === 'string' ? raw.text : pickContentText(raw.content);
-    return text ? { role, text } : null;
-  }
-  return null;
 }
 
 function pickContentText(content: unknown): string | null {

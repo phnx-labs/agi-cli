@@ -55,8 +55,6 @@ export const NATIVE_ACCOUNT_CAPABILITIES: Record<AgentId, NativeAccountCapabilit
   antigravity: { inspection: 'opaque', scope: 'device', status: 'unsupported' },
   droid: { inspection: 'opaque', scope: 'device', status: 'unsupported' },
   opencode: { inspection: 'opaque', scope: 'device', status: 'unsupported' },
-  // Discoverable in the list, but not nameable.
-  gemini: { inspection: 'email', scope: 'unsupported', status: 'discovery-only' },
   copilot: { inspection: 'none', scope: 'unsupported', status: 'unsupported' },
   openclaw: { inspection: 'none', scope: 'unsupported', status: 'unsupported' },
   amp: { inspection: 'none', scope: 'unsupported', status: 'unsupported' },

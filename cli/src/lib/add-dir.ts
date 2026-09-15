@@ -37,7 +37,6 @@ export const ADD_DIR_STRATEGY: Record<AgentId, AddDirStrategy> = {
   grok: 'grok-sandbox',
   // No multi-root CLI surface today (single --dir / project path).
   opencode: 'none',
-  gemini: 'none',
   openclaw: 'none',
   copilot: 'none',
   amp: 'none',

@@ -6,7 +6,6 @@ import {
   writeUpdateCache,
   writeClaudeSession,
   writeCodexSession,
-  writeGeminiSession,
   writeOpenClawSetup,
   runAgents,
   outputOf,
@@ -316,35 +315,6 @@ describe('agents sessions', () => {
       const result = runAgents(args, tempHome, tempHome);
       expect(result.status).toBe(1);
       expect(result.stderr).toContain("option '--version <version>' argument missing");
-    } finally {
-      fs.rmSync(tempHome, { recursive: true, force: true });
-    }
-  });
-
-  it('lists Gemini sessions from a managed version home', () => {
-    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-gemini-version-'));
-
-    try {
-      writeUpdateCache(tempHome);
-
-      const projectDir = path.join(tempHome, 'work', 'agents-cli');
-      writeGeminiSession(
-        tempHome,
-        'f0f0f0f0-f0f0-4f0f-8f0f-f0f0f0f0f0f0',
-        projectDir,
-        'Show gemini versions in the session list',
-        '2026-04-17T19:43:30.000Z'
-      );
-
-      const result = runAgents(['sessions', '--agent', 'gemini', '--all'], projectDir, tempHome);
-      expect(result.status).toBe(0);
-
-      const output = outputOf(result);
-      // Version suffix in the agent column was removed by the table
-      // simplification. Still verify the session is discovered & listed.
-      expect(output).toContain('gemini');
-      expect(output).toContain('Show gemini versions in the session list');
-      expect(output).toContain('f0f0f0f0');
     } finally {
       fs.rmSync(tempHome, { recursive: true, force: true });
     }

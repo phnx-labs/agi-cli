@@ -787,17 +787,6 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
     jsonFlags: ['--json'],
     modelFlag: '--model',
   },
-  gemini: {
-    base: ['gemini'],
-    promptFlag: 'positional',
-    modeFlags: {
-      plan: ['--approval-mode', 'plan'],
-      edit: ['--approval-mode', 'auto_edit'],
-      skip: ['--yolo'],
-    },
-    jsonFlags: ['--output-format', 'stream-json'],
-    modelFlag: '--model',
-  },
   cursor: {
     base: ['cursor-agent'],
     promptFlag: '-p',

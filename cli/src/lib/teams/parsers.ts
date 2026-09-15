@@ -2,14 +2,14 @@
  * Agent event stream parsers.
  *
  * Normalizes the heterogeneous JSON event formats emitted by each agent CLI
- * (Claude, Codex, Gemini, Cursor, OpenCode, Grok, Antigravity, Kimi) into a unified
+ * (Claude, Codex, Cursor, OpenCode, Grok, Antigravity, Kimi) into a unified
  * event schema with consistent types: init, message, tool_use, bash,
  * file_read, file_write, file_create, file_delete, result, error, and others.
  */
 import { extractFileOpsFromBash } from './file_ops.js';
 
 /** Supported agent CLI types for team spawning. */
-export type AgentType = 'codex' | 'gemini' | 'cursor' | 'claude' | 'opencode' | 'grok' | 'antigravity' | 'kimi' | 'droid' | 'warp';
+export type AgentType = 'codex' | 'cursor' | 'claude' | 'opencode' | 'grok' | 'antigravity' | 'kimi' | 'droid' | 'warp';
 
 const claudeToolUseMap = new Map<string, { tool: string; command?: string; path?: string }>();
 const droidToolUseMap = new Map<string, { tool: string; args: Record<string, any> }>();
@@ -23,7 +23,6 @@ const droidToolUseMap = new Map<string, { tool: string; args: Record<string, any
 const TEAM_EVENT_NORMALIZERS: Partial<Record<AgentType, (raw: any) => any[]>> = {
   codex: normalizeCodex,
   cursor: normalizeCursor,
-  gemini: normalizeGemini,
   claude: normalizeClaude,
   opencode: normalizeOpencode,
   grok: normalizeGrok,
@@ -418,147 +417,6 @@ function normalizeCursor(raw: any): any[] {
   return [{
     type: eventType,
     agent: 'cursor',
-    raw: raw,
-    timestamp: timestamp,
-  }];
-}
-
-function normalizeGemini(raw: any): any[] {
-  if (!raw || typeof raw !== 'object') {
-    return [{
-      type: 'unknown',
-      agent: 'gemini',
-      raw: raw,
-      timestamp: new Date().toISOString(),
-    }];
-  }
-
-  const eventType = raw?.type || 'unknown';
-  const timestamp = raw?.timestamp || new Date().toISOString();
-
-  if (eventType === 'init') {
-    return [{
-      type: 'init',
-      agent: 'gemini',
-      model: raw?.model,
-      session_id: raw?.session_id,
-      timestamp: timestamp,
-    }];
-  } else if (eventType === 'message') {
-    const role = raw?.role || 'assistant';
-    if (role === 'assistant') {
-      return [{
-        type: 'message',
-        agent: 'gemini',
-        content: raw?.content || '',
-        complete: !raw?.delta,
-        timestamp: timestamp,
-      }];
-    } else {
-      return [{
-        type: 'user_message',
-        agent: 'gemini',
-        content: raw?.content || '',
-        timestamp: timestamp,
-      }];
-    }
-  } else if (eventType === 'tool_call' || eventType === 'tool_use') {
-    const toolNameRaw = raw?.tool_name || raw?.name || 'unknown';
-    const toolName = String(toolNameRaw);
-
-    let toolArgsRaw = raw?.parameters;
-    if (toolArgsRaw === null || toolArgsRaw === undefined) {
-      toolArgsRaw = raw?.args;
-    }
-    const toolArgs = (typeof toolArgsRaw === 'object' && toolArgsRaw !== null) ? toolArgsRaw : {};
-    const toolNameLower = toolName.toLowerCase();
-
-    const filePath = toolArgs?.file_path || toolArgs?.path || '';
-    const command = toolArgs?.command || '';
-
-    // File write/edit tools - Gemini uses 'replace', 'edit', 'patch', 'write_file', etc.
-    const writeTools = ['replace', 'edit', 'patch', 'write_file', 'edit_file', 'update_file', 'modify_file'];
-    if (writeTools.includes(toolNameLower) || (toolNameLower.includes('write') && toolNameLower.includes('file'))) {
-      if (!filePath.trim()) {
-        return [];
-      }
-      return [{
-        type: 'file_write',
-        agent: 'gemini',
-        tool: toolName,
-        path: filePath,
-        timestamp: timestamp,
-      }];
-    }
-
-    // File read tools
-    const readTools = ['read_file', 'view_file', 'cat_file', 'get_file'];
-    if (readTools.includes(toolNameLower) || (toolNameLower.includes('read') && toolNameLower.includes('file'))) {
-      if (!filePath.trim()) {
-        return [];
-      }
-      return [{
-        type: 'file_read',
-        agent: 'gemini',
-        tool: toolName,
-        path: filePath,
-        timestamp: timestamp,
-      }];
-    }
-
-    // File delete tools
-    const deleteTools = ['delete_file', 'remove_file', 'rm_file'];
-    if (deleteTools.includes(toolNameLower) || (toolNameLower.includes('delete') && toolNameLower.includes('file'))) {
-      if (!filePath.trim()) {
-        return [];
-      }
-      return [{
-        type: 'file_delete',
-        agent: 'gemini',
-        tool: toolName,
-        path: filePath,
-        timestamp: timestamp,
-      }];
-    }
-
-    // Shell/bash tools
-    if (['shell', 'bash', 'execute', 'run_command', 'run_shell_command'].includes(toolNameLower)) {
-      if (!command.trim()) {
-        return [];
-      }
-      return [{
-        type: 'bash',
-        agent: 'gemini',
-        tool: toolName,
-        command: command,
-        timestamp: timestamp,
-      }];
-    }
-
-    return [{
-      type: 'tool_use',
-      agent: 'gemini',
-      tool: toolName,
-      args: toolArgs,
-      timestamp: timestamp,
-    }];
-  } else if (eventType === 'result') {
-    const stats = raw?.stats || {};
-    return [{
-      type: 'result',
-      agent: 'gemini',
-      status: raw?.status || 'success',
-      duration_ms: stats?.duration_ms,
-      usage: {
-        total_tokens: stats?.total_tokens || 0,
-      },
-      timestamp: timestamp,
-    }];
-  }
-
-  return [{
-    type: eventType,
-    agent: 'gemini',
     raw: raw,
     timestamp: timestamp,
   }];

@@ -153,8 +153,6 @@ export function prepareJobHome(config: JobConfig, version?: string): string {
   cleanJobHome(config.name);
   fs.mkdirSync(overlayHome, { recursive: true });
 
-  // gemini is hard-deprecated: runner.ts rejects a gemini routine before it
-  // ever reaches prepareJobHome, so there is deliberately no branch here.
   if (config.agent === 'claude') {
     generateClaudeConfig(overlayHome, config);
   } else if (config.agent === 'codex') {

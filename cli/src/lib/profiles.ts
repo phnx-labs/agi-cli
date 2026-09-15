@@ -454,7 +454,6 @@ const MODEL_ENV_KEY_BY_HOST: Partial<Record<AgentId, string>> = {
   claude: 'ANTHROPIC_MODEL',
   opencode: 'OPENCODE_MODEL',
   grok: 'GROK_MODEL',
-  gemini: 'GEMINI_MODEL',
   codex: 'OPENAI_MODEL',
 };
 
@@ -478,7 +477,6 @@ export function baseUrlEnvKeyForHost(host: AgentId): string | null {
 const AUTH_ENV_KEY_BY_HOST: Partial<Record<AgentId, string>> = {
   claude: 'ANTHROPIC_AUTH_TOKEN',
   codex: 'OPENAI_API_KEY',
-  gemini: 'GEMINI_API_KEY',
   grok: 'XAI_API_KEY',
   opencode: 'OPENCODE_API_KEY',
 };

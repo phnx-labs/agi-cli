@@ -541,7 +541,6 @@ const ROUTINE_TRANSCRIPT_SPECS: Partial<Record<AgentId, Array<{ root: string[]; 
   claude: [{ root: ['.claude', 'projects'], ext: '.jsonl' }],
   codex: [{ root: ['.codex', 'sessions'], ext: '.jsonl' }],
   cursor: [{ root: ['.cursor', 'projects'], ext: '.jsonl' }],
-  gemini: [{ root: ['.gemini', 'tmp'], ext: '.json' }],
   antigravity: [{ root: ['.gemini', 'antigravity-cli', 'conversations'], ext: '.db' }],
   droid: [{ root: ['.factory', 'sessions'], ext: '.jsonl' }],
   // Kimi splits a session across two files (session/discover.ts:4382-4384):
@@ -586,8 +585,8 @@ export function routineSpawnCwd(
  *     modeFlags.plan so claudeAdapter.routineModeArgs can splice
  *     plan → acceptEdits / auto / skip.
  *
- * Returns undefined when `agent` is outside ROUTINE_AGENT_IDS (gemini, grok,
- * and every other harness the daemon does not fire locally).
+ * Returns undefined when `agent` is outside ROUTINE_AGENT_IDS (grok and every
+ * other harness the daemon does not fire locally).
  */
 export function bakeRoutineArgv(agent: string): string[] | undefined {
   if (!ROUTINE_AGENT_IDS.includes(agent)) return undefined;
@@ -2505,11 +2504,6 @@ export function extractReport(stdoutPath: string, agentType: AgentId): string | 
           }
         }
 
-        if (agentType === 'gemini') {
-          if (parsed.type === 'text' && parsed.text) {
-            lastMessage = parsed.text;
-          }
-        }
       } catch { /* malformed JSONL line */ }
     }
 

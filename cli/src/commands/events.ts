@@ -215,7 +215,7 @@ export function addEventsReadOptions(command: Command): Command {
     .option('--command <path>', 'Only this command path — prefix match (e.g. "teams create")')
     .option('--event <type>', 'Only this typed event (repeatable, e.g. secrets.get, run.dispatched, pr.opened)', collect, [])
     .option('--agent <name>', 'Only events tagged with this agent')
-    .option('--caller <kind>', 'Only this caller kind (claude-code, codex, gemini, cursor, terminal, script)')
+    .option('--caller <kind>', 'Only this caller kind (claude-code, codex, cursor, terminal, script)')
     .option('--level <level>', 'Only this level: audit, warn, info, debug')
     .option('--session <id>', 'Only events from this session (the provenance sessionId) — e.g. trace which session read a secret')
     .option('--bundle <name>', 'Only events carrying this bundle in their payload — e.g. `--module secrets --bundle share` for every read of the share bundle')

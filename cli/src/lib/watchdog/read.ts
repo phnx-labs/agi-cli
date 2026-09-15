@@ -40,7 +40,6 @@ const WATCHDOG_SESSION_LAYOUT: Record<string, { subdir: string; ext: string }> =
   claude: { subdir: 'projects', ext: '.jsonl' },
   codex: { subdir: 'sessions', ext: '.jsonl' },
   droid: { subdir: 'sessions', ext: '.jsonl' },
-  gemini: { subdir: 'tmp', ext: '.json' },
 };
 
 const WATCHDOG_SESSION_LAYOUT_DEFAULT = { subdir: 'projects', ext: '.jsonl' };

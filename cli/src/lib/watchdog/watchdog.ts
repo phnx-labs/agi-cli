@@ -7,7 +7,7 @@
 
 export interface WatchdogCandidate {
   terminalId: string;
-  agentType: 'claude' | 'codex' | 'gemini';
+  agentType: 'claude' | 'codex';
   tailLines: string[];
   stalledForMs: number;
   /** The originating task / first prompt / topic — so the agent can judge "was given a task but hasn't finished it". */

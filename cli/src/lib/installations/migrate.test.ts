@@ -174,12 +174,12 @@ describe('migrateExtrasExtrasToAgentsExtras', () => {
 
   it('walks all agents and versions', () => {
     const historyDir = makeTempHistoryDir();
-    for (const [agentId, ver] of [['claude', '2.1.143'], ['codex', '0.117.0'], ['gemini', '0.26.0']] as const) {
+    for (const [agentId, ver] of [['claude', '2.1.143'], ['codex', '0.117.0'], ['grok', '0.26.0']] as const) {
       const { pluginsDir, marketplacesDir } = seedVersionHome(historyDir, agentId, ver);
       seedExtrasExtras(marketplacesDir, pluginsDir, agentId, ver, historyDir);
     }
     migrateExtrasExtrasToAgentsExtras(historyDir);
-    for (const [agentId, ver] of [['claude', '2.1.143'], ['codex', '0.117.0'], ['gemini', '0.26.0']] as const) {
+    for (const [agentId, ver] of [['claude', '2.1.143'], ['codex', '0.117.0'], ['grok', '0.26.0']] as const) {
       const marketplacesDir = path.join(historyDir, 'versions', agentId, ver, 'home', `.${agentId}`, 'plugins', 'marketplaces');
       expect(fs.existsSync(path.join(marketplacesDir, 'extras-extras'))).toBe(false);
       expect(fs.existsSync(path.join(marketplacesDir, 'agents-extras'))).toBe(true);
@@ -1082,7 +1082,7 @@ describe('removeHomeCompiledProjectRules (RUSH-2725)', () => {
     fs.writeFileSync(path.join(home, 'AGENTS.md'), compiled);
     fs.symlinkSync('AGENTS.md', path.join(home, 'CLAUDE.md'));
     // Symlink-less-filesystem fallback: a copy of AGENTS.md, same header.
-    fs.writeFileSync(path.join(home, 'GEMINI.md'), compiled);
+    fs.writeFileSync(path.join(home, '.cursorrules'), compiled);
     // User-authored per-agent file: no compiled header, must survive.
     fs.writeFileSync(path.join(home, 'MEMORY.md'), '# my own notes\n');
 
@@ -1090,7 +1090,7 @@ describe('removeHomeCompiledProjectRules (RUSH-2725)', () => {
 
     expect(fs.existsSync(path.join(home, 'AGENTS.md'))).toBe(false);
     expect(fs.existsSync(path.join(home, 'CLAUDE.md'))).toBe(false);
-    expect(fs.existsSync(path.join(home, 'GEMINI.md'))).toBe(false);
+    expect(fs.existsSync(path.join(home, '.cursorrules'))).toBe(false);
     expect(fs.readFileSync(path.join(home, 'MEMORY.md'), 'utf8')).toBe('# my own notes\n');
   });
 

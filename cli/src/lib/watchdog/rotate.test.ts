@@ -196,8 +196,8 @@ describe('exitSequenceFor (per-harness table)', () => {
   it('claude: Esc, Ctrl+C, Ctrl+C', () => {
     expect(exitSequenceFor('claude')).toEqual(['\x1b', '\x03', '\x03']);
   });
-  it('codex / gemini / cursor / opencode: Ctrl+C twice', () => {
-    for (const agent of ['codex', 'gemini', 'cursor', 'opencode']) {
+  it('codex / cursor / opencode: Ctrl+C twice', () => {
+    for (const agent of ['codex', 'cursor', 'opencode']) {
       expect(exitSequenceFor(agent)).toEqual(['\x03', '\x03']);
     }
   });

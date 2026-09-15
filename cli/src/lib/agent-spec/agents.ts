@@ -384,46 +384,6 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
     // ~/.codex/agents/*.toml (name, description, developer_instructions).
     capabilities: { hooks: { since: '0.116.0' }, mcp: true, mcpHttp: true, mcpHeaders: false, allowlist: { since: '0.138.0' }, skills: true, commands: { until: '0.117.0' }, plugins: { since: '0.128.0' }, subagents: { since: '0.117.0' }, rules: { file: 'AGENTS.md' }, workflows: false, memory: true, modes: ['plan', 'edit', 'auto', 'skip'], interactiveRepl: true },
   },
-  gemini: {
-    id: 'gemini',
-    name: 'Gemini',
-    sessionDir: ['.gemini', 'tmp'],
-    sessionFileExt: '.json',
-    versionStdoutMatch: 'semver',
-    unmanagedBinary: 'path',
-    mcpRegister: 'cli',
-    mcpAddHttp: 'transport',
-    mcpAddStdio: 'simple',
-    mcpConfigWrite: 'json-mcpServers',
-    color: 'blue',
-    cliCommand: 'gemini',
-    npmPackage: '@google/gemini-cli',
-    configDir: path.join(HOME, '.gemini'),
-    commandsDir: path.join(HOME, '.gemini', 'commands'),
-    commandsSubdir: 'commands',
-    skillsDir: path.join(HOME, '.gemini', 'skills'),
-    hooksDir: 'hooks',
-    instructionsFile: 'GEMINI.md',
-    format: 'toml',
-    variableSyntax: '{{args}}',
-    supportsHooks: true,
-    nativeAgentsSkillsDir: true,
-    // Google retired the Gemini CLI (announced at Google I/O 2026, May 19); the `gemini`
-    // command stopped serving free/Pro/Ultra requests on June 18, 2026. Antigravity CLI
-    // (`agy`) is the official successor. Hard deprecation keeps legacy Gemini
-    // sessions/config parseable while blocking install/import/sync.
-    deprecated: {
-      by: 'Google',
-      date: 'June 18, 2026',
-      reason: 'The Gemini CLI was retired for free, Pro, and Ultra tiers and no longer serves requests (announced at Google I/O 2026 on May 19).',
-      replacement: 'antigravity',
-      url: 'https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/',
-      hard: true,
-    },
-    // gemini hooks: shipped in v0.26.0 (Jan 2026); older binaries silently ignore the `hooks` key.
-    // extensions: gemini-extension.json bundles shipped in v0.8.0; custom subagents in v0.36.0.
-    capabilities: { hooks: { since: '0.26.0' }, mcp: true, mcpHttp: true, mcpHeaders: false, allowlist: true, skills: true, commands: true, plugins: { since: '0.8.0' }, subagents: { since: '0.36.0' }, rules: { file: 'GEMINI.md' }, workflows: false, memory: false, modes: ['plan', 'edit', 'skip'], rulesImports: true, interactiveRepl: false },
-  },
   cursor: {
     id: 'cursor',
     name: 'Cursor',
@@ -1101,16 +1061,13 @@ export const ALL_AGENT_IDS: AgentId[] = Object.keys(AGENTS) as AgentId[];
  * import (runner.ts already imports from routines.ts).
  *
  * This is a curated subset of AGENT_COMMANDS, not "every harness that can run
- * headlessly". Expanding it is a product change (gemini is hard-deprecated and
- * is deliberately absent). Argv itself is baked from AGENT_COMMANDS in
- * daemon/runner.ts bakeRoutineArgv — do not reintroduce a second token table.
+ * headlessly". Expanding it is a product change. Argv itself is baked from
+ * AGENT_COMMANDS in daemon/runner.ts bakeRoutineArgv — do not reintroduce a
+ * second token table.
  */
 export const ROUTINE_AGENT_IDS: readonly string[] = Object.freeze([
   'claude',
   'codex',
-  // gemini is hard-deprecated (Antigravity replaced it) — no routine target. A
-  // legacy gemini routine now fails validateJob loud instead of firing a
-  // retired backend; the id survives only for reading old sessions/config.
   'cursor',
   'kimi',
   'droid',
@@ -1481,7 +1438,6 @@ export function accountOrgBadge(
 export const ACCOUNT_INSPECTION_AGENT_IDS = [
   'claude',
   'codex',
-  'gemini',
   'cursor',
   'grok',
   'antigravity',
@@ -1576,7 +1532,6 @@ function resolveAccountCredentialPath(base: string, ...segments: string[]): stri
 const CREDENTIAL_FILE_SEGMENTS: Partial<Record<AgentId, string[][]>> = {
   claude: [['.claude', '.claude.json'], ['.claude.json']],
   codex: [['.codex', 'auth.json']],
-  gemini: [['.gemini', 'google_accounts.json']],
   grok: [['.grok', 'auth.json']],
   kimi: [['.kimi-code', 'credentials', 'kimi-code.json']],
   droid: [['.factory', 'auth.v2.file']],
@@ -2253,7 +2208,6 @@ export async function getAccountInfo(
   const configFiles: Partial<Record<AgentId, string>> = {
     claude: path.join(base, '.claude.json'),
     codex: path.join(base, '.codex', 'auth.json'),
-    gemini: path.join(base, '.gemini', 'google_accounts.json'),
     // OpenCode keeps every session in ONE sqlite file rather than a directory of
     // per-session transcripts, so the session-file walk resolveLastActive runs
     // for other agents finds nothing. Its mtime fallback is the right read here:
@@ -2380,11 +2334,6 @@ export async function getAccountInfo(
           lastActive,
           signedIn: !!email,
         };
-      }
-      case 'gemini': {
-        const data = JSON.parse(await fs.promises.readFile(path.join(base, '.gemini', 'google_accounts.json'), 'utf-8'));
-        const email = data.active || null;
-        return { ...empty, email, signedIn: !!email, lastActive };
       }
       case 'cursor': {
         // Cursor CLI keeps account metadata in ~/.cursor/cli-config.json
@@ -3223,9 +3172,8 @@ function parseMcpFromOpenCodeConfig(configPath: string): Record<string, McpConfi
  *
  * All three MCP path resolvers read `MCP_TARGETS`, so the file the writer
  * targets, the file the parser reads, and the file the staleness detector
- * watches cannot drift apart. An agent with no MCP target (the hard-deprecated
- * `gemini`) keeps the historical settings.json default so old configs still
- * parse.
+ * watches cannot drift apart. An agent with no MCP target keeps the historical
+ * settings.json default so old configs still parse.
  */
 export function getUserMcpConfigPath(agentId: AgentId): string {
   return getMcpConfigPathForHome(agentId, HOME);
@@ -3376,9 +3324,6 @@ const AGENT_NAME_ALIASES: Record<string, AgentId> = {
   codex: 'codex',
   'openai-codex': 'codex',
   cx: 'codex',
-  gemini: 'gemini',
-  'gemini-cli': 'gemini',
-  gx: 'gemini',
   cursor: 'cursor',
   'cursor-agent': 'cursor',
   cr: 'cursor',

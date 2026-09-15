@@ -324,7 +324,6 @@ describeEventsIo('events', () => {
 
     it.each([
       ['CX-123', 'codex'],
-      ['GX-123', 'gemini'],
       ['CR-123', 'cursor'],
       ['CC-123', 'claude'],
     ])('maps swarmify terminal %s to %s', (terminalId, kind) => {

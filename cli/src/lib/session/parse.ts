@@ -180,7 +180,6 @@ function truncateNormalizedToolOutput(output: string, maxChars: number): string 
 const TRANSCRIPT_PARSERS: Record<SessionAgentId, (filePath: string, opts: ParseSessionOptions) => SessionEvent[]> = {
   claude: (filePath, opts) => parseClaude(filePath, opts),
   codex: (filePath) => parseCodex(filePath),
-  gemini: (filePath) => parseGemini(filePath),
   antigravity: (filePath) => parseAntigravity(filePath),
   // Cloud-captured opencode sessions are normalized JSONL (produced by the
   // factory at capture time), NOT the local `opencode.db#<session>` SQLite
@@ -228,12 +227,9 @@ export function parseSession(
 export function detectAgent(filePath: string): SessionAgentId | null {
   if (filePath.includes('/.claude/') || filePath.includes('\\.claude\\')) return 'claude';
   if (filePath.includes('/.codex/') || filePath.includes('\\.codex\\')) return 'codex';
-  // Antigravity lives under ~/.gemini/antigravity-cli/conversations/<uuid>.db, so
-  // it must be matched BEFORE the generic /.gemini/ check below or it would be
-  // misdetected as Gemini.
+  // Antigravity lives under ~/.gemini/antigravity-cli/conversations/<uuid>.db.
   if ((filePath.includes('/antigravity-cli/conversations/') || filePath.includes('\\antigravity-cli\\conversations\\'))
       && filePath.endsWith('.db')) return 'antigravity';
-  if (filePath.includes('/.gemini/') || filePath.includes('\\.gemini\\')) return 'gemini';
   if (filePath.includes('/.grok/') || filePath.includes('\\.grok\\')) return 'grok';
   if (filePath.includes('/.rush/') || filePath.includes('\\.rush\\')) return 'rush';
   if (filePath.includes('/.hermes/') || filePath.includes('\\.hermes\\')) return 'hermes';
@@ -254,8 +250,6 @@ export function detectAgent(filePath: string): SessionAgentId | null {
   if (cloudMatch) return cloudMatch[1] as SessionAgentId;
   if (filePath.includes('opencode.db')) return 'opencode';
 
-  // Try file extension + content heuristic
-  if (filePath.endsWith('.json')) return 'gemini';
   return null;
 }
 
@@ -1085,142 +1079,6 @@ export function parseCodexContent(content: string): SessionEvent[] {
   }
 
   return events;
-}
-
-// ---------------------------------------------------------------------------
-// Gemini parser
-// ---------------------------------------------------------------------------
-
-/** Parse a Gemini JSON session file into normalized events. */
-export function parseGemini(filePath: string): SessionEvent[] {
-  const content = safeReadSessionFile(filePath);
-  let session: any;
-  try {
-    session = JSON.parse(content);
-  } catch {
-    /* Gemini session file is not valid JSON */
-    throw new Error(`Failed to parse Gemini session: ${filePath}`);
-  }
-
-  const messages = session.messages || [];
-  const events: SessionEvent[] = [];
-
-  events.push({
-    type: 'init',
-    agent: 'gemini',
-    timestamp: session.startTime || new Date().toISOString(),
-    content: `Gemini session ${session.sessionId || ''}`.trim(),
-  });
-
-  for (const msg of messages) {
-    const timestamp = msg.timestamp || session.startTime || new Date().toISOString();
-
-    if (msg.type === 'user') {
-      const text = extractGeminiContent(msg.content);
-      if (text) {
-        events.push({
-          type: 'message',
-          agent: 'gemini',
-          timestamp,
-          role: 'user',
-          content: text,
-        });
-      }
-    } else if (msg.type === 'gemini') {
-      // Reasoning thoughts
-      if (Array.isArray(msg.thoughts)) {
-        for (const thought of msg.thoughts) {
-          const text = thought.description || thought.subject || '';
-          if (text.trim()) {
-            const subject = thought.subject ? `**${thought.subject}**: ` : '';
-            events.push({
-              type: 'thinking',
-              agent: 'gemini',
-              timestamp: thought.timestamp || timestamp,
-              content: `${subject}${thought.description || ''}`.trim(),
-            });
-          }
-        }
-      }
-
-      // Assistant text
-      const text = extractGeminiContent(msg.content);
-      if (text) {
-        events.push({
-          type: 'message',
-          agent: 'gemini',
-          timestamp,
-          role: 'assistant',
-          content: text,
-        });
-      }
-
-      // Tool calls (Gemini inlines call + result on the same message)
-      if (Array.isArray(msg.toolCalls)) {
-        for (const tc of msg.toolCalls) {
-          const toolName = tc.name || 'unknown';
-          const args = tc.args || {};
-
-        events.push({
-          type: 'tool_use',
-          agent: 'gemini',
-          timestamp: tc.timestamp || timestamp,
-          tool: toolName,
-          callId: typeof tc.id === 'string' ? tc.id : undefined,
-          args,
-            command: ['run_shell_command', 'shell', 'bash'].includes(toolName) ? args.command : undefined,
-            path: args.file_path || args.path || undefined,
-          });
-
-          // Inline result
-          if (tc.result || tc.status) {
-            let output = '';
-            if (Array.isArray(tc.result)) {
-              for (const r of tc.result) {
-                const resp = r?.functionResponse?.response;
-                if (resp?.output) {
-                  output += String(resp.output);
-                }
-              }
-            } else if (typeof tc.result === 'string') {
-              output = tc.result;
-            }
-
-            events.push({
-              type: 'tool_result',
-              agent: 'gemini',
-              timestamp: tc.timestamp || timestamp,
-              tool: toolName,
-              callId: typeof tc.id === 'string' ? tc.id : undefined,
-              success: tc.status === 'success',
-              output,
-            });
-          }
-        }
-      }
-    }
-  }
-
-  return events;
-}
-
-/**
- * Extract text content from Gemini's content field,
- * which can be a string or an array of {text: string} parts.
- */
-function extractGeminiContent(content: any): string {
-  if (typeof content === 'string') return content.trim();
-  if (Array.isArray(content)) {
-    return content
-      .map((part: any) => {
-        if (typeof part === 'string') return part;
-        if (typeof part?.text === 'string') return part.text;
-        return '';
-      })
-      .join('\n')
-      .trim();
-  }
-  return '';
 }
 
 // Antigravity's undocumented protobuf stores tool name in f2, JSON args in f3,

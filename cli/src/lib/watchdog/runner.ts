@@ -654,7 +654,7 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
       session,
       candidate: {
         terminalId: sid,
-        agentType: session.kind === 'codex' || session.kind === 'gemini' ? session.kind : 'claude',
+        agentType: session.kind === 'codex' ? 'codex' : 'claude',
         tailLines: tail,
         stalledForMs: st.stalledForMs,
         task: session.topic ?? session.label ?? session.name,
@@ -788,7 +788,7 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
     const tailLines = tailCache.get(session.sessionId) ?? tailFor(session);
     const candidate: WatchdogCandidate = {
       terminalId: session.sessionId,
-      agentType: (session.kind === 'codex' || session.kind === 'gemini' ? session.kind : 'claude'),
+      agentType: (session.kind === 'codex' ? 'codex' : 'claude'),
       tailLines,
       stalledForMs: status.stalledForMs,
     };

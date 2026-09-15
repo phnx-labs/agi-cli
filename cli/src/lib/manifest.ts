@@ -136,7 +136,7 @@ export function createDefaultManifest(): Manifest {
     defaults: {
       method: 'symlink',
       scope: 'global',
-      agents: ['claude', 'codex', 'gemini', 'cursor', 'opencode'],
+      agents: ['claude', 'codex', 'cursor', 'opencode'],
     },
   };
 }

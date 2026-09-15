@@ -91,7 +91,7 @@ function migratePromptcutsToRoot(agentsDir: string, quiet = false): void {
   const rootPath = path.join(agentsDir, 'promptcuts.yaml');
   if (fs.existsSync(rootPath)) return;
 
-  const agentDirs = ['claude', 'codex', 'cursor', 'gemini', 'opencode'];
+  const agentDirs = ['claude', 'codex', 'cursor', 'opencode'];
   for (const dir of agentDirs) {
     const legacyPath = path.join(agentsDir, dir, 'promptcuts.yaml');
     if (fs.existsSync(legacyPath)) {
