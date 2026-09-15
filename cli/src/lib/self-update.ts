@@ -552,6 +552,23 @@ function setBunGlobalDependency(globalDir: string, spec: string | null): string 
 }
 
 /**
+ * A recovery edit of the manifest, for the paths that are already handling a
+ * failure. The write can itself fail (a global dir that went read-only, a full
+ * disk), and on those paths throwing would displace what actually went wrong:
+ * the install error on its way out, or — after an install that SUCCEEDED — an
+ * upgrade this code has no business failing. The pre-install clear is
+ * deliberately NOT routed through here: if that write fails the install cannot
+ * succeed anyway, and its error is the useful one to report.
+ */
+function restoreBunGlobalDependency(globalDir: string, spec: string | null): void {
+  try {
+    setBunGlobalDependency(globalDir, spec);
+  } catch {
+    /* best-effort — the caller is already reporting something more important */
+  }
+}
+
+/**
  * Install `spec` into bun's global store at `globalDir` with `bun add -g`. bun
  * writes to `<globalDir>/node_modules/<pkg>`, which is exactly the running
  * package root for a bun install — so verifyInstalledVersion() sees the new
@@ -608,7 +625,7 @@ export async function installPackageWithBun(spec: string, globalDir: string, sig
     // and bun treats an unpinned package as not installed: `bun remove -g`
     // then reports success and removes nothing, and `bun pm ls -g` stops
     // listing it. Put back what was there.
-    setBunGlobalDependency(globalDir, previous);
+    restoreBunGlobalDependency(globalDir, previous);
     throw err;
   }
   try {
@@ -619,7 +636,7 @@ export async function installPackageWithBun(spec: string, globalDir: string, sig
     // the tarball, the caller is about to delete it, and a manifest naming a
     // missing file breaks every later `bun add -g`, while an absent entry
     // leaves the installed package and its bin links working.
-    setBunGlobalDependency(globalDir, null);
+    restoreBunGlobalDependency(globalDir, null);
   }
 }
 

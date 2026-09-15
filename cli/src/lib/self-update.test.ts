@@ -1358,6 +1358,24 @@ describe.skipIf(!hasBun())('installPackageWithBun', () => {
     expect(readManifest().trustedDependencies).toEqual(trusted);
   });
 
+  it('surfaces an unwritable global dir instead of letting bun fail on the stale pin', { timeout: 120_000 }, async () => {
+    // The pre-install clear is deliberately NOT best-effort. If it cannot write,
+    // the install could not have succeeded anyway, and EACCES on the manifest
+    // names the real problem — where swallowing it would hand the caller bun's
+    // DependencyLoop instead, which describes a symptom of this failure.
+    seedBunPrefix({ dependencies: { [NPM_PACKAGE_NAME]: '1.22.115' } });
+    const globalDir = bunGlobalDir();
+    fs.chmodSync(globalDir, 0o555);
+
+    try {
+      await expect(installPackageWithBun(packAgentsCli('1.22.117'), globalDir)).rejects.toThrow(/EACCES/);
+    } finally {
+      fs.chmodSync(globalDir, 0o755);
+    }
+    // Nothing was written, so the pin the upgrade found is still there.
+    expect(readManifest().dependencies?.[NPM_PACKAGE_NAME]).toBe('1.22.115');
+  });
+
   it('installs into the directory it is given, not the one BUN_INSTALL names', { timeout: 120_000 }, async () => {
     // detectPackageManager() routes a relocated bun install here whose
     // BUN_INSTALL this process never saw. If the parameter steered only the
