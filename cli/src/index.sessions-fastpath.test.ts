@@ -115,8 +115,8 @@ describe('index.ts sessions read fast-path (PHNX-4012)', () => {
     }
   });
 
-  it('forwards --host to a >=0.3.0 standalone, argv intact (PHNX-4012 remote read)', () => {
-    const bin = stubSessionsVersioned('0.3.0');
+  it('forwards --host to a >=0.2.1 standalone, argv intact (PHNX-4012 remote read)', () => {
+    const bin = stubSessionsVersioned('0.2.1');
     const r = spawnSync('bun', [INDEX, 'sessions', 'auth', '--host', 'box', '--json'], {
       cwd: REPO_ROOT,
       env: { ...process.env, SESSIONS_BIN: bin, AGENTS_NO_AUTOPULL: '1' },
@@ -129,12 +129,12 @@ describe('index.ts sessions read fast-path (PHNX-4012)', () => {
     expect(argv).toEqual(['auth', '--host', 'box', '--json']);
   });
 
-  it('routes a read --device query through the standalone --host (>=0.3.0), --device stripped', () => {
+  it('routes a read --device query through the standalone --host (>=0.2.1), --device stripped', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-device-host-'));
     temps.push(home);
     writeUpdateCache(home);
     const devicesDir = writeDeviceRegistry(home, ['box']);
-    const bin = stubSessionsVersioned('0.3.0');
+    const bin = stubSessionsVersioned('0.2.1');
     const r = runAgents(['sessions', 'auth', '--device', 'box', '--json'], REPO_ROOT, home, {
       SESSIONS_BIN: bin,
       AGENTS_DEVICES_DIR: devicesDir,
@@ -151,7 +151,7 @@ describe('index.ts sessions read fast-path (PHNX-4012)', () => {
     temps.push(home);
     writeUpdateCache(home);
     const devicesDir = writeDeviceRegistry(home, ['box', 'mac-mini']);
-    const bin = stubSessionsVersioned('0.3.0');
+    const bin = stubSessionsVersioned('0.2.1');
     // Variadic `--device box mac-mini` is two devices; `--host` is point-to-one,
     // so the whole query must stay on the in-repo fan-out (which answers with a
     // merged array, [] for the unreachable peers) — the standalone is never
@@ -171,7 +171,7 @@ describe('index.ts sessions read fast-path (PHNX-4012)', () => {
     temps.push(home);
     writeUpdateCache(home);
     const devicesDir = writeDeviceRegistry(home, ['box']);
-    const bin = stubSessionsHost127('0.3.0');
+    const bin = stubSessionsHost127('0.2.1');
     const r = runAgents(['sessions', 'auth', '--device', 'box', '--json'], REPO_ROOT, home, {
       SESSIONS_BIN: bin,
       AGENTS_DEVICES_DIR: devicesDir,
@@ -204,12 +204,12 @@ describe('index.ts sessions read fast-path (PHNX-4012)', () => {
     expect(fs.existsSync(path.join(path.dirname(bin), 'argv'))).toBe(false);
   });
 
-  it('never rewrites a lifecycle --device (resume) to --host, even at >=0.3.0', () => {
+  it('never rewrites a lifecycle --device (resume) to --host, even at >=0.2.1', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-device-host-life-'));
     temps.push(home);
     writeUpdateCache(home);
     const devicesDir = writeDeviceRegistry(home, ['box']);
-    const bin = stubSessionsVersioned('0.3.0');
+    const bin = stubSessionsVersioned('0.2.1');
     const r = runAgents(['sessions', 'resume', '--help', '--device', 'box'], REPO_ROOT, home, {
       SESSIONS_BIN: bin,
       AGENTS_DEVICES_DIR: devicesDir,

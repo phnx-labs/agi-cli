@@ -107,13 +107,13 @@ the 0.2.0 metadata filters/sort (`--project`/`--since`/`--until`/`--sort`, the
 `@version` suffix, the harness shorthands) forward only when the installed
 `sessions` is ≥ 0.2.0, and the point-to-one remote read `agents sessions <query>
 --host <target>` (SSH to ONE box, run `sessions … --local`, stream JSON back)
-forwards only when it is ≥ 0.3.0 — its own, higher floor. Below a floor, or with no
+forwards only when it is ≥ 0.2.1 — its own, higher floor. Below a floor, or with no
 standalone installed at all, that query stays on the in-repo engine (which
 implements the same filters and resolves `--device` against the fleet); nothing
 mis-routes or crashes. `--host` targets one box directly.
 
 A **read** `agents sessions <query> --device <name>` that names EXACTLY ONE device
-(no explicit `--host`) also takes this path when the local `sessions` is ≥ 0.3.0:
+(no explicit `--host`) also takes this path when the local `sessions` is ≥ 0.2.1:
 the device is resolved to its SSH target and the query is forwarded as `sessions
 <read args> --host ssh://<target>` — the standalone owns the remote hop, replacing
 the in-repo peer fan-out for that read (the same collapse `secrets`/`computer`
@@ -125,9 +125,9 @@ peers. It is safe because the peer may not have the standalone yet: if the remot
 `sessions` is not on the peer's PATH the SSH `bash -lc` exits **127**
 (command-not-found), and the read **falls through to the in-repo `--device`
 fan-out** so it still succeeds — a capability gate keyed on that one signal, a
-migration bridge until the fleet is uniformly on 0.3.0, after which the in-repo read
+migration bridge until the fleet is uniformly on 0.2.1, after which the in-repo read
 fan-out can be removed (a PHNX-4012 follow-up). Everything else (e.g. 255
-unreachable) is a real error and propagates. Below the 0.3.0 host floor, or with no
+unreachable) is a real error and propagates. Below the 0.2.1 host floor, or with no
 standalone installed, a `--device` read stays on the in-repo engine exactly as
 before. Only reads route this way: a lifecycle `--device` (resume / watch / inject /
 focus / …) keeps its in-repo / `runOnPeer` behavior, and an explicit `--host`

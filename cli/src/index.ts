@@ -167,7 +167,7 @@ if (process.argv[2] === 'sessions') {
   // Resolve the bin up front (a cheap PATH lookup): its presence decides whether
   // we can route at all, and its VERSION decides whether the 0.2.0 filter flags
   // (`--project`/`--since`/`--until`/`--sort`, `@version`, the shorthands) and the
-  // 0.3.0 `--host <target>` point-to-one remote read flag are recognized — an
+  // 0.2.1 `--host <target>` point-to-one remote read flag are recognized — an
   // older `sessions` would mis-read them as FTS tokens, so those queries stay on
   // the in-repo engine (which implements the same filters and the `--device`
   // fan-out). The two floors are checked independently: a 0.2.0 binary takes the
@@ -189,7 +189,7 @@ if (process.argv[2] === 'sessions') {
   // <name>` (and no explicit `--host`) routes through the standalone's
   // point-to-one remote read — `sessions <read args> --host ssh://<resolved>` —
   // instead of the in-repo `--device` peer fan-out, WHEN this box's standalone
-  // supports `--host` (>=0.3.0). `planDeviceHostRead` is pure and probes nothing,
+  // supports `--host` (>=0.2.1). `planDeviceHostRead` is pure and probes nothing,
   // so a non-device read never pays a `sessions --version` spawn (the probe fires
   // only after a device read is detected). If the PEER lacks the standalone the
   // ssh `bash -lc` command-not-found surfaces as exit 127 — a CAPABILITY gate
@@ -197,7 +197,7 @@ if (process.argv[2] === 'sessions') {
   // on which we FALL THROUGH to the in-repo `--device` fan-out below so the read
   // still succeeds. Everything else (e.g. 255 unreachable) propagates verbatim.
   // The in-repo fan-out is deliberately KEPT here as the path for un-upgraded
-  // peers; its eventual removal is a follow-up gated on fleet-wide 0.3.0 (a
+  // peers; its eventual removal is a follow-up gated on fleet-wide 0.2.1 (a
   // separate PHNX-4012 follow-up, see the PR body), not this PR.
   if (bin !== null) {
     const deviceRead = planDeviceHostRead(forwarded, { filters });
