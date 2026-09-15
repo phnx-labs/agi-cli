@@ -1304,19 +1304,12 @@ try {
   if (err instanceof Error && err.name === 'ExitPromptError') {
     process.exit(130);
   }
-  // Browser-service-not-running and CDP-not-reachable surface as typed errors
-  // from src/lib/browser/. Don't dump a Node stacktrace for these — they are
-  // user-actionable, not engineering bugs. See issues #41 and #43.
   if (err instanceof Error) {
-    const isBrowserServiceNotRunning = err.name === 'BrowserServiceNotRunningError';
-    const isBrowserCdpUnreachable = err.name === 'BrowserCdpConnectionError';
-    const isBrowserIpcDown =
-      err.message.startsWith('IPC error:') &&
-      (err.message.includes('ECONNREFUSED') || err.message.includes('ENOENT'));
-    if (isBrowserServiceNotRunning || isBrowserCdpUnreachable || isBrowserIpcDown) {
-      console.error(err.message);
-      process.exit(1);
-    }
+    // (The browser-service-not-running / CDP-unreachable / IPC-down typed errors
+    // were thrown by the in-repo browser engine, deleted with PHNX-4101; the
+    // standalone `browser` CLI now prints its own user-actionable errors and
+    // agents-cli forwards its exit code, so there is nothing to special-case here.)
+
     // A --device targeting a password-auth device throws this from resolveHost.
     // It carries an actionable message (switch to key auth / enroll as a host);
     // handling it here covers every resolveHost caller (run, hosts check/rm,

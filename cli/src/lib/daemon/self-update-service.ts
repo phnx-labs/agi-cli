@@ -19,12 +19,12 @@
  * package on disk, and only once that succeeds does it `process.exit(0)` —
  * the OS supervisor (launchd `KeepAlive` / systemd `Restart=always`, see
  * `daemon/AGENTS.md`'s crash-recovery model) relaunches the daemon, which
- * then boots the new code. Clients do not need to be told anything: browser
- * IPC clients re-probe the socket via `waitForBrowserService`
- * (`browser/ipc.ts`), and the scheduler's atomic `(routine, scheduledFor)`
- * claim (see `docs/specifications.md` §Scheduling & execution singularity)
- * means a routine mid-fire at the moment of exit is deduped safely across the
- * restart rather than double-fired.
+ * then boots the new code. Clients do not need to be told anything: a socket
+ * client re-probes and reconnects when the daemon relaunches, and the
+ * scheduler's atomic `(routine, scheduledFor)` claim (see
+ * `docs/specifications.md` §Scheduling & execution singularity) means a routine
+ * mid-fire at the moment of exit is deduped safely across the restart rather
+ * than double-fired.
  *
  * Fail-closed is the whole point: every step below that can fail — the
  * registry check, the install, the post-install verify — leaves the OLD
@@ -68,10 +68,13 @@ const SELF_UPDATE_TICK_MS = 75 * 60_000;
 /**
  * Hard cap per tick: a real download + npm/bun install + verify can
  * legitimately take minutes on a slow link. 15 minutes matches the task's
- * stated budget and is short relative to the ~75min cadence. Exported so the
- * on-demand `request-self-update` IPC handler (`browser/ipc.ts`) can bound
+ * stated budget and is short relative to the ~75min cadence. Exported so an
+ * on-demand self-update trigger ({@link triggerSelfUpdateInBackground}) can bound
  * its own `AbortController` on the SAME budget the periodic tick runs under —
  * one deadline, not two independently-tuned numbers that could drift apart.
+ * (Its former transport, the `request-self-update` verb on the daemon's browser
+ * IPC socket, left with the standalone `browser` CLI in PHNX-4101; the mechanism
+ * stays for a future on-demand caller.)
  */
 const SELF_UPDATE_DEADLINE_MS = 15 * 60_000;
 /**
@@ -258,14 +261,14 @@ let inFlightAttempt: Promise<SelfUpdateOutcome> | null = null;
 
 /**
  * Core self-update decision + action, shared by the periodic tick
- * ({@link SelfUpdateService.onTick}) and the on-demand IPC path
- * (`request-self-update`, `browser/ipc.ts`) — one implementation, so a
- * version-skew client asking "update now" runs exactly the same fail-closed
- * logic as the scheduled sweep. Returns rather than throws so callers decide
- * their own exit timing (the periodic service exits immediately; the IPC
- * handler must respond to the client on the socket BEFORE exiting, or the
- * client hangs on a socket that is closing mid-write). Concurrent callers
- * share one in-flight attempt rather than racing separate installs.
+ * ({@link SelfUpdateService.onTick}) and the on-demand trigger
+ * ({@link triggerSelfUpdateInBackground}) — one implementation, so a
+ * version-skew "update now" caller runs exactly the same fail-closed logic as the
+ * scheduled sweep. Returns rather than throws so callers decide their own exit
+ * timing (the periodic service exits immediately; an on-demand caller that must
+ * respond to a client BEFORE exiting delays via {@link scheduleSelfUpdateExit}).
+ * Concurrent callers share one in-flight attempt rather than racing separate
+ * installs.
  */
 export async function attemptSelfUpdateAndExit(
   ctx: DaemonContext,
@@ -370,14 +373,13 @@ let exitScheduled = false;
 /**
  * Schedule the process exit for a verified self-update, exactly once, no
  * matter how many callers observe `outcome.updated` on the shared
- * `inFlightAttempt` promise. The periodic tick and an on-demand
- * `request-self-update` IPC call (`browser/ipc.ts`) can both be awaiting that
- * SAME promise — if the tick's continuation ran an immediate `process.exit(0)`
- * while the IPC handler's continuation had not yet reached `socket.write`,
- * the tick's exit could win the race and the client would see a closed socket
- * before any response (found in review, PHNX-3695). Routing every caller
- * through this one guarded, always-delayed scheduling point means the delay
- * protects EVERY caller's in-flight response, not just the IPC handler's own.
+ * `inFlightAttempt` promise. The periodic tick and an on-demand caller can both
+ * be awaiting that SAME promise — if the tick's continuation ran an immediate
+ * `process.exit(0)` while an on-demand caller's continuation had not yet flushed
+ * its response to a client, the tick's exit could win the race and the client
+ * would see a closed socket before any response (found in review, PHNX-3695).
+ * Routing every caller through this one guarded, always-delayed scheduling point
+ * means the delay protects EVERY caller's in-flight response.
  */
 export function scheduleSelfUpdateExit(): void {
   if (exitScheduled) return;
@@ -386,17 +388,19 @@ export function scheduleSelfUpdateExit(): void {
 }
 
 /**
- * Fire the on-demand self-update in the BACKGROUND and return its (bounded)
- * promise WITHOUT the caller having to await it. This is what keeps the
- * `request-self-update` IPC handler (`browser/ipc.ts`) from parking a
- * version-skewed `agents browser` verb behind the full
- * check→download→install→verify: that handler routes through
- * `reconcileDaemonVersion` on every version-skewed call, so awaiting the whole
- * install there reintroduces exactly the client-stall PHNX-3605 was written to
- * prevent (tens of seconds, worst case ~15 min). The handler instead responds
- * "triggered" immediately and lets this run in the background — the daemon does
- * install→verify→exit(0) on its own, the OS supervisor relaunches it, and the
- * browser reconnects.
+ * Fire an on-demand self-update in the BACKGROUND and return its (bounded)
+ * promise WITHOUT the caller having to await it — the reusable primitive for a
+ * "update now" trigger that must respond to a client before the daemon exits.
+ * Awaiting the full check→download→install→verify inline would park the caller
+ * for tens of seconds (worst case ~15 min), the client-stall PHNX-3605 was
+ * written to prevent; instead a trigger responds "triggered" immediately and
+ * lets this run in the background — the daemon does install→verify→exit(0) on its
+ * own, the OS supervisor relaunches it, and the client reconnects.
+ *
+ * (Its one former production caller was the `request-self-update` verb on the
+ * daemon's browser IPC socket, removed with the standalone `browser` CLI in
+ * PHNX-4101. The primitive stays — tested and reusable — for a future on-demand
+ * trigger; the periodic tick does not use it, exiting inline instead.)
  *
  * The work still shares the module-level {@link attemptSelfUpdateAndExit}
  * `inFlightAttempt` guard, so a concurrent trigger (or the periodic tick) can't
@@ -407,7 +411,7 @@ export function scheduleSelfUpdateExit(): void {
  * `runSelfUpdateAttempt` already turns an install/verify failure into a
  * not-updated outcome that leaves the running daemon untouched. The caller
  * schedules the one decoupled {@link scheduleSelfUpdateExit} off the returned
- * promise once `updated` is true, so the exit still fires after the IPC
+ * promise once `updated` is true, so the exit still fires after the caller's
  * response has flushed.
  */
 export function triggerSelfUpdateInBackground(
