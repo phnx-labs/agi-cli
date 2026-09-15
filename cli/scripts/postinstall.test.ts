@@ -84,7 +84,7 @@ describe('postinstall alias shims', () => {
 
     expect(result.status, result.stderr).toBe(0);
 
-    const script = readShim(home, 'browser');
+    const script = readShim(home, 'teams');
     const match = script.match(/^AGENTS_BIN='([^']+)'$/m);
 
     expect(match).not.toBeNull();
@@ -92,8 +92,10 @@ describe('postinstall alias shims', () => {
     expect(match![1]).toBe(path.join(root, 'dist', 'index.js'));
     expect(script).toContain('if [ -z "$AGENTS_BIN" ] || [ ! -x "$AGENTS_BIN" ]; then');
     expect(script).toContain('agents: agents-cli entrypoint missing or not executable: $AGENTS_BIN');
-    expect(script).toContain('exec "$AGENTS_BIN" browser "$@"');
-    expect(script).not.toContain('exec agents browser "$@"');
+    expect(script).toContain('exec "$AGENTS_BIN" teams "$@"');
+    expect(script).not.toContain('exec agents teams "$@"');
+    // `browser` is a standalone CLI now (PHNX-4101) — never written as an alias shim.
+    expect(fs.existsSync(path.join(home, '.agents', '.cache', 'shims', 'browser'))).toBe(false);
   });
 
   it('shims-only mode writes aliases silently without the install flow', () => {
@@ -111,7 +113,7 @@ describe('postinstall alias shims', () => {
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe('');
 
-    for (const name of ['browser', 'teams']) {
+    for (const name of ['teams']) {
       const script = readShim(home, name);
       expect(script).toContain(`exec "$AGENTS_BIN" ${name} "$@"`);
       expect(script).toContain(path.join(root, 'dist', 'index.js'));
@@ -120,9 +122,10 @@ describe('postinstall alias shims', () => {
     expect(fs.existsSync(path.join(home, '.agents', '.cache', 'shims', 'secrets'))).toBe(false);
     expect(fs.existsSync(path.join(home, '.agents', '.cache', 'shims', 'sessions'))).toBe(false);
     expect(fs.existsSync(path.join(home, '.agents', '.cache', 'shims', 'pty'))).toBe(false);
+    expect(fs.existsSync(path.join(home, '.agents', '.cache', 'shims', 'browser'))).toBe(false);
   });
 
-  it('removes the retired `secrets` alias a previous install wrote, and only that (PHNX-3989)', () => {
+  it('removes a retired standalone-CLI alias a previous install wrote, and only that (PHNX-3989/4101)', () => {
     // An in-place upgrade from a pre-standalone release leaves the old alias
     // behind; every install path runs this script, so this is where it goes.
     const home = makeTempHome();
@@ -143,6 +146,12 @@ describe('postinstall alias shims', () => {
       `#!/bin/sh\nAGENTS_BIN='/old/install/dist/index.js'\nexec "$AGENTS_BIN" pty "$@"\n`,
       { mode: 0o755 },
     );
+    // browser (PHNX-4101): the engine moved to the standalone browser-cli.
+    fs.writeFileSync(
+      path.join(shims, 'browser'),
+      `#!/bin/sh\nAGENTS_BIN='/old/install/dist/index.js'\nexec "$AGENTS_BIN" browser "$@"\n`,
+      { mode: 0o755 },
+    );
     // An unrelated file under a retired name is not ours and must survive.
     const foreign = path.join(shims, 'secrets-foreign');
     fs.writeFileSync(foreign, '#!/bin/sh\necho unrelated\n', { mode: 0o755 });
@@ -158,8 +167,9 @@ describe('postinstall alias shims', () => {
     expect(fs.existsSync(path.join(shims, 'secrets.cmd'))).toBe(false);
     expect(fs.existsSync(path.join(shims, 'sessions'))).toBe(false);
     expect(fs.existsSync(path.join(shims, 'pty'))).toBe(false);
+    expect(fs.existsSync(path.join(shims, 'browser'))).toBe(false);
     expect(fs.existsSync(foreign)).toBe(true);
-    expect(readShim(home, 'browser')).toContain('exec "$AGENTS_BIN" browser "$@"');
+    expect(readShim(home, 'teams')).toContain('exec "$AGENTS_BIN" teams "$@"');
   });
 
   it("leaves a user's own `# Alias shim:` under a retired name alone", () => {
@@ -192,7 +202,7 @@ describe('postinstall signed-binary resolution (#315)', () => {
       const result = runPostinstall(root, home);
 
       expect(result.status, result.stderr).toBe(0);
-      const script = readShim(home, 'browser');
+      const script = readShim(home, 'teams');
       const match = script.match(/^AGENTS_BIN='([^']+)'$/m);
       expect(match).not.toBeNull();
       expect(match![1]).toBe(path.join(root, 'dist', 'bin', 'agents'));
@@ -208,7 +218,7 @@ describe('postinstall signed-binary resolution (#315)', () => {
 
       expect(result.status, result.stderr).toBe(0);
       expect(result.stderr).toContain('failed to run');
-      const script = readShim(home, 'browser');
+      const script = readShim(home, 'teams');
       const match = script.match(/^AGENTS_BIN='([^']+)'$/m);
       expect(match).not.toBeNull();
       expect(match![1]).toBe(path.join(root, 'dist', 'index.js'));
@@ -223,7 +233,7 @@ describe('postinstall signed-binary resolution (#315)', () => {
       const result = runPostinstall(root, home);
 
       expect(result.status, result.stderr).toBe(0);
-      const script = readShim(home, 'browser');
+      const script = readShim(home, 'teams');
       const match = script.match(/^AGENTS_BIN='([^']+)'$/m);
       expect(match).not.toBeNull();
       expect(match![1]).toBe(path.join(root, 'dist', 'index.js'));
