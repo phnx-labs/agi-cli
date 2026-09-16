@@ -20,6 +20,12 @@ describe('buildImessageOsascriptArgs', () => {
     const args = buildImessageOsascriptArgs('say "hi" \\ there', '+18055550100');
     expect(args[1]).toContain('send "say \\"hi\\" \\\\ there"');
   });
+
+  it('escapes the phone parameter to prevent AppleScript injection', () => {
+    const malicious = '" & (do shell script "rm -rf /") & "';
+    const args = buildImessageOsascriptArgs('hello', malicious);
+    expect(args[1]).toContain('buddy "\\" & (do shell script \\"rm -rf /\\") & \\""');
+  });
 });
 
 describe('buildSlackPayload', () => {

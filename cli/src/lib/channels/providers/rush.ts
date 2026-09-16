@@ -24,13 +24,18 @@ export const RUSH_CHANNELS: RushChannel[] = ['telegram', 'imessage', 'slack', 'd
 
 // ── iMessage via osascript ──────────────────────────────────────────────
 
+function escapeAppleScript(s: string): string {
+  return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
 /** Build the osascript argv for sending an iMessage. */
 export function buildImessageOsascriptArgs(text: string, phone: string): string[] {
-  const escaped = text.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const escapedText = escapeAppleScript(text);
+  const escapedPhone = escapeAppleScript(phone);
   const script = [
     'tell application "Messages"',
-    `  set targetBuddy to buddy "${phone}" of (first account whose service type is iMessage)`,
-    `  send "${escaped}" to targetBuddy`,
+    `  set targetBuddy to buddy "${escapedPhone}" of (first account whose service type is iMessage)`,
+    `  send "${escapedText}" to targetBuddy`,
     'end tell',
   ].join('\n');
   return ['-e', script];
@@ -56,15 +61,10 @@ async function sendImessage(text: string, opts: SendOptions): Promise<SendResult
 
 // ── Slack via Web API ───────────────────────────────────────────────────
 
-let _slackToken: string | undefined;
-
-function resolveSlackToken(): string | undefined {
-  if (_slackToken) return _slackToken;
-
+export function resolveSlackToken(): string | undefined {
   // 1. Environment variable (set by `secrets exec` or the daemon).
   if (process.env.SLACK_BOT_TOKEN) {
-    _slackToken = process.env.SLACK_BOT_TOKEN;
-    return _slackToken;
+    return process.env.SLACK_BOT_TOKEN;
   }
 
   // 2. Secrets bundle — the webhook receiver bundle carries SLACK_BOT_TOKEN
@@ -78,8 +78,7 @@ function resolveSlackToken(): string | undefined {
     };
     const { env } = readAndResolveBundleEnvSync('webhooks', { caller: 'slack-provider', agentOnly: true });
     if (env.SLACK_BOT_TOKEN) {
-      _slackToken = env.SLACK_BOT_TOKEN;
-      return _slackToken;
+      return env.SLACK_BOT_TOKEN;
     }
   } catch {
     // Bundle missing, store locked, or secrets CLI not available — not fatal.

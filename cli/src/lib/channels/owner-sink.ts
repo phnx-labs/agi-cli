@@ -21,7 +21,7 @@
 import { platform } from 'os';
 import type { Meta } from '../types.js';
 import { readOwnerDest } from './send.js';
-import { RUSH_CHANNELS } from './providers/rush.js';
+import { RUSH_CHANNELS, resolveSlackToken } from './providers/rush.js';
 
 export type OwnerSinkReason =
   | 'imessage-not-macos'
@@ -54,20 +54,8 @@ export async function probeOwnerSink(meta: Meta): Promise<OwnerSinkStatus> {
   }
 
   if (transport === 'slack') {
-    if (process.env.SLACK_BOT_TOKEN) {
+    if (resolveSlackToken()) {
       return { configured: true, reachable: true, channel, transport };
-    }
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { readAndResolveBundleEnvSync } = require('../secrets-client.js') as {
-        readAndResolveBundleEnvSync: (name: string, opts?: Record<string, unknown>) => { env: Record<string, string> };
-      };
-      const { env } = readAndResolveBundleEnvSync('webhooks', { caller: 'owner-sink-probe', agentOnly: true });
-      if (env.SLACK_BOT_TOKEN) {
-        return { configured: true, reachable: true, channel, transport };
-      }
-    } catch {
-      // Bundle missing or store locked.
     }
     return { configured: true, reachable: false, channel, transport, reason: 'slack-no-token' };
   }
