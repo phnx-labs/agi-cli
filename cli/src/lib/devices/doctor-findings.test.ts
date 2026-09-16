@@ -837,33 +837,31 @@ describe('remediationFor', () => {
     expect(remediationFor({ ...base, kind: 'stale-cli' })).toBe('upgrade');
   });
 
-  it('owner-sink-unreachable → the rush PATH + login fix', () => {
+  it('owner-sink-unreachable → transport-specific remediation', () => {
     const r = remediationFor({ ...base, kind: 'owner-sink-unreachable' });
-    // Names the two real levers: non-interactive PATH (RUSH-2258) and login.
-    expect(r).toContain('~/.zshenv');
-    expect(r).toContain('rush login');
+    expect(r).toContain('SLACK_BOT_TOKEN');
   });
 });
 
 describe('owner-sink-unreachable finding (RUSH-2262)', () => {
   it('a configured-but-unreachable owner lane is a CRITICAL naming the reason', () => {
-    const notOnPath = buildLocalFindings(localInput({
-      ownerSink: { configured: true, reachable: false, channel: 'imessage', reason: 'rush-not-on-path' },
+    const notMacos = buildLocalFindings(localInput({
+      ownerSink: { configured: true, reachable: false, channel: 'imessage', reason: 'imessage-not-macos' },
     }));
-    expect(notOnPath).toHaveLength(1);
-    expect(notOnPath[0]).toMatchObject({
+    expect(notMacos).toHaveLength(1);
+    expect(notMacos[0]).toMatchObject({
       severity: 'critical', kind: 'owner-sink-unreachable', device: 'boxA',
     });
-    expect(notOnPath[0].message).toContain('imessage');
-    expect(notOnPath[0].message).toContain("not on this box's PATH");
+    expect(notMacos[0].message).toContain('imessage');
+    expect(notMacos[0].message).toContain('macOS');
 
-    const signedOut = buildLocalFindings(localInput({
-      ownerSink: { configured: true, reachable: false, channel: 'imessage', reason: 'rush-signed-out' },
+    const noToken = buildLocalFindings(localInput({
+      ownerSink: { configured: true, reachable: false, channel: 'slack', reason: 'slack-no-token' },
     }));
-    expect(signedOut).toHaveLength(1);
-    expect(signedOut[0].message).toContain('no usable session here');
+    expect(noToken).toHaveLength(1);
+    expect(noToken[0].message).toContain('SLACK_BOT_TOKEN');
     // Severity emitted matches FINDING_SEVERITY — the rubric-consistency contract.
-    expect(signedOut[0].severity).toBe(FINDING_SEVERITY['owner-sink-unreachable']);
+    expect(noToken[0].severity).toBe(FINDING_SEVERITY['owner-sink-unreachable']);
   });
 
   it('a reachable owner lane emits NO finding', () => {
@@ -883,7 +881,7 @@ describe('owner-sink-unreachable finding (RUSH-2262)', () => {
 
   it('renders in the CRITICAL section with an `owner` subject, not a blank label', () => {
     const findings = buildLocalFindings(localInput({
-      ownerSink: { configured: true, reachable: false, channel: 'imessage', reason: 'rush-signed-out' },
+      ownerSink: { configured: true, reachable: false, channel: 'slack', reason: 'slack-no-token' },
     }));
     const out = renderFindings(findings, { boxA: {} }, { fleet: false, baseline: 'boxA' })
       .map(stripAnsi);
@@ -892,7 +890,7 @@ describe('owner-sink-unreachable finding (RUSH-2262)', () => {
     // Left column is `owner` (subjectLabel would be empty for a no-agent finding),
     // and the row carries its remediation.
     expect(critLine).toMatch(/\bowner\b/);
-    expect(critLine).toContain('rush login');
+    expect(critLine).toContain('SLACK_BOT_TOKEN');
   });
 });
 

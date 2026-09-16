@@ -371,12 +371,7 @@ export function remediationFor(finding: DoctorFinding): string {
       // shape only, for a kind constructed through finding() by a future caller.
       return 'kill <pid>';
     case 'owner-sink-unreachable':
-      // The lane delivers over the rush-backed owner channel, which needs rush on
-      // PATH AND a usable session in THIS context. Non-interactive shells miss a
-      // ~/.zshrc export (RUSH-2258), and the session is keychain-bound, not in
-      // ~/.rush/user.yaml (RUSH-2262) — so `rush login` here, or the Rush App for
-      // a GUI keychain, is what makes it reachable.
-      return "put rush on PATH for non-interactive shells (~/.zshenv) and run 'rush login'";
+      return 'check the channel transport: iMessage needs macOS, Slack needs SLACK_BOT_TOKEN in env or the webhooks bundle';
   }
 }
 
