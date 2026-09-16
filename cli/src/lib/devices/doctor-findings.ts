@@ -509,11 +509,13 @@ export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
   const sink = input.ownerSink;
   if (sink?.configured && !sink.reachable) {
     const chan = sink.channel ?? 'owner';
-    const why = sink.reason === 'rush-not-on-path'
-      ? `rush CLI not on this box's PATH`
-      : sink.reason === 'rush-signed-out'
-        ? 'rush has no usable session here'
-        : 'transport unreachable';
+    const why = sink.reason === 'imessage-not-macos'
+      ? 'iMessage requires macOS (peer-forward delivers from a macOS peer)'
+      : sink.reason === 'slack-no-token'
+        ? 'no SLACK_BOT_TOKEN — set it in env or the webhooks secrets bundle'
+        : sink.reason === 'channel-unsupported'
+          ? `${chan} transport removed (Rush daemon)`
+          : 'transport unreachable';
     out.push(finding({
       severity: FINDING_SEVERITY['owner-sink-unreachable'], kind: 'owner-sink-unreachable', device,
       message: `${chan} → owner unreachable: ${why}`,
