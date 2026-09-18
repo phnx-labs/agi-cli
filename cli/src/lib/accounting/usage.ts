@@ -225,6 +225,7 @@ export interface UsageSnapshot {
   unavailable?: {
     reason: 'session_limit' | 'out_of_credits';
     resetsAt?: Date;
+    notedAt?: Date;
   };
   freshness?: {
     source: UsageCaptureSource;
@@ -346,6 +347,7 @@ export interface CachedUsageSnapshot {
   unavailable?: {
     reason: 'session_limit' | 'out_of_credits';
     resetsAt?: string;
+    notedAt?: string;
   };
   modelRefusals?: Record<string, CachedModelRefusal>;
   freshnessSource?: UsageCaptureSource;
@@ -1787,6 +1789,7 @@ function serializeClaudeUsageSnapshot(snapshot: UsageSnapshot): CachedUsageSnaps
       ? {
           reason: snapshot.unavailable.reason,
           resetsAt: snapshot.unavailable.resetsAt?.toISOString(),
+          notedAt: snapshot.unavailable.notedAt?.toISOString(),
         }
       : undefined,
     windows: persistedWindows.map((window) => ({
@@ -1849,13 +1852,24 @@ function deserializeClaudeUsageSnapshot(
   };
 }
 
+export const OUT_OF_CREDITS_REPROBE_MS = 60 * 60 * 1000;
+
+function liveOutOfCredits(
+  cached: NonNullable<CachedUsageSnapshot['unavailable']>,
+  now: Date,
+): UsageSnapshot['unavailable'] {
+  const noted = parseDateValue(cached.notedAt);
+  if (!noted || now.getTime() - noted.getTime() >= OUT_OF_CREDITS_REPROBE_MS) return undefined;
+  return { reason: 'out_of_credits', notedAt: noted };
+}
+
 function carryForwardUnavailable(
   prior: CachedUsageSnapshot['unavailable'],
   live: UsageSnapshot['unavailable'],
 ): UsageSnapshot['unavailable'] {
   if (live) return live;
   if (!prior) return undefined;
-  if (prior.reason === 'out_of_credits') return { reason: 'out_of_credits' };
+  if (prior.reason === 'out_of_credits') return liveOutOfCredits(prior, new Date());
   const reset = parseDateValue(prior.resetsAt);
   return reset && reset.getTime() > Date.now()
     ? { reason: 'session_limit', resetsAt: reset }
@@ -1867,7 +1881,7 @@ function deserializeUnavailable(
   now: Date,
 ): UsageSnapshot['unavailable'] {
   if (!cached) return undefined;
-  if (cached.reason === 'out_of_credits') return { reason: 'out_of_credits' };
+  if (cached.reason === 'out_of_credits') return liveOutOfCredits(cached, now);
   const reset = parseDateValue(cached.resetsAt);
   return reset && reset.getTime() > now.getTime()
     ? { reason: 'session_limit', resetsAt: reset }
@@ -1889,13 +1903,17 @@ function hasLiveModelRefusal(
 export function noteClaudeOutOfCredits(
   usageKey: string,
   cachePath = getClaudeUsageCachePath(),
+  now = new Date(),
 ): void {
   try {
     ensureLockTarget(cachePath, '{}');
     withFileLock(cachePath, () => {
       const cache = readClaudeUsageCacheFile(cachePath);
       const existing = cache[usageKey] ?? { capturedAt: null, windows: [] };
-      cache[usageKey] = { ...existing, unavailable: { reason: 'out_of_credits' } };
+      cache[usageKey] = {
+        ...existing,
+        unavailable: { reason: 'out_of_credits', notedAt: now.toISOString() },
+      };
       atomicWriteFileSync(cachePath, JSON.stringify(cache, null, 2), 'utf-8');
     });
   } catch {
