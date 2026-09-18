@@ -2158,7 +2158,7 @@ describe('getUsageInfo(grok) — last-seen billing from unified.jsonl', () => {
     }
   });
 
-  describe('out_of_credits (tokens/credits exhausted — no clock)', () => {
+  describe('out_of_credits (tokens/credits exhausted — no provider reset, re-probed after a window)', () => {
     const usageKey = 'claude:org=oocred';
     // These write Claude refusal markers via note*/clear* — isolate the Claude
     // usage cache to a temp file so the suite never pollutes the developer's real
@@ -2184,6 +2184,26 @@ describe('getUsageInfo(grok) — last-seen billing from unified.jsonl', () => {
       expect(deriveUsageStatusFromSnapshot(stillDry)).toBe('rate_limited');
       expect(formatUsageSummary('Max', stillDry)).toContain('out of credits');
       // Past the window the mark has expired: no marker, no windows → null snapshot.
+      expect(readClaudeUsageCache(usageKey, undefined, new Date(noted.getTime() + OUT_OF_CREDITS_REPROBE_MS))).toBeNull();
+    });
+
+    it('keeps the original clock across a cache refresh that carries the mark forward', () => {
+      // Real-time anchored: the refresh writers judge the mark against the wall
+      // clock, so a mark noted 5 minutes ago is still live when they run.
+      const noted = new Date(Date.now() - 5 * 60_000);
+      noteClaudeOutOfCredits(usageKey, undefined, noted);
+      // A daemon refresh / statusline merge re-serializes the row with new windows
+      // and no live refusal; the mark must ride through with its ORIGINAL notedAt,
+      // or every refresh would restart (or, if dropped, end) the re-probe window.
+      const refreshed: UsageSnapshot = {
+        capturedAt: new Date(noted.getTime() + 5 * 60_000),
+        windows: [],
+        staleWindows: [],
+      };
+      writeClaudeUsageCache(usageKey, refreshed);
+      mergeClaudeUsageCacheWindows(usageKey, refreshed);
+      const after = readClaudeUsageCache(usageKey, undefined, new Date(noted.getTime() + 30 * 60_000));
+      expect(after?.unavailable).toEqual({ reason: 'out_of_credits', notedAt: noted });
       expect(readClaudeUsageCache(usageKey, undefined, new Date(noted.getTime() + OUT_OF_CREDITS_REPROBE_MS))).toBeNull();
     });
 

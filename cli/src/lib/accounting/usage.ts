@@ -1186,8 +1186,8 @@ export function deriveUsageStatusFromSnapshot(
 ): 'available' | 'rate_limited' | null {
   if (!snapshot) return null;
   if (snapshot.unavailable) {
-    // out_of_credits has no clock — it stays blocking until a successful run
-    // clears it. session_limit blocks only until its reset time.
+    // A live out_of_credits mark blocks; the reader already dropped one past
+    // its re-probe window. session_limit blocks only until its reset time.
     if (snapshot.unavailable.reason === 'out_of_credits') return 'rate_limited';
     if (snapshot.unavailable.resetsAt && snapshot.unavailable.resetsAt.getTime() > Date.now()) {
       return 'rate_limited';
@@ -2813,7 +2813,7 @@ export function noteClaudeOutOfCredits(
 
 /**
  * Clear any persisted refusal marker for an account after a run SUCCEEDS on it.
- * This is the recovery path for `out_of_credits` (which has no clock) and also
+ * This ends an `out_of_credits` mark early (before its re-probe window) and
  * proactively clears a stale `session_limit` the moment the account serves again.
  */
 export function clearClaudeAccountRefusal(
