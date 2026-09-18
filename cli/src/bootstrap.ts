@@ -400,7 +400,7 @@ async function installResolvedPackage(metadata: NpmPackageMetadata): Promise<voi
     // `npm install --prefix` would write to <bunGlobalDir>/lib/node_modules and
     // never touch the running copy — npm exits 0, the verify below fails.
     if (detectPackageManager(packageRoot) === 'bun') {
-      await installPackageWithBun(tarball);
+      await installPackageWithBun(tarball, deriveGlobalPrefix(packageRoot));
     } else {
       await installPackageIntoPrefix(tarball, deriveGlobalPrefix(packageRoot));
     }
