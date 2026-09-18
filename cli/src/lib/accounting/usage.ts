@@ -396,13 +396,15 @@ export interface UsageSnapshot {
   /**
    * A refusal observed from a real harness run, independent of API windows.
    * `session_limit` recovers on a clock (`resetsAt`). `out_of_credits` is a
-   * tokens/balance exhaustion that does NOT reset on a clock — it has no
-   * `resetsAt` and is cleared only by a later successful run on the account
-   * (clearClaudeAccountRefusal). Both exclude the account from rotation while set.
+   * tokens/balance exhaustion with no reset the provider tells us about: it is
+   * cleared by a later successful run on the account (clearClaudeAccountRefusal)
+   * or expires {@link OUT_OF_CREDITS_REPROBE_MS} after `notedAt` so rotation
+   * tries the account again. Both exclude the account from rotation while set.
    */
   unavailable?: {
     reason: 'session_limit' | 'out_of_credits';
     resetsAt?: Date;
+    notedAt?: Date;
   };
   /**
    * D8 freshness provenance. A `sync` row arrived from the account's poller
@@ -579,6 +581,7 @@ export interface CachedUsageSnapshot {
   unavailable?: {
     reason: 'session_limit' | 'out_of_credits';
     resetsAt?: string;
+    notedAt?: string;
   };
   /**
    * Per-model refusal markers, keyed by the exact model name a refusal was
@@ -1183,8 +1186,8 @@ export function deriveUsageStatusFromSnapshot(
 ): 'available' | 'rate_limited' | null {
   if (!snapshot) return null;
   if (snapshot.unavailable) {
-    // out_of_credits has no clock — it stays blocking until a successful run
-    // clears it. session_limit blocks only until its reset time.
+    // A live out_of_credits mark blocks; the reader already dropped one past
+    // its re-probe window. session_limit blocks only until its reset time.
     if (snapshot.unavailable.reason === 'out_of_credits') return 'rate_limited';
     if (snapshot.unavailable.resetsAt && snapshot.unavailable.resetsAt.getTime() > Date.now()) {
       return 'rate_limited';
@@ -2610,6 +2613,7 @@ function serializeClaudeUsageSnapshot(snapshot: UsageSnapshot): CachedUsageSnaps
       ? {
           reason: snapshot.unavailable.reason,
           resetsAt: snapshot.unavailable.resetsAt?.toISOString(),
+          notedAt: snapshot.unavailable.notedAt?.toISOString(),
         }
       : undefined,
     windows: persistedWindows.map((window) => ({
@@ -2705,11 +2709,37 @@ function deserializeClaudeUsageSnapshot(
 }
 
 /**
+ * How long an `out_of_credits` mark keeps an account out of rotation before the
+ * router tries it again. Credits get topped up and org spend caps roll over on
+ * clocks the provider never reports, and the successful-run clear cannot fire
+ * on an account the router refuses to launch — on 2026-09-18 three of four
+ * Claude accounts on one box sat marked for up to 14 days while answering fine,
+ * and rotation had collapsed onto the one login that was actually refusing. One
+ * refused run per hour on a genuinely dry account is the price of never
+ * stranding a live one; the refusal re-marks it with a fresh `notedAt`.
+ */
+export const OUT_OF_CREDITS_REPROBE_MS = 60 * 60 * 1000;
+
+/**
+ * A cached `out_of_credits` marker still in force at `now`. A legacy marker
+ * with no `notedAt` was written before the mark carried a clock and reads as
+ * expired, so an account stranded by one is eligible again on the next read.
+ */
+function liveOutOfCredits(
+  cached: NonNullable<CachedUsageSnapshot['unavailable']>,
+  now: Date,
+): UsageSnapshot['unavailable'] {
+  const noted = parseDateValue(cached.notedAt);
+  if (!noted || now.getTime() - noted.getTime() >= OUT_OF_CREDITS_REPROBE_MS) return undefined;
+  return { reason: 'out_of_credits', notedAt: noted };
+}
+
+/**
  * Carry a prior refusal marker forward across a daemon usage refresh, and drop
  * an expired one. A live `snapshot.unavailable` (a refusal just observed) wins.
- * `out_of_credits` survives refreshes with no reset — only a successful run
- * clears it (clearClaudeAccountRefusal). A `session_limit` survives only while
- * its reset time is still in the future.
+ * `out_of_credits` survives refreshes until a successful run clears it
+ * (clearClaudeAccountRefusal) or its re-probe window passes. A `session_limit`
+ * survives only while its reset time is still in the future.
  */
 function carryForwardUnavailable(
   prior: CachedUsageSnapshot['unavailable'],
@@ -2717,7 +2747,7 @@ function carryForwardUnavailable(
 ): UsageSnapshot['unavailable'] {
   if (live) return live;
   if (!prior) return undefined;
-  if (prior.reason === 'out_of_credits') return { reason: 'out_of_credits' };
+  if (prior.reason === 'out_of_credits') return liveOutOfCredits(prior, new Date());
   const reset = parseDateValue(prior.resetsAt);
   return reset && reset.getTime() > Date.now()
     ? { reason: 'session_limit', resetsAt: reset }
@@ -2726,14 +2756,14 @@ function carryForwardUnavailable(
 
 /**
  * Deserialize a cached `unavailable` marker, dropping an expired session_limit
- * but keeping a clock-less out_of_credits.
+ * or an out_of_credits past its re-probe window.
  */
 function deserializeUnavailable(
   cached: CachedUsageSnapshot['unavailable'],
   now: Date,
 ): UsageSnapshot['unavailable'] {
   if (!cached) return undefined;
-  if (cached.reason === 'out_of_credits') return { reason: 'out_of_credits' };
+  if (cached.reason === 'out_of_credits') return liveOutOfCredits(cached, now);
   const reset = parseDateValue(cached.resetsAt);
   return reset && reset.getTime() > now.getTime()
     ? { reason: 'session_limit', resetsAt: reset }
@@ -2755,20 +2785,25 @@ function hasLiveModelRefusal(
 
 /**
  * Persist a Claude tokens/credits exhaustion (`out of usage credits` / `monthly
- * spend limit`) from a real run. Unlike a rate/session limit this does NOT reset
- * on a clock, so no reset time is stored — rotation excludes the account until a
- * later successful run clears it via {@link clearClaudeAccountRefusal}.
+ * spend limit`) from a real run. The provider reports no reset for it, so the
+ * mark carries the time it was noted: rotation excludes the account until a
+ * later successful run clears it via {@link clearClaudeAccountRefusal} or
+ * {@link OUT_OF_CREDITS_REPROBE_MS} passes.
  */
 export function noteClaudeOutOfCredits(
   usageKey: string,
   cachePath = getClaudeUsageCachePath(),
+  now = new Date(),
 ): void {
   try {
     ensureLockTarget(cachePath, '{}');
     withFileLock(cachePath, () => {
       const cache = readClaudeUsageCacheFile(cachePath);
       const existing = cache[usageKey] ?? { capturedAt: null, windows: [] };
-      cache[usageKey] = { ...existing, unavailable: { reason: 'out_of_credits' } };
+      cache[usageKey] = {
+        ...existing,
+        unavailable: { reason: 'out_of_credits', notedAt: now.toISOString() },
+      };
       atomicWriteFileSync(cachePath, JSON.stringify(cache, null, 2), 'utf-8');
     });
   } catch {
@@ -2778,7 +2813,7 @@ export function noteClaudeOutOfCredits(
 
 /**
  * Clear any persisted refusal marker for an account after a run SUCCEEDS on it.
- * This is the recovery path for `out_of_credits` (which has no clock) and also
+ * This ends an `out_of_credits` mark early (before its re-probe window) and
  * proactively clears a stale `session_limit` the moment the account serves again.
  */
 export function clearClaudeAccountRefusal(

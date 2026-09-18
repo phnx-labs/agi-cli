@@ -2703,9 +2703,10 @@ export function detectRateLimit(text: string): boolean {
 
 /**
  * Narrow detector for a BILLING exhaustion — tokens/credits run out or the
- * monthly spend cap is hit — as opposed to a time-window rate limit. This class
- * does NOT recover on a clock, so rotation must remember it per-account
- * (noteClaudeOutOfCredits) until a later successful run clears it.
+ * monthly spend cap is hit — as opposed to a time-window rate limit. The
+ * provider reports no reset for it, so rotation remembers it per-account
+ * (noteClaudeOutOfCredits) until a later successful run clears it or its
+ * re-probe window (OUT_OF_CREDITS_REPROBE_MS) passes.
  */
 const OUT_OF_CREDITS_PATTERNS: RegExp[] = [
   /out of (?:usage )?credits/i,
@@ -2804,9 +2805,9 @@ export function parseCodexUsageLimitReset(text: string, nowMs = Date.now()): Dat
  * (the `ClaudeRefusalAction` shape is harness-generic; the usage cache it drives
  * is identity-keyed and shared across harnesses). Codex's usage limit is
  * time-windowed and carries a reset ("try again at <date>"), so it is noted as a
- * clock-bearing session limit that auto-clears — NOT a clock-less out_of_credits,
- * which would stay sticky until a successful run the excluded account can never
- * get. A genuine credit/quota exhaustion IS clock-less. A clean run clears any
+ * clock-bearing session limit that auto-clears on the provider's reset — NOT an
+ * out_of_credits, which the provider gives no reset for and which rotation only
+ * re-probes after OUT_OF_CREDITS_REPROBE_MS. A clean run clears any
  * stale marker; a limit with no parseable reset is left untouched (the run still
  * cascades via detectRateLimit) rather than persisting an unexpirable marker.
  */
