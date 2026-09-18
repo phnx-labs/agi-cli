@@ -1856,7 +1856,7 @@ describe('getUsageInfo(grok) — last-seen billing from unified.jsonl', () => {
     }
   });
 
-  describe('out_of_credits (tokens/credits exhausted — no clock)', () => {
+  describe('out_of_credits (tokens/credits exhausted — no provider reset, re-probed after a window)', () => {
     const usageKey = 'claude:org=oocred';
     let cacheDir: string;
     let prevPath: string | null;
@@ -1878,6 +1878,21 @@ describe('getUsageInfo(grok) — last-seen billing from unified.jsonl', () => {
       expect(stillDry?.unavailable).toEqual({ reason: 'out_of_credits', notedAt: noted });
       expect(deriveUsageStatusFromSnapshot(stillDry)).toBe('rate_limited');
       expect(formatUsageSummary('Max', stillDry)).toContain('out of credits');
+      expect(readClaudeUsageCache(usageKey, undefined, new Date(noted.getTime() + OUT_OF_CREDITS_REPROBE_MS))).toBeNull();
+    });
+
+    it('keeps the original clock across a cache refresh that carries the mark forward', () => {
+      const noted = new Date(Date.now() - 5 * 60_000);
+      noteClaudeOutOfCredits(usageKey, undefined, noted);
+      const refreshed: UsageSnapshot = {
+        capturedAt: new Date(noted.getTime() + 5 * 60_000),
+        windows: [],
+        staleWindows: [],
+      };
+      writeClaudeUsageCache(usageKey, refreshed);
+      mergeClaudeUsageCacheWindows(usageKey, refreshed);
+      const after = readClaudeUsageCache(usageKey, undefined, new Date(noted.getTime() + 30 * 60_000));
+      expect(after?.unavailable).toEqual({ reason: 'out_of_credits', notedAt: noted });
       expect(readClaudeUsageCache(usageKey, undefined, new Date(noted.getTime() + OUT_OF_CREDITS_REPROBE_MS))).toBeNull();
     });
 
