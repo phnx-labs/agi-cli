@@ -63,7 +63,8 @@ describe('schema migration v46 -> v50 (four merged migrations land, none dropped
     // The DB is stamped at the combined head, not stranded partway.
     const version = getDB().prepare(`SELECT value FROM meta WHERE key = 'schema_version'`).get() as { value: string };
     expect(version.value).toBe(String(SCHEMA_VERSION));
-    expect(SCHEMA_VERSION).toBe(50);
+    // The four rungs above landed at v50; the head only ever moves past it.
+    expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(50);
   });
 
   it('leaves the legacy row intact — additive columns start NULL, existing content untouched', () => {
