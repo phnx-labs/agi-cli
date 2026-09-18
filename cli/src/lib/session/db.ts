@@ -3151,7 +3151,7 @@ export function syncLabels(labelMap: Map<string, string | null>): number {
   if (updates.length === 0) return 0;
 
   const updSessions = db.prepare(`UPDATE sessions SET label = ? WHERE id = ?`);
-  const updFts = db.prepare(`UPDATE session_text SET label = ? WHERE session_id = ?`);
+  const updFts = db.prepare(`UPDATE session_text SET label = ? WHERE rowid = ${SESSION_TEXT_ROWID}`);
 
   const txn = db.transaction((items: typeof updates) => {
     for (const { id, label } of items) {
@@ -3204,7 +3204,7 @@ export function seedLabelsFromNames(nameMap: Map<string, string | null>): number
   if (updates.length === 0) return 0;
 
   const updSessions = db.prepare(`UPDATE sessions SET label = ? WHERE id = ?`);
-  const updFts = db.prepare(`UPDATE session_text SET label = ? WHERE session_id = ?`);
+  const updFts = db.prepare(`UPDATE session_text SET label = ? WHERE rowid = ${SESSION_TEXT_ROWID}`);
   const txn = db.transaction((items: typeof updates) => {
     for (const { id, label } of items) {
       updSessions.run(label, id);
@@ -3247,7 +3247,7 @@ export function syncTopics(topicMap: Map<string, string>): number {
   if (updates.length === 0) return 0;
 
   const updSessions = db.prepare(`UPDATE sessions SET topic = ? WHERE id = ?`);
-  const updFts = db.prepare(`UPDATE session_text SET topic = ? WHERE session_id = ?`);
+  const updFts = db.prepare(`UPDATE session_text SET topic = ? WHERE rowid = ${SESSION_TEXT_ROWID}`);
 
   const txn = db.transaction((items: typeof updates) => {
     for (const { id, topic } of items) {
