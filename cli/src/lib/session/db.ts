@@ -40,7 +40,7 @@ const DB_PATH = getSessionsDbPath();
 /** Current schema version; bumped when migrations are added. Exported so tests
  * assert against the constant instead of hardcoding a number that every bump
  * then has to chase (docs/sessions.md calls the constant the source of truth). */
-export const SCHEMA_VERSION = 50;
+export const SCHEMA_VERSION = 51;
 
 /**
  * Bump to force the content extractor (assistant-answer text, alongside the
@@ -196,6 +196,10 @@ CREATE INDEX IF NOT EXISTS idx_sessions_short_id ON sessions(short_id);
 -- v17 guarantees the machine column exists (same pattern as last_activity);
 -- idx_sessions_mirror_synced likewise waits for migration v46's column add.
 
+-- A row sits at the rowid of the sessions row it describes (v51) and is
+-- addressed by that rowid, never by session_id: an UNINDEXED FTS5 column cannot
+-- be seeked, so a session_id predicate scans every row's content — the same
+-- rule tool_call_text follows against tool_calls.rowid (v36).
 CREATE VIRTUAL TABLE IF NOT EXISTS session_text USING fts5(
   session_id UNINDEXED,
   label,
@@ -1599,6 +1603,40 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     if (!cols.has('generated_title_at')) db.exec(`ALTER TABLE sessions ADD COLUMN generated_title_at INTEGER`);
   }
 
+  if (fromVersion < 51) {
+    // v50 -> v51: session_text rows move to the rowid of the sessions row they
+    // describe (PHNX-4154), the repair v36 made to tool_call_text. The only key
+    // was the UNINDEXED session_id, so every delete and content read was a full
+    // scan of the FTS content — 669 MB and 0.2-0.5 s per statement on a real
+    // box — and the mirror ingest issues one per mirrored row (2,298 there)
+    // inside a daemon tick: the event loop froze for minutes, every service
+    // blew its deadline, and browser verbs timed out behind it.
+    //
+    // Same shape as v42: rename, recreate, copy back keyed by sessions.rowid,
+    // drop — search never blacks out. OR REPLACE keeps the newest of any
+    // duplicate session_id rows. A text row whose session is gone has no rowid
+    // to sit at and is dropped; nothing could reach it anyway.
+    db.exec(`ALTER TABLE session_text RENAME TO session_text_v50`);
+    db.exec(`
+      CREATE VIRTUAL TABLE session_text USING fts5(
+        session_id UNINDEXED,
+        label,
+        topic,
+        project,
+        content,
+        assistant,
+        tokenize = 'unicode61 remove_diacritics 2'
+      );
+    `);
+    db.exec(`
+      INSERT OR REPLACE INTO session_text (rowid, session_id, label, topic, project, content, assistant)
+      SELECT s.rowid, t.session_id, t.label, t.topic, t.project, t.content, t.assistant
+      FROM session_text_v50 t JOIN sessions s ON s.id = t.session_id
+      ORDER BY t.rowid
+    `);
+    db.exec(`DROP TABLE session_text_v50`);
+  }
+
 }
 
 /**
@@ -2585,10 +2623,18 @@ function enrichCachedSessionMeta(meta: SessionMeta): SessionMeta {
   }
 }
 
+/**
+ * The one way to address a session's FTS row: its rowid is the sessions rowid
+ * (schema comment on session_text). A `session_id = ?` predicate scans the whole
+ * index instead — the PHNX-4154 daemon freeze.
+ */
+const SESSION_TEXT_ROWID = `(SELECT rowid FROM sessions WHERE id = ?)`;
+
 const deleteTextStmt = (db: Database.Database) =>
-  db.prepare(`DELETE FROM session_text WHERE session_id = ?`);
+  db.prepare(`DELETE FROM session_text WHERE rowid = ${SESSION_TEXT_ROWID}`);
+// Binds the session id twice: once for the rowid lookup, once for the column.
 const insertTextStmt = (db: Database.Database) =>
-  db.prepare(`INSERT INTO session_text (session_id, label, topic, project, content, assistant) VALUES (?, ?, ?, ?, ?, ?)`);
+  db.prepare(`INSERT INTO session_text (rowid, session_id, label, topic, project, content, assistant) VALUES (${SESSION_TEXT_ROWID}, ?, ?, ?, ?, ?, ?)`);
 // Read back the label the upsert actually stored (which may be the preserved
 // one, not the incoming blank) so the FTS label column stays consistent with
 // sessions.label after a bare rescan.
@@ -2714,6 +2760,7 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
     delText.run(meta.id);
     insText.run(
       meta.id,
+      meta.id,
       // Use the label the upsert actually stored (preserve-non-empty rule),
       // not the raw incoming one, so FTS label ranking survives a bare rescan.
       storedFtsLabel(readLabel, meta.id),
@@ -2739,8 +2786,10 @@ function reconcileCodexFileOwners(db: Database.Database, metas: SessionMeta[]): 
       .all(...chunk) as Array<{ id: string; file_path: string }>;
     for (const row of rows) {
       if (owners.get(row.file_path) === row.id) continue;
+      // The text row is keyed by the sessions rowid, so it goes before the row.
+      db.prepare(`DELETE FROM session_text WHERE rowid = ${SESSION_TEXT_ROWID}`).run(row.id);
       db.prepare('DELETE FROM sessions WHERE id = ?').run(row.id);
-      for (const table of ['session_text', 'session_preview_cache', 'session_summaries', 'session_insights', 'session_topics', 'session_phenotypes', 'session_resource_usage', 'resource_scan_ledger']) {
+      for (const table of ['session_preview_cache', 'session_summaries', 'session_insights', 'session_topics', 'session_phenotypes', 'session_resource_usage', 'resource_scan_ledger']) {
         db.prepare(`DELETE FROM ${table} WHERE session_id = ?`).run(row.id);
       }
       // The tool ledger has a unique file path too; release the wrong binding
@@ -3015,6 +3064,7 @@ export function upsertSessionsBatch(
       upsert.run(row);
       delText.run(meta.id);
       insText.run(
+        meta.id,
         meta.id,
         // Mirror upsertSession: index the label the upsert actually stored
         // (preserve-non-empty rule), not the raw incoming one.
@@ -3622,7 +3672,7 @@ export function querySessions(options: QueryOptions = {}): SessionMeta[] {
   const missingIds = new Set(missing.map(r => r.id));
   const phantomIds = new Set<string>();
   if (missing.length > 0) {
-    const readContent = db.prepare(`SELECT content FROM session_text WHERE session_id = ?`);
+    const readContent = db.prepare(`SELECT content FROM session_text WHERE rowid = ${SESSION_TEXT_ROWID}`);
     const markArchived = db.prepare(`UPDATE sessions SET archived_at = ? WHERE id = ? AND archived_at IS NULL`);
     const now = Date.now();
     const classify = db.transaction(() => {
@@ -4224,7 +4274,7 @@ export function writeRemotePreviewCacheFailure(
  */
 export function readSessionContent(id: string): string | undefined {
   const row = getDB().prepare(
-    `SELECT content FROM session_text WHERE session_id = ?`,
+    `SELECT content FROM session_text WHERE rowid = ${SESSION_TEXT_ROWID}`,
   ).get(id) as { content: string } | undefined;
   return row?.content;
 }
@@ -4602,11 +4652,11 @@ export function upsertMirrorSession(row: MirrorSessionUpsert, source: string, sy
   });
   if (result.changes === 0) return false;
   // Keep the mirror row searchable by topic + first user turn, like a local row.
-  db.prepare(`DELETE FROM session_text WHERE session_id = ?`).run(row.id);
+  db.prepare(`DELETE FROM session_text WHERE rowid = ${SESSION_TEXT_ROWID}`).run(row.id);
   db.prepare(`
-    INSERT INTO session_text (session_id, label, topic, project, content, assistant)
-    VALUES (?, ?, ?, '', ?, '')
-  `).run(row.id, row.label ?? '', row.topic ?? '', row.firstUser ?? '');
+    INSERT INTO session_text (rowid, session_id, label, topic, project, content, assistant)
+    VALUES (${SESSION_TEXT_ROWID}, ?, ?, ?, '', ?, '')
+  `).run(row.id, row.id, row.label ?? '', row.topic ?? '', row.firstUser ?? '');
   // Carry the peer's daemon-computed summary into the same session_summaries
   // cache the local merge reads (PHNX-3939), so a peer session renders its
   // goal/checkpoints/checklist inline with no transcript. Stamp is null: the
@@ -4741,14 +4791,15 @@ export function pruneMirrorSessions(cutoffMs: number): number {
   ).all(cutoffMs) as Array<{ id: string }>;
   if (stale.length === 0) return 0;
   const delRow = db.prepare(`DELETE FROM sessions WHERE id = ?`);
-  const delText = db.prepare(`DELETE FROM session_text WHERE session_id = ?`);
+  const delText = db.prepare(`DELETE FROM session_text WHERE rowid = ${SESSION_TEXT_ROWID}`);
   const delPreview = db.prepare(`DELETE FROM session_preview_cache WHERE session_id = ?`);
   const delSummary = db.prepare(`DELETE FROM session_summaries WHERE session_id = ?`);
   const delTimeline = db.prepare(`DELETE FROM session_timelines WHERE session_id = ?`);
   const txn = db.transaction(() => {
     for (const { id } of stale) {
-      delRow.run(id);
+      // Text first: its rowid lookup needs the sessions row still present.
       delText.run(id);
+      delRow.run(id);
       delPreview.run(id);
       delSummary.run(id);
       delTimeline.run(id);
@@ -5246,7 +5297,7 @@ export function topSessionsByCost(
   // still excluded. archived_at is the persisted signal; stamp it here too (once)
   // so a session first surfaced through the cost rollup reports `archived`
   // consistently with the listing path.
-  const readContent = db.prepare(`SELECT content FROM session_text WHERE session_id = ?`);
+  const readContent = db.prepare(`SELECT content FROM session_text WHERE rowid = ${SESSION_TEXT_ROWID}`);
   const markArchived = db.prepare(`UPDATE sessions SET archived_at = ? WHERE id = ? AND archived_at IS NULL`);
   const now = Date.now();
   const toStamp: SessionRow[] = [];

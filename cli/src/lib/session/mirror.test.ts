@@ -429,6 +429,31 @@ describe('session mirror (real DB + real shared-state files)', () => {
     expect(rawRow('22222222-0000-0000-0000-000000000008')).toBeTruthy();
     expect(rawRow('ffffffff-0000-0000-0000-000000000006')).toBeTruthy();
   });
+
+  it('keeps every session_text row at its session\'s rowid across local upsert, re-upsert, mirror fold and prune (PHNX-4154)', () => {
+    // Every writer above ran in this suite: seedLocalSession (twice for one id
+    // — a rescan must replace, not duplicate), the peer fold, the placeholder
+    // overwrite, and the prune. The text row of each survivor must sit at its
+    // session's rowid, and a pruned session must leave no text row behind —
+    // a stray row is unreachable by rowid and would only ever be found by
+    // the full scan this fix removed.
+    seedLocalSession({ id: 'ffffffff-0000-0000-0000-000000000006', topic: 'keep me local, rescanned' });
+    const d = new Database(path.join(getSessionsDir(), 'sessions.db'));
+    try {
+      expect(d.prepare(`
+        SELECT t.session_id FROM session_text t
+        LEFT JOIN sessions s ON s.rowid = t.rowid
+        WHERE s.id IS NULL OR s.id <> t.session_id
+      `).all()).toEqual([]);
+      expect(d.prepare(`
+        SELECT session_id FROM session_text GROUP BY session_id HAVING count(*) > 1
+      `).all()).toEqual([]);
+      expect(d.prepare(`SELECT count(*) AS n FROM session_text WHERE session_id = ?`)
+        .get('11111111-0000-0000-0000-000000000007')).toEqual({ n: 0 });
+    } finally {
+      d.close();
+    }
+  });
 });
 
 describe('a mirror row reclaimed by a real local transcript (PHNX-3792 blocker fix)', () => {
