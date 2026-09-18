@@ -106,7 +106,10 @@ describe('schema migration v50 -> v51 (session_text keyed by sessions.rowid)', (
     const source = fs.readFileSync(path.join(__dirname, 'db.ts'), 'utf-8');
     const runtime = source.slice(source.indexOf('export function getDB('));
     expect(runtime.length).toBeGreaterThan(0);
-    expect(runtime).not.toMatch(/session_text\s+WHERE\s+session_id\s*=/);
+    // Any statement on session_text — DELETE, SELECT, or UPDATE with a SET
+    // clause in between — that filters on session_id. Bounded to one template
+    // string so a match cannot span two unrelated statements.
+    expect(runtime).not.toMatch(/session_text[^`]*\bWHERE\s+session_id\s*=/);
     expect(runtime).not.toMatch(/INSERT INTO session_text \(session_id/);
   });
 });
