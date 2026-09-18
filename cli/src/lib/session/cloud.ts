@@ -14,7 +14,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as yaml from 'yaml';
-import type { SessionAgentId, SessionMeta } from './types.js';
+import type { SessionAgentId, SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import { deriveShortId } from '../text/short-id.js';
 import { getCacheDir } from '../state.js';
 import { isRushSessionExpired } from '../rush-session.js';

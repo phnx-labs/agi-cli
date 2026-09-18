@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { describe, expect, it } from 'vitest';
 import type { RotateCandidate } from '../accounting/rotate.js';
-import type { SessionMeta } from './types.js';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import {
   SessionRecoveryError,
   assertRecoverableTranscript,

@@ -9,7 +9,7 @@ process.env.HOME = TEST_HOME;
 const { writeSessionActorRecord, writeSessionAliasRecord, readSessionActorRecord, loadSessionActorIndex, resolveSessionAlias } = await import('./actor-sidecar.js');
 const { resolveOwner, serializeSessionsJson } = await import('./active.js');
 const { getDB, closeDB, upsertSession, upsertSessionsBatch, getSessionById } = await import('./db.js');
-type SessionMeta = import('./types.js').SessionMeta;
+type SessionMeta = import('@phnx-labs/sessions-cli/reader').SessionMeta;
 
 const FILES = path.join(TEST_HOME, 'files');
 fs.mkdirSync(FILES, { recursive: true });

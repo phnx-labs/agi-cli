@@ -15,7 +15,7 @@ const { Command } = await import('commander');
 const { registerInsightsCommand } = await import('../commands/insights.js');
 const { upsertSession, closeDB } = await import('../lib/session/db.js');
 const { costOfUsage } = await import('../lib/pricing/index.js');
-type SessionMeta = import('../lib/session/types.js').SessionMeta;
+type SessionMeta = import('@phnx-labs/sessions-cli/reader').SessionMeta;
 
 const FILES_DIR = path.join(TEST_HOME, 'cost-cmd-files');
 fs.mkdirSync(FILES_DIR, { recursive: true });

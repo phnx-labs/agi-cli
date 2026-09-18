@@ -19,8 +19,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import Database from '../../sqlite.js';
-import { parseAntigravity, detectAgent, parseSession } from '../parse.js';
-import { extractRecentDirectoriesTouched, extractTodoProgressFromEvents } from '../state.js';
+import { parseAntigravity, detectAgent, parseSession } from '@phnx-labs/sessions-cli/reader';
+import { extractRecentDirectoriesTouched, extractTodoProgressFromEvents } from '@phnx-labs/sessions-cli/reader';
 
 // ── Minimal protobuf wire encoder (mirror of the decoder under test) ────────
 

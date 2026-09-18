@@ -3,7 +3,7 @@ import { effectiveMode, rehydrateCommand, buildMigrateResumeCommands } from './s
 import { buildResumeCommand } from './sessions.js';
 import { AGENTS } from '../lib/agents.js';
 import type { AgentId } from '../lib/types.js';
-import { SESSION_AGENTS, type SessionMeta, type SessionAgentId } from '../lib/session/types.js';
+import { SESSION_AGENTS, type SessionMeta, type SessionAgentId } from '@phnx-labs/sessions-cli/reader';
 
 /** Minimal SessionMeta with a resolvable version, for the harness-parity gate. */
 function meta(agent: SessionAgentId): SessionMeta {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { serializeSessionsJson, serializeActiveSessionsForJson, ownerLabel } from './sessions.js';
-import type { SessionMeta } from '../lib/session/types.js';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import type { ActiveSession } from '../lib/session/active.js';
 
 /**

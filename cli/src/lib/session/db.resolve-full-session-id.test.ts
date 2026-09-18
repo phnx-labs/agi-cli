@@ -10,7 +10,7 @@ process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 
 const { upsertSession, resolveFullSessionId } = await import('./db.js');
-type SessionMeta = import('./types.js').SessionMeta;
+type SessionMeta = import('@phnx-labs/sessions-cli/reader').SessionMeta;
 
 const FULL = '6fc1db18-1111-4222-8333-444455556666';
 

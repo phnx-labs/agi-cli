@@ -16,7 +16,7 @@ import {
   type LaunchSessionIndex,
 } from './sessions-list.js';
 import { getProfileRuntimeDir } from './paths.js';
-import type { SessionMeta } from '../session/types.js';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 
 function makeSession(overrides: Partial<SessionMeta> = {}): SessionMeta {
   return {

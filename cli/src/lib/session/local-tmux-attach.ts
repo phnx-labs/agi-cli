@@ -15,7 +15,7 @@
 import fs from 'node:fs';
 import chalk from 'chalk';
 import { attachTmux, ensureSessionHookRepaired, getDefaultSocketPath, hasSession, listSessions, runTmux, teardownIfAgentExited } from '../tmux/index.js';
-import { isAgentTmuxAlias } from './types.js';
+import { isAgentTmuxAlias } from '@phnx-labs/sessions-cli/reader';
 
 export type TmuxAliasState = 'not-an-alias' | 'no-server' | 'absent' | 'dead' | 'live';
 

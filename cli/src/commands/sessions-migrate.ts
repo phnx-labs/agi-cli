@@ -30,7 +30,7 @@ import simpleGit from 'simple-git';
 import type { Command } from 'commander';
 import { spawnSync } from 'child_process';
 
-import type { SessionMeta } from '../lib/session/types.js';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import type { ActiveSession } from '../lib/session/active.js';
 import { AGENTS } from '../lib/agents.js';
 import type { AgentId } from '../lib/types.js';
