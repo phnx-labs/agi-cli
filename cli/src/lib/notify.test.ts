@@ -350,14 +350,16 @@ describe.skipIf(process.platform === 'win32')('notifyUrgentBlock (feed urgent-bl
  * local owner delivery fails on a box with no working provider — proving the
  * wiring, not just the isolated owner-forward.ts functions.
  *
- * Real path, no mocking of the logic: the owner channel is the macOS-only rush
- * `imessage` transport, `rush` is absent from PATH so the local send genuinely
- * fails its `which rush` preflight, a real device registry names a macOS peer,
- * and a fake `ssh` on PATH stands in for the transport (the same on-PATH-fake
- * pattern the openclaw tests above use) returning the peer's `agents send
- * --json` result. POSIX-only: the rig needs `which` + `#!/bin/sh`.
+ * Real path, no mocking of the logic: the owner channel is the macOS-only
+ * `imessage` transport, so on this Linux box the local send genuinely fails on
+ * platform, a real device registry names a macOS peer, and a fake `ssh` on PATH
+ * stands in for the transport (the same on-PATH-fake pattern the openclaw tests
+ * above use) returning the peer's `agents send --json` result.
  */
-describe.skipIf(process.platform === 'win32')('sendToOwner forwards over SSH on local failure (PHNX-3303)', () => {
+// Linux-only: the scenario is a headless worker whose local iMessage provider
+// fails on platform (rush.ts sends via osascript now, no `rush` preflight), so
+// on macOS the "local failure" would be a real Messages.app send attempt.
+describe.skipIf(process.platform !== 'linux')('sendToOwner forwards over SSH on local failure (PHNX-3303)', () => {
   let tmp: string;
   let sshRecord: string;
   const saved = {
@@ -395,7 +397,7 @@ describe.skipIf(process.platform === 'win32')('sendToOwner forwards over SSH on 
     const bin = path.join(tmp, 'bin');
     fs.mkdirSync(bin, { recursive: true });
     const ssh = path.join(bin, 'ssh');
-    // No `rush` on PATH -> the LOCAL imessage send fails its `which rush` preflight.
+    // The LOCAL imessage send fails on platform (not macOS) before any I/O.
     fs.writeFileSync(ssh, `#!/bin/sh\nprintf '%s\\n' "$*" >> "$SSH_RECORD"\nprintf '%s\\n' '{"ok":true,"channel":"imessage","id":"+18055551234"}'\nexit 0\n`);
     fs.chmodSync(ssh, 0o755);
     process.env.PATH = `${bin}${path.delimiter}/usr/bin${path.delimiter}/bin`;
@@ -413,7 +415,7 @@ describe.skipIf(process.platform === 'win32')('sendToOwner forwards over SSH on 
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
-  it('hands off to the macOS peer when this box has no rush', async () => {
+  it('hands off to the macOS peer when this box cannot send iMessage', async () => {
     const result = await sendToOwner('ship it', { meta: ownerMeta });
     expect(result.ok).toBe(true); // forwarded delivery, not the local rush failure
     const log = fs.readFileSync(sshRecord, 'utf-8');
@@ -447,7 +449,7 @@ describe.skipIf(process.platform === 'win32')('sendToOwner forwards over SSH on 
     writeRegistry({});
     const result = await sendToOwner('ship it', { meta: ownerMeta });
     expect(result.ok).toBe(false);
-    expect(result.error).toBe('rush CLI not found on PATH');
+    expect(result.error).toBe('iMessage requires macOS (peer-forward handles Linux delivery)');
     expect(fs.existsSync(sshRecord)).toBe(false);
   });
 
