@@ -59,7 +59,7 @@ import { INSTALLATION_RECORD_FILE } from './types.js';
 import { composeWin32CommandLine } from '../platform/index.js';
 import { listInstalledSubagents, transformSubagentForClaude, syncSubagentToOpenclaw } from '../subagents.js';
 import { listInstalledWorkflows } from '../workflows.js';
-import { parseHookManifest, registerHooksToSettings, selectHookManifest, pruneVersionHomeHookEntriesFromSettings, installSessionTrackerHookSync, installSessionTrackerHook } from '../hooks/install.js';
+import { parseHookManifest, registerHooksToSettings, selectHookManifest, pruneVersionHomeHookEntriesFromSettings, installSessionTrackerHookSync, installSessionTrackerHook, repairManagedHookRuntimeArtifacts } from '../hooks/install.js';
 import { supports, explainSkip, capableAgents } from '../capabilities.js';
 import { discoverPlugins, syncPluginToVersion, isPluginSynced, pluginSupportsAgent, cleanOrphanedPluginSkills, marketplaceSpecForName } from '../plugins/plugins.js';
 import { composeRulesFromState } from '../rules/compose.js';
@@ -1804,6 +1804,11 @@ export function removeVersion(agent: AgentId, version: string): boolean {
       pruneVersionHomeHookEntriesFromSettings(settingsPath, agent, version);
     }
   }
+
+  // The global hook shims embed one SOURCE path. When it pointed into this
+  // version home every shimmed guard would exit 127 (allow) until a self-heal
+  // pass ran, and that pass needs a live daemon. Re-point them now.
+  repairManagedHookRuntimeArtifacts();
 
   emit('version.remove', { agent, version });
   return true;

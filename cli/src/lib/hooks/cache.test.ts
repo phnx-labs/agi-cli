@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { spawnSync } from 'child_process';
 import {
   generateHookShim,
   getHookShimPath,
@@ -279,5 +280,86 @@ describe('generateHookShim', () => {
     const body = fs.readFileSync(shim, 'utf-8');
     expect(body).toMatch(/FAIL_FILE=/);
     expect(body).toMatch(/rm -f "\$FAIL_FILE"/);
+  });
+});
+
+// ─── missing source ──────────────────────────────────────────────────────────
+//
+// Observed on zion 2026-09-14/15: every shimmed guard exited 127 for ~17 hours
+// because the embedded SOURCE path was gone, and Claude Code treats any exit
+// but 2 as "allow". A PreToolUse shim must deny instead.
+
+describe('generated shim — missing source', () => {
+  let tmp: string;
+  let paths: HookShimPaths;
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-shim-missing-'));
+    paths = {
+      shimsDir: path.join(tmp, 'shims'),
+      cacheDir: path.join(tmp, 'cache'),
+      logsDir: path.join(tmp, 'logs'),
+      perfDir: path.join(tmp, 'perf'),
+    };
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  function run(shim: string): { status: number | null; stderr: string } {
+    const res = spawnSync('bash', [shim], { input: JSON.stringify({ tool_name: 'Bash' }), encoding: 'utf-8' });
+    return { status: res.status, stderr: res.stderr };
+  }
+
+  function loggedExit(): number | undefined {
+    const files = fs.readdirSync(paths.logsDir!).filter((f) => f.startsWith('events-'));
+    const line = fs.readFileSync(path.join(paths.logsDir!, files[0]), 'utf-8').trim().split('\n').pop() ?? '';
+    const row = JSON.parse(line) as { cache: string; exit: number };
+    if (row.exit === 2) expect(row.cache).toBe('missing-source');
+    return row.exit;
+  }
+
+  it('embeds FAIL_CLOSED only when asked', () => {
+    const open = generateHookShim({ name: 'open-hook', scriptPath: '/x/y.sh', matches: { tool_name: 'Bash' }, paths });
+    const closed = generateHookShim({ name: 'closed-hook', scriptPath: '/x/y.sh', matches: { tool_name: 'Bash' }, failClosed: true, paths });
+    expect(fs.readFileSync(open, 'utf-8')).toMatch(/^FAIL_CLOSED=0$/m);
+    expect(fs.readFileSync(closed, 'utf-8')).toMatch(/^FAIL_CLOSED=1$/m);
+  });
+
+  it.skipIf(process.platform === 'win32')('a PreToolUse shim denies (exit 2) and names the repair when its source is gone', () => {
+    const shim = generateHookShim({
+      name: 'gone-guard',
+      scriptPath: path.join(tmp, 'not-here.sh'),
+      matches: { tool_name: 'Bash' },
+      failClosed: true,
+      paths,
+    });
+    const res = run(shim);
+    expect(res.status).toBe(2);
+    expect(res.stderr).toContain('gone-guard: hook source is missing');
+    expect(res.stderr).toContain('agents hooks sync');
+    expect(loggedExit()).toBe(2);
+  });
+
+  it.skipIf(process.platform === 'win32')('a non-gating shim with a missing source keeps its old fail-open path', () => {
+    const shim = generateHookShim({
+      name: 'gone-nudge',
+      scriptPath: path.join(tmp, 'not-here.sh'),
+      matches: { tool_name: 'Bash' },
+      paths,
+    });
+    const res = run(shim);
+    // bash's own "No such file" exit, which every harness reads as allow.
+    expect(res.status).toBe(127);
+    expect(res.stderr).not.toContain('fail-closed');
+    expect(loggedExit()).toBe(127);
+  });
+
+  it.skipIf(process.platform === 'win32')('a present source is untouched by the check', () => {
+    const script = path.join(tmp, 'real.sh');
+    fs.writeFileSync(script, '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
+    const shim = generateHookShim({ name: 'present-guard', scriptPath: script, matches: { tool_name: 'Bash' }, failClosed: true, paths });
+    expect(run(shim).status).toBe(0);
   });
 });

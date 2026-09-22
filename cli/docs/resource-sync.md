@@ -469,6 +469,15 @@ into each capable version home and writes the agent-native registration:
 Claude-style harnesses use the synthetic `agents-cli` marketplace, and Goose
 receives the bundle under `.agents/plugins/<name>/`.
 
+A plugin's `skills/` are also flattened into the version home's top-level
+`skills/<name>/` for harnesses that do not load plugin skills from that
+registration (Codex reads plugins from `config.toml`, which sync does not
+write, so the flat copy is the only way its plugin skills exist). A harness
+flagged `nativePluginSkills` in the agent table (Claude Code) loads them
+itself, namespaced `<plugin>:<skill>`, so sync does not flatten there and a
+top-level copy from an earlier sync is swept as an orphan on the next full
+sync (`agents sync claude`) or by `agents prune cleanup skills`.
+
 ```
 Source: ~/.agents/plugins/<name>/        Per-version destination:
 

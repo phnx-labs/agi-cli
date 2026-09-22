@@ -133,13 +133,20 @@ export function generateHookShim(args: {
   cache?: HookCacheConfig | null;
   matches?: HookMatches;
   paths?: HookShimPaths;
+  /**
+   * Deny the tool call (exit 2) when the source script is missing instead of
+   * failing with 127, which every harness reads as "allow". Set for
+   * PreToolUse hooks: a guard whose script vanished (version pruned, sync
+   * rewriting the hooks dir) must not silently wave tool calls through.
+   */
+  failClosed?: boolean;
 }): string {
   const shimsDir = args.paths?.shimsDir ?? getHookShimsDir();
   const cacheDir = args.paths?.cacheDir ?? getHookCacheDir();
   const logsDir = args.paths?.logsDir ?? getLogsDir();
   const perfDir = args.paths?.perfDir ?? getPerfDir();
   const shimPath = resolveContainedHookShimPath(shimsDir, args.name);
-  const content = renderShim(args.name, args.scriptPath, args.cache ?? null, args.matches, { cacheDir, logsDir, perfDir });
+  const content = renderShim(args.name, args.scriptPath, args.cache ?? null, args.matches, { cacheDir, logsDir, perfDir }, args.failClosed === true);
   fs.mkdirSync(shimsDir, { recursive: true });
 
   let existing: string | null = null;
@@ -384,7 +391,8 @@ function renderShim(
   scriptPath: string,
   cache: HookCacheConfig | null,
   matches: HookMatches | undefined,
-  paths: { cacheDir: string; logsDir: string; perfDir: string }
+  paths: { cacheDir: string; logsDir: string; perfDir: string },
+  failClosed = false,
 ): string {
   const ttl = cache ? (typeof cache.ttl === 'number' ? cache.ttl : (parseDuration(cache.ttl) ?? 0)) : 0;
   const key: HookCacheKey = cache?.key ?? 'global';
@@ -420,8 +428,22 @@ TTL=${ttl}
 PREFETCH=${q(prefetch)}
 KEY_MODE=${q(key)}
 MATCHES_JSON=${q(matchesJson)}
+FAIL_CLOSED=${failClosed ? 1 : 0}
 
 mkdir -p "$CACHE_DIR" "$LOGS_DIR" "$PERF_DIR"
+
+# A source that is not on disk cannot be executed: bash exits 127, and every
+# harness treats anything but exit 2 as "allow". For a PreToolUse hook that
+# is a guard silently disabled, so it denies instead and names the repair.
+# Other shims keep their existing path (a cached hook still serves its cache).
+if [ "$FAIL_CLOSED" = 1 ] && [ ! -f "$SOURCE" ]; then
+  _TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  printf '{"ts":"%s","event":"hook.fire","hook":"%s","ms":0,"cache":"missing-source","exit":2}\\n' \\
+    "$_TS" "$HOOK_NAME" >>"$LOGS_DIR/events-$(date -u +%Y-%m-%d).jsonl" 2>/dev/null || true
+  printf '%s: hook source is missing (%s); refusing the tool call unchecked (fail-closed). Run: agents hooks sync\\n' \\
+    "$HOOK_NAME" "$SOURCE" >&2
+  exit 2
+fi
 
 # Resolve a real Python. On Windows, bare python3 is often a Microsoft Store
 # app-execution alias stub that prints to stderr and exits non-zero (0 bytes on

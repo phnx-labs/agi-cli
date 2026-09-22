@@ -221,6 +221,15 @@ export interface AgentConfig {
   supportsHooks: boolean;
   nativeAgentsSkillsDir?: boolean;
   /**
+   * The harness loads a plugin's bundled skills itself, namespaced
+   * `<plugin>:<skill>`, from the plugin registration sync writes. Sync must
+   * then NOT also flatten them into top-level `skills/<name>/`: the flat copy
+   * is a second, un-namespaced registration of the same skill, so every
+   * plugin skill showed twice (`/continue` and `/sessions:continue`). Harnesses
+   * without this flag only see plugin skills through the flattened copies.
+   */
+  nativePluginSkills?: boolean;
+  /**
    * This agent's *own* cloud backend. `agents cloud run --agent <id>` routes
    * here when no `--provider` is given (precedence: --provider > this >
    * cloud.default_provider > rush). Undefined means the agent has no native
