@@ -12,6 +12,7 @@ import * as path from 'path';
 import type { AgentId, PluginManifest } from '../../types.js';
 import { getUserAgentsDir, getAgentsDir, getEnabledExtraRepos, getCommandsDir, getSkillsDir, getHooksDir } from '../../state.js';
 import { isSafeSegmentName, safeJoin } from '../../paths.js';
+import { AGENTS } from '../../agents.js';
 
 /** Trusted source bases for content-like kinds. Project layer excluded. */
 function trustedSourceBases(): { dir: string }[] {
@@ -58,6 +59,9 @@ function pluginSupportsAgent(manifest: PluginManifest, agent?: AgentId): boolean
 /** Every `plugins/<plugin>/skills` dir across trusted source bases, filtered to an optional plugin/agent scope. */
 export function pluginSkillDirs(options: { agent?: AgentId; plugins?: Set<string> } = {}): string[] {
   const dirs: string[] = [];
+  // A harness that loads plugin skills natively gets no flattened copy and no
+  // plugin credit for a top-level skills/<name>: that copy is an orphan there.
+  if (options.agent && AGENTS[options.agent]?.nativePluginSkills) return dirs;
   for (const base of trustedSourceBases()) {
     const pluginsDir = path.join(base.dir, 'plugins');
     let entries: fs.Dirent[];

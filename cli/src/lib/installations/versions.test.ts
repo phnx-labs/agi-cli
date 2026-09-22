@@ -574,7 +574,7 @@ describe('version resource sync path handling', () => {
     expect(second.skills).toBe(false);
   });
 
-  it('force-refreshes plugin-only skills into top-level skill homes and prunes stale orphans', async () => {
+  it('sweeps a flattened plugin skill out of a Claude home and keeps only the marketplace copy', async () => {
     const home = makeTempHome();
     const pluginRoot = path.join(home, '.agents', 'plugins', 'agents');
     const pluginSkillDir = path.join(pluginRoot, 'skills', 'routines');
@@ -598,7 +598,6 @@ describe('version resource sync path handling', () => {
       "syncResourcesToVersion('claude', '2.0.65', undefined, { cwd: home, force: true })"
     ) as { skills: boolean; plugins: string[] };
 
-    const refreshed = fs.readFileSync(path.join(versionSkillRoot, 'routines', 'SKILL.md'), 'utf-8');
     const marketplaceSkill = path.join(
       home,
       '.agents',
@@ -618,12 +617,42 @@ describe('version resource sync path handling', () => {
       'SKILL.md'
     );
 
+    // Claude Code loads `agents:routines` from the marketplace copy itself; a
+    // flattened skills/routines would be a second, un-namespaced `/routines`.
+    expect(result.skills).toBe(false);
+    expect(result.plugins).toEqual(['agents']);
+    expect(fs.existsSync(path.join(versionSkillRoot, 'routines'))).toBe(false);
+    expect(fs.existsSync(path.join(versionSkillRoot, 'old-shadow'))).toBe(false);
+    expect(fs.existsSync(marketplaceSkill)).toBe(true);
+  });
+
+  it('still force-refreshes plugin-only skills into the top-level skill home of a flattening harness', async () => {
+    const home = makeTempHome();
+    const pluginRoot = path.join(home, '.agents', 'plugins', 'agents');
+    const pluginSkillDir = path.join(pluginRoot, 'skills', 'routines');
+    const versionSkillRoot = path.join(home, '.agents', '.history', 'versions', 'codex', '0.150.0', 'home', '.codex', 'skills');
+
+    fs.mkdirSync(path.join(pluginRoot, '.claude-plugin'), { recursive: true });
+    fs.writeFileSync(
+      path.join(pluginRoot, '.claude-plugin', 'plugin.json'),
+      JSON.stringify({ name: 'agents', version: '1.0.0', description: 'Fixture plugin' }),
+      'utf-8'
+    );
+    fs.mkdirSync(pluginSkillDir, { recursive: true });
+    fs.writeFileSync(path.join(pluginSkillDir, 'SKILL.md'), 'fresh continuous ticket drain recipe\n', 'utf-8');
+    fs.mkdirSync(path.join(versionSkillRoot, 'routines'), { recursive: true });
+    fs.writeFileSync(path.join(versionSkillRoot, 'routines', 'SKILL.md'), 'stale routines body\n', 'utf-8');
+
+    const result = runVersionSync(
+      home,
+      "syncResourcesToVersion('codex', '0.150.0', undefined, { cwd: home, force: true })"
+    ) as { skills: boolean; plugins: string[] };
+
+    const refreshed = fs.readFileSync(path.join(versionSkillRoot, 'routines', 'SKILL.md'), 'utf-8');
     expect(result.skills).toBe(true);
     expect(result.plugins).toEqual(['agents']);
     expect(refreshed).toContain('fresh continuous ticket drain recipe');
     expect(refreshed).not.toContain('stale routines body');
-    expect(fs.existsSync(path.join(versionSkillRoot, 'old-shadow'))).toBe(false);
-    expect(fs.existsSync(marketplaceSkill)).toBe(true);
   });
 
   it('filters plugin-bundled skills through the active resource profile', () => {

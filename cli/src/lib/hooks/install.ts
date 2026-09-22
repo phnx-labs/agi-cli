@@ -398,7 +398,13 @@ function resolveHookCommand(
   // script when predicates don't hold) and, when `cache:` is set, layers the
   // cache/timing machinery on top; with neither, it is a pure pass-through
   // timing wrapper.
-  return toPortableCommand(generateHookShim({ name, scriptPath, cache, matches }));
+  return toPortableCommand(generateHookShim({
+    name,
+    scriptPath,
+    cache,
+    matches,
+    failClosed: hookDef.events.includes('PreToolUse'),
+  }));
 }
 
 /**

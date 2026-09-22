@@ -239,10 +239,13 @@ function makePluginSkill(baseRepoDir: string, pluginName: string, skillName: str
 }
 
 describe('diffVersionSkills — plugin-provided skills (PHNX-3185)', () => {
-  it('credits a plugin-bundled skill as matched, never an orphan', () => {
+  // Codex only sees plugin skills through the flattened top-level copies, so
+  // the copy is legitimate there. Claude loads them from the plugin itself
+  // (nativePluginSkills), so the same copy is a duplicate — see the last case.
+  it('credits a plugin-bundled skill as matched on a flattening harness, never an orphan', () => {
     const home = makeTempHome();
-    const agent = 'claude';
-    const version = '2.1.226';
+    const agent = 'codex';
+    const version = '0.150.0';
     const systemRepo = path.join(home, '.agents', '.system');
 
     // Source: a plugin bundles `design`. Home: the materialized copy (identical
@@ -279,8 +282,8 @@ describe('diffVersionSkills — plugin-provided skills (PHNX-3185)', () => {
 
   it('credits a plugin skill from a user-repo plugin too, alongside a real orphan', () => {
     const home = makeTempHome();
-    const agent = 'claude';
-    const version = '2.1.226';
+    const agent = 'codex';
+    const version = '0.150.0';
     const userRepo = path.join(home, '.agents');
 
     makePluginSkill(userRepo, 'write', 'blog');
@@ -294,6 +297,28 @@ describe('diffVersionSkills — plugin-provided skills (PHNX-3185)', () => {
 
     expect(diff.orphans).toEqual(['dead-one']);
     expect(diff.matched).toContain('blog');
+  });
+
+  it('flags a flattened plugin skill as an orphan on a harness that loads plugin skills natively', () => {
+    const home = makeTempHome();
+    const agent = 'claude';
+    const version = '2.1.226';
+    const systemRepo = path.join(home, '.agents', '.system');
+
+    // Claude Code registers the plugin and lists `design:design` itself; the
+    // top-level skills/design copy is the second `/design` row in the picker.
+    makePluginSkill(systemRepo, 'design', 'design');
+    plantSkillInVersionHome(home, agent, version, 'design');
+
+    const diff = runSkills(home, `skills.diffVersionSkills('${agent}', '${version}')`) as {
+      orphans: string[];
+      matched: string[];
+      toAdd: string[];
+    };
+
+    expect(diff.orphans).toEqual(['design']);
+    expect(diff.matched).not.toContain('design');
+    expect(diff.toAdd).not.toContain('design');
   });
 });
 

@@ -183,6 +183,17 @@ makes a matcher-only hook like git-guard show up in `agents perf hooks`.
 Stale shim files are garbage-collected automatically when a hook is renamed,
 deleted, or loses its `cache:`/`matches:`/`matcher:` field entirely.
 
+A shim embeds one `SOURCE=` path, the script inside the canonical version
+home. If that file is not on disk when the hook fires (the version was pruned,
+or sync is rewriting the hooks dir), a `PreToolUse` shim exits 2 with
+`<hook>: hook source is missing (...); refusing the tool call unchecked
+(fail-closed). Run: agents hooks sync` and logs `cache: missing-source`. Every
+harness reads any other exit code as "allow", which is how a missing guard
+script used to wave tool calls through silently (exit 127). Shims for other
+events stay fail-open. Removing a version re-points the shims at the
+surviving canonical home immediately, without waiting for the daemon's
+self-heal pass.
+
 ### `agents hooks profile` / `agents perf hooks`
 
 ```
