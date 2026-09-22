@@ -593,14 +593,16 @@ describe('channel delivery — real provider registry, no mocking', () => {
  * forward when local owner delivery fails on a box with no working provider —
  * not just leave the pure `owner-forward.ts` functions correct in isolation.
  *
- * Real path, no mocking of the logic: the owner channel is the macOS-only rush
- * `imessage` transport, `rush` is absent from PATH so the local send genuinely
- * fails its `which rush` preflight, a real device registry names a macOS peer,
- * and a fake `ssh` on PATH stands in for the transport (the same kind of on-PATH
- * fake the notify/openclaw tests use) and returns the peer's `agents send --json`
- * result. POSIX-only: the fake `ssh`/absent-`rush` rig needs `which` + `#!/bin/sh`.
+ * Real path, no mocking of the logic: the owner channel is the macOS-only
+ * `imessage` transport, so on this Linux box the local send genuinely fails on
+ * platform, a real device registry names a macOS peer, and a fake `ssh` on PATH
+ * stands in for the transport (the same kind of on-PATH fake the
+ * notify/openclaw tests use) and returns the peer's `agents send --json` result.
  */
-describe.skipIf(process.platform === 'win32')('feed owner sink forwards over SSH on local failure (PHNX-3303)', () => {
+// Linux-only: the scenario is a headless worker whose local iMessage provider
+// fails on platform (rush.ts sends via osascript now, no `rush` preflight), so
+// on macOS the "local failure" would be a real Messages.app send attempt.
+describe.skipIf(process.platform !== 'linux')('feed owner sink forwards over SSH on local failure (PHNX-3303)', () => {
   let tmp: string;
   let sshRecord: string;
   const saved = {
@@ -630,7 +632,7 @@ describe.skipIf(process.platform === 'win32')('feed owner sink forwards over SSH
     process.env.AGENTS_HUMANS_FILE = path.join(tmp, 'humans.yaml'); // absent -> meta.notify.owner wins
 
     // A fake `ssh` that records its argv and returns the peer's send result.
-    // No `rush` on PATH, so the LOCAL imessage send fails its `which rush` preflight.
+    // The LOCAL imessage send fails on platform (not macOS) before any I/O.
     sshRecord = path.join(tmp, 'ssh.log');
     process.env.SSH_RECORD = sshRecord;
     const bin = path.join(tmp, 'bin');
@@ -653,7 +655,7 @@ describe.skipIf(process.platform === 'win32')('feed owner sink forwards over SSH
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
-  it('delivers the important post via the macOS peer when this box has no rush', async () => {
+  it('delivers the important post via the macOS peer when this box cannot send iMessage', async () => {
     const meta = { notify: { owner: { channel: 'imessage', to: '+18055551234' } } } as Meta;
     const planned = planFeedBroadcast({ owner: { channel: 'owner' } }, ctx({ level: 'important' }));
     const outcomes = await runFeedBroadcast(planned, meta);
@@ -691,7 +693,7 @@ describe.skipIf(process.platform === 'win32')('feed owner sink forwards over SSH
     const outcomes = await runFeedBroadcast(planned, meta);
 
     expect(outcomes[0].ok).toBe(false);
-    expect(outcomes[0].error).toContain('rush CLI not found on PATH');
+    expect(outcomes[0].error).toContain('iMessage requires macOS');
     expect(fs.existsSync(sshRecord)).toBe(false); // never dialed a peer
   });
 });

@@ -314,9 +314,11 @@ describe.skipIf(!fileBacked)('credential account registry (bundle-canonical)', (
   });
 
   it('fails loud when a host cannot apply the stored BASE_URL override', () => {
+    // antigravity is the one host the google adapter authenticates, and it has
+    // no base-URL env — so the override, not the credential, is what fails.
     addAccount('google-proxy', 'google', 'api-key', 'secret', root, { baseUrl: 'https://gateway.internal/v1' });
-    expect(() => resolveCredentialAccount('google-proxy', 'gemini', undefined, root)).toThrow(
-      "provider 'google' cannot apply it to the gemini harness",
+    expect(() => resolveCredentialAccount('google-proxy', 'antigravity', undefined, root)).toThrow(
+      "provider 'google' cannot apply it to the antigravity harness",
     );
   });
 
