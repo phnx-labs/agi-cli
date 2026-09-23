@@ -67,14 +67,19 @@ modules:
   stores each reply as `devices/<peer>/daemon-state.json` stamped `receivedAt`.
   Nothing rides the user repo. The `auth-sync` service then does the credential
   half: one deterministically elected ready HEADED device asynchronously pushes
-  the real bundle only to pinned `role=worker` peers whose own reply verdict says
-  `missing`, always file-backed with a kill-bounded SSH deadline so each
-  destination auto-provisions its own machine-local key. It plans per peer off
-  that peer's first-hand, `receivedAt`-stamped reply — a peer that has never
-  replied is skipped this tick (logged at INFO) — with no fleet-wide freshness
-  gate (PHNX-4116 PR 5): the push is idempotent, so a stale verdict is safe, and
-  a key removed on a worker flips its next verdict to `missing` and the push
-  resumes. Tokens never enter Git or the exchange envelope.
+  the real bundle only to pinned `role=worker` peers that are missing the key,
+  always file-backed with a kill-bounded SSH deadline so each destination auto-
+  provisions its own machine-local key. Presence is `verdict ∧ fingerprint`: it
+  pushes when the peer's own reply verdict for the account is `missing`, OR when
+  the delivered credential fingerprint (`workerCredential.mintedAt`) no longer
+  matches — so a re-mint (`agents accounts login`, whose old token still
+  authenticates) re-pushes within a tick. It plans per peer off that peer's
+  first-hand, `receivedAt`-stamped reply — a peer that has never replied, or whose
+  reply carries no `accounts.rows` (older CLI — fail closed), is skipped this tick
+  (logged at INFO) — with no fleet-wide freshness gate (PHNX-4116 PR 5): the push
+  is idempotent, so a stale verdict is safe, and a key removed on a worker flips
+  its next verdict to `missing` and the push resumes. Tokens never enter Git or the
+  exchange envelope.
 
 The reserved `auth` bundle is file-backed by construction: it holds long-lived
 Claude setup-tokens that usage/probe and unattended workers read without Touch

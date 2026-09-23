@@ -1242,11 +1242,18 @@ old `readLastSuccessfulExchangeMs` marker): the pushes plan per peer off that
 peer's OWN daemon-state reply (`devices/<peer>/daemon-state.json`, first-hand and
 `receivedAt`-stamped), so a peer that has replied is planned off its per-account
 verdict at any age (the push is idempotent — a stale "has key" is harmless, a
-stale "missing" costs one redundant push), and a peer that has never replied is
-skipped this tick and logged at INFO. Reserved-key presence is read from the
-peer's own per-account verdict rows (`accounts.rows`), so a key removed on a
-worker flips its next verdict to `missing` and the push resumes — which the old
-publisher-side delivery memo could never see (worker-slot reconcile is NOT gated
+stale "missing" costs one redundant push), and a peer that has never replied — or
+whose reply carries no `accounts.rows` field at all (an older CLI — fail closed) —
+is skipped this tick and logged at INFO. Reserved-key presence is
+`verdict ∧ fingerprint`: the peer's own per-account verdict row (`accounts.rows`)
+must be non-`missing` AND the fingerprint (`workerCredential.mintedAt`) the
+publisher last delivered to that peer must match the account's current one. The
+verdict half is first-hand — a key removed on a worker flips its next verdict to
+`missing` and the push resumes. The fingerprint half catches a re-mint (`agents
+accounts login` bumps `mintedAt` while the old token still authenticates, so the
+verdict stays non-`missing`): the publisher keeps a minimal LOCAL per-`(peer,
+bundle, key)` delivered-fingerprint cursor (`reserved-sync-delivered.json`, never
+synced), so a re-mint re-pushes within one tick (worker-slot reconcile is NOT gated
 either — it reads only local durable keys). Every box except a
 marked `worker` folds peers' digests into its local `sessions` index as mirror
 rows. Only topic/label,

@@ -1996,13 +1996,22 @@ engine.
   (`syncReservedAuthBundle` / `syncReservedStores`, `secrets-policy.ts`, through
   the client's `pushBundleToHostAsync`) — delivering the real bundle only to a
   pinned, reachable, `role=worker` peer whose reserved key it is missing. Presence
-  is read first-hand from that peer's own reply: a `missing` per-account verdict in
-  its `accounts.rows` means it lacks the key; a peer that has never replied (no
-  `devices/<peer>/daemon-state.json`) is skipped this tick, logged at INFO
-  (`peerPresentKeys` / `SKIP_REASON_NO_PEER_REPLY`). There is **no** fleet-wide
-  exchange-freshness gate (PHNX-4116 PR 5 removed the `readLastSuccessfulExchangeMs`
-  marker): the push is idempotent, so a stale reply is safe, and a key removed on a
-  worker flips its next verdict to `missing` so the push resumes within a tick.
+  is `verdict ∧ fingerprint`: a key counts as present on a peer only when that
+  peer's own reply reports a NON-`missing` per-account verdict in its
+  `accounts.rows` AND the fingerprint (`workerCredential.mintedAt`) the publisher
+  last delivered to it matches the account's current one. A `missing` verdict, or a
+  re-mint that bumped `mintedAt` (`agents accounts login` — the old token still
+  authenticates, so the verdict stays non-`missing`), (re)pushes the key within a
+  tick. The publisher keeps a minimal LOCAL per-`(peer, bundle, key)` delivered-
+  fingerprint cursor (`reserved-sync-delivered.json`, never synced) for the rotation
+  half; the verdict half is first-hand. A peer that has never replied (no
+  `devices/<peer>/daemon-state.json`), or whose reply carries no `accounts.rows`
+  field at all (an older CLI — fail closed), is skipped this tick, logged at INFO
+  (`peerPresentKeys` / `SKIP_REASON_NO_PEER_REPLY` / `SKIP_REASON_NO_ACCOUNT_ROWS`).
+  There is **no** fleet-wide exchange-freshness gate (PHNX-4116 PR 5 removed the
+  `readLastSuccessfulExchangeMs` marker): the push is idempotent, so a stale reply
+  is safe, and a key removed on a worker flips its next verdict to `missing` so the
+  push resumes within a tick.
   **Given**
   a local file-backed `auth` bundle and a pinned worker peer whose reply reports
   the account `missing` **When** this device is the one deterministically elected
