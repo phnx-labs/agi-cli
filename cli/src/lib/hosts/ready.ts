@@ -120,16 +120,32 @@ export interface ReadyProbe {
  * `$LASTEXITCODE` (no `printf`/`||`); `parseReadyProbe` keys off the sentinel
  * substring, so the missing leading newline vs the POSIX `printf '\n…'` form is
  * absorbed by its `.trim()`. Pure/exported so both branches are unit-testable.
+ *
+ * With `ingestUsage`, the probe first runs `agents __usage-ingest` on the
+ * dispatcher's daemon-state envelope, which the caller pipes to stdin
+ * (PHNX-4116): the chosen worker then holds the dispatcher's current usage
+ * numbers at dispatch instead of waiting for the next 15-minute usage-sync
+ * tick. The ingest writes nothing to stdout (only `--reply` does), so the
+ * version/sentinel/listing shape `parseReadyProbe` reads is unchanged. On
+ * Windows the `agents.ps1` shim drops ssh-piped stdin, so PowerShell reads it
+ * into a temp file and hands the verb `--from <path>`.
  */
-export function buildReadyProbeCommand(os?: string): string {
+export function buildReadyProbeCommand(os?: string, opts: { ingestUsage?: boolean } = {}): string {
   if (remoteShellFor(os) === 'powershell') {
+    const ingest = opts.ingestUsage
+      ? '$in = [Console]::In.ReadToEnd(); $tmp = $null; ' +
+        'try { $tmp = [System.IO.Path]::GetTempFileName(); [System.IO.File]::WriteAllText($tmp, $in); ' +
+        'agents __usage-ingest --from $tmp 2>$null } ' +
+        'finally { if ($tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue } }; '
+      : '';
     const script =
-      `${POWERSHELL_PROGRESS_SILENCE}; ` +
+      `${POWERSHELL_PROGRESS_SILENCE}; ${ingest}` +
       `agents --version 2>$null; Write-Output "${READY_MARKER}"; ` +
       `agents view --json 2>$null; if ($LASTEXITCODE -ne 0) { agents list 2>$null }`;
     return `powershell -NoProfile -EncodedCommand ${encodePowershell(script)}`;
   }
   const script =
+    `${opts.ingestUsage ? 'agents __usage-ingest 2>/dev/null; ' : ''}` +
     `agents --version 2>/dev/null; printf '\\n${READY_MARKER}\\n'; ` +
     `agents view --json 2>/dev/null || agents list 2>/dev/null`;
   return `bash -lc ${shellQuote(script)}`;

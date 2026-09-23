@@ -1,11 +1,11 @@
 /**
  * W3 usage freshness: real home-layout / real shared-store path, no mocks.
  *
- *  1. Two headed boxes publish; a worker consumeUsageSnapshotsFromSharedStore
- *     merge lets balanced auto-pick (no picker) on synced rows 10 min old.
+ *  1. Two headed boxes publish; a worker applies each envelope over the SSH
+ *     exchange (applyPeerFleetState) and balanced auto-picks (no picker) on
+ *     synced rows 10 min old.
  *  2. A worker / setup-token-only box lists zero poll accounts, so
  *     runUsageRefresh issues zero usage API calls.
- *  3. auth-sync and usage-sync kickoffs never land inside the git-lock window.
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
@@ -13,7 +13,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 
 import {
-  consumeUsageSnapshotsFromSharedStore,
+  applyPeerFleetState,
+  buildFleetStatePayload,
   mergeUsageRowsForPublish,
   publishUsageSnapshotToSharedStore,
   USAGE_PUBLISH_HEARTBEAT_MS,
@@ -41,9 +42,8 @@ import {
   HOURLY_CALL_CAP,
   PROVIDER_HOURLY_BUDGET,
 } from './usage-refresh.js';
-import { AUTH_SYNC_KICKOFF_MS, AUTH_SYNC_TICK_MS } from './daemon/auth-sync-service.js';
-import { USAGE_SYNC_KICKOFF_MS, USAGE_SYNC_TICK_MS } from './daemon/usage-sync-service.js';
-import { FLEET_SHARED_REPO_SYNC_DEADLINE_MS } from './fleet-shared-repo-sync.js';
+import { AUTH_SYNC_TICK_MS } from './daemon/auth-sync-service.js';
+import { USAGE_SYNC_TICK_MS } from './daemon/usage-sync-service.js';
 import { writeClaudeUsageCache } from './accounting/usage.js';
 
 const dirs: string[] = [];
@@ -101,15 +101,17 @@ function candidateFromSnap(version: string, snap: ReturnType<typeof readClaudeUs
   };
 }
 
-describe('W3.4 two headed boxes merge through the shared store; worker balanced auto-picks', () => {
-  it('consumes synced rows 10 min old and pickBalancedCandidate does not refuse', async () => {
-    const root = tempDir();
-    const workerCache = path.join(root, 'worker-cache.json');
+describe('W3.4 two headed boxes push over the exchange; worker balanced auto-picks', () => {
+  it('applies synced rows 10 min old and pickBalancedCandidate does not refuse', async () => {
+    const zionHome = tempDir();
+    const desktopHome = tempDir();
+    const workerHome = tempDir();
+    const workerCache = path.join(workerHome, 'worker-cache.json');
     const now = Date.parse('2026-09-06T12:00:00.000Z');
     const tenMinAgo = new Date(now - 10 * 60_000).toISOString();
 
-    const zionCache = path.join(root, 'zion.json');
-    const desktopCache = path.join(root, 'desktop.json');
+    const zionCache = path.join(zionHome, 'zion.json');
+    const desktopCache = path.join(desktopHome, 'desktop.json');
     seed(zionCache, {
       'claude:org=alpha': row(tenMinAgo, 20, { pollerDevice: 'zion' }),
     });
@@ -117,21 +119,20 @@ describe('W3.4 two headed boxes merge through the shared store; worker balanced 
       'claude:org=beta': row(tenMinAgo, 35, { pollerDevice: 'desktop' }),
     });
     expect(await publishUsageSnapshotToSharedStore({
-      userAgentsDir: root, cachePath: zionCache, role: 'personal', device: 'zion',
+      userAgentsDir: zionHome, cachePath: zionCache, role: 'personal', device: 'zion',
     })).toMatchObject({ published: true, changed: true });
     expect(await publishUsageSnapshotToSharedStore({
-      userAgentsDir: root, cachePath: desktopCache, role: 'desktop', device: 'desktop',
+      userAgentsDir: desktopHome, cachePath: desktopCache, role: 'desktop', device: 'desktop',
     })).toMatchObject({ published: true, changed: true });
 
-    const consumed = consumeUsageSnapshotsFromSharedStore({
-      userAgentsDir: root,
-      cachePath: workerCache,
-      role: 'worker',
-      device: 'worker-a',
-      roles: { zion: 'personal', desktop: 'desktop', 'worker-a': 'worker' },
-    });
-    expect(consumed.merged).toBe(2);
-    expect(consumed.sources).toEqual(['desktop', 'zion']);
+    // Each headed box's tick dials the worker with its own envelope; the worker applies both.
+    let merged = 0;
+    for (const [device, home] of [['zion', zionHome], ['desktop', desktopHome]] as const) {
+      merged += applyPeerFleetState(buildFleetStatePayload({ device, userAgentsDir: home }).state, {
+        userAgentsDir: workerHome, cachePath: workerCache, device: 'worker-a',
+      }).merged;
+    }
+    expect(merged).toBe(2);
 
     const alpha = readClaudeUsageCache('claude:org=alpha', workerCache, new Date(now));
     const beta = readClaudeUsageCache('claude:org=beta', workerCache, new Date(now));
@@ -238,22 +239,11 @@ describe('W3.1 shared per-account usage/auth budget', () => {
   });
 });
 
-describe('W3.2 auth-sync and usage-sync do not starve each other on the shared lock', () => {
-  it('kickoffs sit more than one git-exchange deadline apart, forever', () => {
+describe('W3.2 the sync trust window is the usage-sync cadence', () => {
+  it('the tick, the trust window, and auth-sync\'s gate all read one interval', () => {
     expect(USAGE_SYNC_TICK_MS).toBe(USAGE_SYNC_INTERVAL_MS);
     expect(USAGE_SYNC_TRUST_MS).toBe(USAGE_SYNC_INTERVAL_MS);
     expect(AUTH_SYNC_TICK_MS).toBe(USAGE_SYNC_INTERVAL_MS);
-    const gap = Math.abs(USAGE_SYNC_KICKOFF_MS - AUTH_SYNC_KICKOFF_MS);
-    expect(gap).toBeGreaterThan(FLEET_SHARED_REPO_SYNC_DEADLINE_MS);
-
-    const horizon = 24 * 60 * 60_000;
-    for (let t = 0; t <= horizon; t += 60_000) {
-      const authFiring = (t - AUTH_SYNC_KICKOFF_MS) % AUTH_SYNC_TICK_MS === 0 && t >= AUTH_SYNC_KICKOFF_MS;
-      const usageFiring = (t - USAGE_SYNC_KICKOFF_MS) % USAGE_SYNC_TICK_MS === 0 && t >= USAGE_SYNC_KICKOFF_MS;
-      if (authFiring && usageFiring) {
-        throw new Error(`auth-sync and usage-sync both fire at t=${t}`);
-      }
-    }
   });
 });
 

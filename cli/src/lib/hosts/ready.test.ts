@@ -365,6 +365,11 @@ describe('ready commands — POSIX branch unchanged', () => {
     expect(buildReadyProbeCommand()).toBe(
       `bash -lc 'agents --version 2>/dev/null; printf '\\''\\n${MARK}\\n'\\''; agents view --json 2>/dev/null || agents list 2>/dev/null'`,
     );
+    // With the dispatcher's usage envelope on stdin, the silent ingest runs FIRST
+    // (PHNX-4116) and the version/marker/listing shape after it is unchanged.
+    expect(buildReadyProbeCommand(undefined, { ingestUsage: true })).toBe(
+      `bash -lc 'agents __usage-ingest 2>/dev/null; agents --version 2>/dev/null; printf '\\''\\n${MARK}\\n'\\''; agents view --json 2>/dev/null || agents list 2>/dev/null'`,
+    );
     expect(buildBootstrapCommand('@phnx-labs/agents-cli@2.1.170')).toBe(
       "bash -lc 'npm install -g @phnx-labs/agents-cli@2.1.170 2>&1 | tail -3; " +
         "if [ ! -d ~/.agents/.system ]; then agents setup 2>&1 | tail -3 || true; fi; agents --version'",
@@ -394,6 +399,10 @@ describe('ready commands — Windows branch speaks PowerShell', () => {
     expect(script).toBe(
       `$ProgressPreference = 'SilentlyContinue'; agents --version 2>$null; Write-Output "${MARK}"; agents view --json 2>$null; if ($LASTEXITCODE -ne 0) { agents list 2>$null }`,
     );
+    // The agents.ps1 shim drops ssh-piped stdin, so the ingest arm reads the
+    // payload into a temp file and hands the verb `--from <path>` (PHNX-4116).
+    const ingesting = decodeWindows(buildReadyProbeCommand('windows', { ingestUsage: true }));
+    expect(ingesting.startsWith(`$ProgressPreference = 'SilentlyContinue'; $in = [Console]::In.ReadToEnd(); $tmp = $null; try { $tmp = [System.IO.Path]::GetTempFileName(); [System.IO.File]::WriteAllText($tmp, $in); agents __usage-ingest --from $tmp 2>$null } finally { if ($tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue } }; agents --version 2>$null; Write-Output "${MARK}"`)).toBe(true);
     // The script's stdout shape (marker on its own line) round-trips through parseReadyProbe.
     const p = parseReadyProbe(`2.1.170\n${MARK}\nClaude (balanced)\n`);
     expect(p.reachable).toBe(true);
