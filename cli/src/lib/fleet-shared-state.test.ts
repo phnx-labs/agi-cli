@@ -113,18 +113,18 @@ describe('fleet shared daemon state (real files)', () => {
 });
 
 describe('peer envelopes received over the exchange (PHNX-4116)', () => {
-  it('stores a peer envelope stamped receivedAt, merges field-by-field, and reports the newest stamp', () => {
+  it('stores a peer envelope stamped receivedAt, merges field-by-field, and reports the newest stamp', async () => {
     const root = tempStore();
     expect(newestPeerReceivedAtMs(root)).toBeNull();
-    const first = storePeerFleetSharedDeviceState(
+    const first = await storePeerFleetSharedDeviceState(
       { version: 1, device: 'peer-b', auth: { status: 'ready' }, accounts: { rows: [{ accountId: 'x' }] } },
       root,
       1_000,
     );
     expect(first).toEqual({ changed: true, path: path.join(root, 'devices', 'peer-b', FLEET_SHARED_STATE_FILE) });
     // A later partial envelope (sessions only) keeps the earlier auth + accounts fields.
-    storePeerFleetSharedDeviceState({ version: 1, device: 'peer-b', sessions: { rows: [] } }, root, 2_000);
-    storePeerFleetSharedDeviceState({ version: 1, device: 'peer-c' }, root, 1_500);
+    await storePeerFleetSharedDeviceState({ version: 1, device: 'peer-b', sessions: { rows: [] } }, root, 2_000);
+    await storePeerFleetSharedDeviceState({ version: 1, device: 'peer-c' }, root, 1_500);
     const byDevice = Object.fromEntries(readFleetSharedDeviceStates(root).states.map((s) => [s.device, s]));
     expect(byDevice['peer-b']).toEqual({
       version: 1,
@@ -137,7 +137,7 @@ describe('peer envelopes received over the exchange (PHNX-4116)', () => {
     expect(byDevice['peer-c'].receivedAt).toBe(1_500);
     expect(newestPeerReceivedAtMs(root)).toBe(2_000);
     // An unchanged re-store at the same stamp is a no-op write.
-    expect(storePeerFleetSharedDeviceState({ version: 1, device: 'peer-c' }, root, 1_500).changed).toBe(false);
+    expect((await storePeerFleetSharedDeviceState({ version: 1, device: 'peer-c' }, root, 1_500)).changed).toBe(false);
   });
 
   it('rejects a malformed receivedAt or accounts field as a distinct peer error', () => {
