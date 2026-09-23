@@ -365,7 +365,7 @@ function renderRoutineRows({ jobs, scheduler, overdueSet, link, now, local = tru
 
     const overdueTag = overdueSet.has(job.name) ? chalk.yellow(' (overdue)') : '';
 
-    // Append the concrete reason a routine did not complete (auth_failed, wedged,
+    // Append the concrete reason a routine did not complete (auth_failed,
     // blocked, missed) right in the Last Status cell, so the list answers "why"
     // without a drill-in. Only for non-completed local runs; peer rows stay blank.
     const reason = latestRun ? runFailureReason(latestRun) : null;
@@ -791,12 +791,29 @@ function routineMatchesQuery(job: JobConfig, q: string): boolean {
     .includes(q);
 }
 
-/** Friendly one-liners for the claim a `skipped` run lost. */
-const SKIP_REASON_LABEL: Record<NonNullable<RunMeta['skipReason']>, string> = {
-  active_run: 'wedged: a prior run is still active',
+/**
+ * Friendly one-liners for the claim a `skipped` run lost — the reasons whose
+ * message is static. `active_run` is dynamic (it names the live run that owns
+ * the slot and when it started), built in {@link runFailureReason}: since
+ * PHNX-4116 there is no "wedged" daemon state, so an overlapping routine reads
+ * as `blocked` on the live run, not "wedged".
+ */
+const SKIP_REASON_LABEL: Record<Exclude<NonNullable<RunMeta['skipReason']>, 'active_run'>, string> = {
   duplicate_slot: 'duplicate slot (already fired)',
   wrong_owner: 'pinned to another device',
 };
+
+/**
+ * A run id is an ISO timestamp with `:`/`.` replaced by `-` (`slotRunId` /
+ * `generateRunId`), so it reverses losslessly to the run's start time. Returns
+ * the ISO string, or null when the id is not that shape (a hand-set id).
+ */
+function runIdToStartIso(runId: string): string | null {
+  const m = /^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z$/.exec(runId);
+  if (!m) return null;
+  const iso = `${m[1]}T${m[2]}:${m[3]}:${m[4]}.${m[5]}Z`;
+  return Number.isFinite(Date.parse(iso)) ? iso : null;
+}
 
 /**
  * The short, human reason a run did not simply complete — for inline display in
@@ -811,6 +828,20 @@ export function runFailureReason(run: RunMeta): string | null {
     const one = s.replace(/\s+/g, ' ').trim();
     return one.length > 80 ? one.slice(0, 79) + '…' : one;
   };
+  // An overlap skip names the live run it lost to (PHNX-4116): `blocked: run
+  // <id> active since <t>`, not the removed "wedged" wording. The structured
+  // `activeRunId` is preferred; a legacy record without it falls back to the
+  // errorMessage (which embeds the same id) so nothing regresses to vaguer text.
+  if (run.skipReason === 'active_run') {
+    if (run.activeRunId) {
+      const since = runIdToStartIso(run.activeRunId);
+      return since
+        ? `blocked: run ${run.activeRunId} active since ${since}`
+        : `blocked: run ${run.activeRunId} still active`;
+    }
+    if (run.errorMessage) return compact(run.errorMessage);
+    return 'blocked: a prior run is still active';
+  }
   if (run.errorMessage) return compact(run.errorMessage);
   if (run.status === 'blocked' && run.readiness) {
     return compact(run.readiness.message || run.readiness.code);
@@ -896,8 +927,8 @@ function buildRoutineDetail(job: JobConfig, scheduler: JobScheduler, now: Date):
           : chalk.yellow(run.status);
       const dur = run.completedAt ? ` ${formatRunDuration(run.startedAt, run.completedAt)}` : '';
       // Surface WHY a run did not complete, inline, so "looking at status" does not
-      // require digging into the run dir. auth_failed / OAuth-revoked, a wedged
-      // active-run skip, or a readiness block all live on the RunMeta already.
+      // require digging into the run dir. auth_failed / OAuth-revoked, an
+      // active-run overlap skip, or a readiness block all live on the RunMeta already.
       const reason = runFailureReason(run);
       const why = reason ? chalk.gray(` — ${reason}`) : '';
       lines.push(`  ${run.startedAt}  ${status}${dur}${why}`);
@@ -2113,7 +2144,7 @@ export function registerRoutinesCommands(program: Command): void {
         chalk.gray(formatRunDuration(run.startedAt, run.completedAt)) +
         (run.exitCode !== null && run.exitCode !== undefined ? chalk.gray(`  exit ${run.exitCode}`) : '')
       );
-      // The structured reason (auth_failed, blocked readiness, wedged skip) — the
+      // The structured reason (auth_failed, blocked readiness, overlap skip) — the
       // report/stdout tail below often buries or omits it, so name it up front.
       const logsReason = runFailureReason(run);
       if (logsReason) console.log(chalk.red('reason: ') + chalk.gray(logsReason));

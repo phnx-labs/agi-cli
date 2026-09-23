@@ -41,6 +41,22 @@ export function readSlots(meta: Pick<Meta, 'deviceAccounts'>): Record<string, De
   return { ...(meta.deviceAccounts?.slots ?? {}) };
 }
 
+/**
+ * Remove slot records from THIS box's device doc (`deviceAccounts.slots`).
+ * Symmetric with {@link recordSlot}. The slot DIRECTORY is not touched — a
+ * caller that also wants the on-disk home gone removes it separately; a stale
+ * worker slot keeps its dir because `.claude/projects` holds transcripts
+ * (PHNX-4116). A no-op for an empty list or an id with no record.
+ */
+export function dropSlots(accountIds: readonly string[]): void {
+  if (accountIds.length === 0) return;
+  updateMeta((current) => {
+    const slots = { ...current.deviceAccounts?.slots };
+    for (const id of accountIds) delete slots[id];
+    return { ...current, deviceAccounts: { ...current.deviceAccounts, slots } };
+  });
+}
+
 export function recordSlot(accountId: string, slot: DeviceAccountSlot): void {
   if (slot.accountId !== accountId) {
     throw new Error(`recordSlot accountId mismatch: key '${accountId}' vs slot.accountId '${slot.accountId}'.`);
