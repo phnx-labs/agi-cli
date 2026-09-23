@@ -298,6 +298,32 @@ function runRuntime(scriptBody: string): string {
   }).toString('utf-8');
 }
 
+describe('removeVersion re-points the global shims', () => {
+  it('a shim whose SOURCE was inside the removed version resolves to the survivor afterwards', () => {
+    // Two installations share one shim; the default (2.0.0) owns SOURCE.
+    seedClaudeVersionWithGeneratedShim('2.0.0', 'runtime-guard', 'PreToolUse');
+    seedClaudeVersionWithGeneratedShim('2.1.0', 'runtime-guard', 'PreToolUse');
+    const versionsPath = path.resolve(process.cwd(), 'src/lib/installations/versions.ts');
+    const out = runRuntime(`
+      const fs = await import('node:fs');
+      const versions = await import(${JSON.stringify(versionsPath)});
+      const first = mod.repairManagedHookRuntimeArtifacts({ filter: { agent: 'claude', version: '2.0.0' } });
+      const shim = first.attempts[0]?.path;
+      const before = shim ? fs.readFileSync(shim, 'utf-8').match(/^SOURCE='([^']*)'/m)?.[1] : null;
+      const removed = versions.removeVersion('claude', '2.0.0');
+      const after = shim ? fs.readFileSync(shim, 'utf-8').match(/^SOURCE='([^']*)'/m)?.[1] : null;
+      console.log(JSON.stringify({ shim, before, removed, after, afterExists: after ? fs.existsSync(after) : false }));
+    `);
+    // removeVersion prints its own status lines; the JSON report is the last line.
+    const r = JSON.parse(out.trim().split('\n').pop() ?? '{}') as { shim: string | null; before: string | null; removed: boolean; after: string | null; afterExists: boolean };
+    expect(r.shim).toBeTruthy();
+    expect(r.before).toContain(`${path.sep}2.0.0${path.sep}`);
+    expect(r.removed).toBe(true);
+    expect(r.after).toContain(`${path.sep}2.1.0${path.sep}`);
+    expect(r.afterExists).toBe(true);
+  });
+});
+
 describe('repairManagedHookRuntimeArtifacts', () => {
   it('healthy shim: second pass is a no-op and preserves mtime', () => {
     seedClaudeVersionWithGeneratedShim('2.0.0', 'runtime-guard', 'PreToolUse');

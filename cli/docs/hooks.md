@@ -185,12 +185,17 @@ deleted, or loses its `cache:`/`matches:`/`matcher:` field entirely.
 
 A shim embeds one `SOURCE=` path, the script inside the canonical version
 home. If that file is not on disk when the hook fires (the version was pruned,
-or sync is rewriting the hooks dir), a `PreToolUse` shim exits 2 with
-`<hook>: hook source is missing (...); refusing the tool call unchecked
-(fail-closed). Run: agents hooks sync` and logs `cache: missing-source`. Every
-harness reads any other exit code as "allow", which is how a missing guard
-script used to wave tool calls through silently (exit 127). Shims for other
-events stay fail-open. Removing a version re-points the shims at the
+or sync is rewriting the hooks dir), a shim generated for a `PreToolUse` hook
+exits 2 with `<hook>: hook source is missing (...); refusing the tool call
+unchecked (fail-closed). Run: agents hooks sync` and logs
+`cache: missing-source`. Claude Code, Codex and Droid share the exit-2 deny
+contract and read any other exit code as "allow", which is how a missing guard
+script used to wave tool calls through silently (exit 127); on a harness
+without that contract the shim is no worse than before. The denial is scoped
+twice: the `matches:` gate runs first, so a fire the predicates would skip is
+still skipped, and the stdin payload's `hook_event_name` must be `PreToolUse`
+(or absent), so the SessionStart or Stop leg of a hook that declares several
+events keeps its fail-open path. Removing a version re-points the shims at the
 surviving canonical home immediately, without waiting for the daemon's
 self-heal pass.
 
