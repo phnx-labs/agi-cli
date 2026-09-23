@@ -27,7 +27,6 @@ import { setHelpSections } from '../lib/help.js';
 import {
   getDaemonStatus,
   isDaemonRunning,
-  isDaemonWedged,
   readDaemonLog,
   startDaemon,
   stopDaemon,
@@ -429,7 +428,7 @@ function healthLine(label: string, live: boolean, record: SubsystemHealth | null
 async function runStatus(opts: { json?: boolean }): Promise<void> {
   const status = getDaemonStatus();
   const enabled = isDaemonEnabled();
-  const state: 'running' | 'wedged' | 'stopped' | 'disabled' =
+  const state: 'running' | 'stopped' | 'disabled' =
     !status.running && !enabled ? 'disabled' : status.state;
   const pid = status.pid;
   const uptime = pid ? uptimeSeconds(pid) : null;
@@ -459,6 +458,9 @@ async function runStatus(opts: { json?: boolean }): Promise<void> {
       pid,
       uptimeSeconds: uptime,
       heartbeatAgeMs,
+      restarts24h: status.restarts24h,
+      lastRestartCause: status.lastRestartCause,
+      lastRestartAt: status.lastRestartAt,
       logPath: status.logPath,
       binaryPath: owner?.entry ?? status.binaryPath,
       binaryVersion: owner?.version ?? null,
@@ -496,7 +498,6 @@ async function runStatus(opts: { json?: boolean }): Promise<void> {
 
   const stateLabel =
     state === 'running' ? chalk.green('running')
-    : state === 'wedged' ? chalk.red('wedged')
     : state === 'disabled' ? chalk.yellow('disabled')
     : chalk.gray('stopped');
 
@@ -505,6 +506,11 @@ async function runStatus(opts: { json?: boolean }): Promise<void> {
   if (pid) console.log(`  PID:        ${pid}`);
   if (uptime !== null) console.log(`  Uptime:     ${humanDuration(uptime)}`);
   if (heartbeatAgeMs !== null) console.log(`  Heartbeat:  ${Math.round(heartbeatAgeMs / 1000)}s ago`);
+  if (status.restarts24h > 0) {
+    const when = status.lastRestartAt ? ` (last ${new Date(status.lastRestartAt).toLocaleString()})` : '';
+    console.log(`  Restarts:   ${status.restarts24h} in the last 24h${when}`);
+    if (status.lastRestartCause) console.log(`  Last cause: ${chalk.gray(status.lastRestartCause)}`);
+  }
   const binaryLabel = owner?.entry ?? status.binaryPath ?? 'unknown';
   console.log(`  Binary:     ${ownerEntryGone ? chalk.red(`${binaryLabel}  (MISSING from disk)`) : chalk.gray(binaryLabel)}`);
   console.log(`  Version:    ${chalk.gray(owner?.version ?? 'unknown')}`);
@@ -552,10 +558,6 @@ async function runStatus(opts: { json?: boolean }): Promise<void> {
   if (scheduler.failingCount > 0) {
     console.log(chalk.red(`  ${scheduler.failingCount} routine(s) failing their last run — see: agents routines stats`));
   }
-
-  if (state === 'wedged') {
-    console.log(chalk.red('\nThe daemon is wedged (heartbeat stale). Restart: agents daemon restart'));
-  }
 }
 
 // ─── Full service roster (RUSH-3193 P4) ──────────────────────────────────────
@@ -596,8 +598,8 @@ function buildServiceRows(daemonRunning: boolean): DaemonServiceRow[] {
     // A persisted supervisor state (health.json) is only trustworthy while the
     // daemon is actually up. If it is not running (crash / kill -9 / never
     // started), every service is stopped no matter what the last-written record
-    // says — trusting a stale 'running'/'parked'/'idle' here would print a
-    // report that contradicts the live-probed socket rows below (RUSH-2368).
+    // says — trusting a stale 'running'/'idle' here would print a report that
+    // contradicts the live-probed socket rows below (RUSH-2368).
     const state = daemonRunning
       ? (h?.state ?? (s.enabled ? 'running (unsupervised)' : 'stopped'))
       : 'stopped';
@@ -617,7 +619,6 @@ function buildServiceRows(daemonRunning: boolean): DaemonServiceRow[] {
 
 function serviceStateLabel(state: string): string {
   if (state === 'running') return chalk.green('running');
-  if (state === 'parked') return chalk.red('parked');
   if (state === 'stopped') return chalk.gray('stopped');
   if (state === 'idle') return chalk.gray('idle');
   return chalk.yellow(state); // 'running (unsupervised)' or any future label
@@ -728,7 +729,6 @@ async function runDoctor(opts: { json?: boolean }): Promise<void> {
   const problems: string[] = [];
 
   if (!status.running && enabled) problems.push('Daemon is not running. Start it: agents daemon start');
-  if (status.running && isDaemonWedged()) problems.push('Daemon is wedged (heartbeat stale). Restart: agents daemon restart');
 
   // RUSH-2418: an open auto-start circuit breaker is the FIRST thing to report
   // for a stopped daemon — otherwise the only advice is "agents daemon start",

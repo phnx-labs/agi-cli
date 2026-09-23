@@ -1,8 +1,11 @@
 /**
- * ServiceSupervisor (RUSH-3193 P1): per-service error boundary, per-tick
- * deadline, circuit breaker, and health reporting — exercised against fake
- * `DaemonService`/`PeriodicService` implementations, not the real
- * daemon-hosted services.
+ * ServiceSupervisor (RUSH-3193 P1, PHNX-4116): per-service error boundary,
+ * per-tick deadline, and exit-on-breach — exercised against fake
+ * `DaemonService`/`PeriodicService` implementations, not the real daemon-hosted
+ * services. A thrown tick is recorded and the service keeps ticking; a tick (or
+ * a start()/restart() lifecycle call) that breaches its deadline exits the
+ * process (via an injected `exit`) so systemd/launchd restart the daemon. There
+ * is no `parked` state and no in-process backoff restart.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
@@ -30,6 +33,11 @@ afterEach(() => {
 
 function makeCtx(): DaemonContext {
   return { log: () => {} };
+}
+
+/** A supervisor `exit` stub typed to satisfy the never-returning signature. */
+function makeExit(): ReturnType<typeof vi.fn> {
+  return vi.fn();
 }
 
 /** A service that ticks successfully every time, counting how many ticks it ran. */
@@ -71,13 +79,10 @@ class ThrowingService implements PeriodicService {
   readonly intervalMs = 1_000;
   readonly deadlineMs = 500;
   ticks = 0;
-  restarts = 0;
 
   async start(): Promise<void> {}
   async stop(): Promise<void> {}
-  async restart(): Promise<void> {
-    this.restarts += 1;
-  }
+  async restart(): Promise<void> {}
   async tick(): Promise<void> {
     this.ticks += 1;
     throw new Error(`boom #${this.ticks}`);
@@ -107,89 +112,90 @@ class HangingService implements PeriodicService {
 }
 
 describe('ServiceSupervisor', () => {
-  it('a throwing service parks + reports unhealthy + restarts with backoff, while a healthy sibling keeps ticking', async () => {
-    // backoffBaseMs kept well clear of the 1s tick interval so the restart
-    // timer and sibling-tick assertions below never land on the same instant.
-    const supervisor = new ServiceSupervisor({ parkAfterFailures: 3, backoffBaseMs: 5_000, backoffMaxMs: 20_000 });
-    const bad = new ThrowingService();
+  it('a never-settling tick breaches its deadline and exits the process ONCE with code 70 (PHNX-4116)', async () => {
+    const exit = makeExit();
+    const logs: string[] = [];
+    const ctx: DaemonContext = { log: (level, msg) => { logs.push(`${level} ${msg}`); } };
+    const supervisor = new ServiceSupervisor({ exit: exit as unknown as (code: number) => never });
+    const hanging = new HangingService(); // id 'device-probe', deadlineMs 500
+    supervisor.register(hanging);
+
+    await supervisor.startAll(ctx);
+    await vi.advanceTimersByTimeAsync(0); // first immediate tick starts, then hangs
+    expect(hanging.ticksStarted).toBe(1);
+    expect(exit).not.toHaveBeenCalled();
+
+    // The 500ms deadline elapses -> the supervisor exits for a supervised restart.
+    await vi.advanceTimersByTimeAsync(500);
+    expect(exit).toHaveBeenCalledTimes(1);
+    expect(exit).toHaveBeenCalledWith(70);
+
+    // The ERROR log line names the service id AND the deadline it breached.
+    const errorLine = logs.find((l) => l.startsWith('ERROR'));
+    expect(errorLine).toBeDefined();
+    expect(errorLine).toContain('device-probe');
+    expect(errorLine).toContain('deadline of 500ms');
+
+    // The injected exit does not really terminate, but every timer was frozen, so
+    // no further tick fires and exit is never called a second time.
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(exit).toHaveBeenCalledTimes(1);
+  });
+
+  it('a throwing tick is recorded and the service keeps ticking — the process never exits (PHNX-4116)', async () => {
+    const exit = makeExit();
+    const supervisor = new ServiceSupervisor({ exit: exit as unknown as (code: number) => never });
+    const bad = new ThrowingService(); // id 'watchdog'
     const good = new HealthyService('scheduler');
     supervisor.register(bad);
     supervisor.register(good);
 
     await supervisor.startAll(makeCtx());
-    // Immediate first-tick fire (both services), plus enough ticks to cross the park threshold.
-    await vi.advanceTimersByTimeAsync(0); // t=0: tick #1
-    await vi.advanceTimersByTimeAsync(1_000); // t=1000: tick #2
-    await vi.advanceTimersByTimeAsync(1_000); // t=2000: tick #3 -> parks (backoff scheduled for t=7000)
+    await vi.advanceTimersByTimeAsync(0); // tick #1 throws
+    await vi.advanceTimersByTimeAsync(1_000); // tick #2 throws
+    await vi.advanceTimersByTimeAsync(1_000); // tick #3 throws
 
-    let health = supervisor.health();
-    expect(health['watchdog'].state).toBe('parked');
+    const health = supervisor.health();
+    // The throwing service keeps ticking on its interval — never parked, never stopped.
+    expect(bad.ticks).toBe(3);
+    expect(health['watchdog'].state).toBe('running');
     expect(health['watchdog'].consecutiveFailures).toBeGreaterThanOrEqual(3);
     expect(health['watchdog'].lastError).toMatch(/boom/);
-    // The daemon itself must stay up: the sibling never stopped ticking.
+    // A throw is recoverable — the process is NEVER exited for it.
+    expect(exit).not.toHaveBeenCalled();
+    // The healthy sibling was undisturbed throughout.
+    expect(good.ticks).toBeGreaterThanOrEqual(3);
     expect(health['scheduler'].state).toBe('running');
-    const goodTicksAtPark = good.ticks;
-    expect(goodTicksAtPark).toBeGreaterThanOrEqual(3);
-    expect(bad.ticks).toBe(3);
-
-    // Sibling keeps advancing while the bad service sits parked (no more throws counted) — well
-    // before the t=7000 backoff fire.
-    await vi.advanceTimersByTimeAsync(1_000); // t=3000
-    expect(good.ticks).toBeGreaterThan(goodTicksAtPark);
-    expect(bad.ticks).toBe(3); // no ticks scheduled while parked
-
-    // Advance past the scheduled backoff window and confirm a restart was attempted.
-    await vi.advanceTimersByTimeAsync(5_000); // t=8000, past the t=7000 restart
-    expect(bad.restarts).toBeGreaterThanOrEqual(1);
-    health = supervisor.health();
-    expect(health['watchdog'].state).toBe('running');
 
     await supervisor.stopAll();
   });
 
-  it('a never-settling tick is abandoned at the deadline: parked, in-flight released, and force-restarted on backoff (PHNX-3608)', async () => {
-    const supervisor = new ServiceSupervisor({ backoffBaseMs: 5_000 });
-    const hanging = new HangingService();
-    const good = new HealthyService('scheduler');
-    supervisor.register(hanging);
-    supervisor.register(good);
+  it('a start() that exceeds lifecycleDeadlineMs exits the process for a supervised restart (PHNX-4116)', async () => {
+    // Uses REAL timers with a tiny deadline: the point is that `await startAll`
+    // returns on its own once the deadline fires and the injected exit is called.
+    vi.useRealTimers();
+    const exit = makeExit();
+    class WedgedStartService implements PeriodicService {
+      readonly id: DaemonServiceId = 'account-state';
+      readonly intervalMs = 1_000;
+      readonly deadlineMs = 500;
+      async start(): Promise<void> { return new Promise<void>(() => {}); } // never resolves
+      async stop(): Promise<void> {}
+      async restart(): Promise<void> {}
+      async tick(): Promise<void> {}
+      health(): ServiceHealth { return { state: 'running', lastRunMs: 0, consecutiveFailures: 0 }; }
+    }
+    const supervisor = new ServiceSupervisor({ lifecycleDeadlineMs: 20, exit: exit as unknown as (code: number) => never });
+    supervisor.register(new WedgedStartService());
 
     await supervisor.startAll(makeCtx());
-    await vi.advanceTimersByTimeAsync(0); // first immediate tick starts, then hangs
-
-    expect(hanging.ticksStarted).toBe(1);
-    // Advance past the 500ms deadline — the race rejects and parks immediately.
-    await vi.advanceTimersByTimeAsync(500);
-    let health = supervisor.health();
-    expect(health['device-probe'].consecutiveFailures).toBe(1);
-    expect(health['device-probe'].lastError).toMatch(/deadline/);
-    expect(health['device-probe'].state).toBe('parked');
-
-    // NEW contract (PHNX-3608): the runaway promise is NOT waited on. The
-    // in-flight guard is released immediately, so `awaitIdle` resolves promptly
-    // instead of hanging forever, and a live transition is no longer refused
-    // with "tick is still in flight".
-    let becameIdle = false;
-    void supervisor.awaitIdle('device-probe').then(() => { becameIdle = true; });
-    await vi.advanceTimersByTimeAsync(0);
-    expect(becameIdle).toBe(true);
-
-    // The backoff restart fires WITHOUT the never-settling promise ever settling
-    // (t=500 breach -> t=5500 restart) — the service restarts and a fresh tick
-    // starts. This is the exact wedge the old "hold in-flight forever" contract
-    // caused: backoff, `daemon services restart`, and SIGHUP reload were all
-    // blocked until a promise that never settles settled.
-    await vi.advanceTimersByTimeAsync(5_000);
-    expect(hanging.ticksStarted).toBeGreaterThanOrEqual(2);
-
-    // The daemon stays up: the sibling ticked throughout.
-    expect(good.ticks).toBeGreaterThanOrEqual(1);
-    await supervisor.stopAll();
+    expect(exit).toHaveBeenCalledWith(70);
   });
 
-  it('a tick that threads the AbortSignal is aborted at the deadline and can unwind (PHNX-3608)', async () => {
-    // A cooperating tick resolves when its signal aborts. Proves the supervisor
-    // hands a real, deadline-driven AbortSignal into `tick(ctx, signal)`.
+  it('a cooperating tick receives a real deadline-driven AbortSignal, aborted before the exit (PHNX-4116)', async () => {
+    // Proves the supervisor hands a real, deadline-driven AbortSignal into
+    // `tick(ctx, signal)` and aborts it when the deadline wins, before exiting.
+    const exit = makeExit();
     class AbortAwareService implements PeriodicService {
       readonly id: DaemonServiceId = 'device-probe';
       readonly intervalMs = 1_000;
@@ -211,7 +217,7 @@ describe('ServiceSupervisor', () => {
       }
     }
 
-    const supervisor = new ServiceSupervisor({ backoffBaseMs: 5_000 });
+    const supervisor = new ServiceSupervisor({ exit: exit as unknown as (code: number) => never });
     const svc = new AbortAwareService();
     supervisor.register(svc);
     await supervisor.startAll(makeCtx());
@@ -219,98 +225,10 @@ describe('ServiceSupervisor', () => {
     expect(svc.ticks).toBe(1);
     expect(svc.aborts).toBe(0);
 
-    // The deadline fires -> the tick's signal aborts -> the tick unwinds.
+    // The deadline fires -> the tick's signal aborts -> the supervisor exits.
     await vi.advanceTimersByTimeAsync(500);
     expect(svc.aborts).toBe(1);
-    expect(supervisor.health()['device-probe'].state).toBe('parked');
-
-    await supervisor.stopAll();
-  });
-
-  it('a service that hangs once then heals on restart recovers on backoff (PHNX-3608)', async () => {
-    // Models the account-state 12h-usage-dark fix: the first tick hangs
-    // (usageRunning would latch forever), but the supervisor abandons it and the
-    // backoff restart swaps in a healthy tick, so the service recovers instead of
-    // freezing for the daemon's life.
-    class HangThenHealService implements PeriodicService {
-      readonly id: DaemonServiceId = 'account-state';
-      readonly intervalMs = 1_000;
-      readonly deadlineMs = 500;
-      healed = false;
-      healthyTicks = 0;
-      async start(): Promise<void> {}
-      async stop(): Promise<void> {}
-      async restart(): Promise<void> { this.healed = true; }
-      async tick(): Promise<void> {
-        if (!this.healed) return new Promise<void>(() => {}); // hang until restarted
-        this.healthyTicks += 1;
-      }
-      health(): ServiceHealth {
-        return { state: 'running', lastRunMs: 0, consecutiveFailures: 0 };
-      }
-    }
-
-    const supervisor = new ServiceSupervisor({ backoffBaseMs: 5_000 });
-    const svc = new HangThenHealService();
-    supervisor.register(svc);
-    await supervisor.startAll(makeCtx());
-    await vi.advanceTimersByTimeAsync(0); // first tick hangs
-
-    await vi.advanceTimersByTimeAsync(500); // deadline -> parked, restart scheduled
-    expect(supervisor.health()['account-state'].state).toBe('parked');
-
-    await vi.advanceTimersByTimeAsync(5_000); // backoff restart -> heals -> healthy tick
-    expect(svc.healed).toBe(true);
-    expect(supervisor.health()['account-state'].state).toBe('running');
-    await vi.advanceTimersByTimeAsync(1_000);
-    expect(svc.healthyTicks).toBeGreaterThanOrEqual(1);
-
-    await supervisor.stopAll();
-  });
-
-  it('a service that hangs again after a backoff restart is restarted again, not parked for good (PHNX-4116)', async () => {
-    // Observed on zion and four workers 2026-09-15..18: daemon-heartbeat and
-    // usage-sync each recovered from ONE deadline breach on backoff, then the
-    // next breach logged "parked" and never restarted — for days. The fired
-    // restart timer's handle was never dropped, so the second park read it as
-    // "restart already pending" and skipped scheduling one.
-    class AlwaysHangingService implements PeriodicService {
-      readonly id: DaemonServiceId = 'usage-sync';
-      readonly intervalMs = 1_000;
-      readonly deadlineMs = 500;
-      restarts = 0;
-      async start(): Promise<void> {}
-      async stop(): Promise<void> {}
-      async restart(): Promise<void> { this.restarts += 1; }
-      async tick(): Promise<void> {
-        return new Promise<void>(() => {}); // never settles
-      }
-      health(): ServiceHealth {
-        return { state: 'running', lastRunMs: 0, consecutiveFailures: 0 };
-      }
-    }
-
-    const supervisor = new ServiceSupervisor({ backoffBaseMs: 5_000 });
-    const svc = new AlwaysHangingService();
-    supervisor.register(svc);
-    await supervisor.startAll(makeCtx());
-    await vi.advanceTimersByTimeAsync(0); // first tick hangs
-
-    await vi.advanceTimersByTimeAsync(500); // deadline -> parked, restart scheduled
-    expect(supervisor.health()['usage-sync'].state).toBe('parked');
-    await vi.advanceTimersByTimeAsync(5_000); // backoff restart #1 -> running, tick hangs again
-    expect(svc.restarts).toBe(1);
-    expect(supervisor.health()['usage-sync'].state).toBe('running');
-
-    await vi.advanceTimersByTimeAsync(500); // second deadline -> parked again
-    expect(supervisor.health()['usage-sync'].state).toBe('parked');
-    // A successful restart resets the backoff, so the next attempt is due after
-    // the base delay again. Before the fix this never fired.
-    await vi.advanceTimersByTimeAsync(5_000);
-    expect(svc.restarts).toBe(2);
-    expect(supervisor.health()['usage-sync'].state).toBe('running');
-
-    await supervisor.stopAll();
+    expect(exit).toHaveBeenCalledWith(70);
   });
 
   it('health() returns a record for every registered service', async () => {
@@ -416,22 +334,23 @@ describe('ServiceSupervisor', () => {
     expect(delayed.ticks).toBe(0);
   });
 
-  it('restartOne() forces an immediate restart outside the backoff schedule', async () => {
+  it('restartOne() stops then starts a service in place, with no parked intermediate (PHNX-4116)', async () => {
     const supervisor = new ServiceSupervisor();
-    const bad = new ThrowingService();
-    supervisor.register(bad);
+    const svc = new HealthyService('session-index');
+    supervisor.register(svc);
     await supervisor.startAll(makeCtx());
-    await vi.advanceTimersByTimeAsync(0); // tick #1 throws, cf=1 (parkAfterFailures default 3, not parked yet)
+    await vi.advanceTimersByTimeAsync(0);
+    expect(svc.ticks).toBe(1);
+    expect(svc.started).toBe(true);
 
-    expect(supervisor.health()['watchdog'].state).toBe('running');
-    await supervisor.restartOne('watchdog');
-    expect(bad.restarts).toBe(1);
-    // restartOne() clears the failure streak on the restart itself, then fires an
-    // immediate tick like a fresh start — which throws again for this fixture,
-    // so the streak is back to 1 rather than 0. The state stays 'running' either
-    // way since parkAfterFailures (default 3) hasn't been reached again yet.
-    expect(supervisor.health()['watchdog'].state).toBe('running');
-    expect(supervisor.health()['watchdog'].consecutiveFailures).toBe(1);
+    await supervisor.restartOne('session-index');
+    // restartOne is a plain stop + start — the service's stop() ran, and it is
+    // immediately running again (never a 'parked' or 'stopped' resting state).
+    expect(svc.stopped).toBe(true);
+    expect(supervisor.health()['session-index'].state).toBe('running');
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(svc.ticks).toBe(2); // one immediate post-restart tick
   });
 
   it('restartOne() replaces a periodic timer instead of multiplying its tick rate', async () => {
@@ -454,64 +373,17 @@ describe('ServiceSupervisor', () => {
     await supervisor.stopAll();
   });
 
-  it('a service that fails restart() after parking, then later restarts successfully, is stopped cleanly by stopAll() (everStarted set on restart, not just first start)', async () => {
-    const supervisor = new ServiceSupervisor({ parkAfterFailures: 1, backoffBaseMs: 1_000, backoffMaxMs: 1_000 });
-
-    class FlakyStartService implements PeriodicService {
-      readonly id: DaemonServiceId = 'account-state';
-      readonly intervalMs = 1_000;
-      readonly deadlineMs = 500;
-      startCalls = 0;
-      stopCalls = 0;
-
-      async start(): Promise<void> {
-        this.startCalls += 1;
-        if (this.startCalls === 1) throw new Error('first start fails');
-      }
-      async stop(): Promise<void> {
-        this.stopCalls += 1;
-      }
-      async restart(): Promise<void> {
-        await this.stop();
-        await this.start();
-      }
-      async tick(): Promise<void> {}
-      health(): ServiceHealth {
-        return { state: 'running', lastRunMs: 0, consecutiveFailures: 0 };
-      }
-    }
-
-    const svc = new FlakyStartService();
-    supervisor.register(svc);
-    await supervisor.startAll(makeCtx()); // start() throws -> parked immediately, restart scheduled at t=1000
-
-    expect(supervisor.health()['account-state'].state).toBe('parked');
-    await vi.advanceTimersByTimeAsync(1_000); // backoff fires -> restart() succeeds this time
-    expect(supervisor.health()['account-state'].state).toBe('running');
-    expect(svc.startCalls).toBe(2);
-    const stopCallsAfterRestart = svc.stopCalls; // restart() itself calls stop() once internally (=1)
-
-    // Before the fix, `everStarted` was only set on the FIRST successful start() —
-    // never on a successful restart() — so the supervisor's OWN stopOne() would
-    // skip calling stop() again here even though the service is genuinely
-    // running (distinct from the stop() restart() already made internally).
-    await supervisor.stopAll();
-    expect(svc.stopCalls).toBe(stopCallsAfterRestart + 1);
-  });
-
-  // RUSH-3193 P3 migrated watchdog, device-probe, self-heal, and
-  // state-dir-check onto the supervisor (a fifth, keychain-reap, migrated too
-  // but moved out of this daemon entirely with the standalone `secrets` engine
-  // — PHNX-3989 OWN-1). The throw/hang mechanics above already exercise
-  // 'watchdog' (ThrowingService) and 'device-probe' (HangingService) by id;
-  // this closes the same two guarantees explicitly for every id P3 migrated
-  // that still lives here, proving the mechanism the concrete `*-service.ts`
-  // wrappers rely on is id-agnostic.
-  describe('RUSH-3193 P3 migrated ids: throw parks, hang hits deadline', () => {
+  // RUSH-3193 P3 migrated watchdog, device-probe, self-heal, and state-dir-check
+  // onto the supervisor. The throw/hang mechanics above already exercise
+  // 'watchdog' (ThrowingService) and 'device-probe' (HangingService) by id; this
+  // closes the same two guarantees explicitly for every id P3 migrated, proving
+  // the mechanism the concrete `*-service.ts` wrappers rely on is id-agnostic.
+  describe('RUSH-3193 P3 migrated ids: throw keeps ticking, hang exits (PHNX-4116)', () => {
     const P3_IDS: DaemonServiceId[] = ['watchdog', 'device-probe', 'self-heal', 'state-dir-check'];
 
-    it.each(P3_IDS)('%s: a throwing tick parks the service after parkAfterFailures, without crashing a healthy sibling', async (id) => {
-      const supervisor = new ServiceSupervisor({ parkAfterFailures: 3, backoffBaseMs: 5_000, backoffMaxMs: 20_000 });
+    it.each(P3_IDS)('%s: a throwing tick keeps ticking without exiting or crashing a healthy sibling', async (id) => {
+      const exit = makeExit();
+      const supervisor = new ServiceSupervisor({ exit: exit as unknown as (code: number) => never });
       class NamedThrowingService extends ThrowingService {
         readonly id = id;
       }
@@ -523,19 +395,21 @@ describe('ServiceSupervisor', () => {
       await supervisor.startAll(makeCtx());
       await vi.advanceTimersByTimeAsync(0); // tick #1
       await vi.advanceTimersByTimeAsync(1_000); // tick #2
-      await vi.advanceTimersByTimeAsync(1_000); // tick #3 -> parks
+      await vi.advanceTimersByTimeAsync(1_000); // tick #3
 
       const health = supervisor.health();
-      expect(health[id].state).toBe('parked');
+      expect(health[id].state).toBe('running');
       expect(health[id].consecutiveFailures).toBeGreaterThanOrEqual(3);
       expect(health['scheduler'].state).toBe('running');
       expect(good.ticks).toBeGreaterThanOrEqual(3);
+      expect(exit).not.toHaveBeenCalled();
 
       await supervisor.stopAll();
     });
 
-    it.each(P3_IDS)('%s: a hanging tick is abandoned at the deadline and force-restarted on backoff (PHNX-3608)', async (id) => {
-      const supervisor = new ServiceSupervisor({ parkAfterFailures: 100, backoffBaseMs: 5_000 });
+    it.each(P3_IDS)('%s: a hanging tick breaches its deadline and exits the process (PHNX-4116)', async (id) => {
+      const exit = makeExit();
+      const supervisor = new ServiceSupervisor({ exit: exit as unknown as (code: number) => never });
       class NamedHangingService extends HangingService {
         readonly id = id;
       }
@@ -549,54 +423,8 @@ describe('ServiceSupervisor', () => {
       expect(hanging.ticksStarted).toBe(1);
 
       await vi.advanceTimersByTimeAsync(500); // past the 500ms deadline
-      const health = supervisor.health();
-      expect(health[id].consecutiveFailures).toBe(1);
-      expect(health[id].lastError).toMatch(/deadline/);
-      expect(health[id].state).toBe('parked');
-
-      // The backoff restart fires without the unresolved promise ever settling —
-      // a fresh tick starts (and hangs again). The old contract left this at 1
-      // forever, wedging the service for the daemon's life.
-      await vi.advanceTimersByTimeAsync(5_000);
-      expect(hanging.ticksStarted).toBeGreaterThanOrEqual(2);
-      expect(good.ticks).toBeGreaterThanOrEqual(1);
-
-      await supervisor.stopAll();
-    });
-
-    it.each(P3_IDS)('%s: a wedged start() is bounded so it parks instead of stalling startAll (PHNX-3608)', async (id) => {
-      // A start() that never resolves must not hang startAll() forever — the
-      // lifecycle deadline turns it into a park + backoff restart. Uses REAL
-      // timers with a tiny deadline: the whole point is that `await startAll`
-      // returns on its own once the deadline fires, which a fake-timer race
-      // (advance-while-awaiting-startAll) cannot express.
-      vi.useRealTimers();
-      class WedgedStartService implements PeriodicService {
-        readonly id = id;
-        readonly intervalMs = 1_000;
-        readonly deadlineMs = 500;
-        async start(): Promise<void> { return new Promise<void>(() => {}); } // never resolves
-        async stop(): Promise<void> {}
-        async restart(): Promise<void> {}
-        async tick(): Promise<void> {}
-        health(): ServiceHealth { return { state: 'running', lastRunMs: 0, consecutiveFailures: 0 }; }
-      }
-      // backoff far out so no restart fires during this short real-time test.
-      const supervisor = new ServiceSupervisor({ lifecycleDeadlineMs: 20, backoffBaseMs: 60_000 });
-      const wedged = new WedgedStartService();
-      const good = new HealthyService('scheduler');
-      supervisor.register(wedged);
-      supervisor.register(good);
-
-      // startAll awaits startOne per service; a wedged start must NOT block the
-      // sibling's boot forever. The 20ms lifecycle deadline lets startAll return.
-      await supervisor.startAll(makeCtx());
-      expect(supervisor.health()[id].state).toBe('parked');
-      expect(supervisor.health()[id].lastError).toMatch(/start exceeded deadline/);
-
-      // The sibling started and its immediate first tick ran despite the wedged peer.
-      await new Promise((r) => setTimeout(r, 10));
-      expect(good.ticks).toBeGreaterThanOrEqual(1);
+      expect(exit).toHaveBeenCalledWith(70);
+      expect(supervisor.health()[id].lastError).toMatch(/deadline/);
 
       await supervisor.stopAll();
     });
@@ -605,17 +433,18 @@ describe('ServiceSupervisor', () => {
   // Review finding on PR #3037: recordSubsystemOk/Error (daemon-health.ts) are
   // called from inside runTick's own catch block. Before the fix, a health-file
   // write failure there (disk full, permission, or — as simulated here — the
-  // state dir replaced with an unwritable path mid-run) would throw OUT of
-  // that catch with no further handler, becoming an unhandled rejection that
-  // takes the whole daemon down with `process.exit(1)` — reproducing exactly
-  // the failure mode this supervisor exists to prevent.
+  // state dir replaced with an unwritable path mid-run) would throw OUT of that
+  // catch with no further handler, becoming an unhandled rejection that takes the
+  // whole daemon down — reproducing exactly the failure mode this supervisor
+  // exists to prevent.
   it('a health-ledger write failure never escapes runTick — the daemon and every sibling survive', async () => {
     // Point AGENTS_DAEMON_DIR at a FILE instead of a directory, so daemon-health's
     // mkdirSync/writeFileSync both fail on every recordSubsystemOk/Error call.
     fs.rmSync(testDaemonDir, { recursive: true, force: true });
     fs.writeFileSync(testDaemonDir, 'not a directory', 'utf-8');
 
-    const supervisor = new ServiceSupervisor({ parkAfterFailures: 3, backoffBaseMs: 5_000, backoffMaxMs: 20_000 });
+    const exit = makeExit();
+    const supervisor = new ServiceSupervisor({ exit: exit as unknown as (code: number) => never });
     const bad = new ThrowingService();
     const healthy = new HealthyService('scheduler');
     supervisor.register(bad);
@@ -629,9 +458,11 @@ describe('ServiceSupervisor', () => {
     expect(supervisor.health()['watchdog'].consecutiveFailures).toBeGreaterThan(0);
     // ...and the healthy sibling was never touched by the other service's
     // health-write failures — this is the actual regression: an escaped throw
-    // there would have killed the process before this line ever ran.
+    // there would have killed the process before this line ever ran. A throwing
+    // tick is recoverable, so the process is never exited for it either.
     expect(healthy.ticks).toBeGreaterThan(0);
     expect(supervisor.health()['scheduler'].state).toBe('running');
+    expect(exit).not.toHaveBeenCalled();
 
     fs.rmSync(testDaemonDir, { force: true });
   });

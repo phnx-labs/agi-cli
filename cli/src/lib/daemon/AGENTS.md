@@ -116,14 +116,20 @@ record of `null` for it.
   an immediate first tick on registration, and `state-dir-check`'s tick calls
   `handleShutdown` on a marker mismatch, so registering it before that const
   exists would reference it in its temporal dead zone. The supervisor gives
-  each periodic service a per-tick deadline race, a per-service try/catch that never
-  escapes to the process-wide crash handler, and a park/backoff circuit
-  breaker (`parkAfterFailures`, default 3) that retries independently of
-  every sibling service. A deadline is detection, not cancellation: the service
-  parks immediately, retains its in-flight ownership until the real promise
-  settles, and cannot be stopped or restarted live underneath that work.
-  SIGHUP control transitions queue on `awaitIdle()` rather than polling, so a
-  requested toggle applies after real settlement without another timer owner.
+  each periodic service a per-tick deadline race and a per-service try/catch that
+  never escapes to the process-wide crash handler. A THROWN tick is recoverable:
+  it is recorded (`recordFailure`) and the service keeps ticking on its own
+  interval, so a transient failure retries in place and no sibling is disturbed.
+  A tick — or a `start()`/`restart()` lifecycle call — that BREACHES its deadline
+  is a hang that can never be retried in-process (its promise may never settle),
+  so the supervisor records the cause, flushes it to `daemon-health.ts`, and EXITS
+  the process (code 70); systemd (`Restart=always`, `RestartSec=30`,
+  `StartLimitIntervalSec=0`) / launchd (`KeepAlive` + `ThrottleInterval=30`)
+  restart the whole daemon within ~30s (PHNX-4116). There is NO `parked` state and
+  NO in-process backoff restart — a wedged daemon is handed back to its OS
+  supervisor rather than left sitting unresponsive. SIGHUP control transitions
+  queue on `awaitIdle()` rather than polling, so a requested toggle applies after
+  real settlement without another timer owner.
   `getServiceSupervisorHealth()` (`daemon.ts:60`)
   exposes the live in-process `supervisor.health()` map for a future
   same-process reader; a cross-process reader (`agents daemon services`, a
@@ -225,9 +231,10 @@ one health mirror both the daemon (writer) and `agents daemon` /
 `agents daemon services` (a separate reader process) use —
 `recordSubsystemOk`/`recordSubsystemError` (ok/error streak + last
 error/timestamp) and, since RUSH-3193 P4, `recordSubsystemState` (the
-supervisor's `idle`/`running`/`parked`/`stopped` lifecycle state, written on
-every transition in `supervisor.ts`'s `startOne`/`stopOne`/`park`/
-`attemptRestart`). Only supervised services call
+supervisor's `idle`/`running`/`stopped` lifecycle state, written on
+every transition in `supervisor.ts`'s `startOne`/`stopOne`). A deadline breach
+does not write a new state — it records the cause via `recordSubsystemError` +
+`recordDaemonRestart` and exits (PHNX-4116). Only supervised services call
 `recordSubsystemState`, so a `SubsystemHealth` record's `state` field being
 present is itself the signal `agents daemon services` uses to render
 "measured" vs "inferred" (`commands/daemon.ts`'s `buildServiceRows`).
@@ -237,10 +244,12 @@ see complete JSON, and concurrent daemon/foreground writers preserve every
 failure-streak increment used by the auto-start circuit breaker.
 
 **Crash model: any uncaught error in the process kills and restarts the
-whole daemon, not just the failing service — except for supervised
-services above, which the supervisor's own try/catch + deadline race now
-isolate.** A throw that escapes an INLINE service's local try/catch is still
-uncaught at the process level. `cli/src/index.ts:96-102` installs the
+whole daemon, not just the failing service — except for a supervised service's
+THROWN tick, which the supervisor's own try/catch isolates (the service keeps
+ticking).** A supervised tick or lifecycle call that BREACHES its deadline is the
+one case the supervisor deliberately exits the process for, so systemd/launchd
+restart the wedged daemon (PHNX-4116). A throw that escapes an INLINE service's
+local try/catch is still uncaught at the process level. `cli/src/index.ts:96-102` installs the
 top-level handlers:
 
 ```ts

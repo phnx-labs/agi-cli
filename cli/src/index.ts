@@ -127,9 +127,10 @@ if (process.argv[2] === '__daemon-run') {
   // stack to whatever the service manager had wired to stdout and never reaching
   // the daemon's own structured log. Route both into log() so the failure is in
   // logs.jsonl where `agents daemon logs` reads it, then exit non-zero and
-  // DELIBERATELY let the supervisor restart us — now paced by the plist's
-  // ThrottleInterval / the unit's StartLimitBurst. Swallowing here would be the
-  // worse failure: a daemon left alive with a dead subsystem.
+  // DELIBERATELY let the supervisor restart us — paced by the plist's
+  // ThrottleInterval / the unit's RestartSec, and never abandoned
+  // (StartLimitIntervalSec=0, PHNX-4116). Swallowing here would be the worse
+  // failure: a daemon left alive with a dead subsystem.
   const crash = (kind: string) => (err: unknown) => {
     const detail = err instanceof Error ? (err.stack ?? err.message) : String(err);
     try { daemonLog('ERROR', `${kind}: ${detail}`); } catch { /* log path unwritable — stderr below still carries it */ }

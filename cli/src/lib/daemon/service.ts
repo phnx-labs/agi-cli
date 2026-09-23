@@ -16,8 +16,12 @@
 
 import type { DaemonServiceId } from '../daemon-services.js';
 
-/** Lifecycle state a supervised service can be in. */
-export type ServiceState = 'idle' | 'running' | 'parked' | 'stopped';
+/**
+ * Lifecycle state a supervised service can be in. There is no `parked` state:
+ * a throw keeps the service `running` (it retries on the next tick) and a
+ * deadline breach exits the whole daemon for a supervised OS restart (PHNX-4116).
+ */
+export type ServiceState = 'idle' | 'running' | 'stopped';
 
 /** A service's most recently observed health, as reported by the supervisor. */
 export interface ServiceHealth {
@@ -48,12 +52,12 @@ export interface DaemonService {
 export interface PeriodicService extends DaemonService {
   readonly intervalMs: number;
   /**
-   * Hard cap per tick. An over-budget tick is ABANDONED: the supervisor aborts
-   * the tick's {@link AbortSignal}, parks the service, and schedules a backoff
-   * restart immediately — it does NOT wait for the real promise to settle
-   * (PHNX-3608). A tick that awaits `signal` (or forwards it to its I/O) can
-   * observe the deadline and unwind; one that ignores it is left to drain in the
-   * background while the service is already being restarted.
+   * Hard cap per tick. An over-budget tick is a HANG that cannot be retried
+   * in-process (its promise may never settle), so the supervisor aborts the
+   * tick's {@link AbortSignal} and EXITS the daemon (code 70) for a supervised
+   * systemd/launchd restart (PHNX-4116) — there is no park or in-process backoff.
+   * A tick that awaits `signal` (or forwards it to its I/O) can observe the
+   * deadline and unwind cleanly before the process exits.
    */
   readonly deadlineMs: number;
   /**

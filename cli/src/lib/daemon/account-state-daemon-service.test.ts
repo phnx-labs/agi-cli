@@ -4,9 +4,10 @@
  * and `AccountAuthService` (`account-auth`) — each with its own per-tick deadline,
  * AbortSignal, and circuit breaker, replacing the old un-deadlined dual-`setInterval`
  * loop whose `usageRunning` latch could hang forever (the 12h usage-dark root cause).
- * Independent breakers mean a run of usage failures parks ONLY usage and never
- * starves the slower auth refresh. Driven through the real ServiceSupervisor so the
- * deadline/abort/circuit-breaker path is exercised, not stubbed.
+ * Independent services mean a run of usage THROWS keeps usage ticking without ever
+ * starving the slower auth refresh, and a usage HANG exits the daemon for a
+ * supervised restart (PHNX-4116). Driven through the real ServiceSupervisor so the
+ * deadline/abort/exit-on-breach path is exercised, not stubbed.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
@@ -83,54 +84,47 @@ describe('AccountUsageService / AccountAuthService', () => {
     await supervisor.stopAll();
   });
 
-  it('a run of usage failures parks ONLY usage — auth keeps its independent breaker running', async () => {
+  it('a run of usage THROWS keeps usage ticking without exiting — auth keeps ticking independently (PHNX-4116)', async () => {
+    const exit = vi.fn();
     const usage = vi.fn(async () => { throw new Error('usage boom'); });
     const auth = vi.fn(async () => {});
-    const supervisor = new ServiceSupervisor({ parkAfterFailures: 3, backoffBaseMs: 60_000 });
+    const supervisor = new ServiceSupervisor({ exit: exit as unknown as (code: number) => never });
     supervisor.register(new AccountUsageService(usage));
     supervisor.register(new AccountAuthService(auth));
 
     await supervisor.startAll(makeCtx());
-    await vi.advanceTimersByTimeAsync(0); // tick #1
-    await vi.advanceTimersByTimeAsync(USAGE_STATE_TICK_MS); // #2
-    await vi.advanceTimersByTimeAsync(USAGE_STATE_TICK_MS); // #3 -> parks usage
+    await vi.advanceTimersByTimeAsync(0); // tick #1 throws
+    await vi.advanceTimersByTimeAsync(USAGE_STATE_TICK_MS); // #2 throws
+    await vi.advanceTimersByTimeAsync(USAGE_STATE_TICK_MS); // #3 throws
 
     const health = supervisor.health();
-    expect(health['account-state'].state).toBe('parked');
+    // A throw is recoverable — usage keeps ticking on its interval, never parked,
+    // and the daemon is never exited for it.
+    expect(health['account-state'].state).toBe('running');
+    expect(health['account-state'].consecutiveFailures).toBeGreaterThanOrEqual(3);
     expect(health['account-state'].lastError).toMatch(/usage boom/);
-    // Auth's breaker is untouched by usage's failures — the whole point of the split.
+    // Auth is untouched by usage's failures — the whole point of the split.
     expect(health['account-auth'].state).toBe('running');
     expect(auth).toHaveBeenCalled();
+    expect(exit).not.toHaveBeenCalled();
 
     await supervisor.stopAll();
   });
 
-  it('a hung usage refresh is abandoned at the deadline and recovers on backoff (12h usage-dark fix)', async () => {
-    let hang = true;
-    const usage = vi.fn(async (signal: AbortSignal) => {
-      if (!hang) return;
-      // Model a well-behaved provider fetch bound to the signal: unwinds on abort.
-      await new Promise<void>((resolve) => {
-        if (signal.aborted) { resolve(); return; }
-        signal.addEventListener('abort', () => resolve(), { once: true });
-      });
-    });
-    const supervisor = new ServiceSupervisor({ backoffBaseMs: 5_000 });
+  it('a hung usage refresh breaches its deadline and exits the daemon for a supervised restart (12h usage-dark fix, PHNX-4116)', async () => {
+    const exit = vi.fn();
+    const usage = vi.fn(async () => new Promise<void>(() => {})); // never settles
+    const supervisor = new ServiceSupervisor({ exit: exit as unknown as (code: number) => never });
     supervisor.register(new AccountUsageService(usage));
 
     await supervisor.startAll(makeCtx());
     await vi.advanceTimersByTimeAsync(0); // first tick — usage hangs
     expect(usage).toHaveBeenCalledTimes(1);
 
-    // The 2-minute deadline elapses -> parked, not latched forever.
+    // The 2-minute deadline elapses -> the supervisor exits, rather than latching
+    // forever (the old 12h usage-dark wedge) or parking.
     await vi.advanceTimersByTimeAsync(2 * 60_000);
-    expect(supervisor.health()['account-state'].state).toBe('parked');
-
-    // Heal + let the backoff restart fire: the service runs again.
-    hang = false;
-    await vi.advanceTimersByTimeAsync(5_000);
-    expect(supervisor.health()['account-state'].state).toBe('running');
-    expect(usage.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(exit).toHaveBeenCalledWith(70);
 
     await supervisor.stopAll();
   });

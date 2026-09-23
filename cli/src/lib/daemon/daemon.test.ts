@@ -449,31 +449,27 @@ describe('generateLaunchdPlist — crash-loop throttle (RUSH-2418)', () => {
   });
 });
 
-// The systemd half of the same guarantee. `Restart=always` with no `StartLimit*`
-// is an uncapped loop; the burst limit is what lets systemd give up and put the
-// unit in `failed` instead of respawning a broken install forever.
-describe.skipIf(process.platform === 'win32')('generateSystemdUnit — crash-loop limits (RUSH-2418)', () => {
-  it('caps restarts with StartLimitIntervalSec/StartLimitBurst', () => {
+// The systemd half of the PHNX-4116 "always recovers" guarantee. Restart is
+// PACED (RestartSec=30) but deliberately UNCAPPED (StartLimitIntervalSec=0), so a
+// repeatedly deadline-breaching daemon is restarted every ~30s forever instead of
+// being abandoned in `failed`. KillMode=process keeps a killed daemon from also
+// killing any detached routine children in its cgroup on restart.
+describe.skipIf(process.platform === 'win32')('generateSystemdUnit — restart-always, uncapped (PHNX-4116)', () => {
+  it('sets StartLimitIntervalSec=0 so systemd never gives up retrying', () => {
     const unit = generateSystemdUnit();
-    const interval = Number(/StartLimitIntervalSec=(\d+)/.exec(unit)?.[1]);
-    const burst = Number(/StartLimitBurst=(\d+)/.exec(unit)?.[1]);
-    expect(interval).toBeGreaterThan(0);
-    expect(burst).toBeGreaterThan(0);
-    // A cap only caps if the window is long enough to contain the bursts: burst
-    // restarts paced by RestartSec must fit inside the interval, else the
-    // counter resets before the limit is reached and nothing is bounded.
-    const restartSec = Number(/RestartSec=(\d+)/.exec(unit)?.[1]);
-    expect(burst * restartSec).toBeLessThanOrEqual(interval);
+    // The [Unit] section carries the (0 =) uncapped limit, where systemd reads it.
+    const unitSection = unit.slice(unit.indexOf('[Unit]'), unit.indexOf('[Service]'));
+    expect(unitSection).toContain('StartLimitIntervalSec=0');
+    // The old burst cap is gone — a repeating hang must keep being restarted.
+    expect(unit).not.toContain('StartLimitBurst');
   });
 
-  it('declares the limits in [Unit], where systemd reads them', () => {
-    // StartLimitIntervalSec/StartLimitBurst moved from [Service] to [Unit] in
-    // systemd 229. Left in [Service] they are ignored on every modern system —
-    // a cap that reads correct and does nothing.
+  it('keeps Restart=always paced by RestartSec, and sets KillMode=process', () => {
     const unit = generateSystemdUnit();
-    const unitSection = unit.slice(unit.indexOf('[Unit]'), unit.indexOf('[Service]'));
-    expect(unitSection).toContain('StartLimitIntervalSec=');
-    expect(unitSection).toContain('StartLimitBurst=');
+    const serviceSection = unit.slice(unit.indexOf('[Service]'));
+    expect(serviceSection).toContain('Restart=always');
+    expect(Number(/RestartSec=(\d+)/.exec(serviceSection)?.[1])).toBeGreaterThan(0);
+    expect(serviceSection).toContain('KillMode=process');
   });
 });
 

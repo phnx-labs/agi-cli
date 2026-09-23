@@ -52,8 +52,8 @@ export interface SubsystemHealth {
   /** ISO timestamp of the most recent success, or null if it has never succeeded. */
   lastOkAt: string | null;
   /**
-   * `ServiceSupervisor`'s lifecycle state (`idle`/`running`/`parked`/`stopped`),
-   * written by `recordSubsystemState` on every transition. Only present for
+   * `ServiceSupervisor`'s lifecycle state (`idle`/`running`/`stopped`), written
+   * by `recordSubsystemState` on every transition. Only present for
    * supervisor-managed subsystems (RUSH-3193 P4) — a subsystem that predates the
    * supervisor (e.g. `daemon-start`) never has this field, which is how `agents
    * daemon services` tells a measured state from an inferred one.
@@ -149,13 +149,70 @@ export function recordSubsystemErrorReason(subsystem: string, error: string, at:
 /**
  * Record a `ServiceSupervisor` lifecycle-state transition, without touching
  * the ok/error streak. Cross-process readers (`agents daemon services`) have
- * no other way to see `parked`/`stopped` vs `running` — `agents daemon
+ * no other way to see `stopped`/`idle` vs `running` — `agents daemon
  * status` runs as a separate process from the daemon (see module docblock).
  */
 export function recordSubsystemState(subsystem: string, state: string): void {
   updateAll((all) => {
     const existing = all[subsystem] ?? blankRecord(subsystem);
     all[subsystem] = { ...existing, subsystem, state };
+  });
+}
+
+// ─── Supervised-restart ledger (PHNX-4116) ────────────────────────────────────
+
+const RESTARTS_FILE = 'restarts.json';
+/** Bound so a crash loop cannot grow the ledger file without limit. */
+const MAX_RESTART_RECORDS = 200;
+
+/** One supervised restart: the service whose deadline breach forced the daemon to exit, and when. */
+export interface DaemonRestartRecord {
+  /** ISO timestamp of the breach that forced the restart. */
+  at: string;
+  /** The service id whose tick or lifecycle call breached its deadline. */
+  subsystem: string;
+  /** The deadline-breach message. */
+  cause: string;
+}
+
+function getRestartsPath(): string {
+  return path.join(getDaemonDir(), RESTARTS_FILE);
+}
+
+function readRestarts(): DaemonRestartRecord[] {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(getRestartsPath(), 'utf-8'));
+    return Array.isArray(parsed) ? (parsed as DaemonRestartRecord[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Append a supervised-restart record and flush it to disk SYNCHRONOUSLY. The
+ * caller is `ServiceSupervisor.exitForRestart`, which calls `process.exit`
+ * immediately after, so the write must be durable before the process dies.
+ * Never throws (same contract as the health file above) — a dropped ledger entry
+ * must not keep the process from exiting for its restart.
+ */
+export function recordDaemonRestart(subsystem: string, cause: string, at: string = new Date().toISOString()): void {
+  try {
+    const restartsPath = getRestartsPath();
+    ensureLockTarget(restartsPath, '[]');
+    withFileLock(restartsPath, () => {
+      const records = readRestarts();
+      records.push({ at, subsystem, cause });
+      atomicWriteFileSync(restartsPath, JSON.stringify(records.slice(-MAX_RESTART_RECORDS)), { encoding: 'utf-8', mode: 0o600 });
+      try { fs.chmodSync(restartsPath, 0o600); } catch { /* best effort */ }
+    });
+  } catch { /* a dropped restart record must never block the exit-for-restart */ }
+}
+
+/** Every supervised restart recorded at or after `sinceMs`, oldest first. */
+export function readRecentDaemonRestarts(sinceMs: number): DaemonRestartRecord[] {
+  return readRestarts().filter((r) => {
+    const t = Date.parse(r.at);
+    return Number.isFinite(t) && t >= sinceMs;
   });
 }
 

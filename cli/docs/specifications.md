@@ -3035,7 +3035,8 @@ nothing but its own view cache.
   `PeriodicService` (`lib/daemon/account-state-daemon-service.ts`, PHNX-3608 —
   previously an un-deadlined dual-`setInterval` in `lib/account-state-service.ts`,
   now removed) with a real per-tick deadline + AbortSignal so a hung usage refresh
-  is abandoned and restarted instead of latching forever; explicit CLI refreshes
+  exits the daemon for a supervised systemd/launchd restart instead of latching
+  forever (PHNX-4116 — no `parked` state, no in-process backoff); explicit CLI refreshes
   enter the same cross-process per-account lease (`lib/refresh-coordinator.ts`). The
   watchdog, device-probe, session-cache-warm, and auto-dispatch ticks
   (RUSH-2353) were briefly promoted to **daemon-owned built-in routines**
@@ -3354,17 +3355,25 @@ a machine-wide process sweep.)
   `stop --service` toggles only `browser-ipc`, and routines `start|stop` toggles
   only `scheduler`; each preserves the daemon PID and all sibling services
   (PHNX-3605).
-- **SING-14 (MUST).** Supervised daemon restart MUST be bounded. A permanently failing
-  daemon start MUST NOT cycle through unbounded rapid retries: the service manager MUST
-  enforce a restart interval and burst limit, and `ensureDaemonStarted` MUST stop
-  initiating starts after a bounded number of consecutive failures until the circuit
-  breaker resets. `generateLaunchdPlist` sets `ThrottleInterval` (`lib/daemon/daemon.ts:1117`)
-  and `generateSystemdUnit` sets `StartLimitIntervalSec`/`StartLimitBurst`
-  (`lib/daemon/daemon.ts:1154-1155`); `isDaemonAutostartCircuitOpen` (`lib/daemon/daemon.ts:1253-1261`)
+- **SING-14 (MUST).** Supervised daemon restart MUST be PACED but MUST NOT be abandoned
+  (PHNX-4116). The OS service manager MUST enforce a restart INTERVAL (`ThrottleInterval`
+  on launchd, `RestartSec` on systemd, ~30s) so a dying daemon cannot respawn in a tight
+  loop, and it MUST keep retrying that restart indefinitely — systemd's
+  `StartLimitIntervalSec=0` deliberately REMOVES the old burst cap, so a repeatedly
+  deadline-breaching daemon is restarted every ~30s forever rather than parked in `failed`
+  and left dark until a human intervenes. This is the owner requirement that a wedged
+  daemon always recovers on its own: a supervised deadline breach is what forces the exit
+  (`ServiceSupervisor.exitForRestart` exits code 70, `lib/daemon/supervisor.ts`), and the
+  exit IS the recovery, not a failure to give up on. Separately, `ensureDaemonStarted` MUST
+  still stop initiating IMPLICIT foreground auto-starts after a bounded number of
+  consecutive failures until its circuit breaker resets — that bounds the busy-operator
+  loop, not the OS unit restart. `generateLaunchdPlist` sets `ThrottleInterval` and
+  `generateSystemdUnit` sets `Restart=always`, `RestartSec`, `KillMode=process`, and
+  `StartLimitIntervalSec=0` (`lib/daemon/daemon.ts`); `isDaemonAutostartCircuitOpen`
   is the `consecutiveFailures`-driven circuit breaker `ensureDaemonStarted` consults,
-  and `index.ts:255-256` adds top-level `uncaughtException`/`unhandledRejection`
-  handlers so a startup crash always reaches the now-throttled supervisor rather than
-  hanging (RUSH-2418, SING-GAP-6 resolved).
+  and `index.ts` adds top-level `uncaughtException`/`unhandledRejection`
+  handlers so a startup crash always reaches the paced OS supervisor rather than
+  hanging (RUSH-2418; PHNX-4116 removed the burst cap).
 - **SING-17 (MUST).** Public webhook ingress MUST be a `ServiceSupervisor`-managed daemon-hosted
   service, not an unsupervised process. The `webhook-receiver` service
   (`lib/daemon-services.ts`) binds one signed receiver per entry in
@@ -3449,10 +3458,13 @@ a machine-wide process sweep.)
   completes, **THEN** the browser IPC socket, pid registration,
   lifetime marker, heartbeat, and instance-registry entry are all absent or released;
   any survivor is named and makes the stop fail (SING-12a).
-- **GIVEN** the daemon exits immediately on every supervised start, **WHEN** launchd,
-  systemd, or a background-adjacent caller attempts to restart it, **THEN** the
-  service-manager burst limit and `ensureDaemonStarted` circuit breaker stop rapid
-  retries after a bounded number of consecutive failures (SING-14).
+- **GIVEN** the daemon exits immediately on every supervised start, **WHEN** launchd or
+  systemd restart it, **THEN** the service manager PACES each restart (~30s via
+  `ThrottleInterval`/`RestartSec`) and keeps retrying indefinitely
+  (`StartLimitIntervalSec=0`), so a transient-then-healthy daemon always recovers; a
+  background-adjacent foreground caller's IMPLICIT auto-starts are separately bounded by
+  the `ensureDaemonStarted` circuit breaker after a bounded number of consecutive failures
+  (SING-14, PHNX-4116).
 - **GIVEN** a user disables a fleet-affecting capability from the ext's command palette,
   **WHEN** the command completes, **THEN** the CLI's config is the state that
   changed (`agents watchdog rotate off`), and the daemon, the menubar, and every
@@ -3546,6 +3558,10 @@ a machine-wide process sweep.)
   `agents daemon doctor`/`status`. `index.ts:255-256` adds top-level
   `uncaughtException`/`unhandledRejection` handlers so a crash during startup always
   exits deterministically into the now-throttled supervisor instead of hanging.
+  PHNX-4116 later REMOVED the systemd burst cap (`StartLimitIntervalSec=0`) while
+  keeping the pacing interval and the `ensureDaemonStarted` breaker: a wedged daemon
+  must always recover on its own, so the OS unit restart is paced but unbounded (see
+  SING-14).
 - **WEBHOOK-GAP-1 (RUSH-2548).** SING-18's ack-before-dispatch removed the 4xx that
   used to make a sender retry a failed dispatch, and nothing replaced it. The
   per-delivery ledger still records exactly which matched jobs completed
@@ -3787,8 +3803,10 @@ not the watchdog's.
   `ServiceSupervisor` (`lib/daemon/watchdog-service.ts`, RUSH-3193 P3 — previously a bare
   `setInterval(WATCHDOG_TICK_MS)` with a hand-rolled in-flight guard directly in
   `daemon.ts`), re-checking `watchdog.enabled` inside each tick — the daemon remains the
-  sole scheduler/executor; the supervisor now also owns the per-tick deadline, error
-  boundary, and park/backoff circuit breaker for this pass.
+  sole scheduler/executor; the supervisor now also owns the per-tick deadline and error
+  boundary for this pass. A thrown pass is recorded and re-runs on the next tick; a pass
+  that breaches its deadline exits the daemon for a supervised OS restart (PHNX-4116),
+  with no `parked` state or in-process backoff.
 - **WD-2 (MUST).** Delivery MUST occur only when `--nudge` is set; without it a tick is a
   dry run that reports "would nudge" and delivers nothing (`lib/watchdog/runner.ts`).
 - **WD-3 (MUST).** `on`/`off` MUST write the typed device-local `watchdog.enabled`

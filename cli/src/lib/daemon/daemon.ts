@@ -29,7 +29,7 @@ import { redactSecrets } from '../redact.js';
 import { getAgentsBinPath, getCliLaunch, BUN_VIRTUAL_ROOT } from '../cli-entry.js';
 import { localBinDir } from '../platform/posixpath.js';
 import { isSchedulerEnabled, assertSchedulerEnabled, isDaemonEnabled } from '../device-config.js';
-import { recordSubsystemOk, recordSubsystemError, recordSubsystemErrorReason, readSubsystemHealth, SUBSYSTEM_DAEMON_START } from '../daemon-health.js';
+import { recordSubsystemOk, recordSubsystemError, recordSubsystemErrorReason, readSubsystemHealth, readRecentDaemonRestarts, SUBSYSTEM_DAEMON_START } from '../daemon-health.js';
 import { ServiceSupervisor } from './supervisor.js';
 import type { ServiceHealth } from './service.js';
 import { emit, emitAsync, emitRoutineEnd } from '../feed/events.js';
@@ -43,8 +43,8 @@ import { sleepSync } from '../fs-atomic.js';
  * survive across processes goes through `daemon-health.ts` instead (which
  * `ServiceSupervisor` already writes on every tick). This getter exists so a
  * FUTURE same-process consumer (e.g. a `daemon services` live-status IPC
- * handler) can read the supervisor's richer state (`parked`, not just
- * ok/error) without needing its own reference to `runDaemon()`'s locals.
+ * handler) can read the supervisor's live state (`running`/`stopped`, plus the
+ * failure streak) without needing its own reference to `runDaemon()`'s locals.
  */
 let activeServiceSupervisor: ServiceSupervisor | null = null;
 
@@ -139,32 +139,34 @@ const WEDGE_THRESHOLD_TICKS = 3;
 const DAEMON_HEARTBEAT_TICK_MS = 60_000;
 
 /**
- * Crash-loop prevention (RUSH-2418). Three layers, because none of them alone
- * bounds a daemon that dies during startup:
+ * Crash-loop pacing and auto-start bounding (RUSH-2418, PHNX-4116). Two layers,
+ * because a daemon that dies during startup must be paced but must NEVER be
+ * abandoned:
  *
- * 1. **The OS supervisor paces the respawn.** `KeepAlive` with no
- *    `ThrottleInterval` lets launchd relaunch on its ~10s default, so a daemon
- *    that dies while booting is restarted six times a minute forever — the exact
- *    failure the menu-bar helper hit (`menubar/install-menubar.ts`: 38 orphaned
- *    `agents doctor` children, load average 490). systemd's `Restart=always`
- *    with no `StartLimit*` is the same uncapped loop.
- * 2. **`StartLimitBurst` gives systemd a real cap** — after this many starts
- *    inside the interval the unit is put in `failed` and stops respawning, so a
- *    genuinely broken install stops burning the box and `systemctl --user status`
- *    names it. launchd has no burst equivalent; the throttle is its whole answer.
- * 3. **The application-level circuit breaker** below stops *auto*-starts from
- *    re-entering the loop from the other direction — a foreground command that
- *    calls `ensureDaemonStarted()` on every invocation.
+ * 1. **The OS supervisor paces AND always retries the respawn.** launchd's
+ *    `KeepAlive` with `ThrottleInterval=30` (and systemd's `Restart=always`
+ *    `RestartSec=30`) relaunch a dead daemon every ~30s. Crucially systemd's
+ *    `StartLimitIntervalSec=0` REMOVES the burst cap (PHNX-4116): a repeatedly
+ *    deadline-breaching daemon is restarted every ~30s indefinitely rather than
+ *    parked in `failed` and left dark until a human runs `systemctl restart`.
+ *    The owner requirement is that a wedged daemon always recovers on its own —
+ *    "just work like systemd/launchd". A supervised deadline breach is precisely
+ *    what forces the exit (see `ServiceSupervisor.exitForRestart`), so the exit
+ *    is the recovery, not a failure to give up on.
+ * 2. **The application-level circuit breaker** below still stops *auto*-starts
+ *    from re-entering the loop from the other direction — a foreground command
+ *    that calls `ensureDaemonStarted()` on every invocation. This bounds the
+ *    IMPLICIT starts a busy operator would otherwise trigger; the OS-level
+ *    unit-restart above is deliberately unbounded.
  */
 const DAEMON_THROTTLE_SECONDS = 30;
-const DAEMON_START_LIMIT_INTERVAL_SECONDS = 300;
-const DAEMON_START_LIMIT_BURST = 5;
 
 /**
  * How many consecutive failed daemon starts disable the *implicit* auto-start
- * (`ensureDaemonStarted`). Matches `DAEMON_START_LIMIT_BURST` so the two layers
- * give up together rather than one silently masking the other. `agents daemon
- * start` is the deliberate override and is never gated by this.
+ * (`ensureDaemonStarted`). This bounds foreground-command auto-starts only; the
+ * OS-level unit restart is deliberately unbounded (`StartLimitIntervalSec=0`) so
+ * a wedged daemon always recovers (PHNX-4116). `agents daemon start` is the
+ * deliberate override and is never gated by this.
  */
 export const DAEMON_AUTOSTART_FAILURE_LIMIT = 5;
 
@@ -367,24 +369,18 @@ export function removeHeartbeat(): void {
 }
 
 /**
- * A heartbeat is "fresh" when its last tick falls inside the wedge window — the
- * same threshold isDaemonWedged() uses to decide a still-present daemon has gone
- * unresponsive. A fresh heartbeat whose pid is alive is proof of a live, ticking
- * daemon even when the pid file has been lost.
+ * A heartbeat is "fresh" when its last tick falls inside the freshness window. A
+ * fresh heartbeat whose pid is alive is proof of a live, ticking daemon even
+ * when the pid file has been lost, which is why `resolveLiveDaemonPid` trusts it.
+ *
+ * There is no separate "wedged" verdict any more (PHNX-4116): a daemon whose
+ * event loop stalls no longer sits `wedged` waiting for a human — a supervised
+ * service that breaches its deadline exits the process, and systemd/launchd
+ * restart it. So the daemon is simply `running` or `stopped`.
  */
 function isHeartbeatFresh(hb: DaemonHeartbeat): boolean {
   const elapsed = Date.now() - Date.parse(hb.lastTick);
   return elapsed <= WEDGE_THRESHOLD_TICKS * DAEMON_HEARTBEAT_TICK_MS;
-}
-
-export function isDaemonWedged(): boolean {
-  const pid = readDaemonPid();
-  if (!pid) return false;
-  if (!isLiveDaemon(pid)) return false;
-  const hb = readHeartbeat();
-  if (!hb) return false;
-  if (hb.pid !== pid) return false;
-  return !isHeartbeatFresh(hb);
 }
 
 /** How long stopDaemon waits for a SIGTERMed daemon to exit before escalating. */
@@ -1069,8 +1065,8 @@ export async function runDaemon(): Promise<void> {
   else log('INFO', 'Monitor engine disabled');
 
   // Usage and auth refresh are two INDEPENDENT supervised services (PHNX-3608)
-  // so a run of usage-refresh failures parks only usage and never starves the
-  // slower auth refresh — each carries its own circuit breaker.
+  // so a run of usage-refresh throws is recorded against usage alone and never
+  // starves the slower auth refresh — each keeps ticking on its own interval.
   if (isEnabled('account-state')) supervisor.register(new AccountUsageService());
   else log('INFO', 'Account-state service disabled');
 
@@ -1358,9 +1354,9 @@ export async function runDaemon(): Promise<void> {
       }
     } catch (err) {
       // Ordinary pass errors are logged, not re-thrown: a transient catchup
-      // failure should not trip the circuit breaker. A HANG is still caught — the
-      // CatchupService deadline aborts the tick and the supervisor parks +
-      // restarts it regardless of this swallow (PHNX-3608).
+      // failure should not be counted as a service failure. A HANG is still
+      // caught — the CatchupService deadline aborts the tick and the supervisor
+      // exits the daemon for an OS restart regardless of this swallow (PHNX-4116).
       log('ERROR', `Catchup pass failed: ${(err as Error).message}`);
     }
   }
@@ -1686,14 +1682,14 @@ export function generateSystemdUnit(
   return `[Unit]
 Description=Agents Daemon - Scheduled Job Runner
 After=network.target
-StartLimitIntervalSec=${DAEMON_START_LIMIT_INTERVAL_SECONDS}
-StartLimitBurst=${DAEMON_START_LIMIT_BURST}
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 ExecStart=${execStart}
 Restart=always
 RestartSec=${DAEMON_THROTTLE_SECONDS}
+KillMode=process
 Environment=PATH=${daemonPathValue(agentsBin, ['/usr/local/bin', '/usr/bin', '/bin'])}
 Environment=HOME=${home}
 Environment=AGENTS_REAL_HOME=${realHome}
@@ -2572,18 +2568,30 @@ function stopDaemonLocked(): DaemonStopResult {
   };
 }
 
-/** Get current daemon status including running state, PID, and enabled job count. */
+/**
+ * Get current daemon status including running state, PID, enabled job count, and
+ * the supervised-restart history `agents daemon status` renders (PHNX-4116).
+ *
+ * There is no `wedged` state: a stalled daemon exits for a supervised
+ * systemd/launchd restart rather than sitting unresponsive, so the daemon is
+ * simply `running` or `stopped`, and its recent restarts are reported instead.
+ */
 export function getDaemonStatus(): {
-  state: 'running' | 'wedged' | 'stopped';
+  state: 'running' | 'stopped';
   running: boolean;
   pid: number | null;
   jobCount: number;
   logPath: string;
   binaryPath: string | null;
   heartbeat: DaemonHeartbeat | null;
+  /** Supervised restarts in the last 24h (a service breaching its deadline exits the daemon for an OS restart). */
+  restarts24h: number;
+  /** The most recent supervised-restart cause, or null if none in the last 24h. */
+  lastRestartCause: string | null;
+  /** ISO timestamp of the most recent supervised restart in the last 24h, or null. */
+  lastRestartAt: string | null;
 } {
   const running = isDaemonRunning();
-  const wedged = running && isDaemonWedged();
   const pid = readDaemonPid();
 
   let jobCount = 0;
@@ -2596,14 +2604,20 @@ export function getDaemonStatus(): {
     binaryPath = getAgentsBinPath();
   } catch { /* resolution failed */ }
 
+  const recentRestarts = readRecentDaemonRestarts(Date.now() - 24 * 60 * 60 * 1000);
+  const lastRestart = recentRestarts.length > 0 ? recentRestarts[recentRestarts.length - 1] : null;
+
   return {
-    state: wedged ? 'wedged' : running ? 'running' : 'stopped',
+    state: running ? 'running' : 'stopped',
     running,
     pid,
     jobCount,
     logPath: getDaemonLogPath(),
     binaryPath,
     heartbeat: readHeartbeat(),
+    restarts24h: recentRestarts.length,
+    lastRestartCause: lastRestart ? `${lastRestart.subsystem}: ${lastRestart.cause}` : null,
+    lastRestartAt: lastRestart ? lastRestart.at : null,
   };
 }
 

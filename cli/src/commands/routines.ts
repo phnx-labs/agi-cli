@@ -15,7 +15,6 @@ import * as yaml from 'yaml';
 
 import {
   isDaemonRunning,
-  isDaemonWedged,
   signalDaemonReload,
   startDaemon,
   readDaemonPid,
@@ -2475,9 +2474,7 @@ export function registerRoutinesCommands(program: Command): void {
       console.log(chalk.bold('Scheduler\n'));
       const stateLabel = schedulerState === 'running'
         ? chalk.green('running')
-        : schedulerState === 'wedged'
-          ? chalk.red('wedged')
-          : chalk.gray('stopped');
+        : chalk.gray('stopped');
       console.log(`  Status:    ${stateLabel}`);
       console.log(`  Daemon:    ${status.running ? chalk.green('running') : chalk.gray('stopped')}`);
       if (status.pid) console.log(`  PID:       ${status.pid}`);
@@ -2490,10 +2487,6 @@ export function registerRoutinesCommands(program: Command): void {
       const jobs = listAllJobs();
       const enabled = jobs.filter((j) => j.enabled);
       console.log(`  Routines:  ${enabled.length} enabled / ${jobs.length} total`);
-
-      if (status.state === 'wedged') {
-        console.log(chalk.red('\n  The shared daemon is wedged (heartbeat stale). Restart deliberately with: agents daemon restart'));
-      }
 
       if (schedulerState === 'running' && enabled.length > 0) {
         const scheduler = new JobScheduler(async () => {});
