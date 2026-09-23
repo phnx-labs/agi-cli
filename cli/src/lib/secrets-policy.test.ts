@@ -470,6 +470,28 @@ describe('reconcileLocalWorkerSlots drops stale slots (PHNX-4116)', () => {
     expect(fs.existsSync(path.join(staleDir, '.claude', '.oauth_token'))).toBe(true);
     expect(Object.keys(readSlots(readMeta()))).toEqual(['stale']);
   });
+
+  it('drops nothing on an UNMARKED device — an undefined role is not `worker`', () => {
+    // `isHeadedDeviceRole(undefined)` is false, so an unmarked box does NOT return
+    // early like a headed one. The credential-deleting branch must still stay off:
+    // only an explicit `worker` mark licenses destroying a slot's token.
+    const staleDir = seedSlot('stale');
+    updateMeta((c) => ({
+      ...c,
+      accounts: {
+        ...c.accounts,
+        native: { reg: { id: 'reg', name: 'work', agent: 'claude', identityKey: 'claude:account=a:org=o', scope: 'version', identityLabel: 'w@x.io' } as NativeAccountRecord },
+      },
+    }));
+
+    // Explicit `undefined` = unmarked device (not a fall-through to the real role).
+    const res = reconcileLocalWorkerSlots({ selfRole: undefined, hasLocalKey: () => false });
+
+    expect(res.dropped).toEqual([]);
+    // Token and record both survive — nothing was destroyed.
+    expect(fs.existsSync(path.join(staleDir, '.claude', '.oauth_token'))).toBe(true);
+    expect(Object.keys(readSlots(readMeta()))).toEqual(['stale']);
+  });
 });
 
 describe('electPublisher', () => {
