@@ -186,8 +186,8 @@ engine:
   — the standalone has no concept of a host suffix.
 - **Fleet sync of reserved credentials** (`secrets-policy.ts`'s
   `syncReservedAuthBundle`, `syncReservedStores`, `reconcileLocalWorkerSlots`)
-  — device roles, election, and the delivery memo are agents-cli's fleet
-  model, not portable secret-storage behavior.
+  — device roles, publisher election, and per-peer presence from each peer's own
+  reply verdict are agents-cli's fleet model, not portable secret-storage behavior.
 - **Credential transport is gated on the SSH host-key pin.**
   `cli/src/lib/hosts/credential-transport.ts` holds
   `assertCredentialTransportHostPinned` and `resolveHostSshTarget`; `accounts

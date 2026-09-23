@@ -1237,12 +1237,17 @@ owned field in its `devices/<device>/daemon-state.json` (`publishOwnFleetState`)
 so all three ride one envelope. `auth-sync` runs no transport of its own: it
 keeps the worker-slot reconcile + the credential SSH pushes, under its own
 deadline and circuit breaker, and acts on the peer verdicts the last exchange
-stored. Those pushes are gated on the exchange's freshness
-(`readLastSuccessfulExchangeMs`, now the newest peer `receivedAt` on this box):
-when no peer envelope has arrived within one tick interval, auth-sync skips the
-pushes and WARNs rather than acting on peer state that may no longer hold
-(worker-slot reconcile is NOT gated — it reads only local durable keys). PR 5 of
-PHNX-4116 moves that gate onto the per-peer `receivedAt`. Every box except a
+stored. There is no fleet-wide freshness gate (PHNX-4116 PR 5, which retired the
+old `readLastSuccessfulExchangeMs` marker): the pushes plan per peer off that
+peer's OWN daemon-state reply (`devices/<peer>/daemon-state.json`, first-hand and
+`receivedAt`-stamped), so a peer that has replied is planned off its per-account
+verdict at any age (the push is idempotent — a stale "has key" is harmless, a
+stale "missing" costs one redundant push), and a peer that has never replied is
+skipped this tick and logged at INFO. Reserved-key presence is read from the
+peer's own per-account verdict rows (`accounts.rows`), so a key removed on a
+worker flips its next verdict to `missing` and the push resumes — which the old
+publisher-side delivery memo could never see (worker-slot reconcile is NOT gated
+either — it reads only local durable keys). Every box except a
 marked `worker` folds peers' digests into its local `sessions` index as mirror
 rows. Only topic/label,
 a first-user-message snippet, last-activity, agent+version, cwd, ticket, and PR

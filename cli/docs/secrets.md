@@ -66,11 +66,15 @@ modules:
   box dials each dialable peer in parallel with a 20 s per-peer deadline and
   stores each reply as `devices/<peer>/daemon-state.json` stamped `receivedAt`.
   Nothing rides the user repo. The `auth-sync` service then does the credential
-  half: one deterministically elected ready device asynchronously pushes the
-  real bundle only to pinned peers whose last-received verdict says `missing`,
-  always file-backed with a kill-bounded SSH deadline so each destination
-  auto-provisions its own machine-local key. Tokens never enter Git or the
-  exchange envelope.
+  half: one deterministically elected ready HEADED device asynchronously pushes
+  the real bundle only to pinned `role=worker` peers whose own reply verdict says
+  `missing`, always file-backed with a kill-bounded SSH deadline so each
+  destination auto-provisions its own machine-local key. It plans per peer off
+  that peer's first-hand, `receivedAt`-stamped reply — a peer that has never
+  replied is skipped this tick (logged at INFO) — with no fleet-wide freshness
+  gate (PHNX-4116 PR 5): the push is idempotent, so a stale verdict is safe, and
+  a key removed on a worker flips its next verdict to `missing` and the push
+  resumes. Tokens never enter Git or the exchange envelope.
 
 The reserved `auth` bundle is file-backed by construction: it holds long-lived
 Claude setup-tokens that usage/probe and unattended workers read without Touch

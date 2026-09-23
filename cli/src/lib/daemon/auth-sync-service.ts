@@ -3,29 +3,27 @@
  *
  * This tick owns only the NON-git duties of auth sync: it materializes worker
  * slots from durable keys already on the box, then (on the elected headed
- * publisher) provisions peers whose LAST-DELIVERED verdict says `missing` by
- * pushing the credential over SSH. The secret never enters Git.
+ * publisher) provisions peers missing a reserved key by pushing the credential
+ * over SSH. The secret never enters Git.
  *
- * It no longer runs its own `syncFleetSharedStateRepo` (PHNX-4051). The verdict
- * this tick's decisions read is published and delivered by the single git
- * committer, the usage-sync tick — folding both publishes into one caller is
- * what stops the two ticks (30 s apart) from contending for the one shared-repo
- * lock and starving the usage snapshot workers depend on. This tick keeps its
- * own deadline and circuit breaker, so a hung peer SSH push parks only auth-sync
- * and never the usage delivery. The pushes read the peer verdicts the last
- * usage-sync exchange wrote into the local checkout; they are idempotent
- * (push only when a peer is missing a key), so acting on at-most-one-tick-old
- * data converges exactly as the in-tick exchange did. To keep "at-most-one-tick-
- * old" true, the pushes are gated on the exchange's freshness marker
- * (`readLastSuccessfulExchangeMs`): when the last usage-sync exchange is missing
- * or older than one usage-sync tick interval (`USAGE_SYNC_TICK_MS`, the
- * producer's cadence — not this service's own `AUTH_SYNC_TICK_MS`), this tick
- * skips the pushes and WARNs instead of acting on peer state that may no longer
- * hold.
+ * It runs no transport of its own (PHNX-4051): the per-account readiness
+ * verdicts it reads are published and delivered by the usage-sync tick's SSH
+ * exchange, which stores each peer's reply at `devices/<peer>/daemon-state.json`
+ * stamped `receivedAt`. This tick keeps its own deadline and circuit breaker, so
+ * a hung peer SSH push parks only auth-sync and never the usage delivery.
+ *
+ * The pushes read each peer's OWN reply file (PHNX-4116 PR 5): a peer reporting
+ * a `missing` verdict for an account is pushed that account's key; a peer that
+ * has never sent a reply (no file) is skipped this tick and logged at INFO. The
+ * push is idempotent, so a stale reply is harmless — a stale "has key" is fine,
+ * a stale "missing key" costs one redundant push — which is why the per-peer
+ * `receivedAt` replaced the old global freshness gate (`readLastSuccessfulExchangeMs`)
+ * that skipped EVERY push when the newest exchange across the fleet went stale.
+ * The reply file is first-hand and timestamped, so acting on it needs no such
+ * fleet-wide gate.
  */
 import { BasePeriodicService, type DaemonContext } from './service.js';
 import type { DaemonServiceId } from '../daemon-services.js';
-import { USAGE_SYNC_TICK_MS } from './usage-sync-service.js';
 
 export const AUTH_SYNC_TICK_MS = 15 * 60_000;
 const AUTH_SYNC_DEADLINE_MS = 2 * 60_000;
@@ -50,6 +48,7 @@ export class AuthSyncService extends BasePeriodicService {
       reconcileLocalWorkerSlots,
       syncReservedAuthBundle,
       syncReservedStores,
+      SKIP_REASON_NO_PEER_REPLY,
     } = await import('../secrets-policy.js');
 
     // Worker-side slot materialization FIRST (PHNX-3940 T6): for each registered
@@ -76,30 +75,12 @@ export class AuthSyncService extends BasePeriodicService {
       ctx.log('WARN', `auth-sync: worker slot reconcile: ${(err as Error).message}`);
     }
 
-    // The verdict this tick's pushes read is published by the usage-sync tick,
-    // the single git committer (PHNX-4051), and delivered into the local checkout
-    // by its exchange. The pushes below act on that last-delivered peer state, so
-    // they are only sound while that state is fresh. Gate them on the exchange's
-    // freshness: if the last successful usage-sync exchange is missing or older
-    // than one tick interval, the delivered peer verdicts may be stale — a peer
-    // that already received the key still reads `missing`, or a cleared `missing`
-    // still reads stale — so skip the pushes and WARN rather than pushing off it.
-    // The worker-slot reconcile above is NOT gated: it reads only local durable
-    // keys, never delivered peer verdicts.
-    const { readLastSuccessfulExchangeMs } = await import('../fleet-shared-repo-sync.js');
-    const lastExchangeMs = readLastSuccessfulExchangeMs();
-    const ageMs = lastExchangeMs === null ? null : Date.now() - lastExchangeMs;
-    // The threshold is the PRODUCER's cadence (USAGE_SYNC_TICK_MS), not this
-    // service's own AUTH_SYNC_TICK_MS: the delivered peer verdicts are refreshed
-    // once per usage-sync exchange, so "stale" is measured against that tick, not
-    // this one. The two constants are equal today, but sourcing it here keeps the
-    // gate tracking the usage-sync cadence if either is ever retuned alone.
-    if (ageMs === null || ageMs > USAGE_SYNC_TICK_MS) {
-      const age = ageMs === null ? 'never completed' : `last completed ${Math.round(ageMs / 1000)}s ago`;
-      ctx.log('WARN', `auth-sync: skipping credential push — usage-sync exchange ${age} (need one within ${Math.round(USAGE_SYNC_TICK_MS / 1000)}s); peer verdicts may be stale`);
-      return;
-    }
-
+    // The pushes read each peer's OWN daemon-state reply, first-hand and
+    // timestamped, so they run every tick with no fleet-wide freshness gate: a
+    // peer that has replied is planned off its verdict (any age — the push is
+    // idempotent), and a peer that has never replied is skipped and logged at
+    // INFO below. The worker-slot reconcile above reads only local durable keys,
+    // never peer verdicts, so it was never gated either.
     const result = await syncReservedAuthBundle();
     if (result.pushed.length > 0) {
       ctx.log('INFO', `auth-sync: pushed auth to ${result.pushed.join(', ')}`);
@@ -116,6 +97,10 @@ export class AuthSyncService extends BasePeriodicService {
       const stores = await syncReservedStores();
       if (stores.adopted.length > 0) ctx.log('INFO', `auth-sync: adopted ${stores.adopted.length} legacy reserved item(s) into their bundle: ${stores.adopted.map((a) => `${a.bundle} ${a.key}`).join(', ')}`);
       for (const p of stores.pushed) ctx.log('INFO', `auth-sync: pushed ${p.bundle} (${p.keys.length} key(s)) to ${p.device}`);
+      // A peer with no reply yet is informational, not a warning — a brand-new or
+      // never-dialed worker legitimately has none on an early tick. One line per
+      // such peer per tick.
+      for (const s of stores.skipped) if (s.reason === SKIP_REASON_NO_PEER_REPLY) ctx.log('INFO', `auth-sync: ${s.device}: ${s.reason}`);
       for (const err of stores.errors) ctx.log('WARN', `auth-sync: reserved-store ${err.device}: ${err.message}`);
     } catch (err) {
       ctx.log('WARN', `auth-sync: reserved-store sync: ${(err as Error).message}`);
