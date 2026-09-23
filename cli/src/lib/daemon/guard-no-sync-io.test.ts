@@ -139,11 +139,16 @@ describe('daemon tick call sites use the async, non-blocking helper variants', (
     expect(src).not.toMatch(/\bemit\(/);           // the sleepSync-locked emitter
   });
 
-  it('usage-sync tick awaits the async fleet-state publishes (usage + auth verdict)', () => {
-    // Both fleet-state fields publish from the single git committer (PHNX-4051),
-    // so both must use the async, non-blocking variant on this tick.
-    expect(read('usage-sync-service.ts')).toMatch(/await publishUsageSnapshotToSharedStore\(/);
-    expect(read('usage-sync-service.ts')).toMatch(/await publishReservedAuthVerdict\(/);
+  it('usage-sync tick awaits the async own-state publish, whose writers are all the async variants', () => {
+    // The tick refreshes every owned field through publishOwnFleetState
+    // (PHNX-4116); that helper must await the async, non-blocking publishers
+    // (usage, session mirror, auth verdict), never the sleepSync-locked ones.
+    expect(read('usage-sync-service.ts')).toMatch(/await publishOwnFleetState\(/);
+    const helper = stripNonCode(fs.readFileSync(path.join(daemonDir, '..', 'accounting', 'usage-sync.ts'), 'utf-8')).join('\n');
+    expect(helper).toMatch(/await publishUsageSnapshotToSharedStore\(/);
+    expect(helper).toMatch(/await publishSessionMirrorToSharedStore\(/);
+    expect(helper).toMatch(/await publishReservedAuthVerdict\(/);
+    expect(helper).toMatch(/updateFleetSharedDeviceStateAsync\(/);
   });
 
   it('heartbeat tick uses the async run reaper, not the sync monitorRunningJobs', () => {

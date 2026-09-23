@@ -106,9 +106,11 @@ export function ingestClaudeStatusLineUsage(
     windows,
     freshness: { source: 'statusline', poller: machineId() },
   });
+  // Keep this box's own state file current so the next placement probe or
+  // usage-sync fan-out carries this reading; the file is local, no transport.
   void import('./accounting/usage-sync.js')
-    .then((mod) => mod.pushUsageSnapshotNow())
-    .catch(() => { /* best-effort push-on-change */ });
+    .then((mod) => mod.publishUsageSnapshotToSharedStore())
+    .catch(() => { /* best-effort own-state refresh */ });
   return true;
 }
 

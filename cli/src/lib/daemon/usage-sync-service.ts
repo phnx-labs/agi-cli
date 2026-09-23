@@ -1,29 +1,24 @@
 /**
- * Fleet shared-state sync as a `PeriodicService` (PHNX-3392 usage-sync,
- * PHNX-3792 session mirror).
+ * Fleet state exchange as a `PeriodicService` (PHNX-3392 usage-sync,
+ * PHNX-3792 session mirror, PHNX-4051 auth verdict, PHNX-4116 SSH transport).
  *
- * This is the ONE tick that owns the bounded Git exchange over the fleet-synced
- * user repo, so every non-secret daemon-state field rides it rather than opening
- * a second committer. Each tick: (1) publishes this box's own fields into its
- * conflict-free `devices/<device>/daemon-state.json` — a headed box's Claude
- * usage snapshot, EVERY box's lightweight session digests (PHNX-3792), and the
- * reserved-auth readiness verdict (PHNX-4051, folded in from the auth-sync tick
- * so a single caller holds the shared-repo lock per tick); (2) runs one
- * serialized, timeout-bounded commit/rebase/push; (3) consumes the peer fields
- * the exchange delivered — a worker merges usage newest-wins, and every
- * non-worker box folds peers' session digests into its local index so the picker
- * renders remote-host previews inline. No tick opens a device-to-device SSH mesh.
+ * Each tick: (1) refreshes every field this box owns in its own
+ * `devices/<device>/daemon-state.json` — a headed box's Claude usage snapshot,
+ * EVERY box's lightweight session digests, and the reserved-auth readiness
+ * verdict; (2) on a headed box (`personal`/`desktop`) only, dials every dialable
+ * peer in parallel with `agents __usage-ingest --reply`, sending that envelope
+ * on stdin and storing each peer's reply as `devices/<peer>/daemon-state.json`
+ * stamped `receivedAt` (`exchangeFleetStateWithPeers`); (3) folds the peers'
+ * session digests into the local index so the picker renders remote-host
+ * previews inline. A worker never initiates: its state leaves the box only as
+ * the reply to a headed peer's dial, and a headed peer's usage rows arrive on
+ * that same dial.
  *
- * Why the auth verdict publishes here (PHNX-4051): auth-sync used to run its OWN
- * `syncFleetSharedStateRepo`, so on every box two ticks 30 s apart contended for
- * the one `proper-lockfile` lock (20×100 ms ≈ 2 s of retries) while a real
- * fetch/rebase/push on a drifted repo runs far longer — the usage tick then
- * failed with "Lock file is already being held" (zion logged it 95× in 24 h) and
- * workers never received a fresh usage snapshot, which the 40-min placement gate
- * turned into "no ready device". Folding the auth verdict into this single
- * committer removes the second caller entirely. Auth-sync keeps its non-git
- * duties (worker-slot reconcile + the credential SSH pushes) under its own
- * deadline and circuit breaker.
+ * There is no git in this tick. The exchange used to be a commit/rebase/push of
+ * the fleet-synced user repo, which needed a cross-process lock, a 45 s
+ * process-tree deadline, an 8-minute kickoff offset from auth-sync to dodge that
+ * lock, and untracked-collision backups — and still wedged every clone behind a
+ * bloated remote. Peers that time out are skipped this tick; none blocks another.
  */
 import { BasePeriodicService, type DaemonContext } from './service.js';
 import type { DaemonServiceId } from '../daemon-services.js';
@@ -39,12 +34,8 @@ import { USAGE_SYNC_INTERVAL_MS } from '../accounting/usage-sync.js';
  */
 export const USAGE_SYNC_TICK_MS = USAGE_SYNC_INTERVAL_MS;
 const USAGE_SYNC_DEADLINE_MS = 2 * 60_000;
-/**
- * Offset from auth-sync's 60s kickoff so the two never contend for the
- * shared-repo lock. Auth fires at T+1m, T+16m, …; usage at T+8m, T+23m, …
- * The git exchange deadline is 45s, so a 7-minute gap is the whole point.
- */
-export const USAGE_SYNC_KICKOFF_MS = 8 * 60_000;
+/** Let the daemon's registry/device probes settle before the first fan-out. */
+export const USAGE_SYNC_KICKOFF_MS = 90_000;
 
 export class UsageSyncService extends BasePeriodicService {
   readonly id: DaemonServiceId = 'usage-sync';
@@ -61,39 +52,28 @@ export class UsageSyncService extends BasePeriodicService {
   }
 
   protected async onTick(ctx: DaemonContext): Promise<void> {
-    const { consumeUsageSnapshotsFromSharedStore, publishUsageSnapshotToSharedStore } = await import('../accounting/usage-sync.js');
-    const { consumeSessionMirrorFromSharedStore, publishSessionMirrorToSharedStore } = await import('../session/mirror.js');
-    // Publish every owned field BEFORE the single git exchange so they ride one commit.
-    // Browser profile declarations (including discovered native Arc/Comet profiles)
-    // are the standalone `browser` CLI's now (PHNX-4101), so the daemon no longer
-    // publishes them here.
-    const published = await publishUsageSnapshotToSharedStore();
-    if (published.changed) ctx.log('INFO', `usage-sync: published usage snapshot to ${published.path}`);
-    if (published.error) ctx.log('WARN', `usage-sync: publish: ${published.error}`);
-    const mirrored = await publishSessionMirrorToSharedStore();
-    if (mirrored.changed) ctx.log('INFO', `session-mirror: published ${mirrored.count} session digest(s)`);
-    if (mirrored.error) ctx.log('WARN', `session-mirror: publish: ${mirrored.error}`);
-    // The reserved-auth readiness verdict rides this single git exchange too
-    // (PHNX-4051): it is a conflict-free field in the same owned daemon-state
-    // file, so publishing it here — instead of from a second committer in
-    // auth-sync — is what keeps exactly one caller of syncFleetSharedStateRepo on
-    // the periodic path.
-    const { publishReservedAuthVerdict } = await import('../secrets-policy.js');
-    const authVerdict = await publishReservedAuthVerdict();
-    if (authVerdict.error) ctx.log('WARN', `usage-sync: auth verdict: ${authVerdict.error}`);
-    const { syncFleetSharedStateRepo } = await import('../fleet-shared-repo-sync.js');
-    const transport = await syncFleetSharedStateRepo();
-    if (transport.skipped) ctx.log('WARN', `usage-sync: ${transport.skipped}`);
-    if (transport.error) ctx.log('WARN', `usage-sync: shared-store transport: ${transport.error}`);
-    if (transport.untrackedBackedUp?.length) {
-      ctx.log('WARN', `usage-sync: backed up ${transport.untrackedBackedUp.length} untracked shared-store collision(s) to ${transport.untrackedBackupDir}: ${transport.untrackedBackedUp.join(', ')}`);
+    const { exchangeFleetStateWithPeers, publishOwnFleetState } = await import('../accounting/usage-sync.js');
+    const { isHeadedDeviceRole, selfConfiguredDeviceRole } = await import('../device-config.js');
+    // Refresh every owned field BEFORE the fan-out so peers receive this tick's state.
+    const published = await publishOwnFleetState();
+    if (published.usage.changed) ctx.log('INFO', `usage-sync: published usage snapshot to ${published.usage.path}`);
+    if (published.mirror.changed) ctx.log('INFO', `session-mirror: published ${published.mirror.count} session digest(s)`);
+    for (const err of published.errors) ctx.log('WARN', `usage-sync: publish ${err}`);
+    if (!isHeadedDeviceRole(selfConfiguredDeviceRole())) {
+      ctx.log('INFO', 'usage-sync: not a headed device; peers dial in with `agents __usage-ingest --reply`, nothing to send');
+      return;
     }
-    if (!transport.success) return;
-    const consumed = consumeUsageSnapshotsFromSharedStore();
-    if (consumed.merged > 0) {
-      ctx.log('INFO', `usage-sync: merged ${consumed.merged} row(s) from ${consumed.sources.join(', ')}`);
+    const exchange = await exchangeFleetStateWithPeers();
+    if (exchange.skipped) ctx.log('WARN', `usage-sync: ${exchange.skipped}`);
+    const delivered = exchange.outcomes.filter((o) => o.delivered);
+    if (delivered.length > 0) {
+      ctx.log('INFO', `usage-sync: exchanged with ${delivered.map((o) => `${o.device}${o.merged ? ` (+${o.merged} usage row(s))` : ''}`).join(', ')}`);
     }
-    for (const err of consumed.errors) ctx.log('WARN', `usage-sync: ${err.device}: ${err.message}`);
+    for (const o of exchange.outcomes) {
+      if (o.error) ctx.log('WARN', `usage-sync: ${o.device}: ${o.error}`);
+      for (const err of o.peerErrors) ctx.log('WARN', `usage-sync: ${o.device} reported: ${err}`);
+    }
+    const { consumeSessionMirrorFromSharedStore } = await import('../session/mirror.js');
     const foldedIn = consumeSessionMirrorFromSharedStore();
     if (foldedIn.merged > 0) {
       ctx.log('INFO', `session-mirror: folded ${foldedIn.merged} session(s) from ${foldedIn.sources.join(', ')}`);

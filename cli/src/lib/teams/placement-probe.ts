@@ -16,12 +16,16 @@
  * of the rank stays live (the pure pick recounts the roster each call), only the
  * SSH-measured load/harness snapshot is reused within the TTL.
  *
- * All SSH here is via `execFile` (async, bounded) so the whole pool is probed in
- * parallel; a slow or wedged box degrades to "no signal" instead of blocking the
- * launch. The readiness payload is `agents view --json`, so remote and local
- * candidates carry the same installed/sign-in verdict.
+ * All SSH here is via `spawn` (async, kill-bounded) so the whole pool is probed
+ * in parallel; a slow or wedged box degrades to "no signal" instead of blocking
+ * the launch. The readiness payload is `agents view --json`, so remote and local
+ * candidates carry the same installed/sign-in verdict. The dispatcher's usage
+ * envelope rides the same round-trip on stdin (`agents __usage-ingest` runs
+ * first in the probe, PHNX-4116), so the worker the pick lands on holds current
+ * usage numbers at dispatch rather than at the next usage-sync tick.
  */
-import { execFile } from 'child_process';
+import { spawn } from 'child_process';
+import { buildFleetStatePayload } from '../accounting/usage-sync.js';
 import { probeFleetStats, headroom } from '../devices/health.js';
 import { loadDevicesSync, type DeviceProfile } from '../devices/registry.js';
 import { buildSshInvocation, writeAskpassShim } from '../devices/connect.js';
@@ -74,39 +78,61 @@ export function clearPlacementSignalCache(): void {
 function probeRemoteReadiness(
   device: DeviceProfile,
   agent: string,
+  usagePayload: string,
 ): Promise<{
   installed: boolean | undefined;
   signedIn: boolean | undefined;
   pickerEligible: boolean | undefined;
 }> {
+  const unknown = { installed: undefined, signedIn: undefined, pickerEligible: undefined };
   let args: string[];
   let env: Record<string, string>;
   try {
     const shim = writeAskpassShim();
-    const cmd = buildReadyProbeCommand(device.shell === 'powershell' ? 'windows' : undefined);
+    const cmd = buildReadyProbeCommand(device.shell === 'powershell' ? 'windows' : undefined, { ingestUsage: true });
     // agentOnly: a read-only probe must never force a foreground Touch ID sheet
     // on a password-auth device (mirrors probeDeviceStats in devices/health).
     ({ args, env } = buildSshInvocation(device, [cmd], shim, {}, { agentOnly: true }));
   } catch {
-    return Promise.resolve({ installed: undefined, signedIn: undefined, pickerEligible: undefined });
+    return Promise.resolve(unknown);
   }
   return new Promise((resolve) => {
-    execFile(
-      'ssh',
-      args,
-      { encoding: 'utf-8', env: { ...process.env, ...env }, timeout: READY_PROBE_TIMEOUT_MS },
-      (err, stdout) => {
-        if (err || !stdout) return resolve({ installed: undefined, signedIn: undefined, pickerEligible: undefined });
-        const probe = parseReadyProbe(stdout);
-        if (!probe.reachable) return resolve({ installed: undefined, signedIn: undefined, pickerEligible: undefined });
-        if (!probe.version) return resolve({ installed: false, signedIn: false, pickerEligible: false });
-        const installed = viewHasAgent(probe.view, agent);
-        const eligibility = installed
-          ? viewAgentAccountEligibility(probe.view, agent)
-          : { signedIn: false, pickerEligible: false };
-        resolve({ installed, ...eligibility });
-      },
-    );
+    const child = spawn('ssh', args, {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, ...env },
+      windowsHide: true,
+    });
+    let stdout = '';
+    let settled = false;
+    const finish = (value: typeof unknown | { installed: boolean; signedIn: boolean | undefined; pickerEligible: boolean | undefined }): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearTimeout(killTimer);
+      resolve(value);
+    };
+    // A wedged box degrades to "no signal": SIGTERM at the budget, SIGKILL shortly
+    // after, so one dead peer can never hold the whole placement wave open.
+    const timer = setTimeout(() => child.kill('SIGTERM'), READY_PROBE_TIMEOUT_MS);
+    const killTimer = setTimeout(() => { if (!settled) child.kill('SIGKILL'); }, READY_PROBE_TIMEOUT_MS + 250);
+    killTimer.unref?.();
+    child.stdout.setEncoding('utf-8');
+    child.stdout.on('data', (chunk: string) => { stdout += chunk; });
+    child.stderr.resume();
+    child.on('error', () => finish(unknown));
+    child.on('close', (code) => {
+      if (code !== 0 || !stdout) return finish(unknown);
+      const probe = parseReadyProbe(stdout);
+      if (!probe.reachable) return finish(unknown);
+      if (!probe.version) return finish({ installed: false, signedIn: false, pickerEligible: false });
+      const installed = viewHasAgent(probe.view, agent);
+      const eligibility = installed
+        ? viewAgentAccountEligibility(probe.view, agent)
+        : { signedIn: false, pickerEligible: false };
+      finish({ installed, ...eligibility });
+    });
+    child.stdin.on('error', () => { /* peer closed early; the close handler reports it */ });
+    child.stdin.end(usagePayload);
   });
 }
 
@@ -143,6 +169,9 @@ export async function probePoolSignals(
 
   const selfProfile = profiles.find((d) => normalizeHost(d.name) === self);
   const stats = await probeFleetStats(profiles, { selfName: selfProfile?.name });
+  // Built once per wave: this box's current usage rows (headed only — a worker
+  // dispatcher has none to give), ingested by every remote candidate it probes.
+  const usagePayload = JSON.stringify(buildFleetStatePayload({ usageOnly: true }));
 
   type InstalledInfo = {
     installed: boolean | undefined;
@@ -167,7 +196,7 @@ export async function probePoolSignals(
             pickerEligible: readiness.some((candidate) => candidate.ready || isSignInRecoverable(candidate)),
           }];
         }
-        return [d.name, await probeRemoteReadiness(d, agent)];
+        return [d.name, await probeRemoteReadiness(d, agent, usagePayload)];
       }),
     )
     : [],

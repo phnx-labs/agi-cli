@@ -184,9 +184,11 @@ export async function runUsageRefreshTick(signal?: AbortSignal): Promise<void> {
     // is bounded by deadlineMs, not just each fetch's own 5s timeout (PHNX-3608).
     signal,
     pollerDevice: machineId(),
+    // A changed poll refreshes this box's own state file so the next usage-sync
+    // fan-out (or a placement probe before it) sends the new reading.
     onSnapshotsChanged: async () => {
-      const { pushUsageSnapshotNow } = await import('./accounting/usage-sync.js');
-      await pushUsageSnapshotNow();
+      const { publishUsageSnapshotToSharedStore } = await import('./accounting/usage-sync.js');
+      await publishUsageSnapshotToSharedStore();
     },
   });
   const { listProfiles } = await import('./profiles.js');

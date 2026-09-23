@@ -3,9 +3,14 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { readFleetSharedDeviceStates, readOwnFleetSharedDeviceState } from '../fleet-shared-state.js';
 import { readClaudeUsageCache, type CachedUsageSnapshot } from './usage.js';
 import {
-  consumeUsageSnapshotsFromSharedStore,
+  applyPeerFleetState,
+  buildFleetStatePayload,
+  parseFleetStateExchangeInput,
+  parseFleetStateReply,
+  formatFleetStateReply,
   publishUsageSnapshotToSharedStore,
 } from './usage-sync.js';
 
@@ -31,85 +36,117 @@ function seed(file: string, rows: Record<string, CachedUsageSnapshot>): void {
   fs.writeFileSync(file, JSON.stringify(rows), 'utf-8');
 }
 
-describe('usage sync through the real fleet-shared file path', () => {
-  it('publishes once on a headed device and a worker reads it without SSH', async () => {
-    const root = tempDir();
-    const sourceCache = path.join(root, 'source-cache.json');
-    const workerCache = path.join(root, 'worker-cache.json');
+describe('usage sync envelope: headed box publishes, peer applies (real files, no git)', () => {
+  it('a headed device publishes once and a worker applies the envelope into its cache with sync provenance', async () => {
+    const headed = tempDir();
+    const worker = tempDir();
+    const sourceCache = path.join(headed, 'source-cache.json');
+    const workerCache = path.join(worker, 'worker-cache.json');
     seed(sourceCache, { 'claude:org=alpha': row('2026-08-30T20:00:00.000Z', 64) });
 
     const published = await publishUsageSnapshotToSharedStore({
-      userAgentsDir: root,
-      cachePath: sourceCache,
-      role: 'personal',
-      device: 'zion',
+      userAgentsDir: headed, cachePath: sourceCache, role: 'personal', device: 'zion',
     });
     expect(published).toMatchObject({ published: true, changed: true, error: null });
 
-    const consumed = consumeUsageSnapshotsFromSharedStore({
-      userAgentsDir: root,
-      cachePath: workerCache,
-      role: 'worker',
-      device: 'worker-a',
-      roles: { zion: 'personal', 'worker-a': 'worker' },
+    const payload = buildFleetStatePayload({ device: 'zion', userAgentsDir: headed });
+    expect(payload.v).toBe(2);
+    expect(payload.state.device).toBe('zion');
+    expect(payload.state.receivedAt).toBeUndefined();
+
+    const applied = applyPeerFleetState(payload.state, {
+      userAgentsDir: worker, cachePath: workerCache, device: 'worker-a', receivedAt: 1_700_000_000_000,
     });
-    expect(consumed).toEqual({ sources: ['zion'], merged: 1, skipped: null, errors: [] });
-    expect(readClaudeUsageCache('claude:org=alpha', workerCache, new Date('2026-08-30T20:01:00.000Z'))?.windows[0].usedPercent).toBe(64);
+    expect(applied).toMatchObject({ merged: 1, receivedAt: 1_700_000_000_000 });
+    expect(applied.path).toBe(path.join(worker, 'devices', 'zion', 'daemon-state.json'));
+    const cached = readClaudeUsageCache('claude:org=alpha', workerCache, new Date('2026-08-30T20:01:00.000Z'));
+    expect(cached?.windows[0].usedPercent).toBe(64);
+    expect(cached?.freshness).toEqual({ source: 'sync', poller: 'zion' });
+    // The peer file is the envelope stamped with when it arrived.
+    const [peer] = readFleetSharedDeviceStates(worker).states;
+    expect(peer.device).toBe('zion');
+    expect(peer.receivedAt).toBe(1_700_000_000_000);
+    expect(peer.usage?.rows['claude:org=alpha'].windows[0].usedPercent).toBe(64);
   });
 
-  it('chooses the newest identity row across multiple headed snapshots', async () => {
-    const root = tempDir();
-    const workerCache = path.join(root, 'worker-cache.json');
+  it('newest-wins per identity across two headed envelopes, whatever the arrival order', async () => {
+    const worker = tempDir();
+    const workerCache = path.join(worker, 'worker-cache.json');
+    const envelopes = [];
     for (const [device, role, snapshot] of [
-      ['laptop', 'personal', row('2026-08-30T20:00:00.000Z', 25)],
       ['desktop', 'desktop', row('2026-08-30T20:05:00.000Z', 80)],
+      ['laptop', 'personal', row('2026-08-30T20:00:00.000Z', 25)],
     ] as const) {
-      const source = path.join(root, `${device}.json`);
+      const home = tempDir();
+      const source = path.join(home, `${device}.json`);
       seed(source, { 'claude:org=alpha': snapshot });
-      await publishUsageSnapshotToSharedStore({ userAgentsDir: root, cachePath: source, role, device });
+      await publishUsageSnapshotToSharedStore({ userAgentsDir: home, cachePath: source, role, device });
+      envelopes.push(buildFleetStatePayload({ device, userAgentsDir: home }).state);
     }
-
-    const consumed = consumeUsageSnapshotsFromSharedStore({
-      userAgentsDir: root,
-      cachePath: workerCache,
-      role: 'worker',
-      device: 'worker-a',
-      roles: { laptop: 'personal', desktop: 'desktop', 'worker-a': 'worker' },
-    });
-    expect(consumed.sources).toEqual(['desktop', 'laptop']);
-    expect(consumed.merged).toBe(1);
+    // The newer (desktop) envelope arrives first; the older laptop one must not displace it.
+    expect(applyPeerFleetState(envelopes[0], { userAgentsDir: worker, cachePath: workerCache, device: 'worker-a' }).merged).toBe(1);
+    expect(applyPeerFleetState(envelopes[1], { userAgentsDir: worker, cachePath: workerCache, device: 'worker-a' }).merged).toBe(0);
     expect(readClaudeUsageCache('claude:org=alpha', workerCache, new Date('2026-08-30T20:06:00.000Z'))?.windows[0].usedPercent).toBe(80);
+    expect(readFleetSharedDeviceStates(worker).states.map((s) => s.device)).toEqual(['desktop', 'laptop']);
   });
 
-  it('does not publish from a worker or consume on a headed device', async () => {
+  it('a worker publishes no usage and its envelope carries none, but a usage-only payload from a headed cache does', async () => {
     const root = tempDir();
     const cache = path.join(root, 'cache.json');
     seed(cache, { 'claude:org=alpha': row('2026-08-30T20:00:00.000Z', 10) });
     expect((await publishUsageSnapshotToSharedStore({ userAgentsDir: root, cachePath: cache, role: 'worker', device: 'worker-a' })).skipped)
       .toContain('not a usage publisher');
-    expect(consumeUsageSnapshotsFromSharedStore({ userAgentsDir: root, cachePath: cache, role: 'desktop', device: 'desktop' }).skipped)
-      .toBe('this device is not a worker');
+    expect(fs.existsSync(path.join(root, 'devices'))).toBe(false);
+    expect(buildFleetStatePayload({ device: 'worker-a', userAgentsDir: root }).state).toEqual({ version: 1, device: 'worker-a' });
+    expect(buildFleetStatePayload({ device: 'worker-a', cachePath: cache, role: 'worker', usageOnly: true }).state.usage).toBeUndefined();
+    expect(buildFleetStatePayload({ device: 'zion', cachePath: cache, role: 'personal', usageOnly: true }).state.usage?.rows['claude:org=alpha'].windows[0].usedPercent).toBe(10);
+  });
+
+  it('a partial (usage-only) envelope refreshes usage without erasing the peer\'s other fields', () => {
+    const root = tempDir();
+    applyPeerFleetState(
+      { version: 1, device: 'zion', auth: { status: 'ready' }, usage: { rows: { 'claude:org=alpha': row('2026-08-30T20:00:00.000Z', 10) } } },
+      { userAgentsDir: root, cachePath: path.join(root, 'c.json'), device: 'worker-a', receivedAt: 1 },
+    );
+    applyPeerFleetState(
+      { version: 1, device: 'zion', usage: { rows: { 'claude:org=alpha': row('2026-08-30T20:10:00.000Z', 55) } } },
+      { userAgentsDir: root, cachePath: path.join(root, 'c.json'), device: 'worker-a', receivedAt: 2 },
+    );
+    const [peer] = readFleetSharedDeviceStates(root).states;
+    expect(peer.auth).toEqual({ status: 'ready' });
+    expect(peer.receivedAt).toBe(2);
+    expect(peer.usage?.rows['claude:org=alpha'].windows[0].usedPercent).toBe(55);
+  });
+
+  it('refuses an envelope naming this device — the own file is never overwritten by a peer', () => {
+    const root = tempDir();
+    expect(() => applyPeerFleetState({ version: 1, device: 'worker-a' }, { userAgentsDir: root, device: 'worker-a' }))
+      .toThrow(/names this device/);
     expect(fs.existsSync(path.join(root, 'devices'))).toBe(false);
   });
 
-  it('surfaces a malformed peer independently while consuming valid peers', async () => {
-    const root = tempDir();
-    const source = path.join(root, 'source.json');
-    const worker = path.join(root, 'worker.json');
-    seed(source, { 'claude:org=alpha': row('2026-08-30T20:00:00.000Z', 35) });
-    await publishUsageSnapshotToSharedStore({ userAgentsDir: root, cachePath: source, role: 'personal', device: 'zion' });
-    const malformedDir = path.join(root, 'devices', 'broken');
-    fs.mkdirSync(malformedDir, { recursive: true });
-    fs.writeFileSync(path.join(malformedDir, 'daemon-state.json'), '{broken', 'utf-8');
+  it('parses v2 and legacy v1 input, rejects everything else with a clear reason', () => {
+    expect(parseFleetStateExchangeInput('{"v":1,"rows":{}}')).toEqual({ v: 1, rows: {} });
+    expect(parseFleetStateExchangeInput('{"v":2,"state":{"version":1,"device":"zion"},"errors":["auth: x"]}'))
+      .toEqual({ v: 2, state: { version: 1, device: 'zion' }, errors: ['auth: x'] });
+    expect(() => parseFleetStateExchangeInput('{not json')).toThrow('malformed JSON payload');
+    expect(() => parseFleetStateExchangeInput('{"v":1,"rows":[]}')).toThrow('unrecognized usage-sync payload shape');
+    expect(() => parseFleetStateExchangeInput('{"v":2,"state":{"version":1}}')).toThrow('unrecognized shared-state envelope');
+    expect(() => parseFleetStateExchangeInput('{"v":2,"state":{"version":1,"device":"../etc"}}')).toThrow();
+    expect(() => parseFleetStateExchangeInput('{"v":3}')).toThrow('unrecognized usage-sync payload shape');
+  });
 
-    const consumed = consumeUsageSnapshotsFromSharedStore({
-      userAgentsDir: root,
-      cachePath: worker,
-      role: 'worker',
-      device: 'worker-a',
-      roles: { zion: 'personal', broken: 'personal' },
-    });
-    expect(consumed.merged).toBe(1);
-    expect(consumed.errors).toEqual([{ device: 'broken', message: expect.stringContaining('JSON') }]);
+  it('reads the reply after the marker, ignoring login-shell noise before it, and names an old peer', () => {
+    const reply = formatFleetStateReply({ v: 2, state: { version: 1, device: 'peer-b' } });
+    expect(parseFleetStateReply(`motd banner\nwelcome\n${reply}`).state.device).toBe('peer-b');
+    expect(() => parseFleetStateReply('')).toThrow(/empty reply .*predates/);
+    expect(() => parseFleetStateReply('some noise')).toThrow(/no reply envelope/);
+  });
+
+  it('readOwnFleetSharedDeviceState strips a stray receivedAt and yields a bare envelope for a never-published device', () => {
+    const root = tempDir();
+    expect(readOwnFleetSharedDeviceState('fresh', root)).toEqual({ version: 1, device: 'fresh' });
+    applyPeerFleetState({ version: 1, device: 'zion', auth: { status: 'ready' } }, { userAgentsDir: root, device: 'worker-a', receivedAt: 5 });
+    expect(readOwnFleetSharedDeviceState('zion', root)).toEqual({ version: 1, device: 'zion', auth: { status: 'ready' } });
   });
 });
