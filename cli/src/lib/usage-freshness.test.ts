@@ -128,9 +128,9 @@ describe('W3.4 two headed boxes push over the exchange; worker balanced auto-pic
     // Each headed box's tick dials the worker with its own envelope; the worker applies both.
     let merged = 0;
     for (const [device, home] of [['zion', zionHome], ['desktop', desktopHome]] as const) {
-      merged += applyPeerFleetState(buildFleetStatePayload({ device, userAgentsDir: home }).state, {
+      merged += (await applyPeerFleetState(buildFleetStatePayload({ device, userAgentsDir: home }).state, {
         userAgentsDir: workerHome, cachePath: workerCache, device: 'worker-a',
-      }).merged;
+      })).merged;
     }
     expect(merged).toBe(2);
 

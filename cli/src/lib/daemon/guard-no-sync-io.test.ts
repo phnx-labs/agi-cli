@@ -151,6 +151,25 @@ describe('daemon tick call sites use the async, non-blocking helper variants', (
     expect(helper).toMatch(/updateFleetSharedDeviceStateAsync\(/);
   });
 
+  it('usage-sync exchange applies each peer reply through async file locks, never the sleepSync ones', () => {
+    // exchangeFleetStateWithPeers → applyPeerFleetState runs on the tick once per
+    // peer reply (PHNX-4116). Its two writers — the peer's daemon-state file and
+    // the usage cache — must take their locks with withFileLockAsync: the sync
+    // twin sleepSyncs the daemon's event loop for up to 30 s under contention.
+    const libDir = path.join(daemonDir, '..');
+    const helper = stripNonCode(fs.readFileSync(path.join(libDir, 'accounting', 'usage-sync.ts'), 'utf-8')).join('\n');
+    expect(helper).toMatch(/await applyPeerFleetState\(/);
+    expect(helper).toMatch(/await storePeerFleetSharedDeviceState\(/);
+    expect(helper).toMatch(/await ingestPeerClaudeUsageRows\(/);
+    const store = stripNonCode(fs.readFileSync(path.join(libDir, 'fleet-shared-state.ts'), 'utf-8')).join('\n');
+    expect(store).toMatch(/export async function storePeerFleetSharedDeviceState[\s\S]*?return updateFleetSharedDeviceStateAsync\(/);
+    const usage = stripNonCode(fs.readFileSync(path.join(libDir, 'accounting', 'usage.ts'), 'utf-8')).join('\n');
+    const ingest = usage.slice(usage.indexOf('export async function ingestPeerClaudeUsageRows'));
+    const body = ingest.slice(0, ingest.indexOf('\n}\n') + 1);
+    expect(body).toMatch(/await withFileLockAsync\(/);
+    expect(body).not.toMatch(/\bwithFileLock\(/);
+  });
+
   it('heartbeat tick uses the async run reaper, not the sync monitorRunningJobs', () => {
     const src = read('heartbeat-service.ts');
     expect(src).toMatch(/await reapExitedRunningJobs\(/);

@@ -61,9 +61,9 @@ describe('usage-sync cache export/ingest (newest-wins)', () => {
     expect(Object.keys(rows)).toEqual([KEY_A]);
   });
 
-  it('ingests into an empty worker cache and reads back through the normal reader', () => {
+  it('ingests into an empty worker cache and reads back through the normal reader', async () => {
     const rows = { [KEY_A]: row('2026-08-28T12:00:00.000Z', 34) };
-    const merged = ingestPeerClaudeUsageRows(rows, dst);
+    const merged = await ingestPeerClaudeUsageRows(rows, dst);
     expect(merged).toBe(1);
     const snap = readClaudeUsageCache(KEY_A, dst, new Date('2026-08-28T12:05:00.000Z'));
     expect(snap?.windows[0].usedPercent).toBe(34);
@@ -71,41 +71,41 @@ describe('usage-sync cache export/ingest (newest-wins)', () => {
     expect(snap?.source).toBe('last_seen');
   });
 
-  it('does NOT overwrite a fresher local row with an older peer push', () => {
+  it('does NOT overwrite a fresher local row with an older peer push', async () => {
     seed(dst, { [KEY_A]: row('2026-08-28T12:10:00.000Z', 50) }); // local is newer
-    const merged = ingestPeerClaudeUsageRows({ [KEY_A]: row('2026-08-28T12:00:00.000Z', 10) }, dst);
+    const merged = await ingestPeerClaudeUsageRows({ [KEY_A]: row('2026-08-28T12:00:00.000Z', 10) }, dst);
     expect(merged).toBe(0);
     const snap = readClaudeUsageCache(KEY_A, dst, new Date('2026-08-28T12:11:00.000Z'));
     expect(snap?.windows[0].usedPercent).toBe(50); // fresher local survives
   });
 
-  it('accepts a strictly-newer peer push over an older local row', () => {
+  it('accepts a strictly-newer peer push over an older local row', async () => {
     seed(dst, { [KEY_A]: row('2026-08-28T12:00:00.000Z', 10) });
-    const merged = ingestPeerClaudeUsageRows({ [KEY_A]: row('2026-08-28T12:10:00.000Z', 55) }, dst);
+    const merged = await ingestPeerClaudeUsageRows({ [KEY_A]: row('2026-08-28T12:10:00.000Z', 55) }, dst);
     expect(merged).toBe(1);
     const snap = readClaudeUsageCache(KEY_A, dst, new Date('2026-08-28T12:11:00.000Z'));
     expect(snap?.windows[0].usedPercent).toBe(55);
   });
 
-  it('a peer row with no capturedAt never displaces a timestamped local row', () => {
+  it('a peer row with no capturedAt never displaces a timestamped local row', async () => {
     seed(dst, { [KEY_A]: row('2026-08-28T12:00:00.000Z', 22) });
-    const merged = ingestPeerClaudeUsageRows({ [KEY_A]: row(null, 99) }, dst);
+    const merged = await ingestPeerClaudeUsageRows({ [KEY_A]: row(null, 99) }, dst);
     expect(merged).toBe(0);
     const snap = readClaudeUsageCache(KEY_A, dst, new Date('2026-08-28T12:01:00.000Z'));
     expect(snap?.windows[0].usedPercent).toBe(22);
   });
 
-  it('adds a brand-new identity the worker had never seen', () => {
+  it('adds a brand-new identity the worker had never seen', async () => {
     seed(dst, { [KEY_A]: row('2026-08-28T12:00:00.000Z', 22) });
-    const merged = ingestPeerClaudeUsageRows({ [KEY_B]: row('2026-08-28T12:00:00.000Z', 8) }, dst);
+    const merged = await ingestPeerClaudeUsageRows({ [KEY_B]: row('2026-08-28T12:00:00.000Z', 8) }, dst);
     expect(merged).toBe(1);
     expect(readClaudeUsageCache(KEY_A, dst, new Date('2026-08-28T12:01:00.000Z'))?.windows[0].usedPercent).toBe(22);
     expect(readClaudeUsageCache(KEY_B, dst, new Date('2026-08-28T12:01:00.000Z'))?.windows[0].usedPercent).toBe(8);
   });
 
-  it('an empty payload is a no-op, not an error', () => {
+  it('an empty payload is a no-op, not an error', async () => {
     seed(dst, { [KEY_A]: row('2026-08-28T12:00:00.000Z', 22) });
-    expect(ingestPeerClaudeUsageRows({}, dst)).toBe(0);
+    expect(await ingestPeerClaudeUsageRows({}, dst)).toBe(0);
     expect(readClaudeUsageCache(KEY_A, dst, new Date('2026-08-28T12:01:00.000Z'))?.windows[0].usedPercent).toBe(22);
   });
 });

@@ -288,17 +288,19 @@ export function readOwnFleetSharedDeviceState(
  * refreshes that field without erasing the peer's last auth verdict, session
  * digests, or account rows. The five readers of `devices/<peer>/daemon-state.json`
  * (usage merge, poller claims, auth verdicts, session mirror, account catalog)
- * are unchanged by the transport swap.
+ * are unchanged by the transport swap. Async because it runs on the daemon's
+ * usage-sync tick once per peer reply: the sync lock would `sleepSync` the event
+ * loop for up to 30 s under contention (see {@link updateFleetSharedDeviceStateAsync}).
  */
-export function storePeerFleetSharedDeviceState(
+export async function storePeerFleetSharedDeviceState(
   state: FleetSharedDeviceState,
   userAgentsDir = getUserAgentsDir(),
   receivedAt: number = Date.now(),
-): { changed: boolean; path: string } {
+): Promise<{ changed: boolean; path: string }> {
   const patch: FleetSharedStatePatch = { receivedAt };
   if (state.usage !== undefined) patch.usage = state.usage;
   if (state.auth !== undefined) patch.auth = state.auth;
   if (state.sessions !== undefined) patch.sessions = state.sessions;
   if (state.accounts !== undefined) patch.accounts = state.accounts;
-  return updateFleetSharedDeviceState(state.device, patch, userAgentsDir);
+  return updateFleetSharedDeviceStateAsync(state.device, patch, userAgentsDir);
 }
