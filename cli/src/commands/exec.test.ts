@@ -27,6 +27,7 @@ import {
   RUN_AUTO_KEYWORD,
 } from './exec.js';
 import { ALL_AGENT_IDS } from '../lib/agents.js';
+import { codexShortKey, shortCodexHome } from '../lib/codex-home.js';
 
 describe('run working directory across a device boundary', () => {
   it.each(['$HOME', '~', '$HOME/project with spaces', '~/project with spaces'])(
@@ -98,6 +99,70 @@ describe.skipIf(process.platform === 'win32')('native account launch selects a s
         });
         expect(fs.readFileSync(path.join(authHome, '.codex', 'auth.json'), 'utf8')).toBe(credential);
       }
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }, 150_000);
+});
+
+describe.skipIf(process.platform === 'win32')('a balanced pick launches the picked account slot (PHNX-4116)', () => {
+  it('spawns the binary with the picked slot as its home, not the version home', () => {
+    // yosemite-m0, 2026-09-23: the picker chose one account and Claude Code
+    // started in the executable's version home as another account. A native
+    // candidate is a registered slot since PHNX-3940; the spawn must use it.
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'balanced-slot-launch-'));
+    const capturePath = path.join(root, 'launch.json');
+    const binaryDefault = '0.2.0';
+    const accountId = 'acct-work';
+    const slotDir = path.join(root, '.agents', '.history', 'accounts', 'codex', accountId);
+    fs.mkdirSync(path.join(root, '.agents', '.system', '.git'), { recursive: true });
+    const dir = path.join(root, '.agents', '.history', 'versions', 'codex', binaryDefault);
+    fs.mkdirSync(path.join(dir, 'node_modules', '.bin'), { recursive: true });
+    fs.mkdirSync(path.join(dir, 'home', '.codex'), { recursive: true }); // version home: no login
+    fs.writeFileSync(path.join(dir, 'node_modules', '.bin', 'codex'),
+      '#!/usr/bin/env node\n' +
+      `if (process.argv.includes('--version')) { console.log('codex-cli ${binaryDefault}'); process.exit(0); }\n` +
+      `require('fs').writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify({codexHome:process.env.CODEX_HOME}));\n` +
+      'console.log(JSON.stringify({type:"item.completed",item:{type:"agent_message",text:"OK"}}));\n' +
+      'console.log(JSON.stringify({type:"turn.completed",usage:{input_tokens:0,output_tokens:0}}));\n',
+      { mode: 0o755 });
+    const payload = Buffer.from(JSON.stringify({
+      email: 'work@example.com',
+      'https://api.openai.com/auth': { chatgpt_account_id: 'work', chatgpt_user_id: 'user1' },
+    })).toString('base64url');
+    fs.mkdirSync(path.join(slotDir, '.codex'), { recursive: true });
+    fs.writeFileSync(path.join(slotDir, '.codex', 'auth.json'), JSON.stringify({ tokens: { id_token: `fixture.${payload}.unsigned` } }));
+    fs.writeFileSync(path.join(root, '.agents', 'agents.yaml'), JSON.stringify({ agents: { codex: binaryDefault } }));
+    // The slot is device-scoped state: it lives in this box's device doc.
+    const deviceDir = path.join(root, '.agents', 'devices', 'testbox');
+    fs.mkdirSync(deviceDir, { recursive: true });
+    fs.writeFileSync(path.join(deviceDir, 'agents.yaml'), JSON.stringify({
+      accounts: {
+        native: { [accountId]: {
+          id: accountId, name: 'work', agent: 'codex', scope: 'device',
+          identityKey: 'codex:account=work:user=user1', identityLabel: 'work@example.com',
+        } },
+        slots: { [accountId]: { accountId, slotDir, authMode: 'native', verdict: 'live' } },
+      },
+    }));
+    try {
+      const tsxImport = pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href;
+      const result = spawnSync('node', ['--import', tsxImport,
+        path.resolve(import.meta.dirname, '..', 'index.ts'), 'run', 'codex', 'Reply OK',
+        '--strategy', 'balanced', '--mode', 'skip', '--quiet', '--no-auto-secrets', '--cwd', '$HOME'], {
+        cwd: path.resolve(import.meta.dirname, '..', '..'),
+        env: { ...process.env, HOME: root, AGENTS_SYNC_MACHINE_ID: 'testbox', AGENTS_EVENTS_PATH: path.join(root, 'events.jsonl') },
+        encoding: 'utf8', timeout: 60_000,
+      });
+      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+      // On macOS a deep codex home is relocated to a short real path keyed by
+      // the ORIGIN (`a-<account id>` for a slot), so accept that alias too; the
+      // version home (`versions/codex/<binary>` or key `<binary>`) is never right.
+      const rawHome = path.join(slotDir, '.codex');
+      const shortHome = shortCodexHome(path.join(root, '.agents'), codexShortKey(rawHome, binaryDefault, path.join(root, '.agents', '.history')));
+      const captured = JSON.parse(fs.readFileSync(capturePath, 'utf8')).codexHome as string;
+      expect([rawHome, shortHome], `captured ${captured}`).toContain(captured);
+      expect(captured).not.toContain(path.join('codex', binaryDefault));
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
