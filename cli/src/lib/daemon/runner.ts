@@ -86,7 +86,30 @@ import {
 import { isHeadedDeviceRole, selfConfiguredDeviceRole } from '../device-config.js';
 import { isSelfUpdatingAgent, ROUTINE_AGENT_IDS, isAgentHardDeprecated, hardDeprecationError } from '../agents.js';
 import { isCustomHarnessName, readProfile } from '../profiles.js';
-import { findAccount, findUnifiedAccount, resolveAccountSelection, resolveCredentialAccount } from '../account-registry.js';
+import { findAccount, findUnifiedAccount, listNativeAccounts, resolveAccountSelection, resolveCredentialAccount } from '../account-registry.js';
+import { recordRunAuthOutcome, type RunAuthOutcome } from '../auth-health.js';
+
+/**
+ * Record a routine run's auth outcome as a per-account FACT (PHNX-4116). A worker
+ * runs entirely through routines and never probes, so an auth failure here — or a
+ * clean success that clears a stale failure — is the honest evidence `agents view`
+ * renders as `last used ok` / `last auth failure`. Best-effort: resolves the slot
+ * from the routine's account name so the fact lands on the right row, and never
+ * throws (a run it cannot attribute is simply not recorded).
+ */
+function recordRoutineAuthOutcome(
+  agent: AgentId,
+  accountName: string | undefined,
+  version: string | undefined,
+  outcome: RunAuthOutcome,
+): void {
+  try {
+    const accountId = accountName
+      ? listNativeAccounts(readMeta()).find((a) => a.agent === agent && a.name === accountName)?.id ?? null
+      : null;
+    recordRunAuthOutcome({ agent, accountId, version: version ?? null, account: accountName, outcome });
+  } catch { /* best-effort */ }
+}
 
 /** Result of a completed job execution, including metadata and optional report. */
 export interface RunResult {
@@ -1805,6 +1828,7 @@ async function executeJobPlaced(config: JobConfig, deps: LoopDeps | undefined, a
       // success (processFailed:false).
       if (isAuthFailureFromLog(attempt.logText, effectiveAgent, { processFailed: false })) {
         const reason = authFailureReason(attempt.logText) ?? 'authentication_failed';
+        recordRoutineAuthOutcome(attemptAgent, config.account, attemptVersion, { ok: false, verdict: 'revoked', detail: reason });
         finalizeRunMeta(meta, 'failed', attempt.exitCode ?? 1, { errorMessage: `auth_failed: ${reason}` });
         writeRunMeta(meta);
         timer.end({ status: 'failed', exitCode: meta.exitCode ?? undefined, runId, error: `auth_failed: ${reason}` });
@@ -1812,6 +1836,9 @@ async function executeJobPlaced(config: JobConfig, deps: LoopDeps | undefined, a
         archiveRoutineTranscripts(meta, runDir, overlayHome);
         return { meta, reportPath: null };
       }
+      // A clean routine completion is real auth evidence — record it so a worker's
+      // token reads `last used ok` and a stale failure fact is cleared (PHNX-4116).
+      recordRoutineAuthOutcome(attemptAgent, config.account, attemptVersion, { ok: true });
       finalizeRunMeta(meta, 'completed', 0);
       writeRunMeta(meta);
       timer.end({ status: 'completed', exitCode: 0, runId });
@@ -1861,6 +1888,7 @@ async function executeJobPlaced(config: JobConfig, deps: LoopDeps | undefined, a
       ? `auth_failed: ${authReason}`
       : (attempt.error ?? undefined);
 
+    if (authFailed) recordRoutineAuthOutcome(attemptAgent, config.account, attemptVersion, { ok: false, verdict: 'revoked', detail: authReason ?? undefined });
     finalizeRunMeta(meta, 'failed', attempt.exitCode ?? 1, failureErrorMessage ? { errorMessage: failureErrorMessage } : undefined);
     writeRunMeta(meta);
     timer.end({
@@ -2335,10 +2363,14 @@ async function executeJobDetachedClaimed(config: JobConfig, attempt: RoutineAtte
     // marker still catches an exit-0 auth failure on its own.
     if (isAuthFailureFromLog(logText, effectiveAgent, { processFailed: (code ?? 1) !== 0 })) {
       const reason = authFailureReason(logText) ?? 'authentication_failed';
+      recordRoutineAuthOutcome(effectiveAgent, config.account, meta.version, { ok: false, verdict: 'revoked', detail: reason });
       settle('failed', code ?? 1, `auth_failed: ${reason}`);
       return;
     }
     const inferred = inferFinalStatusFromLog(stdoutPath, effectiveAgent);
+    const finalStatus = inferred ? inferred.status : (code === 0 ? 'completed' : 'failed');
+    // A clean completion clears any stale auth-failure fact for this account.
+    if (finalStatus === 'completed') recordRoutineAuthOutcome(effectiveAgent, config.account, meta.version, { ok: true });
     if (inferred) {
       settle(inferred.status, inferred.exitCode);
     } else {

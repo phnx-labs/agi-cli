@@ -31,6 +31,8 @@ function row(overrides: Partial<NativeAccountCatalogRow> = {}): NativeAccountCat
       resetsAt: null,
       unavailableReason: null,
     },
+    token: 'sk-ant-oat01 (Sep 6)',
+    lastAuth: 'last used ok 2m ago',
     fix: null,
     ...overrides,
   };
@@ -124,29 +126,36 @@ describe('renderAccountList', () => {
   });
 
   it('prints the exact repair command and attention count for an expired account', () => {
+    // PHNX-4116: the row no longer trails the verdict WORD — the auth fact carries
+    // what happened, and the repair command + attention count still surface.
     const out = stripAnsi(renderAccountList([
       row({
         verdict: 'expired',
+        lastAuth: 'last auth failure 401 Sep 20 14:02',
         fix: 'agents accounts login claude#work',
         devices: [{ device: 'zion', authMode: 'native', verdict: 'expired' }],
       }),
     ]));
-    expect(out).toContain('expired · fix: agents accounts login claude#work');
+    expect(out).toContain('fix: agents accounts login claude#work');
     expect(out).toContain('1 accounts need you');
   });
 
   it.each([
-    ['expired', 'expired'],
-    ['revoked', 'revoked'],
-    ['missing', 'missing'],
-    ['rate_limited', 'rate-limited'],
-  ] as const)('trails the %s verdict on the row as %s', (verdict, label) => {
-    const out = stripAnsi(renderAccountList([row({
-      verdict,
-      fix: verdict === 'rate_limited' ? null : 'repair',
-    })]));
+    ['last used ok 12m ago'],
+    ['last auth failure 401 Sep 20 14:02'],
+    ['rate-limited until 15:00 (Sep 20 14:02)'],
+    ['not used on this box yet'],
+  ] as const)('prints the auth FACT %s verbatim on the row (PHNX-4116)', (fact) => {
+    const out = stripAnsi(renderAccountList([row({ lastAuth: fact })]));
     const data = out.split('\n').find((line) => line.includes('work'))!;
-    expect(data).toContain(label);
+    expect(data).toContain(fact);
+  });
+
+  it('flags a signed-out account and never prints the aggregate verdict word (PHNX-4116)', () => {
+    const out = stripAnsi(renderAccountList([row({ verdict: 'missing', lastAuth: 'not used on this box yet', fix: 'repair' })]));
+    const data = out.split('\n').find((line) => line.includes('work'))!;
+    expect(data).toContain('signed out');
+    expect(data).not.toContain('missing');
   });
 
   it.each(['live', 'unverified', 'per-device'] as const)(
@@ -177,26 +186,17 @@ describe('renderAccountList', () => {
     expect(data).not.toContain('rate-limited');
   });
 
-  it('keeps the rate-limited note when the maxed window is hidden behind the overview +N count', () => {
-    // Droid meters on 5h/week/month. The overview renders two windows and
-    // always seats session + week first, so a month window at 100% is folded
-    // into "+1" with no color — the trailing note is the only signal left.
+  it('shows the rate-limited auth fact independently of the usage cell (PHNX-4116)', () => {
+    // The auth fact is per-box run evidence, separate from the usage windows: a
+    // throttle recorded by a run prints with its reset time even when the maxed
+    // usage window is folded behind the overview "+1".
     const window = (key: 'session' | 'week' | 'month', shortLabel: string, usedPercent: number) => ({
       key, label: key, shortLabel, usedPercent, resetsAt: new Date('2026-09-07T00:00:00.000Z'), windowMinutes: null,
     });
     const throttled = row({
       agent: 'droid',
-      verdict: 'rate_limited',
+      lastAuth: 'rate-limited until 15:00 (Sep 20 14:02)',
       fix: null,
-      usage: {
-        status: 'rate_limited',
-        verdict: 'unavailable',
-        usedPercent: 100,
-        stale: false,
-        capturedAt: '2026-09-06T00:00:00.000Z',
-        resetsAt: null,
-        unavailableReason: null,
-      },
       usageSnapshot: {
         source: 'live',
         sourceLabel: 'live',
@@ -207,16 +207,7 @@ describe('renderAccountList', () => {
     const out = stripAnsi(renderAccountList([throttled], [], { localDevice: 'zion', maxUsageWindows: 2 }));
     const data = out.split('\n').find((line) => line.includes('work'))!;
     expect(data).toContain('+1');
-    expect(data).toContain('rate-limited');
-    // With the snapshot itself refusing (out of credits), the cell carries the
-    // marker and the note stays suppressed.
-    const refused = stripAnsi(renderAccountList([row({
-      ...throttled,
-      usageSnapshot: { ...throttled.usageSnapshot!, unavailable: { reason: 'out_of_credits' } },
-    })], [], { localDevice: 'zion', maxUsageWindows: 2 }));
-    const refusedLine = refused.split('\n').find((line) => line.includes('work'))!;
-    expect(refusedLine).toContain('out of credits');
-    expect(refusedLine).not.toContain('rate-limited');
+    expect(data).toContain('rate-limited until 15:00');
   });
 
   it('never exposes reserved credential stores in account output', () => {

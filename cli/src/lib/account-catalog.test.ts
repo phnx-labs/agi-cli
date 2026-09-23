@@ -13,9 +13,12 @@ import {
   loadAccountCatalog,
   readSharedAccountVerdicts,
   resolveLocalAccountObservation,
+  readTokenFact,
+  renderAccountRows,
   secretsUnavailableNote,
   toProviderRow,
   coverageNote,
+  type NativeAccountCatalogRow,
   type NativeHomeRow,
 } from './account-catalog.js';
 import { USAGE_NOT_COLLECTED_MARKER, deriveUsageStatusFromSnapshot, usageErrorForDisplay, usageHeadlessScopeError } from './accounting/usage.js';
@@ -144,6 +147,8 @@ describe('buildNativeCatalog account-first read model', () => {
         checkedAt: '2026-09-06T01:02:03.000Z',
         devices: [{ device: 'zion', authMode: 'native', verdict: 'expired' }],
         usage: null,
+        token: 'no token',
+        lastAuth: 'not used on this box yet',
         fix: 'agents accounts login claude#work',
       }],
     });
@@ -230,7 +235,9 @@ describe('resolveLocalAccountObservation (newest observation wins)', () => {
   it('falls back to whichever source exists, and to signedIn when neither does', () => {
     expect(resolveLocalAccountObservation(slot('2026-09-06T01:00:00.000Z'), undefined, true).verdict).toBe('live');
     expect(resolveLocalAccountObservation(undefined, cached('2026-09-06T01:00:00.000Z', 'revoked'), true).verdict).toBe('revoked');
-    expect(resolveLocalAccountObservation(undefined, undefined, true).verdict).toBe('unverified');
+    // A present credential with no observation either way is `no_evidence`, not
+    // `unverified` (PHNX-4116) — the display becomes a fact, not this word.
+    expect(resolveLocalAccountObservation(undefined, undefined, true).verdict).toBe('no_evidence');
     expect(resolveLocalAccountObservation(undefined, undefined, false).verdict).toBe('missing');
   });
 
@@ -240,7 +247,7 @@ describe('resolveLocalAccountObservation (newest observation wins)', () => {
     // logged in, and the row still rendered MISSING because `unconfigured` was
     // mapped to missing unconditionally.
     const stale = { authMode: 'native' as const, verdict: 'unconfigured' as const };
-    expect(resolveLocalAccountObservation(stale, undefined, true).verdict).toBe('unverified');
+    expect(resolveLocalAccountObservation(stale, undefined, true).verdict).toBe('no_evidence');
     expect(resolveLocalAccountObservation(stale, undefined, false).verdict).toBe('missing');
     // A newer daemon probe of the slot still wins over the default.
     expect(resolveLocalAccountObservation(stale, cached('2026-09-10T19:06:37.000Z', 'live'), true).verdict).toBe('live');
@@ -468,6 +475,8 @@ describe('account catalog per-window USAGE rendering (PHNX-3940 regression)', ()
       usage: { status: 'available', verdict: 'available', usedPercent: 58, stale: false, capturedAt: new Date().toISOString(), resetsAt: null, unavailableReason: null },
       usageSnapshot: snapshotWithBoth(),
       usageError: null,
+      token: 'no token',
+      lastAuth: 'not used on this box yet',
       fix: null,
     };
     const { renderAccountRows: render } = await import('./account-catalog.js');
@@ -510,6 +519,8 @@ describe('account catalog per-window USAGE rendering (PHNX-3940 regression)', ()
       usage: { status: 'available', verdict: 'available', usedPercent: 30, stale: false, capturedAt: new Date().toISOString(), resetsAt: null, unavailableReason: null },
       usageSnapshot: snapshot,
       usageError: null,
+      token: 'no token',
+      lastAuth: 'not used on this box yet',
       fix: null,
     };
     const overview = stripAnsi(renderAccountRows([row], { heading: false, footer: false, harnessHeadings: false, localDevice: 'zion' }));
@@ -551,6 +562,8 @@ describe('agents accounts list --json never leaks the stale sentinel (PHNX-3348 
       usage: null,
       usageSnapshot: null,
       usageError: usageErrorForDisplay(USAGE_NOT_COLLECTED_MARKER),
+      token: 'no token',
+      lastAuth: 'not used on this box yet',
       fix: null,
     };
     const json = accountListJson([row]);
@@ -586,6 +599,8 @@ describe('agents accounts list --json never leaks the stale sentinel (PHNX-3348 
       usage: null,
       usageSnapshot: null,
       usageError: display,
+      token: 'no token',
+      lastAuth: 'not used on this box yet',
       fix: null,
     };
     const json = accountListJson([row]);
@@ -680,7 +695,7 @@ describe('aggregateAccountVerdict honours local usage snapshot (PHNX-3940/4051)'
 
 describe('device coverage is a note, not a column (PHNX-4051)', () => {
   const mkRow = (devices: Array<{ device: string; verdict: 'live' | 'revoked' | 'rate_limited' | 'unverified' | 'missing' | 'expired' }>, provisioning: 'portable' | 'per-device' = 'portable'): Parameters<typeof coverageNote>[0] =>
-    ({ kind: 'native', agent: 'claude', identityKey: 'k', name: 'n', id: 'id', email: null, display: 'd', identityLabel: 'd', home: null, installations: [], isDefault: false, state: 'connected', provisioning, verdict: 'live', checkedAt: null, devices: devices as never, usage: null, fix: null } as never);
+    ({ kind: 'native', agent: 'claude', identityKey: 'k', name: 'n', id: 'id', email: null, display: 'd', identityLabel: 'd', home: null, installations: [], isDefault: false, state: 'connected', provisioning, verdict: 'live', checkedAt: null, devices: devices as never, usage: null, token: 'no token', lastAuth: 'not used on this box yet', fix: null } as never);
 
   it('says nothing when only the local device reports — that is a gap in what we can see', () => {
     expect(coverageNote(mkRow([{ device: 'zion', verdict: 'live' }]), 'zion')).toBeNull();
@@ -724,5 +739,75 @@ describe('device coverage is a note, not a column (PHNX-4051)', () => {
     const out = renderAccountRows([row] as never, { localDevice: 'zion' } as never);
     expect(out).toContain('* stale usage');
     expect(out).toContain('agents accounts list --fleet');
+  });
+});
+
+describe('per-account per-box FACTS (PHNX-4116)', () => {
+  const strip = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '');
+
+  it('readTokenFact reports the Claude slot token scheme prefix + its file date, never the secret', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-token-fact-'));
+    try {
+      const tokenPath = path.join(dir, '.claude', '.oauth_token');
+      fs.mkdirSync(path.dirname(tokenPath), { recursive: true });
+      fs.writeFileSync(tokenPath, 'sk-ant-oat01-THIS-IS-SECRET-DO-NOT-LEAK');
+      fs.utimesSync(tokenPath, new Date(2026, 8, 16), new Date(2026, 8, 16)); // Sep 16
+      const fact = readTokenFact('claude', dir);
+      expect(fact).toBe('sk-ant-oat01 (Sep 16)');
+      expect(fact).not.toContain('SECRET');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('readTokenFact reads "no token" when the slot has no credential file', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-token-fact-'));
+    try {
+      expect(readTokenFact('claude', dir)).toBe('no token');
+      expect(readTokenFact('claude', null)).toBe('no token');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('names the origin of a SYNCED usage reading — a number from another box is a fact, not a local capture', () => {
+    const row: NativeAccountCatalogRow = {
+      kind: 'native', agent: 'claude', identityKey: 'claude:user=1', name: 'work', id: 'id-1',
+      email: 'w@example.com', display: 'w@example.com', identityLabel: 'w@example.com', home: 'main',
+      installations: [{ label: 'main', releaseVersion: '2.0.0', signedIn: true }],
+      isDefault: false, state: 'connected', provisioning: 'portable', verdict: 'live', checkedAt: null,
+      devices: [{ device: 'yosemite-m5', authMode: 'durable', verdict: 'live' }],
+      usage: null,
+      usageSnapshot: {
+        source: 'last_seen', sourceLabel: 'synced', capturedAt: new Date(),
+        windows: [
+          { key: 'session', label: 'Current session', shortLabel: 'S', usedPercent: 12, resetsAt: null, windowMinutes: 300 },
+          { key: 'week', label: 'Current week', shortLabel: 'W', usedPercent: 40, resetsAt: null, windowMinutes: 10080 },
+        ],
+        freshness: { source: 'sync', poller: 'zion' },
+      },
+      usageError: null, token: 'sk-ant-oat01 (Sep 16)', lastAuth: 'not used on this box yet', fix: null,
+    };
+    const out = strip(renderAccountRows([row], { heading: false, footer: false, harnessHeadings: false, localDevice: 'yosemite-m5', harness: 'claude' }));
+    expect(out).toContain('(from zion)');
+    // A locally-captured reading carries no origin suffix.
+    const local: NativeAccountCatalogRow = { ...row, usageSnapshot: { ...row.usageSnapshot!, freshness: { source: 'statusline', poller: 'yosemite-m5' } } };
+    expect(strip(renderAccountRows([local], { heading: false, footer: false, harnessHeadings: false, localDevice: 'yosemite-m5', harness: 'claude' }))).not.toContain('(from');
+  });
+
+  it('renders the token + auth facts on the row instead of a verdict word', () => {
+    const row: NativeAccountCatalogRow = {
+      kind: 'native', agent: 'claude', identityKey: 'claude:user=1', name: 'work', id: 'id-1',
+      email: 'w@example.com', display: 'w@example.com', identityLabel: 'w@example.com', home: 'main',
+      installations: [{ label: 'main', releaseVersion: '2.0.0', signedIn: true }],
+      isDefault: false, state: 'connected', provisioning: 'portable', verdict: 'no_evidence', checkedAt: null,
+      devices: [{ device: 'yosemite-m5', authMode: 'durable', verdict: 'no_evidence' }],
+      usage: null, usageSnapshot: null, usageError: null,
+      token: 'sk-ant-oat01 (Sep 16)', lastAuth: 'not used on this box yet', fix: null,
+    };
+    const out = strip(renderAccountRows([row], { heading: false, footer: false, harnessHeadings: false, localDevice: 'yosemite-m5', harness: 'claude' }));
+    expect(out).toContain('sk-ant-oat01 (Sep 16)');
+    expect(out).toContain('not used on this box yet');
+    expect(out).not.toContain('no_evidence');
   });
 });

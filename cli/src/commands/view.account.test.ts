@@ -63,6 +63,8 @@ describe('account-first view — name and usage, nothing ceremonial', () => {
         resetsAt: null,
         unavailableReason: null,
       },
+      token: 'credential present',
+      lastAuth: 'last used ok 2m ago',
       fix: null,
     };
     const providers: ProviderAccountCatalogRow[] = [{
@@ -582,6 +584,8 @@ describe('account rows render per-window usage bars (PHNX-3940 regression)', () 
     usage: { status: 'available', verdict: 'available', usedPercent: 58, stale: false, capturedAt: new Date().toISOString(), resetsAt: null, unavailableReason: null },
     usageSnapshot: snapshotWithBoth(),
     usageError: null,
+    token: 'sk-ant-oat01 (Sep 6)',
+    lastAuth: 'last used ok 2m ago',
     fix: null,
   });
 

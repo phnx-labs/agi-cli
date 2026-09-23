@@ -227,6 +227,7 @@ function verdictRank(verdict: AuthVerdict): number {
     case 'rate_limited': return 5;
     case 'live': return 4;
     case 'unverified': return 3;
+    case 'no_evidence': return 3;
     case 'error': return 2;
     case 'unconfigured': return 1;
   }
