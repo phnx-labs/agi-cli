@@ -5,7 +5,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 import type { DeviceProfile } from '../devices/registry.js';
-import type { SshExecResult } from '../ssh-exec.js';
+import { REMOTE_STDOUT_MAX_BYTES, type SshExecResult } from '../ssh-exec.js';
 import { readFleetSharedDeviceStates, newestPeerReceivedAtMs } from '../fleet-shared-state.js';
 import { readLastSuccessfulExchangeMs } from '../fleet-shared-repo-sync.js';
 import {
@@ -157,6 +157,34 @@ describe('agents __usage-ingest (real CLI verb)', () => {
     expect(replied.status).toBe(0);
     expect(parseFleetStateReply(replied.stdout).errors?.[0]).toMatch(/names this device/);
     expect(fs.existsSync(cachePath)).toBe(false);
+  });
+
+  it('refuses a stdin payload over REMOTE_STDOUT_MAX_BYTES: exit 2, one typed stderr line, cache untouched; a normal payload still merges', () => {
+    // Seed the cache so "unchanged" is a real byte comparison, not "still absent".
+    expect(run(home, legacyPayload(41)).status).toBe(0);
+    const before = fs.readFileSync(cachePath, 'utf-8');
+    expect(JSON.parse(before)['claude:org=alpha'].windows[0].usedPercent).toBe(41);
+
+    // A v1 envelope that WOULD merge (the parser tolerates extra keys) if the
+    // cap were missing — 16 MiB of padding pushes it over the dialer's ceiling.
+    const oversized = JSON.stringify({
+      v: 1,
+      rows: { 'claude:org=alpha': usageRow(99, '2026-08-29T12:00:00.000Z') },
+      pad: 'x'.repeat(REMOTE_STDOUT_MAX_BYTES),
+    });
+    expect(Buffer.byteLength(oversized)).toBeGreaterThan(REMOTE_STDOUT_MAX_BYTES);
+    const refused = run(home, oversized);
+    expect(refused.status).toBe(2);
+    expect(refused.stdout).toBe('');
+    const lines = refused.stderr.trim().split('\n');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(/^\[agents\] __usage-ingest: UsageIngestInputTooLargeError: stdin payload exceeds 16777216 bytes \(16 MiB\); refusing it unread$/);
+    expect(fs.readFileSync(cachePath, 'utf-8')).toBe(before);
+
+    // The same row without the padding is under the cap and merges newest-wins.
+    const merged = run(home, legacyPayload(99, '2026-08-29T12:00:00.000Z'));
+    expect(merged.status).toBe(0);
+    expect(JSON.parse(fs.readFileSync(cachePath, 'utf-8'))['claude:org=alpha'].windows[0].usedPercent).toBe(99);
   });
 
   it('reads the payload from --from <file> (the Windows stdin workaround path)', () => {

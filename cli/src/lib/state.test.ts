@@ -403,9 +403,12 @@ describe('serializeCentral heals a frozen top-level header (PHNX-3315)', () => {
 // uncommitted, the tree is dirty on agents.yaml between the write and the
 // daemon's next publish tick — and an incoming peer publish commit that also
 // touches agents.yaml then trips dirtyTreeRefusal, wedging `agents repo pull`.
-// writeMetaUnlocked now commits the central edit synchronously (only when the
-// central bytes actually moved, never in the daemon), so the tree is clean at
-// rest. Real git repo, no mocks.
+// writeMeta/updateMeta now commit the central edit synchronously after the meta
+// lock releases (only when the central bytes actually moved), so the tree is
+// clean at rest. The daemon (`agents __daemon-run`) commits too: since the
+// shared-state exchange moved to SSH (PHNX-4116) no daemon tick touches the user
+// repo, so a daemon-side central write would otherwise sit dirty until the next
+// CLI edit. Real git repo, no mocks.
 describe('commit-on-write: a CLI central mutation commits agents.yaml', () => {
   let TMP2 = '';
   const agentsDir = () => path.join(TMP2, '.agents');
@@ -436,6 +439,24 @@ describe('commit-on-write: a CLI central mutation commits agents.yaml', () => {
     // agents.yaml is committed — not left dirty for the next incoming pull to trip on.
     expect(git(['status', '--porcelain', '--', 'agents.yaml']).trim()).toBe('');
     expect(git(['log', '-1', '--pretty=%s']).trim()).toBe('chore(config): update agents.yaml');
+  });
+
+  it('commits from the daemon process too (argv[2] === "__daemon-run") — no tick commits the user repo any more', async () => {
+    // The daemon used to be exempt (an `isDaemonProcess` argv gate) because the
+    // git publish tick owned the user repo's commits. That tick is gone; a
+    // daemon-side central write must commit itself or stay dirty at rest.
+    const argv2 = process.argv[2];
+    process.argv[2] = '__daemon-run';
+    try {
+      const { updateMeta } = await freshState();
+      updateMeta((m) => ({ ...m, fleet: { devices: {}, defaults: { config: { maxAgents: 7 } } } }));
+    } finally {
+      if (argv2 === undefined) process.argv.length = 2; else process.argv[2] = argv2;
+    }
+
+    expect(git(['status', '--porcelain', '--', 'agents.yaml']).trim()).toBe('');
+    expect(git(['log', '-1', '--pretty=%s']).trim()).toBe('chore(config): update agents.yaml');
+    expect(git(['rev-list', '--count', 'HEAD']).trim()).toBe('1');
   });
 
   it('does not commit when only device-scoped state changed (central bytes unchanged)', async () => {
