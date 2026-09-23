@@ -307,14 +307,15 @@ independently — there is no shared abstraction between them:**
   `writeAuthHealthEntries` (`cli/src/lib/auth-health.ts:373`, called at
   `auth-health.ts:603`) each write a local file that other devices read and
   merge — no single device owns the aggregate. `fleet-shared-state.ts` applies
-  the same pattern to a conflict-free tracked per-device file: headed usage
-  publishers write rows that workers union newest-wins, while auth writes only
-  a safe readiness verdict and elects one ready source for an exceptional,
-  async, deadline-bounded secret provision. `fleet-shared-repo-sync.ts`
-  automatically commits only the owning device's file and exchanges the user
-  repo under one cross-process lock; its async git process tree has a 45-second
-  hard deadline, so both daemon services share transport without racing or
-  depending on a human `agents repo sync user`.
+  the same pattern to an untracked per-device file: headed usage publishers
+  write rows that workers merge newest-wins, while auth writes only a safe
+  readiness verdict and elects one ready source for an exceptional, async,
+  deadline-bounded secret provision. The transport is the `usage-sync` tick's
+  SSH exchange (`accounting/usage-sync.ts`, PHNX-4116): a headed box dials each
+  dialable peer with `agents __usage-ingest --reply` under a 20-second per-peer
+  deadline, pushing its own envelope and storing the peer's reply stamped
+  `receivedAt`; a worker never dials. Nothing rides the user repo, so no human
+  `agents repo sync user` is involved and no git lock exists to contend for.
 The daemon used to host a fourth pattern — **elected-singleton** (first-come
 binds, others detect and back off) — for the secrets broker, via
 `startHostedBroker`/`shouldTakeOverBroker`. That hosting is gone (PHNX-3989,
