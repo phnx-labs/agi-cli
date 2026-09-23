@@ -977,10 +977,10 @@ SSH access (§7); rendering sessions that no harness produced.
   through `redactSecrets` with the environment's known values (the local-only
   `sessions trace --no-redact` is the sole opt-out), and terminal escape
   sequences MUST ALWAYS be stripped, opt-out or not. A transcript is untrusted
-  input, these labels are printed to a terminal, and the row is published to the
-  git-tracked `~/.agents/devices/<device>/daemon-state.json` — so a label built
-  by falling back to raw command text (a Bash call with no `description`) must
-  never carry a credential there. `sanitizeEvents` does NOT run on the fold's
+  input, these labels are printed to a terminal, and the row is published to
+  `~/.agents/devices/<device>/daemon-state.json` and sent to every fleet peer over
+  the usage-sync SSH exchange — so a label built by falling back to raw command
+  text (a Bash call with no `description`) must never carry a credential there. `sanitizeEvents` does NOT run on the fold's
   parse path, so no consumer may assume the events were pre-scrubbed
   (PHNX-3939; `lib/session/timeline.ts` `projectTimeline`,
   `commands/sessions-trace.ts` `renderSessionSteps`;
@@ -1983,16 +1983,19 @@ engine.
   is ever called; the standalone never sees the `@host` suffix.
 - **Fleet sync of reserved credentials is agents-cli's own fleet model, not
   portable secret-storage behavior.** A `ready`/`missing`/`invalid` verdict —
-  never a credential — is published to the owning device's tracked
-  `~/.agents/devices/<device>/daemon-state.json` by the daemon's single
-  shared-repo committer, the `usage-sync` tick (`publishReservedAuthVerdict`,
-  `secrets-policy.ts`; PHNX-4051), so exactly one caller holds the shared-repo
-  lock per tick. The bounded, kill-deadlined Git exchange that delivers those
-  verdicts across the fleet is that same tick's. The `auth-sync` service then
-  runs the non-git half — `reconcileLocalWorkerSlots` plus the targeted SSH push
+  never a credential — is published to the owning device's UNTRACKED
+  `~/.agents/devices/<device>/daemon-state.json` by the `usage-sync` tick
+  (`publishReservedAuthVerdict` via `publishOwnFleetState`,
+  `accounting/usage-sync.ts`; PHNX-4051, PHNX-4116) and carried to peers by that
+  tick's SSH exchange: the headed daemon dials each dialable peer with
+  `agents __usage-ingest --reply` (20 s per peer, in parallel), sending its own
+  envelope on stdin and storing the peer's reply envelope as
+  `devices/<peer>/daemon-state.json` stamped `receivedAt`. Nothing in that
+  envelope enters Git. The `auth-sync` service then runs the credential half —
+  `reconcileLocalWorkerSlots` plus the targeted SSH push
   (`syncReservedAuthBundle` / `syncReservedStores`, `secrets-policy.ts`, through
   the client's `pushBundleToHostAsync`) — delivering the real bundle only to a
-  pinned, reachable, `role=worker` peer whose last-synced verdict says `missing`.
+  pinned, reachable, `role=worker` peer whose last-received verdict says `missing`.
   **Given**
   a local file-backed `auth` bundle and a pinned worker peer reporting
   `missing` **When** this device is the one deterministically elected ready
@@ -2919,12 +2922,19 @@ unknown MUST NOT be scored as full-capacity (`capacityWeight`'s null arm is
 an unverifiable account MUST NOT outrank a verified-healthy one in a mixed pool,
 yet an all-*blind* pool (no snapshots at all) still draws a pick. An all-*stale*
 pool is the exception — see GWT-E5d. The missing signal MUST be
-supplied by the daemon (a sanctioned SING-1a collector): headed daemons publish
-one snapshot into their owned per-device file in the fleet-synced user repo,
-the daemon automatically commits only that file and exchanges the repo under a
-cross-process lock plus a 45-second process-tree deadline, and workers read the
-delivered local mirror newest-wins (`usage-sync`) — NOT by peer SSH or a
-fetch on the launch path, which MUST stay cache-only (SING-1a). A run that HITS
+supplied by the daemon (a sanctioned SING-1a collector): a headed daemon's
+`usage-sync` tick publishes one snapshot into its own untracked
+`devices/<device>/daemon-state.json` and pushes that envelope to every dialable
+peer over SSH (`agents __usage-ingest --reply`, per-peer 20 s deadline, peers
+in parallel, a timed-out peer skipped for that tick), and the worker merges the
+rows into its cache newest-wins as it receives them (`applyPeerFleetState`,
+`accounting/usage-sync.ts`; PHNX-4116). A worker MUST NOT initiate the
+exchange, MUST NOT poll `/api/oauth/usage` itself (credential-management.md
+invariant 5), and the launch path MUST stay cache-only (SING-1a) — it never
+dials a peer or fetches. The envelope MUST NOT ride the user repo: that transport
+grew the shared store to 1.1 GiB / 18k `chore(devices)` commits and wedged a
+worker's clone 10k commits behind, which is how a box holding a valid
+setup-token became unschedulable. A run that HITS
 its weekly limit MUST also persist a `rate_limited`
 `week` window (`lib/claude-statusline.ts:96`) so the next
 `collectRunCandidates` sees it and `hasUsageAvailable` excludes the account

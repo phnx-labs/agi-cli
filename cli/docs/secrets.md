@@ -60,16 +60,17 @@ modules:
   alias for Claude) are agents-cli's own naming convention on top of the
   engine's storage.
 - **Fleet sync of reserved credentials.** The daemon publishes only a
-  `ready`/`missing`/`invalid` verdict to the owning device's tracked
-  `~/.agents/devices/<device>/daemon-state.json`; a serialized,
-  45-second-bounded Git exchange delivers those verdicts through the user repo.
-  That publish + exchange runs on the single shared-repo committer, the
-  `usage-sync` tick (PHNX-4051), so the two daemon ticks never contend for the
-  one shared-repo lock. The `auth-sync` service then does the non-git half: one
-  deterministically elected ready device asynchronously pushes the real bundle
-  only to pinned peers whose last-synced verdict says `missing`, always
-  file-backed with a kill-bounded SSH deadline so each destination
-  auto-provisions its own machine-local key. Tokens never enter the Git store.
+  `ready`/`missing`/`invalid` verdict to the owning device's untracked
+  `~/.agents/devices/<device>/daemon-state.json`; the `usage-sync` tick carries
+  it to peers over SSH (`agents __usage-ingest --reply`, PHNX-4116) — a headed
+  box dials each dialable peer in parallel with a 20 s per-peer deadline and
+  stores each reply as `devices/<peer>/daemon-state.json` stamped `receivedAt`.
+  Nothing rides the user repo. The `auth-sync` service then does the credential
+  half: one deterministically elected ready device asynchronously pushes the
+  real bundle only to pinned peers whose last-received verdict says `missing`,
+  always file-backed with a kill-bounded SSH deadline so each destination
+  auto-provisions its own machine-local key. Tokens never enter Git or the
+  exchange envelope.
 
 The reserved `auth` bundle is file-backed by construction: it holds long-lived
 Claude setup-tokens that usage/probe and unattended workers read without Touch

@@ -260,8 +260,8 @@ from the single legacy `auth` bundle to every portable account:
   `antigravity`) gets a `per-device` slot and no push. A row whose key has not
   reached the box is reported `durable key not synced yet` and retried next tick.
   Slot reconciliation runs only on a non-headed device, and it runs **first** in
-  the tick, before the shared-state git exchange: it reads only local state, so a
-  `git rebase timed out` on that tick never postpones it. (Before this, legacy
+  the tick: it reads only local state, so nothing a peer does on the SSH
+  exchange can postpone it. (Before this, legacy
   rows were skipped on the assumption that "a legacy worker resolves its token at
   spawn" — true only for `agents run claude#<name>`, never for the interactive
   picker, which enumerates slots and version homes and therefore showed the 8
@@ -390,10 +390,12 @@ crosses only when the user runs `agents accounts sync <name> --device <device>`.
   No no-ACL cache of the interactive token is needed because the interactive
   token is never read.
   A headed daemon publishes those non-secret rows to its per-device
-  `daemon-state.json` in the fleet-synced user repo. The daemon automatically
-  commits only its owned file and runs a serialized, 45-second-bounded Git
-  exchange; workers consume the delivered local mirror newest-wins, with no
-  per-tick device-to-device SSH mesh.
+  `daemon-state.json` (untracked) and pushes that envelope to every dialable
+  peer over SSH each usage-sync tick (`agents __usage-ingest --reply`,
+  PHNX-4116); a worker merges the rows newest-wins as they arrive and answers
+  with its own envelope. Only usage rows, verdicts, and session digests move —
+  never a credential (invariant 7) — and the worker still never polls the usage
+  endpoint itself (invariant 5).
   Claude's human row ends with one unlabeled last-active timestamp. Auth-health
   remains available in `--json` for machine consumers; it is not rendered as a
   second timestamp beside usage because that probe age is neither activity age

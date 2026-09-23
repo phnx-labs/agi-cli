@@ -341,9 +341,9 @@ the fold, so it scrubs every string it ships — a step's `text`, its `now`, its
 `sessions trace --no-redact` opts out) and terminal escapes are ALWAYS stripped.
 This is load-bearing rather than defensive: `labelForEvent` falls back to raw
 command text when a call wrote no `description`, and `mirror.ts` publishes the
-resulting row into `~/.agents/devices/<device>/daemon-state.json`, which is
-**git-tracked** in the user DotAgents repo — so an unscrubbed label is a credential
-committed to history (root `AGENTS.md` §Security). Note `sanitizeEvents` does NOT
+resulting row into `~/.agents/devices/<device>/daemon-state.json`, which the
+usage-sync tick **sends to every fleet peer** over SSH — so an unscrubbed label is
+a credential copied onto every box (root `AGENTS.md` §Security). Note `sanitizeEvents` does NOT
 run on the fold's parse path (only `tail.ts` / `stream-render.ts` call it), so
 nothing downstream may assume the events arrived pre-scrubbed.
 
@@ -1173,20 +1173,30 @@ usage endpoint needs the `user:profile` scope only the interactive login carries
 (RUSH-2392), and the status-line writer above only fires on a box that runs Claude
 interactively. A headless `worker` has just the `user:inference` setup-token,
 which the endpoint 403s, so its `claude-usage.json` stays blank and `agents view`
-shows no S:/W: bars. The `usage-sync` daemon service closes the gap without a
-device-to-device SSH mesh: each headed daemon publishes one identity-keyed
-snapshot to its owned tracked file at
-`~/.agents/devices/<device>/daemon-state.json`; each tick automatically commits
-only that owned file, fetches/rebases, and pushes the user repo under one
-cross-process lock and a 45-second hard process-tree deadline. Each worker daemon
-therefore receives the file without an operator running `agents repo sync user`,
-then reads its local checkout and merges every headed snapshot
-NEWEST-WINS (`ingestPeerClaudeUsageRows`, `src/lib/accounting/usage.ts`). Both
-sides need not be online together, a tick opens no device-to-device SSH mesh, and two
-headed publishers converge per identity regardless of order. The reserved-auth
+shows no S:/W: bars. The `usage-sync` daemon service closes the gap over SSH
+(PHNX-4116): each headed daemon publishes one identity-keyed snapshot to its own
+UNTRACKED `~/.agents/devices/<device>/daemon-state.json`, then dials every
+dialable peer in parallel with `agents __usage-ingest --reply`
+(`exchangeFleetStateWithPeers`, [`src/lib/accounting/usage-sync.ts`](src/lib/accounting/usage-sync.ts)),
+sending that envelope on stdin under a 20 s per-peer deadline. The peer stores it
+as `devices/<headed>/daemon-state.json`, merges the rows into its cache
+NEWEST-WINS (`ingestPeerClaudeUsageRows`, `src/lib/accounting/usage.ts`), and
+prints its own envelope back, which the headed box stores as
+`devices/<peer>/daemon-state.json` stamped `receivedAt`. Workers never initiate;
+a timed-out peer is skipped for that tick and never blocks another; two headed
+publishers converge per identity regardless of order. The placement probe
+(`buildReadyProbeCommand(os, { ingestUsage: true })`) runs the same silent
+ingest ahead of `agents view --json`, so the worker a dispatch lands on holds the
+dispatcher's numbers at dispatch time. **Nothing rides the user repo any more:**
+the previous transport committed every tick's envelope, which grew the shared
+store to 1.1 GiB / 18,358 commits (100% of the last 2,000 `chore(devices):
+publish <device> daemon state`) and left one worker's clone 10k commits behind
+with `git fetch timed out` every tick — a box holding a valid setup-token was
+unschedulable because a repo was bloated. `agents repo sync user` is a plain
+fetch-and-fast-forward of human-authored resources again. The reserved-auth
 readiness verdict (`ready`/`missing`/`invalid` metadata only; credentials never
-enter Git) rides this **same** envelope and is published by the **same**
-usage-sync tick, not a second committer (PHNX-4051 — see below). **The credential push is per KEY and per ROLE, not bundle-coarse
+enter the envelope) rides this **same** envelope, published by the **same** tick
+(PHNX-4051 — see below). **The credential push is per KEY and per ROLE, not bundle-coarse
 (PHNX-3940 T6).** Each portable account resolves to one reserved-store key
 `<ENV>_<accountId>` in `__<harness>__` (a claude row predating T1 falls back to the
 legacy `auth` alias keyed by email); the elected single publisher (`syncReservedStores`,
@@ -1202,41 +1212,36 @@ receives the account **row** through the normal repo sync but **never a durable 
 `provisionWorkerSlot` materializes a slot for **every** registered account whose key
 is on the box — a v2 row through its reserved key, a pre-v2 claude row through the
 email-keyed `auth` token (both via `reservedSyncTargets`, so the push plan and the
-materialization can never disagree) — and it runs **first** in the tick so a failed
-shared-state git exchange cannot postpone it;
+materialization can never disagree) — and it runs **first** in the tick so nothing
+a peer does on the exchange can postpone it;
 a native OAuth/session file is never transported (`fleet/auth-sync.ts`
 `isCredentialSafeToPropagate` stays `false`). Each exceptional push is async with a
 hard deadline that kills the direct SSH client and remote connection. The store path
 and newest-wins flow have real-file tests
 ([`fleet-shared-state.test.ts`](src/lib/fleet-shared-state.test.ts),
-[`usage-sync.test.ts`](src/lib/accounting/usage-sync.test.ts)); a real two-checkout
-bare-remote test proves the automatic Git delivery
-([`fleet-shared-repo-sync.test.ts`](src/lib/fleet-shared-repo-sync.test.ts)). The legacy hidden
-`__usage-ingest`/`__usage-export` verbs remain compatible with older installed
-peers and retain real-file / real-CLI coverage. A synced row reads as `last_seen`
+[`usage-sync.test.ts`](src/lib/accounting/usage-sync.test.ts)); the exchange is
+proved end to end by spawning the real CLI as the peer, with only the ssh dial
+injected ([`usage-ingest.e2e.test.ts`](src/lib/accounting/usage-ingest.e2e.test.ts)).
+The hidden `__usage-ingest` verb still accepts the legacy v1 bare-rows envelope
+from an older headed peer, and `__usage-export` remains. A synced row reads as `last_seen`
 (cached), never a live fetch, so a worker's bar is honest about being propagated.
 
-**One committer per tick — usage-sync (PHNX-3792 session mirror, PHNX-4051 auth
-verdict).** There is exactly one caller of `syncFleetSharedStateRepo` on the
-periodic path: the `usage-sync` service. It publishes every owned conflict-free
-field into its `devices/<device>/daemon-state.json` — the usage snapshot, EVERY
-box's lightweight per-session preview/metadata (the `sessions` field), and the
-reserved-auth readiness verdict — BEFORE the single commit/rebase/push, so all
-three ride one exchange. `auth-sync` no longer runs its own exchange: it keeps
-only its non-git duties (worker-slot reconcile + the credential SSH pushes,
-under its own deadline and circuit breaker) and acts on the peer verdicts the
-usage-sync exchange last delivered into the local checkout. Those pushes are
-gated on the exchange's freshness marker (`readLastSuccessfulExchangeMs`, written
-beside the lock on every success): when the last usage-sync exchange is missing or
-older than one tick interval, auth-sync skips the pushes and WARNs rather than
-acting on peer state that may no longer hold (worker-slot reconcile is NOT gated —
-it reads only local durable keys). Before PHNX-4051 both
-ticks committed 30 s apart and contended for the one `proper-lockfile` lock
-(20×100 ms of retries vs a multi-second real fetch/rebase/push), so the usage
-tick logged "Lock file is already being held", workers never got a fresh usage
-snapshot, and the 40-min placement gate (`viewAgentAccountEligibility`) turned
-every worker into "no ready device". Every box except a marked `worker` folds
-peers' digests into its local `sessions` index as mirror rows. Only topic/label,
+**One exchange per tick — usage-sync (PHNX-3792 session mirror, PHNX-4051 auth
+verdict, PHNX-4116 SSH transport).** The `usage-sync` service refreshes every
+owned field in its `devices/<device>/daemon-state.json` (`publishOwnFleetState`)
+— the usage snapshot, EVERY box's lightweight per-session preview/metadata (the
+`sessions` field), and the reserved-auth readiness verdict — BEFORE the fan-out,
+so all three ride one envelope. `auth-sync` runs no transport of its own: it
+keeps the worker-slot reconcile + the credential SSH pushes, under its own
+deadline and circuit breaker, and acts on the peer verdicts the last exchange
+stored. Those pushes are gated on the exchange's freshness
+(`readLastSuccessfulExchangeMs`, now the newest peer `receivedAt` on this box):
+when no peer envelope has arrived within one tick interval, auth-sync skips the
+pushes and WARNs rather than acting on peer state that may no longer hold
+(worker-slot reconcile is NOT gated — it reads only local durable keys). PR 5 of
+PHNX-4116 moves that gate onto the per-peer `receivedAt`. Every box except a
+marked `worker` folds peers' digests into its local `sessions` index as mirror
+rows. Only topic/label,
 a first-user-message snippet, last-activity, agent+version, cwd, ticket, and PR
 ride — never a transcript — and the mirror is bounded (200 recent sessions per
 box) and pruned by age (14 days). This is what lets the picker / `agents sessions`
@@ -1530,13 +1535,12 @@ name via `--account`, with no harness to scope them by. `accounts rename` /
 `remove` / `view` accept `<harness>#<name>` and refuse a bare name that spans several
 harnesses rather than guessing (PHNX-3988).
 
-**Writing a label commits `agents.yaml`.** Version-scoped rows land in the central
-`agents.yaml` via a plain file write, while the daemon's shared-state tick committed
-only `devices/<device>/daemon-state.json` and then rebased `--autostash` over the
-dirty central file — so every box silently lost its account labels on its next
-publish. The publish stages `agents.yaml` alongside the device doc
-([`src/lib/fleet-shared-repo-sync.ts`](src/lib/fleet-shared-repo-sync.ts)) so the
-rebase carries the rows instead of stashing them.
+**Writing a label writes `agents.yaml` and commits it on the spot**
+(`commitCentralConfigAfterWrite`, [`src/lib/state.ts`](src/lib/state.ts), from a
+CLI command and the daemon alike). No daemon tick rebases or rewrites the user
+repo any more (PHNX-4116) — daemon state moves over SSH — so the PHNX-3887
+failure (the shared-state tick autostashing over a dirty central file and losing
+every box's account labels) has no path to recur.
 
 `interactive.host` is a **user-level** preference: it lives in central
 `~/.agents/agents.yaml` under `config.interactiveHost`, syncs fleet-wide via
