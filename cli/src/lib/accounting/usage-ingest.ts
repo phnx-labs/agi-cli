@@ -18,9 +18,13 @@
  * it never triggers an update check or a detached sync.
  *
  * Exit codes: 0 = applied (or nothing to apply — an empty payload is not an
- * error), 2 = malformed input. It fails loud on a bad envelope rather than
- * silently accepting a wrong shape, but a busy cache lock degrades to
- * best-effort inside `ingestPeerClaudeUsageRows` like every other cache writer.
+ * error), 2 = malformed or oversized input. It fails loud on a bad envelope
+ * rather than silently accepting a wrong shape, but a busy cache lock degrades
+ * to best-effort inside `ingestPeerClaudeUsageRows` like every other cache
+ * writer. Stdin is bounded at {@link REMOTE_STDOUT_MAX_BYTES} — the same ceiling
+ * the dialer puts on a peer's reply — so a runaway pusher cannot grow this
+ * every-15-min receiver's heap; an overflow stops the read, exits 2, and writes
+ * nothing.
  *
  * The payload arrives on stdin, EXCEPT on a Windows receiver: the `agents.ps1`
  * shim does not forward ssh-piped stdin to the node process, so the pusher
@@ -28,6 +32,7 @@
  * (`buildWindowsStdinAgentsCommand`).
  */
 import * as fs from 'fs';
+import { REMOTE_STDOUT_MAX_BYTES, RemoteUtf8Accumulator } from '../ssh-exec.js';
 import { ingestPeerClaudeUsageRows } from './usage.js';
 import {
   applyPeerFleetState,
@@ -37,15 +42,38 @@ import {
   publishOwnFleetState,
 } from './usage-sync.js';
 
-function readStdin(): Promise<string> {
-  return new Promise((resolve) => {
-    let buf = '';
-    process.stdin.setEncoding('utf-8');
-    process.stdin.on('data', (chunk) => {
-      buf += chunk;
+/** Stdin grew past {@link REMOTE_STDOUT_MAX_BYTES}; the payload was refused unread. */
+export class UsageIngestInputTooLargeError extends Error {
+  constructor(readonly limitBytes: number) {
+    super(`stdin payload exceeds ${limitBytes} bytes (${limitBytes / (1024 * 1024)} MiB); refusing it unread`);
+    this.name = 'UsageIngestInputTooLargeError';
+  }
+}
+
+/**
+ * Read stdin to EOF, bounded at {@link REMOTE_STDOUT_MAX_BYTES}. On overflow the
+ * stream is destroyed so the pusher gets EPIPE instead of a full drain, and the
+ * promise rejects with {@link UsageIngestInputTooLargeError} — the caller exits
+ * 2 without parsing or writing anything.
+ */
+function readStdin(limitBytes = REMOTE_STDOUT_MAX_BYTES): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const acc = new RemoteUtf8Accumulator();
+    let bytes = 0;
+    let settled = false;
+    process.stdin.on('data', (chunk: Buffer) => {
+      if (settled) return;
+      bytes += chunk.byteLength;
+      if (bytes > limitBytes) {
+        settled = true;
+        process.stdin.destroy();
+        reject(new UsageIngestInputTooLargeError(limitBytes));
+        return;
+      }
+      acc.write(chunk);
     });
-    process.stdin.on('end', () => resolve(buf));
-    process.stdin.on('error', () => resolve(buf));
+    process.stdin.on('end', () => { if (!settled) { settled = true; resolve(acc.end()); } });
+    process.stdin.on('error', () => { if (!settled) { settled = true; resolve(acc.end()); } });
   });
 }
 
@@ -67,7 +95,13 @@ export async function runUsageIngest(argv: string[] = process.argv.slice(3)): Pr
       return 2;
     }
   } else {
-    source = await readStdin();
+    try {
+      source = await readStdin();
+    } catch (err) {
+      if (!(err instanceof UsageIngestInputTooLargeError)) throw err;
+      process.stderr.write(`[agents] __usage-ingest: ${err.name}: ${err.message}\n`);
+      return 2;
+    }
   }
   const raw = source.trim();
   const errors: string[] = [];

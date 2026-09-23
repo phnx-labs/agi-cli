@@ -1223,7 +1223,10 @@ and newest-wins flow have real-file tests
 proved end to end by spawning the real CLI as the peer, with only the ssh dial
 injected ([`usage-ingest.e2e.test.ts`](src/lib/accounting/usage-ingest.e2e.test.ts)).
 The hidden `__usage-ingest` verb still accepts the legacy v1 bare-rows envelope
-from an older headed peer, and `__usage-export` remains. A synced row reads as `last_seen`
+from an older headed peer, and `__usage-export` remains. Its stdin is bounded at
+`REMOTE_STDOUT_MAX_BYTES` (16 MiB, `src/lib/ssh-exec.ts`) — the same ceiling the
+dialer puts on a peer's reply — so an oversized push exits 2 with one
+`UsageIngestInputTooLargeError` line on stderr and writes nothing. A synced row reads as `last_seen`
 (cached), never a live fetch, so a worker's bar is honest about being propagated.
 
 **One exchange per tick — usage-sync (PHNX-3792 session mirror, PHNX-4051 auth
