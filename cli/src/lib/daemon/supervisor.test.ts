@@ -268,6 +268,51 @@ describe('ServiceSupervisor', () => {
     await supervisor.stopAll();
   });
 
+  it('a service that hangs again after a backoff restart is restarted again, not parked for good (PHNX-4116)', async () => {
+    // Observed on zion and four workers 2026-09-15..18: daemon-heartbeat and
+    // usage-sync each recovered from ONE deadline breach on backoff, then the
+    // next breach logged "parked" and never restarted — for days. The fired
+    // restart timer's handle was never dropped, so the second park read it as
+    // "restart already pending" and skipped scheduling one.
+    class AlwaysHangingService implements PeriodicService {
+      readonly id: DaemonServiceId = 'usage-sync';
+      readonly intervalMs = 1_000;
+      readonly deadlineMs = 500;
+      restarts = 0;
+      async start(): Promise<void> {}
+      async stop(): Promise<void> {}
+      async restart(): Promise<void> { this.restarts += 1; }
+      async tick(): Promise<void> {
+        return new Promise<void>(() => {}); // never settles
+      }
+      health(): ServiceHealth {
+        return { state: 'running', lastRunMs: 0, consecutiveFailures: 0 };
+      }
+    }
+
+    const supervisor = new ServiceSupervisor({ backoffBaseMs: 5_000 });
+    const svc = new AlwaysHangingService();
+    supervisor.register(svc);
+    await supervisor.startAll(makeCtx());
+    await vi.advanceTimersByTimeAsync(0); // first tick hangs
+
+    await vi.advanceTimersByTimeAsync(500); // deadline -> parked, restart scheduled
+    expect(supervisor.health()['usage-sync'].state).toBe('parked');
+    await vi.advanceTimersByTimeAsync(5_000); // backoff restart #1 -> running, tick hangs again
+    expect(svc.restarts).toBe(1);
+    expect(supervisor.health()['usage-sync'].state).toBe('running');
+
+    await vi.advanceTimersByTimeAsync(500); // second deadline -> parked again
+    expect(supervisor.health()['usage-sync'].state).toBe('parked');
+    // A successful restart resets the backoff, so the next attempt is due after
+    // the base delay again. Before the fix this never fired.
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(svc.restarts).toBe(2);
+    expect(supervisor.health()['usage-sync'].state).toBe('running');
+
+    await supervisor.stopAll();
+  });
+
   it('health() returns a record for every registered service', async () => {
     const supervisor = new ServiceSupervisor();
     const a = new HealthyService('scheduler');

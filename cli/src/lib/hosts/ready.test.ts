@@ -93,7 +93,7 @@ describe('viewAgentSignedIn', () => {
     });
   });
 
-  it('rejects readiness whose auth or usage evidence is stale', () => {
+  it('treats stale usage as unverified, trusts only a fresh throttle or dead-auth verdict', () => {
     const now = Date.parse('2026-09-04T12:00:00Z');
     const stale = JSON.stringify([{ agent: 'claude', versions: [{
       signedIn: true,
@@ -103,7 +103,40 @@ describe('viewAgentSignedIn', () => {
       usageStatus: 'available',
       usageCapturedAt: new Date(now - 41 * 60_000).toISOString(),
     }] }]);
-    expect(viewAgentAccountEligibility(stale, 'claude', now)).toEqual({ signedIn: false, pickerEligible: false });
+    // Stale evidence is unverified, not disqualifying (PHNX-4116): the device
+    // stays placeable, and its stale throttle marker is not trusted either.
+    expect(viewAgentAccountEligibility(stale, 'claude', now)).toEqual({ signedIn: true, pickerEligible: true });
+
+    const staleThrottled = JSON.stringify([{ agent: 'claude', versions: [{
+      signedIn: true,
+      launchable: true,
+      authVerdict: 'live',
+      authCheckedAt: now - 60_000,
+      usageStatus: 'rate_limited',
+      usageCapturedAt: new Date(now - 41 * 60_000).toISOString(),
+    }] }]);
+    expect(viewAgentAccountEligibility(staleThrottled, 'claude', now)).toEqual({ signedIn: true, pickerEligible: true });
+
+    const freshThrottled = JSON.stringify([{ agent: 'claude', versions: [{
+      signedIn: true,
+      launchable: true,
+      authVerdict: 'live',
+      authCheckedAt: now - 60_000,
+      usageStatus: 'rate_limited',
+      usageCapturedAt: new Date(now - 60_000).toISOString(),
+    }] }]);
+    expect(viewAgentAccountEligibility(freshThrottled, 'claude', now)).toEqual({ signedIn: false, pickerEligible: false });
+
+    const staleDeadAuth = JSON.stringify([{ agent: 'claude', versions: [{
+      signedIn: true,
+      launchable: true,
+      authVerdict: 'revoked',
+      authCheckedAt: now - 21 * 60_000,
+      usageStatus: 'available',
+      usageCapturedAt: new Date(now - 60_000).toISOString(),
+    }] }]);
+    // An expired dead verdict no longer blocks (fail-open, same as the local gate).
+    expect(viewAgentAccountEligibility(staleDeadAuth, 'claude', now)).toEqual({ signedIn: true, pickerEligible: true });
 
     const fresh = JSON.stringify([{ agent: 'claude', versions: [{
       signedIn: true,
