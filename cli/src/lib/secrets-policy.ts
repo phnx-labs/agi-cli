@@ -686,7 +686,9 @@ function defaultSlotSeeded(harness: AgentId, slotDir: string): boolean {
  */
 export function reconcileLocalWorkerSlots(deps: ReconcileWorkerSlotsDeps = {}): ReconcileWorkerSlotsResult {
   const result: ReconcileWorkerSlotsResult = { provisioned: [], dropped: [], skipped: [], errors: [] };
-  const role = deps.selfRole ?? selfConfiguredDeviceRole();
+  // `'selfRole' in deps` (not `??`) so a caller can inject an explicit `undefined`
+  // to mean "unmarked device"; a caller that omits it reads the real machine role.
+  const role = 'selfRole' in deps ? deps.selfRole : selfConfiguredDeviceRole();
   if (isHeadedDeviceRole(role)) return result; // headed boxes provision via native login
   const meta = (deps.readMetaFn ?? readMeta)();
   const slots = readSlots(meta as Pick<Meta, 'deviceAccounts'>);
@@ -703,7 +705,11 @@ export function reconcileLocalWorkerSlots(deps: ReconcileWorkerSlotsDeps = {}): 
   // `.claude/projects` holds session transcripts. Fail closed — an empty
   // registry is a transient read, and stripping every slot on it would wipe a
   // healthy box's whole slot set, so drop nothing until the registry answers.
-  if (byId.size > 0) {
+  // This deletion runs ONLY on a device explicitly marked `worker`: provisioning
+  // above is safe on an unmarked box, but destroying a credential is not — an
+  // unmarked device is not headed (`isHeadedDeviceRole(undefined)` is false) yet
+  // must never run a credential-deleting branch.
+  if (role === 'worker' && byId.size > 0) {
     const stale = Object.values(slots).filter((slot) => !byId.has(slot.accountId));
     const droppable: DeviceAccountSlot[] = [];
     for (const slot of stale) {
