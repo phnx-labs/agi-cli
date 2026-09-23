@@ -8,6 +8,8 @@
  * this module only decides WHICH bundle/key, WHO may reach it, and WHERE it
  * gets pushed.
  */
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import {
   pushBundleToHostAsync,
   listBundles,
@@ -26,7 +28,7 @@ import {
   type FleetSharedDeviceState,
   type SharedAuthStatus,
 } from './fleet-shared-state.js';
-import { getUserAgentsDir, readMeta } from './state.js';
+import { getCacheDir, getUserAgentsDir, readMeta } from './state.js';
 import { dropSlots, listNativeAccounts, readSlots } from './account-registry.js';
 import { claudeAccountTokenKey, isClaudeWorkerHomeSeeded, provisionWorkerSlot, readReservedCredential } from './claude-account-token.js';
 import { configuredDeviceRole, isHeadedDeviceRole, selfConfiguredDeviceRole } from './device-config.js';
@@ -354,18 +356,25 @@ export async function syncReservedAuthBundle(deps: AuthSyncDeps = {}): Promise<A
 // The functions below fix both. The plan is per ACCOUNT and per KEY
 // (`<ENV>_<accountId>`), not per bundle, and targets `role=worker` peers only.
 //
-// PRESENCE IS FIRST-HAND, from the peer's own daemon-state reply (PHNX-4116).
-// Each device's account-state daemon publishes a per-account verdict row into
-// `accounts.rows` (`account-state-daemon-service.ts`), and the usage-sync SSH
-// exchange stores each peer's reply at `devices/<peer>/daemon-state.json`. A
-// peer whose reply reports a NON-`missing` verdict for an account holds a
-// working credential for it (its slot materialized), so it holds that account's
-// reserved key; a `missing` verdict — or no row for the account — means it does
-// not, so the key is (re)pushed. This replaced a publisher-side delivery memo
-// that recorded what WE pushed: the memo could never see a key removed on the
-// worker out of band, so a peer that lost its credential read as `present`
-// forever. The reply is self-correcting — a removed key flips the next verdict
-// to `missing` and the push resumes within a tick.
+// PRESENCE IS FIRST-HAND + ROTATION-AWARE (PHNX-4116). Each device's account-
+// state daemon publishes a per-account verdict row into `accounts.rows`
+// (`account-state-daemon-service.ts`), and the usage-sync SSH exchange stores
+// each peer's reply at `devices/<peer>/daemon-state.json`. A key counts as
+// present on a peer only when BOTH hold:
+//   1. FIRST-HAND — the peer's own reply reports a NON-`missing` verdict for the
+//      account (its slot materialized). This is what a publisher-side memo alone
+//      could never see: a key removed on the worker out of band flips the next
+//      verdict to `missing`, so the push resumes within a tick.
+//   2. ROTATION — the fingerprint (`workerCredential.mintedAt`) we last delivered
+//      to that peer matches the account's CURRENT fingerprint. A re-mint
+//      (`accounts login`) rotates the reserved key and bumps `mintedAt` while the
+//      peer's OLD token keeps authenticating, so its verdict stays non-`missing`;
+//      verdict alone would read `present` forever and the rotated key would never
+//      reach the worker. The delivery memo is a LOCAL rotation cursor keyed per
+//      (peer, bundle, key) → fingerprint, never synced, never the primary signal.
+// A peer reply with no `accounts.rows` field at all (an older CLI) is not proof
+// of an empty inventory, so the plan FAILS CLOSED and skips it (INFO), rather
+// than treating "no rows" as "holds nothing" and pushing every key blindly.
 //
 // INVARIANT 1 (transport, retain nothing): materializing a worker slot happens
 // on the box where the key LANDED (`reconcileLocalWorkerSlots` ->
@@ -387,6 +396,18 @@ const EMPTY_KEY_SET: ReadonlySet<string> = new Set();
  */
 export const SKIP_REASON_NO_PEER_REPLY = 'no daemon-state reply from this peer yet';
 
+/**
+ * Skip reason for a peer whose reply exists but carries no `accounts.rows` field
+ * at all (an older CLI that does not publish per-account verdicts, or a partial
+ * state written before the account-state daemon ran). Without those rows there is
+ * no first-hand knowledge of what the peer holds, so the plan FAILS CLOSED and
+ * skips rather than pushing every key blindly. auth-sync logs it at INFO — it is
+ * transient during a rolling upgrade. An EMPTY `accounts.rows` array (a peer with
+ * no registered account) is NOT this case: it is a legitimate "holds nothing",
+ * and its keys are (correctly) pushed to provision it.
+ */
+export const SKIP_REASON_NO_ACCOUNT_ROWS = 'daemon-state reply carries no account rows (fail closed)';
+
 /** One account's durable worker credential, resolved to (bundle, key). */
 export interface ReservedSyncAccount {
   accountId: string;
@@ -395,6 +416,14 @@ export interface ReservedSyncAccount {
   bundle: string;
   /** Storage key `<ENV>_<accountId>` (or the legacy email-keyed claude key). */
   key: string;
+  /**
+   * The credential's rotation fingerprint: `workerCredential.mintedAt` for a T1
+   * row, `'legacy'` for a pre-T1 claude row. A re-mint (`accounts login`) bumps
+   * `mintedAt`, so this changes even though the OLD token still authenticates —
+   * which is why presence is gated on BOTH the peer's verdict AND a delivered-
+   * fingerprint match (see {@link peerPresentKeys}).
+   */
+  fingerprint: string;
 }
 
 /** A peer as the plan sees it: its role, reachability, and the keys it is KNOWN to hold. */
@@ -410,7 +439,18 @@ export interface ReservedSyncPeer {
    * first-hand knowledge of what it holds, so the peer is skipped this tick.
    */
   hasReply: boolean;
-  /** bundle -> keys the peer's own reply verdicts prove it holds. Absent ⇒ none known. */
+  /**
+   * Whether the peer's reply actually carried an `accounts.rows` array (present,
+   * even if empty). A reply file with no such field (older CLI, partial state)
+   * has no first-hand inventory, so the plan skips it fail-closed rather than
+   * pushing blindly. See {@link SKIP_REASON_NO_ACCOUNT_ROWS}.
+   */
+  hasAccountRows: boolean;
+  /**
+   * bundle -> keys the peer is KNOWN to hold: its own reply verdict says present
+   * AND the fingerprint we last delivered to it matches the current one. Absent ⇒
+   * none known.
+   */
   presentKeys: Record<string, ReadonlySet<string>>;
 }
 
@@ -423,7 +463,10 @@ type ReservedSyncPlanItem =
  * key of. Deterministic (peers and bundles sorted) so it pins exactly in tests.
  * A headed peer is skipped BEFORE any key comparison -- it never receives a key;
  * a peer with no reply yet (`hasReply: false`) is skipped next -- there is no
- * first-hand knowledge of what it holds, so nothing is pushed to it this tick.
+ * first-hand knowledge of what it holds, so nothing is pushed to it this tick;
+ * a peer whose reply carries no `accounts.rows` field (`hasAccountRows: false`)
+ * is skipped FAIL-CLOSED for the same reason (an older CLI's reply is not proof
+ * of an empty inventory), rather than pushing every key blindly.
  */
 export function planReservedStoreSync(
   accounts: ReservedSyncAccount[],
@@ -443,6 +486,7 @@ export function planReservedStoreSync(
       continue;
     }
     if (!peer.hasReply) { items.push({ action: 'skip', device: peer.name, reason: SKIP_REASON_NO_PEER_REPLY }); continue; }
+    if (!peer.hasAccountRows) { items.push({ action: 'skip', device: peer.name, reason: SKIP_REASON_NO_ACCOUNT_ROWS }); continue; }
     if (!peer.reachable) { items.push({ action: 'skip', device: peer.name, reason: 'unreachable' }); continue; }
     if (!peer.pinned) {
       items.push({ action: 'skip', device: peer.name, reason: `host key not pinned; run \`agents ssh ${peer.name}\` once` });
@@ -476,9 +520,9 @@ export function reservedSyncTargets(meta: Pick<Meta, 'accounts' | 'deviceAccount
   for (const account of listNativeAccounts(meta)) {
     const cred = account.workerCredential;
     if (cred) {
-      out.push({ accountId: account.id, harness: account.agent, bundle: cred.bundle, key: cred.key });
+      out.push({ accountId: account.id, harness: account.agent, bundle: cred.bundle, key: cred.key, fingerprint: cred.mintedAt });
     } else if (account.agent === 'claude' && account.identityLabel) {
-      out.push({ accountId: account.id, harness: 'claude', bundle: AUTH_STORE_ALIAS, key: claudeAccountTokenKey(account.identityLabel) });
+      out.push({ accountId: account.id, harness: 'claude', bundle: AUTH_STORE_ALIAS, key: claudeAccountTokenKey(account.identityLabel), fingerprint: 'legacy' });
     }
   }
   return out;
@@ -514,18 +558,71 @@ export function readPeerAccountVerdicts(state: FleetSharedDeviceState | undefine
 }
 
 /**
- * The reserved keys a peer is KNOWN to hold, per bundle, from the per-account
- * verdicts in its own daemon-state reply (PHNX-4116). A peer reporting a
- * NON-`missing` verdict for an account has a working credential for it (its slot
- * materialized), so it holds that account's reserved key; a `missing` verdict --
- * or no row for the account at all -- means it does not, so the key is
- * (re)pushed. First-hand and self-correcting: a key removed on the worker flips
- * its next verdict to `missing` and the push resumes, which the old
- * publisher-side delivery memo could never see.
+ * True when the peer's reply carried an `accounts.rows` array at all (present,
+ * even if empty). An older CLI, or a partial state written before the account-
+ * state daemon ran, has no such field — and its absence must NOT read as "the
+ * peer holds nothing", or the plan would push every key blindly. An EMPTY array
+ * (a peer with no registered account) IS a valid first-hand "holds nothing".
+ */
+export function peerHasAccountRows(state: FleetSharedDeviceState | undefined): boolean {
+  return Array.isArray(state?.accounts?.rows);
+}
+
+// --- publisher-side delivery memo (rotation) -------------------------------
+// A peer's verdict says WHETHER it holds a working credential for an account, but
+// not WHICH one: a re-mint (`accounts login`) rotates the reserved key and bumps
+// `workerCredential.mintedAt`, yet the peer's OLD token keeps authenticating, so
+// its verdict stays `live`/`unverified` and never flips to `missing`. Verdict
+// alone would therefore read `present` forever and the new key would never reach
+// the worker. The publisher records the fingerprint it last delivered per
+// (peer, bundle, key); presence requires BOTH the peer's own verdict AND a
+// delivered-fingerprint match, so a re-mint (fingerprint change) re-pushes within
+// a tick while a key removed on the worker (verdict `missing`) also re-pushes.
+// LOCAL publisher bookkeeping, never synced — it is a rotation cursor, not a
+// substitute for the first-hand verdict.
+
+function deliveryMemoPath(root = getCacheDir()): string {
+  return path.join(root, 'reserved-sync-delivered.json');
+}
+
+function memoKey(peer: string, bundle: string, key: string): string {
+  return `${normalizeHost(peer)} ${bundle} ${key}`;
+}
+
+function readDeliveryMemo(root?: string): Record<string, string> {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(deliveryMemoPath(root), 'utf-8')) as unknown;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, string>;
+  } catch { /* missing/malformed → empty memo */ }
+  return {};
+}
+
+function writeDeliveryMemo(memo: Record<string, string>, root = getCacheDir()): void {
+  fs.mkdirSync(root, { recursive: true });
+  fs.writeFileSync(deliveryMemoPath(root), `${JSON.stringify(memo, null, 2)}\n`, 'utf-8');
+}
+
+/**
+ * The reserved keys a peer is KNOWN to hold, per bundle. Two conditions must BOTH
+ * hold (PHNX-4116):
+ *
+ * 1. FIRST-HAND — the peer's own daemon-state reply reports a NON-`missing`
+ *    verdict for the account, so it has a working credential for it (its slot
+ *    materialized). A `missing` verdict, or no row for the account at all, means
+ *    it does not — self-correcting: a key removed on the worker flips its next
+ *    verdict to `missing` and the push resumes, which a publisher-side memo alone
+ *    could never see.
+ * 2. ROTATION — the fingerprint we last delivered to this peer (`delivered`)
+ *    matches the account's CURRENT fingerprint. A re-mint bumps
+ *    `workerCredential.mintedAt` while the old token still authenticates, so the
+ *    verdict stays non-`missing`; without this the rotated key would never
+ *    propagate. A never-delivered key (no memo entry ⇒ `undefined`) never
+ *    matches, so a newly-added account still pushes.
  */
 export function peerPresentKeys(
   accounts: ReservedSyncAccount[],
   verdicts: PeerAccountVerdict[],
+  delivered: (bundle: string, key: string) => string | undefined,
 ): Record<string, ReadonlySet<string>> {
   const held = new Set(
     verdicts.filter((v) => v.verdict !== 'missing').map((v) => `${v.harness}:${v.accountId}`),
@@ -533,6 +630,7 @@ export function peerPresentKeys(
   const present: Record<string, Set<string>> = {};
   for (const account of accounts) {
     if (!held.has(`${account.harness}:${account.accountId}`)) continue;
+    if (delivered(account.bundle, account.key) !== account.fingerprint) continue;
     (present[account.bundle] ??= new Set()).add(account.key);
   }
   return present;
@@ -551,6 +649,8 @@ interface ReservedStoreSyncDeps {
   listDevices?: () => DeviceProfile[];
   localName?: string;
   userAgentsDir?: string;
+  /** Where the publisher-side delivery memo lives; defaults to `getCacheDir()`. */
+  cacheDir?: string;
   readMetaFn?: () => Pick<Meta, 'accounts' | 'deviceAccounts'>;
   isPinned?: (name: string) => boolean;
   peerRole?: (name: string) => ReturnType<typeof selfConfiguredDeviceRole>;
@@ -625,6 +725,7 @@ export async function syncReservedStores(deps: ReservedStoreSyncDeps = {}): Prom
     return result;
   }
 
+  const memo = readDeliveryMemo(deps.cacheDir);
   const pinned = deps.isPinned ?? ((name: string) => isHostPinned(name, managedKnownHostsPath()));
   const peers: ReservedSyncPeer[] = devices.map((d) => {
     const state = stateByDevice.get(normalizeHost(d.name));
@@ -634,7 +735,12 @@ export async function syncReservedStores(deps: ReservedStoreSyncDeps = {}): Prom
       reachable: isDialableDevice(d),
       pinned: isDevicePinned(d, pinned),
       hasReply: state !== undefined,
-      presentKeys: peerPresentKeys(targets, readPeerAccountVerdicts(state)),
+      hasAccountRows: peerHasAccountRows(state),
+      presentKeys: peerPresentKeys(
+        targets,
+        readPeerAccountVerdicts(state),
+        (bundle, key) => memo[memoKey(d.name, bundle, key)],
+      ),
     };
   });
 
@@ -653,6 +759,13 @@ export async function syncReservedStores(deps: ReservedStoreSyncDeps = {}): Prom
       const out = await push(item.bundle, sshTarget(profile));
       if (out.ok) {
         result.pushed.push({ device: item.device, bundle: item.bundle, keys: item.keys });
+        // Record the fingerprint delivered so an UNCHANGED key is not re-pushed
+        // next tick; a re-mint (new fingerprint) or a removed key (verdict flips
+        // `missing`) still re-pushes.
+        for (const key of item.keys) {
+          const fp = targets.find((t) => t.bundle === item.bundle && t.key === key)?.fingerprint;
+          if (fp) memo[memoKey(item.device, item.bundle, key)] = fp;
+        }
       } else {
         result.errors.push({ device: item.device, message: out.message });
       }
@@ -660,6 +773,7 @@ export async function syncReservedStores(deps: ReservedStoreSyncDeps = {}): Prom
       result.errors.push({ device: item.device, message: (err as Error).message });
     }
   }
+  writeDeliveryMemo(memo, deps.cacheDir ?? getCacheDir());
   return result;
 }
 

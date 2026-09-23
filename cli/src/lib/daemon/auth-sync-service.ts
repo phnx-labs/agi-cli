@@ -14,13 +14,17 @@
  *
  * The pushes read each peer's OWN reply file (PHNX-4116 PR 5): a peer reporting
  * a `missing` verdict for an account is pushed that account's key; a peer that
- * has never sent a reply (no file) is skipped this tick and logged at INFO. The
- * push is idempotent, so a stale reply is harmless — a stale "has key" is fine,
- * a stale "missing key" costs one redundant push — which is why the per-peer
- * `receivedAt` replaced the old global freshness gate (`readLastSuccessfulExchangeMs`)
- * that skipped EVERY push when the newest exchange across the fleet went stale.
- * The reply file is first-hand and timestamped, so acting on it needs no such
- * fleet-wide gate.
+ * has never sent a reply (no file), or whose reply carries no `accounts.rows`
+ * field (an older CLI — fail closed), is skipped this tick and logged at INFO.
+ * Presence is also gated on a delivered-fingerprint match, so a re-mint
+ * (`accounts login` bumps `workerCredential.mintedAt` while the old token still
+ * authenticates) re-pushes the rotated key within a tick instead of reading
+ * `present` forever. The push is idempotent, so a stale reply is harmless — a
+ * stale "has key" is fine, a stale "missing key" costs one redundant push —
+ * which is why the per-peer `receivedAt` replaced the old global freshness gate
+ * (`readLastSuccessfulExchangeMs`) that skipped EVERY push when the newest
+ * exchange across the fleet went stale. The reply file is first-hand and
+ * timestamped, so acting on it needs no such fleet-wide gate.
  */
 import { BasePeriodicService, type DaemonContext } from './service.js';
 import type { DaemonServiceId } from '../daemon-services.js';
@@ -49,6 +53,7 @@ export class AuthSyncService extends BasePeriodicService {
       syncReservedAuthBundle,
       syncReservedStores,
       SKIP_REASON_NO_PEER_REPLY,
+      SKIP_REASON_NO_ACCOUNT_ROWS,
     } = await import('../secrets-policy.js');
 
     // Worker-side slot materialization FIRST (PHNX-3940 T6): for each registered
@@ -97,10 +102,15 @@ export class AuthSyncService extends BasePeriodicService {
       const stores = await syncReservedStores();
       if (stores.adopted.length > 0) ctx.log('INFO', `auth-sync: adopted ${stores.adopted.length} legacy reserved item(s) into their bundle: ${stores.adopted.map((a) => `${a.bundle} ${a.key}`).join(', ')}`);
       for (const p of stores.pushed) ctx.log('INFO', `auth-sync: pushed ${p.bundle} (${p.keys.length} key(s)) to ${p.device}`);
-      // A peer with no reply yet is informational, not a warning — a brand-new or
-      // never-dialed worker legitimately has none on an early tick. One line per
-      // such peer per tick.
-      for (const s of stores.skipped) if (s.reason === SKIP_REASON_NO_PEER_REPLY) ctx.log('INFO', `auth-sync: ${s.device}: ${s.reason}`);
+      // A peer with no reply yet — or a reply with no account rows (older CLI,
+      // fail-closed) — is informational, not a warning: a brand-new or never-
+      // dialed worker legitimately has none on an early tick, and the no-rows
+      // skip is transient during a rolling upgrade. One line per such peer per tick.
+      for (const s of stores.skipped) {
+        if (s.reason === SKIP_REASON_NO_PEER_REPLY || s.reason === SKIP_REASON_NO_ACCOUNT_ROWS) {
+          ctx.log('INFO', `auth-sync: ${s.device}: ${s.reason}`);
+        }
+      }
       for (const err of stores.errors) ctx.log('WARN', `auth-sync: reserved-store ${err.device}: ${err.message}`);
     } catch (err) {
       ctx.log('WARN', `auth-sync: reserved-store sync: ${(err as Error).message}`);

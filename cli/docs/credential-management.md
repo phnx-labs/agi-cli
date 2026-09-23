@@ -233,22 +233,42 @@ from the single legacy `auth` bundle to every portable account:
   of its keys — so a newly-added account propagates within one tick, instead of
   being hidden behind a bundle-coarse "already has the bundle" verdict.
   (`planReservedStoreSync` / `reservedSyncTargets`, `lib/secrets-policy.ts`.)
-- **Presence is read first-hand, from each peer's own reply, and there is no
-  fleet-wide freshness gate (PHNX-4116 PR 5).** Each device's account-state daemon
-  publishes a per-account verdict row into `accounts.rows`, and the usage-sync SSH
-  exchange stores each peer's reply at `devices/<peer>/daemon-state.json` stamped
-  `receivedAt`. `auth-sync` plans per peer off that reply: a `missing` verdict for
-  an account means the peer lacks that reserved key, so it is (re)pushed; anything
-  else means the peer holds it (`peerPresentKeys`, keyed by `(harness, accountId)`).
+- **Presence is first-hand AND rotation-aware — `present = verdict ∧ fingerprint`
+  (PHNX-4116 PR 5).** Each device's account-state daemon publishes a per-account
+  verdict row into `accounts.rows`, and the usage-sync SSH exchange stores each
+  peer's reply at `devices/<peer>/daemon-state.json` stamped `receivedAt`.
+  `auth-sync` plans per peer off that reply, and a reserved key counts as present
+  on a peer only when **both** conditions hold (`peerPresentKeys`, keyed by
+  `(harness, accountId)`):
+    1. **verdict** — the peer's own reply reports a NON-`missing` verdict for the
+       account (it has a working credential; its slot materialized). A `missing`
+       verdict, or no row for the account, means it does not, so the key is
+       (re)pushed. This is first-hand and self-correcting: a key removed on the
+       worker out of band flips its next verdict to `missing` and the push resumes
+       — which a publisher-side record alone could never see.
+    2. **fingerprint** — the fingerprint (`workerCredential.mintedAt`, `'legacy'`
+       for a pre-T1 claude row) that the publisher last delivered to that peer
+       matches the account's CURRENT fingerprint. `agents accounts login
+       <harness>#<name>` re-mints the reserved key and bumps `mintedAt` while the
+       peer's OLD token keeps authenticating, so its verdict stays non-`missing`;
+       verdict alone would read present forever and the rotated key would never
+       reach the worker. The publisher keeps a minimal LOCAL rotation cursor per
+       `(peer, bundle, key) → fingerprint` (`reserved-sync-delivered.json`, never
+       synced); a never-delivered key (no entry) never matches, so a newly-added
+       account still pushes on the first tick. **A re-mint therefore propagates
+       within one tick.**
+
   A peer that has never replied (no file) is skipped this tick and logged at INFO,
-  not WARN — a brand-new or never-dialed worker legitimately has none early on. The
-  push is idempotent, so a stale reply is safe (a stale "has key" is harmless, a
-  stale "missing" costs one redundant push), which is why the per-peer `receivedAt`
-  replaced the old global marker (`readLastSuccessfulExchangeMs`, now removed) that
-  skipped **every** push when the newest exchange across the fleet went stale. This
-  also retired the publisher-side delivery memo: the memo recorded what WE pushed
-  and could never see a key removed on the worker out of band, so a peer that lost
-  its credential read as present forever — the reply verdict is self-correcting.
+  not WARN — a brand-new or never-dialed worker legitimately has none early on. A
+  peer whose reply carries no `accounts.rows` field at all (an older CLI, or a
+  partial state) is skipped **fail-closed** (INFO), rather than being read as
+  "holds nothing" and pushed every key blindly; an EMPTY `accounts.rows` (a fresh
+  worker with no accounts) is a valid first-hand "holds nothing" and is provisioned
+  normally. The push is idempotent, so a stale reply is safe (a stale "has key" is
+  harmless, a stale "missing" costs one redundant push), which is why the per-peer
+  `receivedAt` replaced the old global marker (`readLastSuccessfulExchangeMs`, now
+  removed) that skipped **every** push when the newest exchange across the fleet
+  went stale.
 - **The publisher is a ready HEADED device.** `electPublisher` ranks every device
   reporting `auth: ready` (the verdict now rides the SSH reply, not Git) headed-first
   (`personal`/`desktop`, where tokens are minted and the copy of record lives), then

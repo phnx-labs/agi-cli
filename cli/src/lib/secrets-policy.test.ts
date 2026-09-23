@@ -11,9 +11,11 @@ import {
   peerPresentKeys,
   planAuthBundlePush,
   planReservedStoreSync,
+  peerHasAccountRows,
   readPeerAccountVerdicts,
   reconcileLocalWorkerSlots,
   reservedSyncTargets,
+  SKIP_REASON_NO_ACCOUNT_ROWS,
   SKIP_REASON_NO_PEER_REPLY,
   syncReservedAuthBundle,
   syncReservedStores,
@@ -151,11 +153,11 @@ describe('auth sync through real fleet-shared files', () => {
 // --- Generalized reserved-store sync (PHNX-3940 T6) -------------------------
 
 function acct(over: Partial<ReservedSyncAccount>): ReservedSyncAccount {
-  return { accountId: 'a1', harness: 'claude', bundle: '__claude__', key: 'CLAUDE_CODE_OAUTH_TOKEN_a1', ...over };
+  return { accountId: 'a1', harness: 'claude', bundle: '__claude__', key: 'CLAUDE_CODE_OAUTH_TOKEN_a1', fingerprint: 'F1', ...over };
 }
 
 function peer(over: Partial<ReservedSyncPeer>): ReservedSyncPeer {
-  return { name: 'w1', headed: false, reachable: true, pinned: true, hasReply: true, presentKeys: {}, ...over };
+  return { name: 'w1', headed: false, reachable: true, pinned: true, hasReply: true, hasAccountRows: true, presentKeys: {}, ...over };
 }
 
 describe('planReservedStoreSync — per key, per role', () => {
@@ -196,6 +198,11 @@ describe('planReservedStoreSync — per key, per role', () => {
     expect(plan).toEqual([{ action: 'skip', device: 'fresh', reason: SKIP_REASON_NO_PEER_REPLY }]);
   });
 
+  it('skips FAIL-CLOSED a peer whose reply carries no account rows (older CLI), never pushing blindly', () => {
+    const plan = planReservedStoreSync([acct({ key: 'K1' })], [peer({ name: 'oldcli', hasReply: true, hasAccountRows: false })]);
+    expect(plan).toEqual([{ action: 'skip', device: 'oldcli', reason: SKIP_REASON_NO_ACCOUNT_ROWS }]);
+  });
+
   it('groups keys per bundle and is deterministic across peers and bundles', () => {
     const accounts = [
       acct({ accountId: 'c1', harness: 'claude', bundle: '__claude__', key: 'CK' }),
@@ -219,7 +226,7 @@ describe('reservedSyncTargets', () => {
     const m = metaWith([
       { id: 'a1', name: 'work', agent: 'claude', identityKey: 'claude:account=a:org=o', scope: 'version', identityLabel: 'w@x.io', workerCredential: { bundle: '__claude__', key: 'CLAUDE_CODE_OAUTH_TOKEN_a1', kind: 'setup-token', mintedAt: 'm1' } },
     ]);
-    expect(reservedSyncTargets(m)).toEqual([{ accountId: 'a1', harness: 'claude', bundle: '__claude__', key: 'CLAUDE_CODE_OAUTH_TOKEN_a1' }]);
+    expect(reservedSyncTargets(m)).toEqual([{ accountId: 'a1', harness: 'claude', bundle: '__claude__', key: 'CLAUDE_CODE_OAUTH_TOKEN_a1', fingerprint: 'm1' }]);
   });
   it('falls back to the legacy auth bundle for a claude row predating T1', () => {
     const m = metaWith([
@@ -227,7 +234,7 @@ describe('reservedSyncTargets', () => {
     ]);
     const targets = reservedSyncTargets(m);
     expect(targets).toHaveLength(1);
-    expect(targets[0]).toMatchObject({ accountId: 'l1', bundle: 'auth' });
+    expect(targets[0]).toMatchObject({ accountId: 'l1', bundle: 'auth', fingerprint: 'legacy' });
     expect(targets[0].key).toMatch(/^CLAUDE_CODE_OAUTH_TOKEN_/);
   });
   it('drops a non-claude row with no workerCredential (no derivable durable credential)', () => {
@@ -256,30 +263,71 @@ describe('readPeerAccountVerdicts', () => {
   });
 });
 
+describe('peerHasAccountRows', () => {
+  it('distinguishes an absent rows field (fail closed) from an empty array (holds nothing)', () => {
+    expect(peerHasAccountRows(undefined)).toBe(false);
+    expect(peerHasAccountRows({ version: 1, device: 'w1' })).toBe(false); // older CLI: no accounts field
+    expect(peerHasAccountRows({ version: 1, device: 'w1', accounts: { rows: [] } })).toBe(true); // fresh worker, no accounts
+    expect(peerHasAccountRows({ version: 1, device: 'w1', accounts: { rows: [{ accountId: 'a1', harness: 'claude', verdict: 'live' }] } })).toBe(true);
+  });
+});
+
 describe('peerPresentKeys', () => {
   const accounts = [
-    acct({ accountId: 'a1', harness: 'claude', bundle: '__claude__', key: 'RK' }),
-    acct({ accountId: 'l1', harness: 'claude', bundle: 'auth', key: 'LK' }),
+    acct({ accountId: 'a1', harness: 'claude', bundle: '__claude__', key: 'RK', fingerprint: 'F1' }),
+    acct({ accountId: 'l1', harness: 'claude', bundle: 'auth', key: 'LK', fingerprint: 'legacy' }),
   ];
   const verdict = (over: Partial<PeerAccountVerdict>): PeerAccountVerdict => ({ accountId: 'a1', harness: 'claude', verdict: 'live', ...over });
+  // The publisher last delivered each account's CURRENT fingerprint to this peer,
+  // so the verdict dimension is what these cases isolate; the rotation cases below
+  // vary the delivered fingerprint instead.
+  const deliveredCurrent = (bundle: string, key: string): string =>
+    accounts.find((a) => a.bundle === bundle && a.key === key)?.fingerprint ?? '';
+
   it('marks a reserved key present when the peer reports a non-missing verdict for its account', () => {
-    expect(peerPresentKeys(accounts, [verdict({ accountId: 'a1', verdict: 'unverified' })]).__claude__).toEqual(new Set(['RK']));
+    expect(peerPresentKeys(accounts, [verdict({ accountId: 'a1', verdict: 'unverified' })], deliveredCurrent).__claude__).toEqual(new Set(['RK']));
   });
   it('does NOT mark it present when the peer reports the account missing, so the key is re-pushed', () => {
-    expect(peerPresentKeys(accounts, [verdict({ accountId: 'a1', verdict: 'missing' })]).__claude__).toBeUndefined();
+    expect(peerPresentKeys(accounts, [verdict({ accountId: 'a1', verdict: 'missing' })], deliveredCurrent).__claude__).toBeUndefined();
   });
   it('treats an account with no verdict row at all as not present', () => {
-    expect(peerPresentKeys(accounts, []).__claude__).toBeUndefined();
+    expect(peerPresentKeys(accounts, [], deliveredCurrent).__claude__).toBeUndefined();
   });
   it('keys presence by (harness, accountId), so a same-id account on another harness does not count', () => {
-    expect(peerPresentKeys(accounts, [verdict({ accountId: 'a1', harness: 'grok', verdict: 'live' })]).__claude__).toBeUndefined();
+    expect(peerPresentKeys(accounts, [verdict({ accountId: 'a1', harness: 'grok', verdict: 'live' })], deliveredCurrent).__claude__).toBeUndefined();
   });
   it('resolves a legacy pre-T1 claude row (bundle `auth`) through the same per-account verdict path', () => {
     // Replaces the removed coarse `auth.status === 'ready'` presence signal: the
     // legacy `auth` key now rides its account's own verdict like any T1 key.
-    expect(peerPresentKeys(accounts, [verdict({ accountId: 'l1', verdict: 'live' })]).auth).toEqual(new Set(['LK']));
-    expect(peerPresentKeys(accounts, [verdict({ accountId: 'l1', verdict: 'missing' })]).auth).toBeUndefined();
-    expect(peerPresentKeys(accounts, []).auth).toBeUndefined();
+    expect(peerPresentKeys(accounts, [verdict({ accountId: 'l1', verdict: 'live' })], deliveredCurrent).auth).toEqual(new Set(['LK']));
+    expect(peerPresentKeys(accounts, [verdict({ accountId: 'l1', verdict: 'missing' })], deliveredCurrent).auth).toBeUndefined();
+    expect(peerPresentKeys(accounts, [], deliveredCurrent).auth).toBeUndefined();
+  });
+
+  // --- rotation: a re-mint must re-push even while the OLD token authenticates.
+  // `accounts login <harness>#<name>` rotates the reserved key and bumps
+  // `workerCredential.mintedAt`, so the account's fingerprint changes (F1 → F2)
+  // while the peer's verdict stays `live` (its old token still works).
+  describe('rotation (delivered-fingerprint gate)', () => {
+    const remintedAccounts = [acct({ accountId: 'a1', harness: 'claude', bundle: '__claude__', key: 'RK', fingerprint: 'F2' })];
+    const live = [verdict({ accountId: 'a1', verdict: 'live' })];
+
+    it('re-pushes when the peer holds a STALE fingerprint (F1) and the account was re-minted (F2)', () => {
+      const deliveredStale = () => 'F1';
+      expect(peerPresentKeys(remintedAccounts, live, deliveredStale).__claude__).toBeUndefined();
+    });
+    it('does NOT re-push when the delivered fingerprint already matches the current one', () => {
+      const deliveredMatch = () => 'F2';
+      expect(peerPresentKeys(remintedAccounts, live, deliveredMatch).__claude__).toEqual(new Set(['RK']));
+    });
+    it('re-pushes a re-minted account whose peer verdict is `missing`, regardless of fingerprint', () => {
+      const missing = [verdict({ accountId: 'a1', verdict: 'missing' })];
+      expect(peerPresentKeys(remintedAccounts, missing, () => 'F2').__claude__).toBeUndefined();
+    });
+    it('re-pushes a never-delivered key (no memo entry ⇒ undefined) even when the verdict is live', () => {
+      const deliveredNone = () => undefined;
+      expect(peerPresentKeys(remintedAccounts, live, deliveredNone).__claude__).toBeUndefined();
+    });
   });
 });
 
@@ -554,7 +602,10 @@ describe('electPublisher', () => {
 
   it('is what both sync arms elect with, through real shared-state files', async () => {
     const root = tempStore();
-    updateFleetSharedDeviceState('mac-mini', { auth: { status: 'ready' } }, root);
+    // mac-mini's reply reports a LIVE verdict for a1 (it holds a working
+    // credential), so presence is gated on the delivered fingerprint: the first
+    // tick pushes (empty memo), the next is suppressed, and a re-mint pushes again.
+    updateFleetSharedDeviceState('mac-mini', { auth: { status: 'ready' }, accounts: { rows: [{ accountId: 'a1', harness: 'claude', verdict: 'live' }] } }, root);
     const devices = [profile('mac-mini')];
     const peerRole = (name: string) => roles[name];
     const legacy = await syncReservedAuthBundle({
@@ -573,6 +624,7 @@ describe('electPublisher', () => {
 
     const reserved = await syncReservedStores({
       userAgentsDir: root,
+      cacheDir: root,
       localName: 'zion',
       localReady: true,
       listDevices: () => devices,
@@ -586,6 +638,27 @@ describe('electPublisher', () => {
     });
     expect(reserved.publisher).toBe('zion');
     expect(reserved.pushed).toEqual([{ device: 'mac-mini', bundle: '__claude__', keys: ['K1'] }]);
+
+    // The delivered fingerprint is now recorded, so an unchanged key is not
+    // re-pushed on the next tick — but a re-mint (bumped mintedAt) is.
+    const again = await syncReservedStores({
+      userAgentsDir: root, cacheDir: root, localName: 'zion', localReady: true,
+      listDevices: () => devices, isPinned: () => true, peerRole, selfRole: () => 'personal',
+      readMetaFn: () => ({ accounts: { native: { a1: { id: 'a1', name: 'work', agent: 'claude', identityKey: 'claude:account=a:org=o', scope: 'version', identityLabel: 'w@x.io', workerCredential: { bundle: '__claude__', key: 'K1', kind: 'setup-token', mintedAt: 'm1' } } } } }),
+      hasLocalKey: () => true, adoptLegacy: async () => ({ adopted: [], errors: [] }), push: async () => ({ ok: true, message: 'pushed' }),
+    });
+    expect(again.pushed).toEqual([]);
+    expect(again.skipped).toContainEqual({ device: 'mac-mini', reason: 'all reserved credentials present' });
+
+    // Re-mint: mintedAt m1 → m2 while the peer's (empty-rows) reply is unchanged.
+    // The stale delivered fingerprint no longer matches, so the key re-pushes.
+    const reminted = await syncReservedStores({
+      userAgentsDir: root, cacheDir: root, localName: 'zion', localReady: true,
+      listDevices: () => devices, isPinned: () => true, peerRole, selfRole: () => 'personal',
+      readMetaFn: () => ({ accounts: { native: { a1: { id: 'a1', name: 'work', agent: 'claude', identityKey: 'claude:account=a:org=o', scope: 'version', identityLabel: 'w@x.io', workerCredential: { bundle: '__claude__', key: 'K1', kind: 'setup-token', mintedAt: 'm2' } } } } }),
+      hasLocalKey: () => true, adoptLegacy: async () => ({ adopted: [], errors: [] }), push: async () => ({ ok: true, message: 'pushed' }),
+    });
+    expect(reminted.pushed).toEqual([{ device: 'mac-mini', bundle: '__claude__', keys: ['K1'] }]);
   });
 
   it('syncReservedStores adopts legacy raw reserved items locally before planning and surfaces adoption errors', async () => {
@@ -595,13 +668,15 @@ describe('electPublisher', () => {
     // the moment the new release runs — and an adoption failure is reported
     // against the local box instead of being swallowed.
     const root = tempStore();
-    // mac-mini has replied (its daemon-state file exists) but reports no verdict
-    // for this account, so the publisher pushes the key.
-    updateFleetSharedDeviceState('mac-mini', { auth: { status: 'ready' } }, root);
+    // mac-mini has replied WITH an account-rows array (present, empty) but no
+    // verdict for this account, so the fail-closed no-rows skip does not apply
+    // and — with an empty delivery memo — the publisher pushes the key.
+    updateFleetSharedDeviceState('mac-mini', { auth: { status: 'ready' }, accounts: { rows: [] } }, root);
     const meta = { accounts: { native: { a1: { id: 'a1', name: 'gmail', agent: 'cursor', identityKey: 'cursor:user=u', scope: 'version', identityLabel: 'g.io', workerCredential: { bundle: '__cursor__', key: 'CURSOR_API_KEY_a1', kind: 'api-key', mintedAt: 'm1' } } } } } as const;
     const seen: unknown[] = [];
     const reserved = await syncReservedStores({
       userAgentsDir: root,
+      cacheDir: root,
       localName: 'zion',
       localReady: true,
       listDevices: () => [profile('mac-mini')],

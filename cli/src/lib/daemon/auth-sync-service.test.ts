@@ -28,6 +28,7 @@ vi.mock('../secrets-policy.js', () => ({
   syncReservedAuthBundle: mocks.syncAuthBundle,
   syncReservedStores: mocks.syncStores,
   SKIP_REASON_NO_PEER_REPLY: 'no daemon-state reply from this peer yet',
+  SKIP_REASON_NO_ACCOUNT_ROWS: 'daemon-state reply carries no account rows (fail closed)',
 }));
 
 const { AuthSyncService } = await import('./auth-sync-service.js');
@@ -90,6 +91,19 @@ describe('auth-sync tick (PHNX-4116 PR 5 — no fleet-wide freshness gate)', () 
     expect(logs.some((l) => /other/.test(l))).toBe(false);
     // Nothing about it is a warning.
     expect(logs.some((l) => /WARN.*fresh-worker/.test(l))).toBe(false);
+  });
+
+  it('a peer whose reply carries no account rows (older CLI) is logged at INFO, fail-closed', async () => {
+    mocks.syncStores.mockResolvedValue({
+      adopted: [],
+      pushed: [],
+      skipped: [{ device: 'old-worker', reason: 'daemon-state reply carries no account rows (fail closed)' }],
+      errors: [],
+    });
+    await new AuthSyncService().tick(makeCtx(), signal());
+
+    expect(logs).toContain('INFO auth-sync: old-worker: daemon-state reply carries no account rows (fail closed)');
+    expect(logs.some((l) => /WARN.*old-worker/.test(l))).toBe(false);
   });
 
   it('surfaces reserved-store push errors at WARN', async () => {
