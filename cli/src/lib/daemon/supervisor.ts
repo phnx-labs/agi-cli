@@ -453,7 +453,14 @@ export class ServiceSupervisor {
     if (!entry) return;
     const delay = Math.min(this.backoffMaxMs, this.backoffBaseMs * 2 ** entry.restartAttempts);
     entry.restartAttempts += 1;
-    entry.restartTimer = setTimeout(() => { void this.attemptRestart(id); }, delay);
+    // Drop the handle as the timer fires: park() and finishTick() treat a set
+    // `restartTimer` as "a restart is already pending", so a handle left over
+    // from a restart that already ran would make every LATER park permanent
+    // (PHNX-4116 — heartbeat and usage-sync parked for days after one recovery).
+    entry.restartTimer = setTimeout(() => {
+      entry.restartTimer = undefined;
+      void this.attemptRestart(id);
+    }, delay);
   }
 
   private async attemptRestart(id: DaemonServiceId): Promise<void> {

@@ -283,9 +283,13 @@ export function viewAgentAccountEligibility(view: string, agent: string, now: nu
         && version.authVerdict !== undefined
         && authFresh
         && isDeadVerdict(version.authVerdict);
-      const freshnessKnown = version.usageCapturedAt !== undefined || version.authCheckedAt !== undefined;
-      const fresh = !freshnessKnown || (usageFresh && authFresh);
-      const ready = launchable && fresh && !authBlocked && !throttled;
+      // A stale usage reading makes the account UNVERIFIED, not unusable: the
+      // number is ignored (`throttled` above only trusts a fresh one) and the
+      // remote `agents run` weights an unverified account at the floor. Refusing
+      // the whole device here turned a fleet-wide usage-sync outage into "no
+      // healthy device can run claude" while `--device <name>` on the same box
+      // launched fine (PHNX-4116). Only a fresh dead auth verdict blocks.
+      const ready = launchable && !authBlocked && !throttled;
       return [{ ready, pickerEligible: ready || !launchable || authBlocked }];
     });
     if (verdicts.length === 0) return { signedIn: undefined, pickerEligible: undefined };
