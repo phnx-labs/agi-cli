@@ -17,7 +17,7 @@ import {
 } from './strategies.js';
 import { listInstallations, readInstallation, recordRelease, writeInstallation } from './store.js';
 import { effectiveUpdatePolicy, isAutoUpdateEnabledForAgent } from './update-policy.js';
-import { isInstallationLikelyActive } from './active-check.js';
+import { describeInstallationActivity, formatInUseDeferral, isInstallationLikelyActive } from './active-check.js';
 import { installationLockTarget, INSTALLATION_LOCK_OPTIONS } from './installation-lock.js';
 import type { Installation, UpdateOutcome } from './types.js';
 
@@ -158,20 +158,21 @@ async function runUpdateInstallation(
     return { installation, strategy: strategy.id, fromRelease: installation.releaseVersion, toRelease: target,
       unchanged: true, deferred: 'Update cancelled or automatic update policy changed.', alsoUpdated: [] };
   }
-  if (strategy.transactional && await isInstallationLikelyActive(installation)) {
-    options.onProgress?.(
-      `${AGENTS[agent].name}@${installation.label} looks active right now (a process or launch lease); `
-      + `not staging release ${target}.`
-    );
-    return {
-      installation,
-      strategy: strategy.id,
-      fromRelease: installation.releaseVersion,
-      toRelease: target,
-      unchanged: true,
-      deferred: 'Account home is in use; retry after its sessions finish.',
-      alsoUpdated: [],
-    };
+  if (strategy.transactional) {
+    const activity = await describeInstallationActivity(installation);
+    if (activity.active) {
+      const name = `${AGENTS[agent].name}@${installation.label}`;
+      options.onProgress?.(`${name} looks active right now; not staging release ${target}.`);
+      return {
+        installation,
+        strategy: strategy.id,
+        fromRelease: installation.releaseVersion,
+        toRelease: target,
+        unchanged: true,
+        deferred: formatInUseDeferral(name, activity),
+        alsoUpdated: [],
+      };
+    }
   }
 
   let staged: StagedRelease | null = null;

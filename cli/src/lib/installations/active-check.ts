@@ -33,6 +33,26 @@ const execFileAsync = promisify(execFile);
  */
 export interface ProcessSnapshot {
   listCommandLines(): Promise<string[]>;
+  /** Optional richer listing (pid, elapsed, tty) for naming a blocking process. */
+  listProcessRows?(): Promise<ProcessRow[]>;
+}
+
+export interface ProcessRow {
+  pid?: number;
+  elapsed?: string;
+  tty?: string;
+  args: string;
+}
+
+async function listProcessRowsPosix(): Promise<ProcessRow[]> {
+  const { stdout } = await execFileAsync('ps', ['-Ao', 'pid=,etime=,tty=,args='], {
+    timeout: 5_000,
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  return stdout.split('\n').flatMap((line) => {
+    const m = /^\s*(\d+)\s+(\S+)\s+(\S+)\s+(.*)$/.exec(line);
+    return m ? [{ pid: Number(m[1]), elapsed: m[2], tty: m[3], args: m[4] }] : [];
+  });
 }
 
 async function listCommandLinesPosix(): Promise<string[]> {
@@ -66,6 +86,9 @@ async function listCommandLinesWindows(): Promise<string[]> {
 
 export const realProcessSnapshot: ProcessSnapshot = {
   listCommandLines: () => (process.platform === 'win32' ? listCommandLinesWindows() : listCommandLinesPosix()),
+  listProcessRows: async () => (process.platform === 'win32'
+    ? (await listCommandLinesWindows()).map((args) => ({ args }))
+    : listProcessRowsPosix()),
 };
 
 /**
@@ -101,4 +124,64 @@ export async function isInstallationLikelyActive(
   } catch {
     return true;
   }
+}
+
+export interface InstallationActivity {
+  active: boolean;
+  /** A launch lease is held (a launch is starting and may not be in the process table yet). */
+  lease: boolean;
+  /** Live processes naming this installation's directory, one line each. */
+  processes: string[];
+  /** The process scan failed; `active` is the fail-closed default. */
+  scanError?: string;
+}
+
+function shortenArgs(args: string, versionDir: string): string {
+  // Strip the long install path so the line reads as the command the user ran.
+  const trimmed = args.replace(versionDir, '…').replace(/\/node_modules\/\.bin\//, '/');
+  return trimmed.length > 110 ? `${trimmed.slice(0, 107)}...` : trimmed;
+}
+
+/**
+ * Same verdict as {@link isInstallationLikelyActive}, plus WHAT is holding the
+ * installation, so a refused update can name the session to finish instead of
+ * "in use; retry later" (PHNX-4116 follow-up: an operator on yosemite-s0 had a
+ * one-hour-old resumed session on another tty and no way to see it from the
+ * refusal).
+ */
+export async function describeInstallationActivity(
+  installation: Pick<Installation, 'agent' | 'label'>,
+  snapshot: ProcessSnapshot = realProcessSnapshot,
+): Promise<InstallationActivity> {
+  const lease = hasLiveLaunchLease(installation.agent, installation.label);
+  const versionDir = getVersionDir(installation.agent, installation.label);
+  try {
+    const rows: ProcessRow[] = snapshot.listProcessRows
+      ? await snapshot.listProcessRows()
+      : (await snapshot.listCommandLines()).map((args) => ({ args }));
+    const processes = rows
+      .filter((row) => row.args.includes(versionDir))
+      .map((row) => {
+        const meta = [row.pid !== undefined ? `pid ${row.pid}` : null, row.elapsed ? `up ${row.elapsed}` : null, row.tty && row.tty !== '?' ? row.tty : null]
+          .filter((part): part is string => part !== null)
+          .join(', ');
+        return meta ? `${meta}: ${shortenArgs(row.args, versionDir)}` : shortenArgs(row.args, versionDir);
+      });
+    return { active: lease || processes.length > 0, lease, processes };
+  } catch (err) {
+    return { active: true, lease, processes: [], scanError: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** The one-line refusal an update prints for a busy installation. */
+export function formatInUseDeferral(name: string, activity: InstallationActivity): string {
+  if (activity.scanError) return `${name}: could not confirm nothing is running (${activity.scanError}); not updating.`;
+  if (activity.processes.length > 0) {
+    const list = activity.processes.length === 1
+      ? activity.processes[0]
+      : activity.processes.map((p) => `\n    ${p}`).join('');
+    return `${name} is in use by ${activity.processes.length === 1 ? 'a running process' : `${activity.processes.length} running processes`} — ${list}. `
+      + 'Finish that session (agents sessions stop <id> for an agents session), then retry.';
+  }
+  return `${name} has a launch in flight; retry once it has started or exited.`;
 }

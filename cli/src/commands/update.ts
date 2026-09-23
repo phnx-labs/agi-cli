@@ -16,6 +16,8 @@ import {
   type UpdateOutcome,
 } from '../lib/installations/index.js';
 import { resolveManagedInstallation } from '../lib/installations/index.js';
+import { findUnifiedAccount } from '../lib/account-registry.js';
+import { readMeta } from '../lib/state.js';
 import type { AgentId } from '../lib/types.js';
 
 interface UpdateOptions {
@@ -31,16 +33,36 @@ interface UpdateOptions {
  * is `--to`. Keeping them separate is what lets `agents update claude@2.0.65
  * --to 2.0.71` read unambiguously.
  */
-function parseTarget(raw: string): { agent: AgentId; selector?: string } {
-  const at = raw.indexOf('@');
-  const name = at === -1 ? raw : raw.slice(0, at);
-  const selector = at === -1 ? undefined : raw.slice(at + 1).trim();
+/**
+ * `<agent>[@<installed-version>][#<account>]`. The `#<account>` form is the
+ * same selector `agents run claude#work` takes: accounts run on the harness's
+ * one managed installation (PHNX-3940), so it names WHICH login the user means
+ * and resolves to that installation. Refusing it as "Unknown agent
+ * 'claude#work'" sent operators hunting for a per-account install that does
+ * not exist.
+ */
+export function parseTarget(raw: string): { agent: AgentId; selector?: string; account?: string } {
+  const hash = raw.indexOf('#');
+  const spec = hash === -1 ? raw : raw.slice(0, hash);
+  const account = hash === -1 ? undefined : raw.slice(hash + 1).trim();
+  if (hash !== -1 && !account) {
+    throw new Error(`Select an account after # in '${raw}', e.g. claude#work — or just <agent>.`);
+  }
+  const at = spec.indexOf('@');
+  const name = at === -1 ? spec : spec.slice(0, at);
+  const selector = at === -1 ? undefined : spec.slice(at + 1).trim();
   if (at !== -1 && !selector) {
     throw new Error(`Missing installation in '${raw}'. Use <agent>@<installed-version>, or just <agent>.`);
   }
   const agent = resolveAgentName(name);
   if (!agent) throw new Error(formatAgentError(name));
-  return { agent, selector };
+  if (account) {
+    const known = findUnifiedAccount(account, readMeta(), undefined, agent);
+    if (!known) {
+      throw new Error(`Unknown ${AGENTS[agent].name} account '${account}'. See: agents accounts list ${agent}`);
+    }
+  }
+  return { agent, selector, account };
 }
 
 /**
@@ -250,7 +272,10 @@ export function registerUpdateCommand(program: Command): void {
         if (!target) {
           throw new Error('Which agent? Use: agents update <agent>[@<installed-version>], or agents update --auto.');
         }
-        const { agent, selector } = parseTarget(target);
+        const { agent, selector, account } = parseTarget(target);
+        if (account && !options.json) {
+          console.log(chalk.gray(`  account '${account}' runs on the managed ${AGENTS[agent].name} installation; updating that.`));
+        }
 
         if (options.check) {
           const plan = (await planAutoUpdates({ agents: [agent] })).filter(
