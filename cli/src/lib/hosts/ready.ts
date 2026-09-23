@@ -14,6 +14,8 @@ import type { Host } from './types.js';
 import { hostIdentityArgs, sshTargetFor } from './types.js';
 import { remoteShellFor, buildWindowsAgentsCommand, encodePowershell, powershellQuote, POWERSHELL_PROGRESS_SILENCE } from './remote-cmd.js';
 import { resolveRemoteOsSync } from './remote-os.js';
+import { AUTH_PROBE_MAX_AGE_MS, isDeadVerdict, type AuthVerdict } from '../auth-health.js';
+import { USAGE_STALE_REFUSAL_MAX_AGE_MS } from '../accounting/rotate.js';
 
 /** Resolve this CLI's own version by walking up to the nearest package.json. */
 export function localCliVersion(): string | null {
@@ -272,11 +274,18 @@ interface ViewAgentAccountEligibility {
  * never satisfy, turning a usage-sync lag into "no ready device" while
  * `--device <name>` on the same box launched fine.
  *
- * An older remote CLI omits `runReady`; the one-release fallback trusts the
- * strict per-version `launchable` signal (`isLaunchableSignedIn`, PHNX-3466) for
- * sign-in and leaves the finer picker decision to the remote's own run path.
+ * An older remote CLI omits `runReady`; the one-release fallback derives the
+ * verdict from the per-version list the same way the pre-PHNX-4116 dispatcher
+ * did: the strict `launchable` signal (`isLaunchableSignedIn`, PHNX-3466) for
+ * sign-in, MINUS a FRESH throttle (`rate_limited`/`out_of_credits` captured
+ * within {@link USAGE_STALE_REFUSAL_MAX_AGE_MS}) or a FRESH dead auth verdict
+ * (checked within {@link AUTH_PROBE_MAX_AGE_MS}, {@link isDeadVerdict}). A stale
+ * reading is UNVERIFIED, not disqualifying (PHNX-4116/#3700), so a usage-sync
+ * lag never bars an old-CLI worker `--device <name>` would launch fine — but a
+ * throttled-but-launchable worker no longer reads `signedIn: true` and slips
+ * into `--device auto`'s pick during a rolling upgrade.
  */
-export function viewAgentAccountEligibility(view: string, agent: string): ViewAgentAccountEligibility {
+export function viewAgentAccountEligibility(view: string, agent: string, now: number = Date.now()): ViewAgentAccountEligibility {
   try {
     const rows = JSON.parse(view) as Array<{
       agent?: string;
@@ -285,7 +294,14 @@ export function viewAgentAccountEligibility(view: string, agent: string): ViewAg
         reason?: string;
         accounts?: Array<{ ready?: boolean; reason?: string }>;
       };
-      versions?: Array<{ signedIn?: boolean; launchable?: boolean }>;
+      versions?: Array<{
+        signedIn?: boolean;
+        launchable?: boolean;
+        authVerdict?: AuthVerdict | null;
+        authCheckedAt?: number | null;
+        usageStatus?: 'available' | 'rate_limited' | 'out_of_credits' | null;
+        usageCapturedAt?: string | null;
+      }>;
     }>;
     const row = rows.find((candidate) => candidate.agent?.toLowerCase() === agent.toLowerCase());
     if (!row) return { signedIn: undefined, pickerEligible: undefined };
@@ -305,14 +321,39 @@ export function viewAgentAccountEligibility(view: string, agent: string): ViewAg
     }
 
     // One-release fallback for an older remote CLI without `runReady`.
-    const launchables = (row.versions ?? []).flatMap((version) => {
+    const verdicts = (row.versions ?? []).flatMap((version) => {
       if (typeof version.signedIn !== 'boolean') return [];
       // Prefer the strict per-version launch signal; fall back to the display
       // `signedIn` for a CLI old enough to omit `launchable` too.
-      return [typeof version.launchable === 'boolean' ? version.launchable : version.signedIn];
+      const launchable = typeof version.launchable === 'boolean' ? version.launchable : version.signedIn;
+      const usageCapturedAt = version.usageCapturedAt ? Date.parse(version.usageCapturedAt) : Number.NaN;
+      const usageFresh = Number.isFinite(usageCapturedAt)
+        ? now - usageCapturedAt <= USAGE_STALE_REFUSAL_MAX_AGE_MS
+        : version.usageCapturedAt === undefined;
+      const authFresh = typeof version.authCheckedAt === 'number'
+        ? now - version.authCheckedAt <= AUTH_PROBE_MAX_AGE_MS
+        : version.authCheckedAt === undefined;
+      const throttled = usageFresh
+        && (version.usageStatus === 'rate_limited' || version.usageStatus === 'out_of_credits');
+      const authBlocked = version.authVerdict !== null
+        && version.authVerdict !== undefined
+        && authFresh
+        && isDeadVerdict(version.authVerdict);
+      // A stale usage/auth reading makes the account UNVERIFIED, not unusable:
+      // the number is ignored (`throttled`/`authBlocked` only trust a fresh one)
+      // and the remote `agents run` weights an unverified account at the floor.
+      // Refusing the whole device on a stale reading turned a fleet-wide
+      // usage-sync lag into "no healthy device can run claude" while
+      // `--device <name>` on the same box launched fine (PHNX-4116/#3700). Only a
+      // FRESH throttle or a FRESH dead auth verdict disqualifies.
+      const ready = launchable && !authBlocked && !throttled;
+      return [{ ready, pickerEligible: ready || !launchable || authBlocked }];
     });
-    if (launchables.length === 0) return { signedIn: undefined, pickerEligible: undefined };
-    return { signedIn: launchables.some(Boolean), pickerEligible: true };
+    if (verdicts.length === 0) return { signedIn: undefined, pickerEligible: undefined };
+    return {
+      signedIn: verdicts.some((verdict) => verdict.ready),
+      pickerEligible: verdicts.some((verdict) => verdict.pickerEligible),
+    };
   } catch {
     return { signedIn: undefined, pickerEligible: undefined };
   }

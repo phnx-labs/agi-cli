@@ -154,6 +154,36 @@ describe('viewAgentAccountEligibility — older-CLI fallback without runReady (P
     const view = JSON.stringify([{ agent: 'claude', versions: [{}] }]);
     expect(viewAgentAccountEligibility(view, 'claude')).toEqual({ signedIn: undefined, pickerEligible: undefined });
   });
+
+  // #3705: the fallback must keep the pre-PHNX-4116 throttle exclusion, or a
+  // throttled-but-launchable old-CLI worker reads signedIn: true and slips into
+  // `--device auto`'s pick during a rolling upgrade. A FRESH rate_limit
+  // disqualifies; a STALE one is unverified, not disqualifying.
+  it('a FRESH rate_limited launchable version is not signed in (throttle exclusion restored)', () => {
+    const now = Date.now();
+    const view = JSON.stringify([{ agent: 'claude', versions: [{
+      signedIn: true,
+      launchable: true,
+      usageStatus: 'rate_limited',
+      usageCapturedAt: new Date(now - 60_000).toISOString(), // 1 min old — fresh
+    }] }]);
+    expect(viewAgentAccountEligibility(view, 'claude', now)).toEqual({ signedIn: false, pickerEligible: false });
+    // The default-`now` entry point (`viewAgentSignedIn`) agrees — a fresh
+    // reading is fresh under Date.now() too.
+    expect(viewAgentSignedIn(view, 'claude')).toBe(false);
+  });
+
+  it('a STALE rate_limited launchable version is unverified, so it stays signed in', () => {
+    const now = Date.now();
+    const view = JSON.stringify([{ agent: 'claude', versions: [{
+      signedIn: true,
+      launchable: true,
+      usageStatus: 'rate_limited',
+      usageCapturedAt: new Date(now - 60 * 60_000).toISOString(), // 1 h old — stale
+    }] }]);
+    expect(viewAgentAccountEligibility(view, 'claude', now)).toEqual({ signedIn: true, pickerEligible: true });
+    expect(viewAgentSignedIn(view, 'claude')).toBe(true);
+  });
 });
 
 describe('parseReadyProbe', () => {

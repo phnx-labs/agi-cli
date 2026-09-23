@@ -1160,6 +1160,20 @@ export function formatUsageSummary(
 }
 
 /**
+ * The snapshot's windows that are still LIVE — reset time not yet passed. A
+ * window past its `resetsAt` has rolled over: its `usedPercent` is a reading of
+ * the PREVIOUS period, not a live throttle (PHNX-4116). Both the throttle
+ * verdict ({@link deriveUsageStatusFromSnapshot}) and the displayed
+ * `usedPercent` (`devices/harness-inventory.ts`) MUST select from this SAME set,
+ * or a maxed-then-reset account reads `available` yet shows a stale 99% next to
+ * its "ready" verdict (#3705). Callers still narrow further (dropping
+ * `sonnet_week`, the model sub-limit); this is only the reset-rollover cut.
+ */
+export function liveUsageWindows(snapshot: UsageSnapshot, now: number = Date.now()): UsageWindow[] {
+  return snapshot.windows.filter((window) => !(window.resetsAt && window.resetsAt.getTime() <= now));
+}
+
+/**
  * Derive an account's real throttle state from its live usage windows — the
  * single signal both the `agents view` badge and run-rotation eligibility share
  * (`hasUsageAvailable` in rotate.ts treats a `rate_limited` verdict here as
@@ -1192,12 +1206,7 @@ export function deriveUsageStatusFromSnapshot(
     }
   }
   if (snapshot.windows.length === 0) return null;
-  // A window whose reset time has passed has rolled over: its usedPercent is a
-  // reading of the PREVIOUS period, not a live throttle (PHNX-4116). Drop it so a
-  // maxed-then-reset account reads `available`, not a phantom `rate_limited`. This
-  // is the one place both `agents view`'s badge and the router's
-  // `hasUsageAvailable` read the throttle verdict, so they can never disagree.
-  const live = snapshot.windows.filter((window) => !(window.resetsAt && window.resetsAt.getTime() <= now));
+  const live = liveUsageWindows(snapshot, now);
   if (live.length === 0) return 'available';
   const blocking = live.filter((window) => window.key !== 'sonnet_week');
   const windows = blocking.length > 0 ? blocking : live;

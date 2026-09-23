@@ -24,6 +24,7 @@ import {
 import type { AgentId } from '../types.js';
 import {
   deriveUsageStatusFromSnapshot,
+  liveUsageWindows,
   classifyUsageErrorKind,
   getUsageInfoByIdentity,
   getUsageLookupKey,
@@ -147,11 +148,20 @@ export function summarizeQuota(
       unavailableReason: status ? null : (reason ?? 'usage unavailable'),
     };
   }
-  const blocking = snapshot.windows.filter((w) => w.key !== 'sonnet_week');
-  const windows = blocking.length > 0 ? blocking : snapshot.windows;
+  // Percentage and status MUST read from the SAME live windows, or a window past
+  // its reset (usedPercent from the PREVIOUS period) makes the status `available`
+  // while the displayed percentage still shows a stale ~100% (#3705). Select the
+  // live set first, then narrow to blocking exactly as
+  // `deriveUsageStatusFromSnapshot` does.
+  const live = liveUsageWindows(snapshot);
+  const blocking = live.filter((w) => w.key !== 'sonnet_week');
+  const windows = blocking.length > 0 ? blocking : live;
   const derived = deriveUsageStatusFromSnapshot(snapshot);
   const status = accountStatus === 'out_of_credits' ? accountStatus : derived;
-  let usedPercent = Math.round(Math.max(...windows.map((w) => w.usedPercent)));
+  // Every window rolled over: no live utilization to show (status is `available`).
+  let usedPercent = windows.length > 0
+    ? Math.round(Math.max(...windows.map((w) => w.usedPercent)))
+    : 0;
   // Never show 100% for an account that isn't actually capped: a genuinely-100
   // blocking window makes the status `rate_limited` (rendered "limited"), so a
   // rounded 100 on an `available` account (e.g. 99.6% → 100) would read as maxed
