@@ -14,6 +14,7 @@ import * as path from 'path';
 import { ServiceSupervisor } from './supervisor.js';
 import type { DaemonContext, PeriodicService, ServiceHealth } from './service.js';
 import type { DaemonServiceId } from '../daemon-services.js';
+import { readRecentDaemonRestarts } from '../daemon-health.js';
 
 let testDaemonDir = '';
 const originalDaemonDir = process.env.AGENTS_DAEMON_DIR;
@@ -140,6 +141,31 @@ describe('ServiceSupervisor', () => {
     // no further tick fires and exit is never called a second time.
     await vi.advanceTimersByTimeAsync(5_000);
     expect(exit).toHaveBeenCalledTimes(1);
+  });
+
+  it('a hang whose deadline elapses AFTER stopAll() does NOT exit or write a restart record (PHNX-4116)', async () => {
+    // stopAll() force-stops the in-flight tick (aborting its signal) while its
+    // deadline timer was still armed. If the hung tick ignores the abort, that
+    // timer must NOT fire exitForRestart mid-shutdown: doing so exits 70 instead
+    // of the clean 0, appends a spurious restart-ledger entry, and skips
+    // handleShutdown's cleanup. Both belts guard it — stopOne clears the timer,
+    // and runTick no-ops the timeout branch for a stopped service.
+    const exit = makeExit();
+    const supervisor = new ServiceSupervisor({ exit: exit as unknown as (code: number) => never });
+    const hanging = new HangingService(); // id 'device-probe', deadlineMs 500
+    supervisor.register(hanging);
+
+    await supervisor.startAll(makeCtx());
+    await vi.advanceTimersByTimeAsync(0); // first immediate tick starts, then hangs
+    expect(hanging.ticksStarted).toBe(1);
+
+    // Shut the supervisor down while the tick is still in flight, then let the
+    // original 500ms deadline (and well past it) elapse.
+    await supervisor.stopAll();
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(exit).not.toHaveBeenCalled();
+    expect(readRecentDaemonRestarts(0)).toHaveLength(0);
   });
 
   it('a throwing tick is recorded and the service keeps ticking — the process never exits (PHNX-4116)', async () => {

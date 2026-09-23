@@ -84,6 +84,14 @@ interface RegisteredService {
   everStarted: boolean;
   timer?: ReturnType<typeof setInterval>;
   startupTimer?: ReturnType<typeof setTimeout>;
+  /**
+   * The in-flight tick's deadline timer. Stored on the entry (not just a local
+   * in `runTick`) so `stopOne` can clear it — otherwise a force-stop aborts the
+   * tick and returns while this timer stays armed, and if the hung tick ignores
+   * the abort it fires `exitForRestart` mid-shutdown (wrong exit code, spurious
+   * restart-ledger entry, `handleShutdown` cleanup skipped). PHNX-4116.
+   */
+  deadlineTimer?: ReturnType<typeof setTimeout>;
 }
 
 interface RegisterServiceOptions {
@@ -309,6 +317,14 @@ export class ServiceSupervisor {
       clearTimeout(entry.startupTimer);
       entry.startupTimer = undefined;
     }
+    // Cancel the in-flight tick's deadline timer too — leaving it armed lets it
+    // fire `exitForRestart` mid-shutdown if the hung tick ignores the abort
+    // below (PHNX-4116). The `state === 'stopped'` guard in `runTick` is the
+    // belt to this braces.
+    if (entry.deadlineTimer) {
+      clearTimeout(entry.deadlineTimer);
+      entry.deadlineTimer = undefined;
+    }
     entry.state = 'stopped';
     recordSubsystemState(id, 'stopped');
     // Signal any in-flight tick to unwind — a cooperating tick threads this into
@@ -363,13 +379,12 @@ export class ServiceSupervisor {
     entry.inFlight = true;
     const controller = new AbortController();
     entry.activeController = controller;
-    let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
     let timedOut = false;
     const tickPromise = periodicService.tick(ctx, controller.signal);
     entry.activeTick = tickPromise;
     try {
       const deadline = new Promise<never>((_, reject) => {
-        deadlineTimer = setTimeout(
+        entry.deadlineTimer = setTimeout(
           () => {
             timedOut = true;
             reject(new Error(`tick exceeded deadline of ${periodicService.deadlineMs}ms`));
@@ -383,7 +398,16 @@ export class ServiceSupervisor {
       entry.lastRunMs = Date.now();
       recordSubsystemOk(id);
     } catch (err) {
-      if (timedOut) {
+      // A stopped service must never exit the process: `stopOne` may have
+      // force-stopped this tick (aborting its signal) while the deadline timer
+      // was still armed, and a hang that ignored the abort would otherwise let
+      // that timer fire `exitForRestart` mid-shutdown — wrong exit code, a
+      // spurious restart-ledger entry, and `handleShutdown` cleanup skipped
+      // (PHNX-4116). This is the belt to `stopOne`'s clearTimeout braces. Read
+      // the state fresh: `stopOne` mutated it across the `await` above, past the
+      // narrowing the top-of-function `state !== 'running'` guard applied.
+      const stoppedDuringTick = this.registry.get(id)?.state === 'stopped';
+      if (timedOut && !stoppedDuringTick) {
         // Abort the runaway tick's signal so a cooperating tick can unwind, then
         // hand the daemon back to its OS supervisor: a hang has no in-process
         // recovery (PHNX-4116). `exitForRestart` calls `process.exit`, so nothing
@@ -394,9 +418,10 @@ export class ServiceSupervisor {
         return;
       }
       // A throw is recoverable — record it and keep ticking on the next interval.
-      this.recordFailure(entry, id, err);
+      // A deadline breach of an already-stopped service is intentionally dropped.
+      if (!timedOut) this.recordFailure(entry, id, err);
     } finally {
-      if (deadlineTimer) clearTimeout(deadlineTimer);
+      if (entry.deadlineTimer) { clearTimeout(entry.deadlineTimer); entry.deadlineTimer = undefined; }
       entry.activeTick = undefined;
       entry.activeController = undefined;
       this.clearInFlight(entry);
@@ -440,6 +465,7 @@ export class ServiceSupervisor {
     for (const entry of this.registry.values()) {
       if (entry.timer) { clearInterval(entry.timer); entry.timer = undefined; }
       if (entry.startupTimer) { clearTimeout(entry.startupTimer); entry.startupTimer = undefined; }
+      if (entry.deadlineTimer) { clearTimeout(entry.deadlineTimer); entry.deadlineTimer = undefined; }
     }
   }
 }
