@@ -17,7 +17,7 @@ import {
 } from './strategies.js';
 import { listInstallations, readInstallation, recordRelease, writeInstallation } from './store.js';
 import { effectiveUpdatePolicy, isAutoUpdateEnabledForAgent } from './update-policy.js';
-import { describeInstallationActivity, formatInUseDeferral, isInstallationLikelyActive } from './active-check.js';
+import { describeInstallationActivity, formatInUseDeferral } from './active-check.js';
 import { installationLockTarget, INSTALLATION_LOCK_OPTIONS } from './installation-lock.js';
 import type { Installation, UpdateOutcome } from './types.js';
 
@@ -266,7 +266,8 @@ async function runUpdateInstallation(
     // identical pre-stage check above for why this cannot be opt-in: a launch
     // that starts AFTER that first check but before this swap is exactly the
     // window this closes.
-    if (options.shouldCancel?.() || (strategy.transactional && await isInstallationLikelyActive(installation))) {
+    const lateActivity = strategy.transactional ? await describeInstallationActivity(installation) : null;
+    if (options.shouldCancel?.() || lateActivity?.active) {
       options.onProgress?.(
         `${AGENTS[agent].name}@${installation.label} looks active now (a process or launch lease appeared while `
         + `${staged.release} was staging); not committing it.`
@@ -277,7 +278,9 @@ async function runUpdateInstallation(
         fromRelease: installation.releaseVersion,
         toRelease: staged.release,
         unchanged: true,
-        deferred: 'Update cancelled or the account home became active.',
+        deferred: lateActivity?.active
+          ? formatInUseDeferral(`${AGENTS[agent].name}@${installation.label}`, lateActivity)
+          : 'Update cancelled while the release was being prepared.',
         alsoUpdated: [],
       };
     }

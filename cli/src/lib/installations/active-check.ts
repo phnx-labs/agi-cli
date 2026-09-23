@@ -136,6 +136,9 @@ export interface InstallationActivity {
   scanError?: string;
 }
 
+/** `ps` prints `?` (Linux), `??` (macOS) or `-` for a process with no controlling terminal. */
+const NO_TTY_MARKERS = new Set(['?', '??', '-']);
+
 function shortenArgs(args: string, versionDir: string): string {
   // Strip the long install path so the line reads as the command the user ran.
   const trimmed = args.replace(versionDir, '…').replace(/\/node_modules\/\.bin\//, '/');
@@ -162,7 +165,7 @@ export async function describeInstallationActivity(
     const processes = rows
       .filter((row) => row.args.includes(versionDir))
       .map((row) => {
-        const meta = [row.pid !== undefined ? `pid ${row.pid}` : null, row.elapsed ? `up ${row.elapsed}` : null, row.tty && row.tty !== '?' ? row.tty : null]
+        const meta = [row.pid !== undefined ? `pid ${row.pid}` : null, row.elapsed ? `up ${row.elapsed}` : null, row.tty && !NO_TTY_MARKERS.has(row.tty) ? row.tty : null]
           .filter((part): part is string => part !== null)
           .join(', ');
         return meta ? `${meta}: ${shortenArgs(row.args, versionDir)}` : shortenArgs(row.args, versionDir);

@@ -35,6 +35,7 @@ describe('describeInstallationActivity', () => {
       listProcessRows: async () => [
         { pid: 2173999, elapsed: '01:10:22', tty: 'pts/1', args: `${dir}/node_modules/.bin/claude --permission-mode plan --resume 3ef30267-f84f` },
         { pid: 42, elapsed: '00:01', tty: '?', args: `${other}/node_modules/.bin/claude` },
+        { pid: 4242, elapsed: '05:00', tty: '??', args: `${dir}/node_modules/.bin/claude -p headless` },
         { pid: 7, elapsed: '9-01:00:00', tty: '?', args: '/usr/bin/sshd' },
       ],
     };
@@ -42,9 +43,12 @@ describe('describeInstallationActivity', () => {
     expect(activity.active).toBe(true);
     expect(activity.processes).toEqual([
       'pid 2173999, up 01:10:22, pts/1: …/claude --permission-mode plan --resume 3ef30267-f84f',
+      // macOS prints `??` for no controlling terminal; it must not print as a tty.
+      'pid 4242, up 05:00: …/claude -p headless',
     ]);
     const line = activeCheck.formatInUseDeferral('Claude@2.1.219', activity);
     expect(line).toContain('pid 2173999');
+    expect(line).not.toContain('??');
     expect(line).toContain('agents sessions stop');
     expect(line).not.toContain('retry after its sessions finish');
   });

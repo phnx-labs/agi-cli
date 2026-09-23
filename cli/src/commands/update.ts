@@ -48,6 +48,9 @@ export function parseTarget(raw: string): { agent: AgentId; selector?: string; a
   if (hash !== -1 && !account) {
     throw new Error(`Select an account after # in '${raw}', e.g. claude#work — or just <agent>.`);
   }
+  if (account?.includes('@')) {
+    throw new Error(`Put the installation before the account: <agent>@<installed-version>#<account>, not '${raw}'.`);
+  }
   const at = spec.indexOf('@');
   const name = at === -1 ? spec : spec.slice(0, at);
   const selector = at === -1 ? undefined : spec.slice(at + 1).trim();

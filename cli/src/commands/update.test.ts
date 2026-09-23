@@ -93,6 +93,7 @@ describe('agents update', () => {
     // while `agents run claude#work` accepted the same selector.
     await expectFailure(['update', 'claude#work'], /Unknown Claude account 'work'.*agents accounts list claude/);
     await expectFailure(['update', 'claude#'], /Select an account after #/);
+    await expectFailure(['update', 'claude#work@2.0.65'], /before the account/);
   });
 
   it('rejects a bare @ with no installation', async () => {
