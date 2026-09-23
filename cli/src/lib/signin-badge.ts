@@ -80,8 +80,9 @@ export function loginSubcommand(agent: AgentId): string | null {
  *   personal device; this box is provisioned from the durable credential).
  * - Unnamed legacy homes use the same version-targeted command shape as
  *   doctor, so the hint never logs a different/default home in by accident.
- * - `unverified` emits nothing: the probe could not confirm state (e.g. a
- *   worker whose token lacks the usage scope), so there is nothing to repair.
+ * - `unverified` / `no_evidence` emit nothing: the probe could not confirm state
+ *   (codex/grok have no probe endpoint; a worker's token lacks the usage scope),
+ *   so there is nothing to repair.
  */
 export function fixFor(input: {
   agent: AgentId;
@@ -93,7 +94,9 @@ export function fixFor(input: {
   hasSlot?: boolean;
 }): string | null {
   const { agent, verdict } = input;
-  if (verdict === 'live' || verdict === 'rate_limited' || verdict === 'unverified' || verdict === 'ready') return null;
+  // `no_evidence` (credential present, nothing probed/run here yet) is benign like
+  // `unverified` — there is nothing to repair (PHNX-4116).
+  if (verdict === 'live' || verdict === 'rate_limited' || verdict === 'unverified' || verdict === 'no_evidence' || verdict === 'ready') return null;
   if (input.provisioning === 'per-device' || verdict === 'per-device') {
     return loginHint(agent);
   }

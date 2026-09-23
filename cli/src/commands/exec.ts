@@ -24,6 +24,7 @@ import type { RotateResult } from '../lib/accounting/rotate.js';
 import { AGENTS, resolveAgentName, isAgentHardDeprecated, hardDeprecationError } from '../lib/agents.js';
 import { parseAgentVersionSpec } from '../lib/agent-spec/agents.js';
 import { recordDispatchedRun } from '../lib/audit/log.js';
+import { recordRunAuthOutcome } from '../lib/auth-health.js';
 import { maybeShowStarNudge } from '../lib/star-nudge.js';
 import { warnUnpushedWork, shouldWarnUnpushed } from '../lib/warn-unpushed.js';
 import { warnOrphanedOpenPr } from '../lib/pr-land-detach.js';
@@ -4021,6 +4022,24 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         // Governance chokepoint (#347): every dispatched run finalizes here.
         // ONE tamper-evident audit record per run — non-fatal by contract.
         recordDispatchedRun({ agent: ranAgent, version: ranVersion ?? 'unknown', mode, cwd, exitCode });
+        // A clean headless exit is real auth evidence — the account authenticated
+        // and produced a result. Record it as the per-account FACT `agents view`
+        // renders (`last used ok`), keyed to the slot the run used so it lands on
+        // the right row and clears any stale failure fact (PHNX-4116). A non-zero
+        // exit is NOT recorded as an auth failure: the exit code alone does not
+        // prove the token was rejected (a task can fail for a hundred reasons), and
+        // a lying "auth failure" fact is worse than none. Real auth failures are
+        // recorded where they are actually detected (the routine runner's
+        // isAuthFailureFromLog sites) and by the daemon probe.
+        if (exitCode === 0) {
+          recordRunAuthOutcome({
+            agent: ranAgent,
+            accountId: execOptions.accountId ?? null,
+            version: ranVersion ?? null,
+            home: execHome ?? null,
+            outcome: { ok: true },
+          });
+        }
         // First-successful-run star nudge (one-time, non-nagging). Only on a
         // clean run, and never when output is machine-readable/quiet.
         if (exitCode === 0) maybeShowStarNudge({ quiet: options.json || options.quiet });

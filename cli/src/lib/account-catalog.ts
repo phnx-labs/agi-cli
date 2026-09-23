@@ -9,7 +9,9 @@ import { harnessWorkerIsPerDevice } from './harness-auth-capabilities.js';
 import { hasKeychainTokenSync, isSecretsTransportError, type SecretsClientError } from './secrets-client.js';
 import type { AgentId, Meta } from './types.js';
 import { isLaunchableSignedIn as isCredentialLaunchable } from './accounting/rotate.js';
-import { authCacheKey, readAuthHealthCache, slotAuthVersionKey, type AuthVerdict } from './auth-health.js';
+import * as fs from 'fs';
+import * as path from 'path';
+import { authCacheKey, formatAuthFact, readAuthHealthCache, slotAuthVersionKey, type AuthHealth, type AuthVerdict } from './auth-health.js';
 import { readFleetSharedDeviceStates, type FleetSharedDeviceState } from './fleet-shared-state.js';
 import { machineId } from './machine-id.js';
 import { isHeadedDeviceRole, selfConfiguredDeviceRole } from './device-config.js';
@@ -160,6 +162,19 @@ export interface NativeAccountCatalogRow {
   usageSnapshot?: UsageSnapshot | null;
   /** Raw usage fetch error, for headless/unverified labeling alongside the bars. */
   usageError?: string | null;
+  /**
+   * The token FACT for this account ON THIS BOX (PHNX-4116): the credential kind
+   * plus its file date — `sk-ant-oat01 (Sep 16)` for a Claude slot's
+   * `.claude/.oauth_token`, `api key (present)` for a provider-key harness — or
+   * `no token` when the credential file is absent. A fact, never a verdict word.
+   */
+  token: string;
+  /**
+   * The auth FACT for this account ON THIS BOX (PHNX-4116): `last used ok 12m
+   * ago` / `last auth failure 401 Sep 20 14:02` / `rate-limited until 15:00` /
+   * `not used on this box yet`, from the recorded run outcome (or a real probe).
+   */
+  lastAuth: string;
   fix: string | null;
 }
 
@@ -250,6 +265,17 @@ export interface AccountListEntryJson {
   /** The live usage snapshot backing `usage`, when available — additive, not breaking. */
   usageSnapshot?: UsageSnapshot | null;
   usageError?: string | null;
+  /**
+   * The token FACT for this account on the box that emitted this JSON (PHNX-4116):
+   * `sk-ant-oat01 (Sep 16)` / `api key (present)` / `no token`. A fact, not a verdict.
+   */
+  token: string;
+  /**
+   * The auth FACT for this account on the box that emitted this JSON (PHNX-4116):
+   * `last used ok 12m ago` / `last auth failure 401 Sep 20 14:02` / `not used on
+   * this box yet`. Reflects the emitting box only; `devices[]` carries the fleet.
+   */
+  lastAuth: string;
   fix: string | null;
 }
 
@@ -383,15 +409,21 @@ export function buildNativeCatalog(
       state: signedIn ? 'connected' : 'reconnect-needed',
       identityLabel: email ?? account?.name ?? group.identityKey,
       provisioning: provisioningFor(group.agent),
-      verdict: signedIn ? 'unverified' : 'missing',
+      // A credential is present but nothing has probed or run it here yet — that
+      // is `no_evidence` ("we did not look"), not `unverified` (PHNX-4116). The
+      // real per-box verdict is recomputed in loadAccountCatalog; the display is
+      // a fact (token + run outcomes), never this word.
+      verdict: signedIn ? 'no_evidence' : 'missing',
       checkedAt: null,
       devices: [],
       usage: null,
       usageSnapshot: null,
       usageError: null,
+      token: 'no token',
+      lastAuth: 'not used on this box yet',
       fix: fixFor({
         agent: group.agent,
-        verdict: signedIn ? 'unverified' : 'missing',
+        verdict: signedIn ? 'no_evidence' : 'missing',
         name: account?.name,
         version: home,
         provisioning: provisioningFor(group.agent),
@@ -408,6 +440,53 @@ export function buildNativeCatalog(
 
 function provisioningFor(agent: AgentId): AccountProvisioning {
   return harnessWorkerIsPerDevice(agent) ? 'per-device' : 'portable';
+}
+
+const TOKEN_FACT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** `Sep 16` — the credential file's date, the only mutable part of the token fact. */
+function tokenFileDate(mtimeMs: number): string {
+  const d = new Date(mtimeMs);
+  return `${TOKEN_FACT_MONTHS[d.getMonth()]} ${d.getDate()}`;
+}
+
+/**
+ * The non-secret scheme prefix of a Claude token — `sk-ant-oat01` for a
+ * setup-token, `sk-ant` for another Claude scheme, `token` otherwise. NEVER the
+ * secret body: only a fixed, publicly-documented prefix is returned so the fact
+ * can be printed and fleet-synced safely (root AGENTS.md §Security).
+ */
+function safeTokenPrefix(raw: string): string {
+  const value = raw.trim();
+  if (value.startsWith('sk-ant-oat01')) return 'sk-ant-oat01';
+  if (value.startsWith('sk-ant')) return 'sk-ant';
+  return 'token';
+}
+
+/**
+ * The token FACT for a Claude account ON THIS BOX (PHNX-4116): the slot/home
+ * `.claude/.oauth_token` scheme prefix + its file date, else a present native
+ * credential, else `no token`. For non-Claude native rows it reports credential
+ * presence generically. `dir` is the slot dir when the account has one, else the
+ * local version home. A fact, never a verdict.
+ */
+export function readTokenFact(agent: AgentId, dir: string | null): string {
+  if (!dir) return 'no token';
+  if (agent === 'claude') {
+    const oauth = path.join(dir, '.claude', '.oauth_token');
+    try {
+      const stat = fs.statSync(oauth);
+      const prefix = safeTokenPrefix(fs.readFileSync(oauth, 'utf-8'));
+      return `${prefix} (${tokenFileDate(stat.mtimeMs)})`;
+    } catch { /* fall through to the native-credential check */ }
+    try {
+      const creds = path.join(dir, '.claude', '.credentials.json');
+      const stat = fs.statSync(creds);
+      return `native login (${tokenFileDate(stat.mtimeMs)})`;
+    } catch { /* no credential file */ }
+    return 'no token';
+  }
+  return credentialPresence(agent, dir).perVersion ? 'credential present' : 'no token';
 }
 
 export function toProviderRow(account: CredentialAccount, meta: Pick<Meta, 'accounts'>): ProviderAccountCatalogRow {
@@ -496,6 +575,13 @@ export async function loadAccountCatalog(): Promise<AccountCatalog> {
     const inv = localHome ? inventoryByHome.get(`${row.agent}:${localHome.label}`) : undefined;
     row.usageSnapshot = inv?.snapshot ?? null;
     row.usageError = inv?.usageError ?? null;
+    // The per-box FACTS (PHNX-4116): the token file on disk and the recorded run
+    // (or probe) outcome — never a verdict word. `cached` is the same row the
+    // observation used (slot key first, then the version-home label), so the
+    // fact and the internal verdict read the same evidence.
+    const credentialDir = slot?.slotDir ?? (localHome ? getVersionHomePath(row.agent, localHome.label) : null);
+    row.token = readTokenFact(row.agent, credentialDir);
+    row.lastAuth = formatAuthFact((cached as AuthHealth | undefined) ?? null);
     row.fix = fixFor({
       agent: row.agent,
       verdict: row.verdict,
@@ -540,6 +626,10 @@ function providerListEntry(
     checkedAt: null,
     devices: [],
     usage: null,
+    // A durable provider credential is a key, not a run-tracked login: state its
+    // presence as the token fact; there is no per-run auth evidence to render.
+    token: row.verdict === 'ready' ? 'api key (present)' : 'no key',
+    lastAuth: 'not used on this box yet',
     fix: row.fix,
   };
 }
@@ -583,6 +673,8 @@ export function accountListJson(
         usage: row.usage,
         ...(row.usageSnapshot ? { usageSnapshot: row.usageSnapshot } : {}),
         ...((() => { const v = usageErrorForDisplay(row.usageError); return v ? { usageError: v } : {}; })()),
+        token: row.token,
+        lastAuth: row.lastAuth,
         fix: row.fix,
       })),
       ...providers.flatMap((row) => providerJsonEntries(row, harness)),
@@ -625,7 +717,7 @@ export function coverageNote(row: NativeAccountCatalogRow, localDevice: string):
     return absent.length > 0 && absent.length < row.devices.length ? `not on ${absent.join(', ')}` : null;
   }
   const provisioned = row.devices.filter((device) => device.verdict !== 'missing').length;
-  const usable = row.devices.filter((device) => device.verdict === 'live' || device.verdict === 'rate_limited' || device.verdict === 'unverified').length;
+  const usable = row.devices.filter((device) => device.verdict === 'live' || device.verdict === 'rate_limited' || device.verdict === 'unverified' || device.verdict === 'no_evidence').length;
   if (usable === 0 || usable === provisioned) return null;
   return `usable on ${usable} of ${provisioned} boxes`;
 }
@@ -641,6 +733,16 @@ export const OVERVIEW_MAX_USAGE_WINDOWS = 2;
 export const ACCOUNT_LISTING_LEGEND =
   '* stale usage · a healthy account carries no state · identity + per-box state: agents accounts list --fleet';
 
+/**
+ * When a usage reading arrived from ANOTHER box's poller over the fleet store,
+ * name its origin — `(from zion)` — so the number reads as a synced fact, not a
+ * local capture (PHNX-4116). Local captures (statusline/poll) carry no suffix.
+ */
+function usageOriginSuffix(snapshot: UsageSnapshot | null | undefined): string {
+  const poller = snapshot?.freshness?.source === 'sync' ? snapshot.freshness.poller : undefined;
+  return poller ? ` ${chalk.gray(`(from ${poller})`)}` : '';
+}
+
 function usageText(row: NativeAccountCatalogRow, maxWindows?: number): string {
   if (row.usageSnapshot) {
     const usageInfo: UsageInfo = { snapshot: row.usageSnapshot, error: row.usageError ?? null };
@@ -649,7 +751,7 @@ function usageText(row: NativeAccountCatalogRow, maxWindows?: number): string {
       usageInfo.snapshot,
       3,
       viewUsageSummaryOptions(row.agent, row.state === 'connected', usageInfo, maxWindows),
-    );
+    ) + usageOriginSuffix(row.usageSnapshot);
   }
   if (row.usage?.status === 'rate_limited' && (row.usage.usedPercent === null || row.usage.usedPercent === undefined)) {
     return 'limited';
@@ -669,23 +771,15 @@ interface ListingLine {
 }
 
 /**
- * True only when the USAGE cell is certain to print a throttle marker, so the
- * `rate-limited` note would say the same thing twice. Mirrors `usageText`
- * branch for branch: with a snapshot, `formatUsageSummary` appends
- * 'out of credits' or 'session-limited (…)' exactly for these `unavailable`
- * reasons; without one, `usageText` prints 'limited' or 'no credits'. A verdict
- * thrown by a maxed WINDOW is deliberately NOT here: the overview caps the cell
- * at `OVERVIEW_MAX_USAGE_WINDOWS`, so the window that tripped it can be hidden
- * behind the `+N` count with no color at all, and the note is the only signal.
+ * Colour the auth FACT by what it states (PHNX-4116): a recent success is green,
+ * a server rejection red, a throttle yellow, and "not used on this box yet" the
+ * neutral gray of a fact that carries no alarm.
  */
-function usageCellNamesThrottle(row: NativeAccountCatalogRow): boolean {
-  if (row.usageSnapshot) {
-    const unavailable = row.usageSnapshot.unavailable;
-    return unavailable?.reason === 'out_of_credits'
-      || (unavailable?.reason === 'session_limit' && !!unavailable.resetsAt);
-  }
-  return row.usage?.status === 'out_of_credits'
-    || (row.usage?.status === 'rate_limited' && (row.usage.usedPercent === null || row.usage.usedPercent === undefined));
+export function authFactNote(lastAuth: string): string {
+  if (lastAuth.startsWith('last used ok')) return chalk.green(lastAuth);
+  if (lastAuth.startsWith('last auth failure')) return chalk.red(lastAuth);
+  if (lastAuth.startsWith('rate-limited')) return chalk.yellow(lastAuth);
+  return chalk.gray(lastAuth);
 }
 
 function nativeLine(row: NativeAccountCatalogRow, localDevice: string, maxWindows?: number): ListingLine {
@@ -693,8 +787,14 @@ function nativeLine(row: NativeAccountCatalogRow, localDevice: string, maxWindow
     // A discovered login nobody has named is still identified by what it is:
     // the row no longer carries an IDENTITY column, so the identity IS the name.
     name: row.name ?? row.identityLabel,
+    // FACTS, in order: the token on disk, what happened when it was last used, a
+    // signed-out flag when there is no credential at all, fleet coverage, then the
+    // repair. The auth fact already carries a throttle/failure with its time, so
+    // there is no separate verdict word (PHNX-4116).
     notes: [
-      usageCellNamesThrottle(row) && row.verdict === 'rate_limited' ? null : verdictNote(row.verdict),
+      chalk.gray(row.token),
+      authFactNote(row.lastAuth),
+      row.verdict === 'missing' ? chalk.red('signed out') : null,
       coverageNote(row, localDevice),
       row.fix ? chalk.gray(`fix: ${row.fix}`) : null,
     ].filter((note): note is string => !!note),
@@ -842,7 +942,7 @@ export function readSharedAccountVerdicts(
     for (const row of state.accounts?.rows ?? []) {
       if (!ALL_AGENT_IDS.includes(row.harness)) continue;
       if (!['native', 'durable', 'per-device'].includes(row.authMode)) continue;
-      if (!['live', 'expired', 'revoked', 'rate_limited', 'unverified', 'missing'].includes(row.verdict)) continue;
+      if (!['live', 'expired', 'revoked', 'rate_limited', 'unverified', 'no_evidence', 'missing'].includes(row.verdict)) continue;
       const key = `${row.harness}:${row.accountId}`;
       const values = out.get(key) ?? [];
       values.push({
@@ -881,9 +981,12 @@ function normalizeAuthVerdict(
   // result — the daemon never publishes it (probeLocalFleetAuth drops those
   // rows). So it says nothing about the credential on disk; the live signedIn
   // read of the slot decides, exactly as it does when no verdict exists at all.
-  if (verdict === 'unconfigured') return signedIn ? 'unverified' : 'missing';
-  if (verdict === 'error') return signedIn ? 'unverified' : 'missing';
-  return verdict ?? (signedIn ? 'unverified' : 'missing');
+  // No probe row, or one that says nothing about the credential: a present
+  // credential with no evidence either way is `no_evidence`, never a word that
+  // claims we looked (PHNX-4116).
+  if (verdict === 'unconfigured') return signedIn ? 'no_evidence' : 'missing';
+  if (verdict === 'error') return signedIn ? 'no_evidence' : 'missing';
+  return verdict ?? (signedIn ? 'no_evidence' : 'missing');
 }
 
 /** The T1 slot store's per-account observation of the local verdict. */
@@ -949,6 +1052,7 @@ export function aggregateAccountVerdict(
   if (!hasLocalSnapshot && verdicts.includes('rate_limited')) return 'rate_limited';
   if (verdicts.includes('live')) return 'live';
   if (verdicts.includes('unverified')) return 'unverified';
+  if (verdicts.includes('no_evidence')) return 'no_evidence';
   return provisioning === 'per-device' ? 'per-device' : 'missing';
 }
 

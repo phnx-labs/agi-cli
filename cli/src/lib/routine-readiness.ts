@@ -190,10 +190,22 @@ export async function evaluateActivationReadinessLive(config: JobConfig): Promis
   let authVerdict: { ok: boolean; reason?: string };
   const rows = await probeLocalFleetAuth({ agents: [config.agent as never] });
   const row = rows.find((candidate) => candidate.version === version);
-  const accepted = new Set(['live', 'rate_limited', 'unverified']);
-  authVerdict = row && accepted.has(row.health.verdict)
-    ? { ok: true }
-    : { ok: false, reason: row?.health.verdict ?? 'unconfigured' };
+  const accepted = new Set(['live', 'rate_limited', 'unverified', 'no_evidence']);
+  if (row && accepted.has(row.health.verdict)) {
+    authVerdict = { ok: true };
+  } else if (!row) {
+    // A worker no longer writes a probe row — `no_evidence` is dropped, not
+    // published (PHNX-4116) — so an absent row is NOT "unconfigured". Fall back
+    // to the same launchability the router uses (a signed-in slot or version
+    // home), which reads the token, not a probe verdict. This keeps a worker's
+    // token-backed routine activatable while still failing a box with no
+    // credential at all.
+    const { collectRunCandidates } = await import('./accounting/rotate.js');
+    const launchable = (await collectRunCandidates(config.agent as never)).some((candidate) => candidate.signedIn);
+    authVerdict = launchable ? { ok: true } : { ok: false, reason: 'unconfigured' };
+  } else {
+    authVerdict = { ok: false, reason: row.health.verdict };
+  }
 
   return evaluateRoutineReadiness(context, {
     agentInstalled: () => true,
@@ -276,7 +288,7 @@ export async function evaluateHostActivationReadiness(config: JobConfig): Promis
           verdict = payload.rows?.find((row) => row.agent === config.agent)?.health.verdict ?? 'unconfigured';
         } catch { verdict = 'error'; }
       }
-      if (!new Set(['live', 'rate_limited', 'unverified']).has(verdict)) {
+      if (!new Set(['live', 'rate_limited', 'unverified', 'no_evidence']).has(verdict)) {
         return evaluateRoutineReadiness(unprobed, {
           authOk: () => ({ ok: false, reason: verdict }),
         }, { agent: config.agent });

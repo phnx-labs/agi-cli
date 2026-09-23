@@ -14,6 +14,7 @@ import { mergeClaudeUsageCacheWindows, type UsageWindow } from './accounting/usa
 import { loadReminders, pickReminderForSession } from './reminders.js';
 import { readMeta } from './state.js';
 import { machineId } from './machine-id.js';
+import { recordRunAuthOutcome } from './auth-health.js';
 
 export const CLAUDE_STATUSLINE_COMMAND = 'agents __claude-statusline';
 const DELEGATE_FILE = path.join('.agents', 'claude-statusline-delegate');
@@ -92,6 +93,7 @@ function windowFromNative(
 export function ingestClaudeStatusLineUsage(
   payload: ClaudeStatusLinePayload,
   identity: ClaudeHomeIdentity | null,
+  versionHome?: string | null,
 ): boolean {
   if (!identity?.usageKey || !payload.rate_limits) return false;
   const windows = [
@@ -105,6 +107,15 @@ export function ingestClaudeStatusLineUsage(
     capturedAt: new Date(),
     windows,
     freshness: { source: 'statusline', poller: machineId() },
+  });
+  // A status-line payload with rate_limits IS a real inference response — the
+  // token authenticated moments ago. Record that as the per-account auth FACT
+  // (`last used ok`), keyed to the account this box actually ran (PHNX-4116).
+  recordRunAuthOutcome({
+    agent: 'claude',
+    accountId: resolveNativeAccount(identity)?.id ?? null,
+    home: versionHome ?? null,
+    outcome: { ok: true },
   });
   // Keep this box's own state file current so the next placement probe or
   // usage-sync fan-out carries this reading; the file is local, no transport.
@@ -241,7 +252,7 @@ export async function runClaudeStatusLine(): Promise<number> {
   }
   const versionHome = versionHomeFromEnv(process.env);
   const identity = readClaudeIdentity(claudeHomeFromEnv(process.env));
-  if (versionHome) ingestClaudeStatusLineUsage(payload, identity);
+  if (versionHome) ingestClaudeStatusLineUsage(payload, identity, versionHome);
   process.stdout.write(renderClaudeStatusLine(
     payload,
     undefined,

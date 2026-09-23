@@ -230,7 +230,7 @@ export function applyUsageHonesty(
     }
     return { verdict, usage: stripped };
   }
-  if ((usage.status === 'rate_limited' || usage.status === 'out_of_credits') && (verdict === 'live' || verdict === 'unverified')) {
+  if ((usage.status === 'rate_limited' || usage.status === 'out_of_credits') && (verdict === 'live' || verdict === 'unverified' || verdict === 'no_evidence')) {
     return { verdict: 'rate_limited', usage };
   }
   return { verdict, usage };

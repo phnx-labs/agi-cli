@@ -36,6 +36,7 @@ import { getVersionHomePath, listInstalledVersions } from './installations/versi
 import { atomicWriteFileSync, ensureLockTarget, withFileLock } from './fs-atomic.js';
 import { selfConfiguredDeviceRole } from './device-config.js';
 import { mayIssueUsageEndpointProbe, trySpendUsageApiCall } from './usage-refresh.js';
+import { machineId } from './machine-id.js';
 
 /**
  * - `live`        — completed an authenticated request (200).
@@ -55,6 +56,17 @@ import { mayIssueUsageEndpointProbe, trySpendUsageApiCall } from './usage-refres
  *                   endpoint cannot prove live for a known non-revocation
  *                   reason (Claude setup-token usage-scope gap — RUSH-2392),
  *                   OR a throttled probe with no fresh previous verdict (PHNX-4051).
+ * - `no_evidence` — a credential is present on disk but THIS box has no evidence,
+ *                   either way, that it can authenticate: no probe was possible
+ *                   (a worker's setup-token box does not probe the usage endpoint)
+ *                   and no run outcome has been recorded here yet. Distinct from
+ *                   `unverified` (which is "signed in, no probe endpoint exists for
+ *                   this harness") — `no_evidence` is "we did not look", the exact
+ *                   state PHNX-4116 stops rendering as a verdict word. A worker
+ *                   never PUBLISHES this row (it is dropped in
+ *                   {@link probeLocalFleetAuth}); it surfaces only as an in-memory
+ *                   account-catalog verdict whose display is a FACT (token presence
+ *                   + recorded run outcomes), never the word "no_evidence".
  * - `unconfigured`— no usable credential on disk.
  * - `error`       — network/other failure; verdict indeterminate (keep the last known one).
  */
@@ -64,6 +76,7 @@ export type AuthVerdict =
   | 'expired'
   | 'rate_limited'
   | 'unverified'
+  | 'no_evidence'
   | 'unconfigured'
   | 'error';
 
@@ -77,6 +90,15 @@ export interface AuthHealth {
   account?: string;
   /** Stable registered account id. Display labels are never used as identity. */
   accountId?: string;
+  /**
+   * How this row was observed (PHNX-4116). `probe` (default when absent) is a
+   * network/usage-endpoint probe the daemon ran; `run` is a REAL agent run
+   * outcome recorded on exit — a successful inference (`live`) or an auth failure
+   * (`revoked`/`expired`/`rate_limited`). The auth FACT `agents view` renders
+   * (`last used ok 12m ago` vs `last auth failure 401 …`) reads this so a token's
+   * usability is stated as evidence, not inferred from a stale usage file.
+   */
+  source?: 'probe' | 'run';
 }
 
 /** Maximum age of an auth verdict used for automatic routing decisions. */
@@ -130,6 +152,7 @@ const VERDICT_GLYPHS: Record<AuthVerdict, string> = {
   expired: '○', // ○
   rate_limited: '◐', // ◐
   unverified: '◐', // ◐
+  no_evidence: '◌', // ◌ — credential present, no evidence either way
   unconfigured: '·', // ·
   error: '·', // ·
 };
@@ -147,6 +170,7 @@ export function verdictLabel(verdict: AuthVerdict): string {
     case 'expired': return 'expired';
     case 'rate_limited': return 'limited';
     case 'unverified': return 'unverified';
+    case 'no_evidence': return 'no evidence';
     case 'unconfigured': return '—';
     case 'error': return '?';
   }
@@ -182,7 +206,7 @@ export function summarizeVerdicts(verdicts: AuthVerdict[]): VerdictSummary {
   let warn = 0;
   for (const v of verdicts) {
     if (v === 'live') live++;
-    else if (v === 'unverified') present++;
+    else if (v === 'unverified' || v === 'no_evidence') present++;
     else if (v === 'revoked') bad++;
     else warn++;
   }
@@ -206,6 +230,7 @@ export function verdictColor(verdict: AuthVerdict): AuthCellColor {
     case 'live': return 'green';
     case 'revoked': return 'red';
     case 'unverified': return 'gray';
+    case 'no_evidence': return 'gray';
     case 'unconfigured': return 'dim';
     default: return 'yellow'; // expired / rate_limited / error — soft, self-healing/indeterminate
   }
@@ -286,6 +311,7 @@ export function summarizeHostAuth(
     switch (health.verdict) {
       case 'live': live++; break;
       case 'unverified': present++; break;      // signed in, no probe — benign
+      case 'no_evidence': present++; break;     // credential present, no evidence — benign
       case 'revoked': revoked++; break;          // server said no — re-login
       default: degraded++; break;                // expired / rate_limited / error — soft
     }
@@ -567,6 +593,13 @@ function verdictFromFreshUsage(
   const snapshot = readClaudeUsageCache(usageKey);
   const capturedAt = snapshot?.capturedAt?.getTime();
   if (!capturedAt || now - capturedAt >= FRESH_USAGE_VERDICT_MAX_AGE_MS) return null;
+  // A `sync`-sourced snapshot arrived from ANOTHER box's poller over the fleet
+  // store — it proves the shared setup-token works SOMEWHERE, not that THIS box
+  // can authenticate (PHNX-4116). Deriving `live` from it is exactly the false
+  // "we did not look here, but a synced file is fresh, so call it live" the
+  // ticket removes. Only a reading THIS box captured itself (statusline/poll)
+  // is admissible live evidence.
+  if (snapshot?.freshness?.source === 'sync') return null;
   const ageMin = Math.max(1, Math.round((now - capturedAt) / 60_000));
   return { verdict: 'live', checkedAt: now, detail: `token proven live by a usage fetch ${ageMin}m ago` };
 }
@@ -606,15 +639,21 @@ export async function probeAuthHealth(
       role: selfConfiguredDeviceRole(),
       forceLive: opts?.forceLive,
     })) {
+      // A worker's setup-token cannot read the usage endpoint (RUSH-2392), so this
+      // box has no probe evidence for the account. This is NOT `unverified` (which
+      // conflated it with codex/grok's permanent no-probe-endpoint state): it is
+      // "we did not look here". A worker never publishes it — probeLocalFleetAuth
+      // drops `no_evidence` like `unconfigured` — so the account's facts come from
+      // token presence + recorded run outcomes instead (PHNX-4116).
       return {
-        verdict: 'unverified',
+        verdict: 'no_evidence',
         checkedAt,
         detail: 'setup-token box does not probe the usage endpoint',
       };
     }
     if (opts?.forceLive !== true && usageScope && !trySpendUsageApiCall(usageScope, agent, checkedAt)) {
       return {
-        verdict: 'unverified',
+        verdict: 'no_evidence',
         checkedAt,
         detail: 'usage-endpoint budget already spent this hour',
       };
@@ -767,7 +806,12 @@ export async function probeLocalFleetAuth(opts?: {
     const health = await probeAuthHealth(rep.agent, rep.home, { cliVersion: opts?.cliVersion, info: rep.info, forceLive: opts?.forceLive, signal: opts?.signal });
     health.account = authAccountLabel(rep.info);
     health.accountId = rep.accountId;
-    if (health.verdict === 'unconfigured') {
+    health.source = 'probe';
+    // `unconfigured` (no credential) and `no_evidence` (a worker that cannot probe)
+    // both write NO row: the first has nothing to say, the second says only "we
+    // did not look", which is not a fleet-publishable verdict — the account's
+    // facts come from token presence + recorded run outcomes instead (PHNX-4116).
+    if (health.verdict === 'unconfigured' || health.verdict === 'no_evidence') {
       perGroup.push([]);
     } else {
       perGroup.push(group.members.map((inst) => ({
@@ -811,4 +855,122 @@ export function writeFleetAuthRows(host: string, rows: AuthProbeRow[], installed
     }
     : undefined;
   writeAuthHealthEntries(entries, drop);
+}
+
+// ---------------------------------------------------------------------------
+// Run-outcome recording + auth-fact rendering (PHNX-4116)
+//
+// A worker never probes, so the honest evidence that its token authenticates is
+// a REAL run: a successful inference (`live`) or an auth failure. These rows are
+// written with `source: 'run'` and read back as a FACT — `last used ok 12m ago`
+// / `last auth failure 401 Sep 20 14:02` / `not used on this box yet` — instead
+// of the misleading verdict word the ticket removes.
+// ---------------------------------------------------------------------------
+
+/**
+ * The installed-version label a run outcome falls back to when the account has no
+ * slot on this box: the explicit `version`, else the label derived from `home` (a
+ * version home is `<versionDir>/home`, so the label is its parent dir's basename).
+ * Null when neither resolves. Pure (no fs) so it is unit-tested directly.
+ */
+export function runOutcomeVersionKey(opts: { version?: string | null; home?: string | null }): string | null {
+  if (opts.version) return opts.version;
+  if (opts.home) {
+    const label = path.basename(path.dirname(opts.home));
+    if (label && label !== '.' && label !== path.sep) return label;
+  }
+  return null;
+}
+
+/** A real agent-run outcome — the evidence behind `last used ok` / `last auth failure`. */
+export type RunAuthOutcome =
+  | { ok: true }
+  | { ok: false; verdict: 'revoked' | 'expired' | 'rate_limited' | 'error'; detail?: string; resetsAt?: number | null };
+
+/**
+ * Record a REAL run's auth outcome into the auth-health cache with
+ * `source: 'run'`. Best-effort and never throws: an unattributable run (no
+ * accountId/version/home) writes nothing, and the underlying write already
+ * swallows IO errors. Keyed exactly as the catalog reads, so the recorded fact
+ * surfaces on the same account row.
+ */
+export function recordRunAuthOutcome(opts: {
+  agent: AgentId | string;
+  accountId?: string | null;
+  version?: string | null;
+  home?: string | null;
+  account?: string;
+  outcome: RunAuthOutcome;
+  host?: string;
+  now?: number;
+}): void {
+  // Key exactly as the account catalog READS (slot key first, then the version
+  // label) so the fact lands on the row: the slot key ONLY when a slot dir
+  // actually exists for this account on this box (workers), else the installed
+  // version label (headed native logins have no slot). A last-resort slot key
+  // keeps an attributable-by-id run recorded even with no version hint.
+  const slotKey = opts.accountId && readSlots(readMeta())[opts.accountId]
+    ? slotAuthVersionKey(opts.accountId)
+    : null;
+  const versionKey = slotKey
+    ?? runOutcomeVersionKey(opts)
+    ?? (opts.accountId ? slotAuthVersionKey(opts.accountId) : null);
+  if (!versionKey) return;
+  const checkedAt = opts.now ?? Date.now();
+  const host = opts.host ?? machineId();
+  let detail: string | undefined;
+  if (opts.outcome.ok) {
+    detail = 'run ok';
+  } else if (opts.outcome.verdict === 'rate_limited' && opts.outcome.resetsAt) {
+    detail = `until ${factClock(opts.outcome.resetsAt)}`;
+  } else {
+    detail = opts.outcome.detail;
+  }
+  const health: AuthHealth = {
+    verdict: opts.outcome.ok ? 'live' : opts.outcome.verdict,
+    checkedAt,
+    source: 'run',
+    ...(detail ? { detail } : {}),
+    ...(opts.account ? { account: opts.account } : {}),
+    ...(opts.accountId ? { accountId: opts.accountId } : {}),
+  };
+  writeAuthHealthEntries({ [authCacheKey(host, opts.agent, versionKey)]: health });
+}
+
+const FACT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** `HH:MM` local clock — used for a throttle reset time. */
+function factClock(ms: number): string {
+  const d = new Date(ms);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+/** `Sep 20 14:02` — the fact timestamp for an auth failure. */
+export function factTimestamp(ms: number): string {
+  const d = new Date(ms);
+  return `${FACT_MONTHS[d.getMonth()]} ${d.getDate()} ${factClock(ms)}`;
+}
+
+/**
+ * The auth FACT `agents view` / `agents accounts` render per account per box
+ * (PHNX-4116): what actually happened here, with its time — never a word that
+ * means "we did not look". A `live` row (a recorded run OR a real probe) reads
+ * `last used ok <age>`; a server rejection reads `last auth failure <detail>
+ * <time>`; a throttle reads `rate-limited <detail> (<time>)`; anything with no
+ * usable evidence — including `no_evidence`/`unverified` — reads `not used on
+ * this box yet`.
+ */
+export function formatAuthFact(health: AuthHealth | null | undefined, now: number = Date.now()): string {
+  if (!health) return 'not used on this box yet';
+  switch (health.verdict) {
+    case 'live':
+      return `last used ok ${formatCheckedAge(health.checkedAt, now)}`;
+    case 'revoked':
+    case 'expired':
+      return `last auth failure${health.detail ? ` ${health.detail}` : ''} ${factTimestamp(health.checkedAt)}`;
+    case 'rate_limited':
+      return `rate-limited${health.detail ? ` ${health.detail}` : ''} (${factTimestamp(health.checkedAt)})`;
+    default:
+      return 'not used on this box yet';
+  }
 }
