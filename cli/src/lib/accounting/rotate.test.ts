@@ -1157,6 +1157,87 @@ describe('routing refuses to decide on usage it cannot verify', () => {
   });
 });
 
+describe('one readiness gate — sync freshness, expired windows, dead auth (PHNX-4116)', () => {
+  const NOW = Date.UTC(2026, 8, 23, 12, 0);
+
+  /** A snapshot marked as arrived via fleet sync (D1: age shown, never refused). */
+  const syncedStale = (usedPercent: number): UsageSnapshot => {
+    const snap = snapshotAt(new Date(NOW - 90 * 60_000), [{ key: 'week', usedPercent }]);
+    snap.freshness = { source: 'sync', poller: 'zion' };
+    return snap;
+  };
+
+  /** A snapshot with one maxed (100%) window whose reset time is `resetsAt`. */
+  const rateLimitedAt = (resetsAt: Date): UsageSnapshot => ({
+    source: 'live',
+    sourceLabel: 'live',
+    capturedAt: new Date(NOW - 60_000),
+    windows: [{ key: 'session', label: 'Session', shortLabel: 'S', usedPercent: 100, resetsAt, windowMinutes: 300 }],
+  });
+
+  it('hasStaleUsage: a synced row is never refusal-stale however old — its age is shown, not used to refuse (D1)', () => {
+    // A worker cannot refresh a synced row (the poller is on the headed box that
+    // published it). A 90-min-old synced reading would trip the 40-min refusal
+    // bar for a LOCAL capture, but a synced one takes a floor-weight pick.
+    expect(hasStaleUsage(candidate({ version: '1.0.0', usageSnapshot: syncedStale(30) }), NOW)).toBe(false);
+    // The same-age LOCAL capture IS refusal-stale — a broken poller on the box
+    // itself is the failure NO_VERIFIED_USAGE exists to catch.
+    const local = snapshotAt(new Date(NOW - 90 * 60_000), [{ key: 'week', usedPercent: 30 }]);
+    local.freshness = { source: 'poll', poller: 'zion' };
+    expect(hasStaleUsage(candidate({ version: '1.0.0', usageSnapshot: local }), NOW)).toBe(true);
+  });
+
+  it('router: an all-synced-stale pool yields a pick, not noVerifiedUsage (the wedged-worker case)', () => {
+    // The 2026-09-23 incident: 8 workers each held every account through fleet
+    // sync but no local capture, so the all-stale refusal fired and `--device
+    // auto` refused every box while each held a valid one-year setup-token.
+    const a = candidate({ version: '2.1.181', usageSnapshot: syncedStale(48) });
+    const b = candidate({ version: '2.1.207', usageSnapshot: syncedStale(70) });
+    const result = pickBalancedCandidate([a, b], NOW)!;
+    expect(result.noVerifiedUsage).toBe(false);
+    expect(['2.1.181', '2.1.207']).toContain(result.picked.version);
+  });
+
+  it('deriveUsageStatusFromSnapshot / readiness: a rate-limited window whose reset has PASSED is available', () => {
+    const past = rateLimitedAt(new Date(NOW - 60_000));
+    expect(deriveUsageStatusFromSnapshot(past, NOW)).toBe('available');
+    expect(readinessFromCandidate(candidate({ version: '1.0.0', usageSnapshot: past }), NOW)).toEqual({ ready: true });
+  });
+
+  it('deriveUsageStatusFromSnapshot / readiness: a FRESH rate-limited window (reset still ahead) is not ready', () => {
+    const future = rateLimitedAt(new Date(NOW + 60 * 60_000));
+    expect(deriveUsageStatusFromSnapshot(future, NOW)).toBe('rate_limited');
+    expect(readinessFromCandidate(candidate({ version: '1.0.0', usageSnapshot: future }), NOW)).toEqual({
+      ready: false,
+      reason: 'rate_limited',
+      email: '1.0.0@example.com',
+    });
+  });
+
+  it('a fresh dead-auth verdict is not ready even with usage headroom', () => {
+    const c = candidate({
+      version: '1.0.0',
+      usageSnapshot: snapshotAt(new Date(NOW - 60_000), [{ key: 'week', usedPercent: 10 }]),
+      authVerdict: 'revoked',
+      authCheckedAt: NOW - 60_000,
+    });
+    expect(readinessFromCandidate(c, NOW)).toEqual({ ready: false, reason: 'revoked', email: '1.0.0@example.com' });
+  });
+
+  it('formatNoVerifiedUsageError labels a synced row as synced so the operator does not read it as the culprit', () => {
+    const synced = candidate({ version: '2.1.181', usageSnapshot: syncedStale(30) });
+    const local = candidate({ version: '2.1.207', usageSnapshot: (() => {
+      const s = snapshotAt(new Date(NOW - 90 * 60_000), [{ key: 'week', usedPercent: 40 }]);
+      s.freshness = { source: 'poll', poller: 'zion' };
+      return s;
+    })() });
+    const msg = formatNoVerifiedUsageError('claude', 'balanced', [synced, local], NOW);
+    expect(msg).toContain('2.1.181 (usage 90m old, synced)');
+    expect(msg).toContain('2.1.207 (usage 90m old)');
+    expect(msg).toContain('NO_VERIFIED_USAGE');
+  });
+});
+
 describe('--strategy available applies the same freshness rule as balanced', () => {
   // The reviewer's catch: collectRunCandidates caps staleness for EVERY caller,
   // so `available` paid the new live-fetch cost while keeping the exact bug —

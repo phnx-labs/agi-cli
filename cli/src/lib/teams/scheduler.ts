@@ -67,6 +67,13 @@ export interface DevicePlacementSignal {
   signedIn?: boolean;
   /** Requested agent has at least one row the interactive account picker can launch. */
   pickerEligible?: boolean;
+  /**
+   * The box's OWN aggregate readiness reason when it has no ready account
+   * (`runReady.reason`, e.g. `all signed_out`), so the placement error names why
+   * the remote turned itself away rather than a bare "no ready harness account"
+   * (PHNX-4116). Undefined when ready or when the remote gave no reason.
+   */
+  reason?: string;
 }
 
 /** Team fields the placement cascade reads (a subset of TeamMeta). */

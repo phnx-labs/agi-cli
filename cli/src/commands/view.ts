@@ -86,10 +86,10 @@ import { selectUpdateStrategy } from '../lib/installations/strategies.js';
 import { isGitRepo, getGitSyncStatus } from '../lib/git.js';
 import { getCentralRulesFileName } from '../lib/rules/rules.js';
 import { composeRulesFromState, type ComposedSubrule } from '../lib/rules/compose.js';
-import { getConfiguredRunStrategy, isLaunchableSignedIn } from '../lib/accounting/rotate.js';
+import { getConfiguredRunStrategy, isLaunchableSignedIn, collectRunCandidates, readinessFromCandidate } from '../lib/accounting/rotate.js';
 import { resolveRunDefaults } from '../lib/run-defaults.js';
 import { resolveConfiguredModel, type ConfiguredModelSource } from '../lib/models.js';
-import type { ResourceItemJson, ResourceSection, SyncState, VersionResourcesJson, ViewJsonAgent, ViewJsonVersion } from '../lib/view-types.js';
+import type { ResourceItemJson, ResourceSection, SyncState, VersionResourcesJson, ViewJsonAgent, ViewJsonVersion, ViewJsonRunReady } from '../lib/view-types.js';
 export type { ResourceItemJson, ResourceSection, SyncState, VersionResourcesJson, ViewJsonAgent, ViewJsonVersion } from '../lib/view-types.js';
 import { listProfiles, profileExists, profileSummary, readProfile, type Profile, type ProfileSummary } from '../lib/profiles.js';
 import { getByokUsageForHarness, hasByokProvider, renderByokBar, type ByokUsageResult } from '../lib/byok-usage.js';
@@ -1469,6 +1469,35 @@ export function parseResourceSections(
 }
 
 /**
+ * The one run-readiness gate for one agent on THIS box (PHNX-4116). Runs the
+ * SAME enumeration the local router picks from — `collectRunCandidates` (native
+ * slots + version homes) through `readinessFromCandidate` — so the answer
+ * `agents view --json` publishes is exactly what a `run` here would find, and a
+ * remote `--device auto` dispatcher can read it instead of re-deriving freshness
+ * on its own box (which drifted: view.ts lists version homes, the router lists
+ * slots). Returns undefined when the agent has no candidates at all (nothing
+ * installed), so the field is simply absent rather than a misleading verdict.
+ */
+export async function computeAgentRunReady(agentId: AgentId): Promise<ViewJsonRunReady | undefined> {
+  const candidates = await collectRunCandidates(agentId);
+  if (candidates.length === 0) return undefined;
+  const accounts = candidates.map((c) => {
+    const readiness = readinessFromCandidate(c);
+    const name = c.nativeAccount || c.accountLabel || c.email || c.version;
+    return { name, ready: readiness.ready, reason: readiness.ready ? 'ready' : readiness.reason };
+  });
+  const readyAccount = accounts.find((a) => a.ready);
+  let reason: string;
+  if (readyAccount) {
+    reason = `ready (${readyAccount.name})`;
+  } else {
+    const reasons = [...new Set(accounts.map((a) => a.reason))];
+    reason = reasons.length === 1 ? `all ${reasons[0]}` : reasons.join(', ');
+  }
+  return { ready: !!readyAccount, reason, accounts };
+}
+
+/**
  * Collect structured info for one or more agents without rendering to the
  * terminal. Used by `--json` output and any programmatic consumer (e.g. the
  * agents-cli extension's "resume current session in best available version"
@@ -1609,6 +1638,17 @@ export async function collectAgentsJson(
   const catalog = await loadAccountCatalog();
   const note = secretsUnavailableNote(catalog);
   if (note) console.error(chalk.yellow(note)); // stderr — never corrupts --json stdout
+  // The one run-readiness gate per agent, computed off the router's own
+  // enumeration (PHNX-4116). Runs in parallel across agents; a harness with
+  // nothing installed yields undefined and the field is omitted.
+  const runReadyByAgent = new Map<AgentId, ViewJsonRunReady>();
+  await Promise.all(
+    agentsToShow.map(async (agentId) => {
+      const runReady = await computeAgentRunReady(agentId);
+      if (runReady) runReadyByAgent.set(agentId, runReady);
+    }),
+  );
+
   const out: ViewJsonAgent[] = [];
   for (const agentId of agentsToShow) {
     const versions = byAgent.get(agentId) ?? [];
@@ -1623,7 +1663,13 @@ export async function collectAgentsJson(
       catalog.provider.filter((row) => row.harnesses.includes(agentId)),
       agentId,
     ).accounts;
-    out.push({ agent: agentId, versions, accounts, harnesses: harnesses.filter((h) => h.agent === agentId) });
+    out.push({
+      agent: agentId,
+      versions,
+      accounts,
+      runReady: runReadyByAgent.get(agentId),
+      harnesses: harnesses.filter((h) => h.agent === agentId),
+    });
   }
   return out;
 }

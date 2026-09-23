@@ -48,186 +48,111 @@ describe('ReadyProbe.timedOut — timeout vs unreachable distinction', () => {
   });
 });
 
-describe('viewAgentSignedIn', () => {
-  const view = JSON.stringify([{ agent: 'codex', versions: [{ signedIn: false }, { signedIn: true }] }]);
-  it('reads the per-version sign-in split from agents view JSON', () => {
-    expect(viewAgentSignedIn(view, 'codex')).toBe(true);
-    expect(viewAgentSignedIn(view, 'claude')).toBeUndefined();
-    expect(viewAgentSignedIn('not json', 'codex')).toBeUndefined();
+// PHNX-4116: ONE readiness gate. The box that RUNS computes `runReady`
+// (`collectRunCandidates` → `readinessFromCandidate` over its native slots AND
+// version homes); the dispatcher READS that answer off `agents view --json` and
+// never re-derives freshness. These lock the placement seam
+// (`viewAgentAccountEligibility` reads `runReady`, the probe maps it into the
+// signal `resolveDeviceAuto` gates on).
+describe('viewAgentAccountEligibility / viewAgentSignedIn — one readiness gate (PHNX-4116)', () => {
+  const runReadyRow = (runReady: unknown, agent = 'claude') =>
+    JSON.stringify([{ agent, runReady }]);
+
+  it('reads runReady.ready as the sign-in gate; a ready box needs no reason', () => {
+    const view = runReadyRow({ ready: true, reason: 'ready (work)', accounts: [{ name: 'work', ready: true, reason: 'ready' }] });
+    expect(viewAgentSignedIn(view, 'claude')).toBe(true);
+    expect(viewAgentAccountEligibility(view, 'claude')).toEqual({ signedIn: true, pickerEligible: true });
   });
 
-  it('rejects signed-in versions that are capped', () => {
-    const view = JSON.stringify([{ agent: 'codex', versions: [
-      { signedIn: true, usageStatus: 'rate_limited' },
-      { signedIn: true, usageStatus: 'out_of_credits' },
-    ] }]);
-    expect(viewAgentSignedIn(view, 'codex')).toBe(false);
+  it('undefined for an unlisted agent or non-JSON', () => {
+    const view = runReadyRow({ ready: true, reason: 'ready (work)', accounts: [] });
+    expect(viewAgentSignedIn(view, 'codex')).toBeUndefined();
+    expect(viewAgentSignedIn('not json', 'claude')).toBeUndefined();
   });
 
-  it('keeps signed-out login targets picker-eligible but rejects throttled-only devices', () => {
-    const signedOut = JSON.stringify([{ agent: 'codex', versions: [
-      { signedIn: false, usageStatus: null },
-      { signedIn: true, usageStatus: 'rate_limited' },
-    ] }]);
-    const throttled = JSON.stringify([{ agent: 'codex', versions: [
-      { signedIn: true, usageStatus: 'rate_limited' },
-      { signedIn: true, usageStatus: 'out_of_credits' },
-    ] }]);
-    expect(viewAgentAccountEligibility(signedOut, 'codex')).toEqual({
-      signedIn: false,
-      pickerEligible: true,
-    });
-    expect(viewAgentAccountEligibility(throttled, 'codex')).toEqual({
-      signedIn: false,
-      pickerEligible: false,
-    });
-  });
-
-  it('keeps a remotely revoked credential picker-eligible without ranking it as ready', () => {
-    const view = JSON.stringify([{ agent: 'claude', versions: [
-      { signedIn: true, authVerdict: 'revoked', usageStatus: 'available' },
-    ] }]);
+  it('a signed_out-only box is not ready but stays picker-eligible (launching it IS the login flow) and surfaces its reason', () => {
+    const view = runReadyRow({ ready: false, reason: 'all signed_out', accounts: [{ name: 'work', ready: false, reason: 'signed_out' }] });
     expect(viewAgentAccountEligibility(view, 'claude')).toEqual({
       signedIn: false,
       pickerEligible: true,
+      reason: 'all signed_out',
     });
   });
 
-  it('treats stale usage as unverified, trusts only a fresh throttle or dead-auth verdict', () => {
-    const now = Date.parse('2026-09-04T12:00:00Z');
-    const stale = JSON.stringify([{ agent: 'claude', versions: [{
-      signedIn: true,
-      launchable: true,
-      authVerdict: 'live',
-      authCheckedAt: now - 21 * 60_000,
-      usageStatus: 'available',
-      usageCapturedAt: new Date(now - 41 * 60_000).toISOString(),
-    }] }]);
-    // Stale evidence is unverified, not disqualifying (PHNX-4116): the device
-    // stays placeable, and its stale throttle marker is not trusted either.
-    expect(viewAgentAccountEligibility(stale, 'claude', now)).toEqual({ signedIn: true, pickerEligible: true });
+  it('a revoked-only box stays picker-eligible — a re-login clears a revoked token', () => {
+    const view = runReadyRow({ ready: false, reason: 'all revoked', accounts: [{ name: 'work', ready: false, reason: 'revoked' }] });
+    expect(viewAgentAccountEligibility(view, 'claude')).toEqual({
+      signedIn: false,
+      pickerEligible: true,
+      reason: 'all revoked',
+    });
+  });
 
-    const staleThrottled = JSON.stringify([{ agent: 'claude', versions: [{
-      signedIn: true,
-      launchable: true,
-      authVerdict: 'live',
-      authCheckedAt: now - 60_000,
-      usageStatus: 'rate_limited',
-      usageCapturedAt: new Date(now - 41 * 60_000).toISOString(),
-    }] }]);
-    expect(viewAgentAccountEligibility(staleThrottled, 'claude', now)).toEqual({ signedIn: true, pickerEligible: true });
+  it('a throttled-only box is neither ready nor picker-eligible — a login cannot clear a rate limit', () => {
+    const view = runReadyRow({ ready: false, reason: 'all rate_limited', accounts: [{ name: 'work', ready: false, reason: 'rate_limited' }] });
+    expect(viewAgentAccountEligibility(view, 'claude')).toEqual({
+      signedIn: false,
+      pickerEligible: false,
+      reason: 'all rate_limited',
+    });
+  });
 
-    const freshThrottled = JSON.stringify([{ agent: 'claude', versions: [{
-      signedIn: true,
-      launchable: true,
-      authVerdict: 'live',
-      authCheckedAt: now - 60_000,
-      usageStatus: 'rate_limited',
-      usageCapturedAt: new Date(now - 60_000).toISOString(),
-    }] }]);
-    expect(viewAgentAccountEligibility(freshThrottled, 'claude', now)).toEqual({ signedIn: false, pickerEligible: false });
+  it('a mixed box (one throttled, one signed out) stays picker-eligible on the signed-out account', () => {
+    const view = runReadyRow({
+      ready: false,
+      reason: 'rate_limited, signed_out',
+      accounts: [
+        { name: 'a', ready: false, reason: 'rate_limited' },
+        { name: 'b', ready: false, reason: 'signed_out' },
+      ],
+    });
+    expect(viewAgentAccountEligibility(view, 'claude')).toEqual({
+      signedIn: false,
+      pickerEligible: true,
+      reason: 'rate_limited, signed_out',
+    });
+  });
 
-    const staleDeadAuth = JSON.stringify([{ agent: 'claude', versions: [{
-      signedIn: true,
-      launchable: true,
-      authVerdict: 'revoked',
-      authCheckedAt: now - 21 * 60_000,
-      usageStatus: 'available',
-      usageCapturedAt: new Date(now - 60_000).toISOString(),
-    }] }]);
-    // An expired dead verdict no longer blocks (fail-open, same as the local gate).
-    expect(viewAgentAccountEligibility(staleDeadAuth, 'claude', now)).toEqual({ signedIn: true, pickerEligible: true });
-
-    const fresh = JSON.stringify([{ agent: 'claude', versions: [{
-      signedIn: true,
-      launchable: true,
-      authVerdict: 'live',
-      authCheckedAt: now - 60_000,
-      usageStatus: 'available',
-      usageCapturedAt: new Date(now - 60_000).toISOString(),
-    }] }]);
-    expect(viewAgentAccountEligibility(fresh, 'claude', now)).toEqual({ signedIn: true, pickerEligible: true });
+  // The stale-usage / dead-auth re-derivation is GONE: the box that runs already
+  // decided, so a synced-only worker whose usage lags is never refused here — the
+  // fleet-wide usage-sync lag that read as "no ready device" while `--device
+  // <name>` launched fine (PHNX-4116). runReady.ready carries the verdict as-is.
+  it('trusts a ready verdict even with no per-version usage evidence (the synced-worker case)', () => {
+    const view = runReadyRow({ ready: true, reason: 'ready (work)', accounts: [{ name: 'work', ready: true, reason: 'ready' }] });
+    expect(viewAgentAccountEligibility(view, 'claude')).toEqual({ signedIn: true, pickerEligible: true });
   });
 });
 
-// PHNX-3466: `--device auto` remote placement must judge a box by the SAME strict
-// per-version launchability the LOCAL candidate uses (`collectRunCandidates` →
-// `isLaunchableSignedIn`), not the display `signedIn` that inherits the global
-// HOME login. The signal rides `agents view --json`'s new per-version `launchable`
-// field; these lock the placement seam (`viewAgentAccountEligibility` reads it,
-// `probeRemoteReadiness` maps it into the signal `resolveDeviceAuto` gates on).
-describe('viewAgentAccountEligibility — launchable gates remote placement (PHNX-3466)', () => {
-  it('EXCLUDES a version signed-in-but-not-launchable (inherits global login, empty version home)', () => {
-    // The exact bug: the version home has no per-version credential, so it only
-    // *inherits* the active/global HOME login. `signedIn` reads true (who is
-    // logged in) but the isolated launch dies at spawn — `launchable` is false.
-    const view = JSON.stringify([{ agent: 'claude', versions: [
-      { signedIn: true, launchable: false, usageStatus: 'available' },
-    ] }]);
-    expect(viewAgentAccountEligibility(view, 'claude')).toEqual({
-      // Not ready → excluded from the non-picker `--device auto` candidate set.
-      signedIn: false,
-      // Still picker-eligible: launching it IS the per-version login flow.
-      pickerEligible: true,
-    });
+// One-release fallback: an older remote CLI emits no `runReady`. signedIn = any
+// launchable version (`isLaunchableSignedIn`, PHNX-3466); pickerEligible is
+// permissive — the remote's own run path makes the finer call.
+describe('viewAgentAccountEligibility — older-CLI fallback without runReady (PHNX-4116)', () => {
+  it('signedIn = any launchable version; pickerEligible = true', () => {
+    const launchable = JSON.stringify([{ agent: 'claude', versions: [{ signedIn: true, launchable: true }] }]);
+    expect(viewAgentAccountEligibility(launchable, 'claude')).toEqual({ signedIn: true, pickerEligible: true });
+
+    const notLaunchable = JSON.stringify([{ agent: 'claude', versions: [{ signedIn: true, launchable: false }] }]);
+    expect(viewAgentAccountEligibility(notLaunchable, 'claude')).toEqual({ signedIn: false, pickerEligible: true });
   });
 
-  it('keeps a blind-but-launchable worker eligible (per-version credential, no usage snapshot — RUSH-2392)', () => {
-    // A worker box with a real per-version setup-token credential but whose usage
-    // endpoint 403s (no snapshot → usageStatus null). launchable is true, so it
-    // stays a valid placement target — the "unverified stays eligible" rule.
+  it('one launchable version carries the device even when a sibling only inherits the global login', () => {
     const view = JSON.stringify([{ agent: 'claude', versions: [
-      { signedIn: true, launchable: true, usageStatus: null },
+      { signedIn: true, launchable: false },
+      { signedIn: true, launchable: true },
     ] }]);
-    expect(viewAgentAccountEligibility(view, 'claude')).toEqual({
-      signedIn: true,
-      pickerEligible: true,
-    });
+    expect(viewAgentAccountEligibility(view, 'claude')).toEqual({ signedIn: true, pickerEligible: true });
   });
 
-  it('falls back to signedIn on an older remote CLI that omits launchable (no rolling-fleet regression)', () => {
-    // A remote CLI predating the field emits no `launchable`; the gate must read
-    // `signedIn` exactly as it did before — a signed-in version stays eligible.
-    const legacyView = JSON.stringify([{ agent: 'claude', versions: [
-      { signedIn: true, usageStatus: 'available' },
-    ] }]);
-    expect(viewAgentAccountEligibility(legacyView, 'claude')).toEqual({
-      signedIn: true,
-      pickerEligible: true,
-    });
-    // ...and a signed-out legacy version stays excluded-but-picker-eligible.
-    const legacyOut = JSON.stringify([{ agent: 'claude', versions: [{ signedIn: false }] }]);
-    expect(viewAgentAccountEligibility(legacyOut, 'claude')).toEqual({
-      signedIn: false,
-      pickerEligible: true,
-    });
+  it('falls back to signedIn for a CLI old enough to omit launchable too', () => {
+    const view = JSON.stringify([{ agent: 'codex', versions: [{ signedIn: false }, { signedIn: true }] }]);
+    expect(viewAgentSignedIn(view, 'codex')).toBe(true);
+    const out = JSON.stringify([{ agent: 'codex', versions: [{ signedIn: false }] }]);
+    expect(viewAgentAccountEligibility(out, 'codex')).toEqual({ signedIn: false, pickerEligible: true });
   });
 
-  it('a box whose only launchable version is throttled is neither ready nor picker-eligible', () => {
-    // launchable:true but rate_limited → not ready, and not picker-eligible
-    // (a login cannot clear a throttle — only a window reset). Matches the
-    // signed-in-but-capped semantics for the launchable signal.
-    const view = JSON.stringify([{ agent: 'claude', versions: [
-      { signedIn: true, launchable: true, usageStatus: 'rate_limited' },
-    ] }]);
-    expect(viewAgentAccountEligibility(view, 'claude')).toEqual({
-      signedIn: false,
-      pickerEligible: false,
-    });
-  });
-
-  it('one launchable version keeps the device eligible even when a sibling only inherits the global login', () => {
-    // Real multi-version box: v1 empty home (launchable:false), v2 real
-    // per-version login (launchable:true). The device can run claude, so it must
-    // stay eligible — the launchable version carries it.
-    const view = JSON.stringify([{ agent: 'claude', versions: [
-      { signedIn: true, launchable: false, usageStatus: 'available' },
-      { signedIn: true, launchable: true, usageStatus: 'available' },
-    ] }]);
-    expect(viewAgentAccountEligibility(view, 'claude')).toEqual({
-      signedIn: true,
-      pickerEligible: true,
-    });
+  it('undefined when the agent row carries neither runReady nor a boolean signedIn', () => {
+    const view = JSON.stringify([{ agent: 'claude', versions: [{}] }]);
+    expect(viewAgentAccountEligibility(view, 'claude')).toEqual({ signedIn: undefined, pickerEligible: undefined });
   });
 });
 

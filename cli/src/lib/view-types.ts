@@ -63,6 +63,30 @@ export interface ViewJsonVersion {
   resources?: VersionResourcesJson;
 }
 
+/**
+ * Whether a `run` on THIS box would find a launch-ready account for the agent,
+ * computed from the SAME enumeration the local router uses
+ * (`collectRunCandidates` → `readinessFromCandidate`), including native slots
+ * (`fromSlot`) — NOT the per-version `versions[]` list, which enumerates version
+ * homes and misses the account slots a run actually picks from (PHNX-4116). This
+ * is the one readiness gate: `agents run --device auto` reads THIS answer off
+ * `agents view --json` rather than re-deriving freshness on the dispatching box,
+ * so the box that runs and the box that dispatches can never disagree.
+ */
+export interface ViewJsonRunReady {
+  /** At least one account is launch-ready right now. */
+  ready: boolean;
+  /**
+   * When ready, names a ready account (`ready (work)`); when not, the aggregate
+   * exclusion reason the dispatcher surfaces (`all signed_out`, `no accounts`, or
+   * a comma list of distinct reasons).
+   */
+  reason: string;
+  /** Per-account verdict; `reason` is `'ready'` for a ready account, else the
+   *  `readinessFromCandidate` reason (`signed_out`/`revoked`/`rate_limited`/…). */
+  accounts: Array<{ name: string; ready: boolean; reason: string }>;
+}
+
 export interface ViewJsonAgent {
   agent: AgentId;
   versions: ViewJsonVersion[];
@@ -71,6 +95,11 @@ export interface ViewJsonAgent {
    * never the internal catalog row, so consumers (AGI EXT) read one shape.
    */
   accounts?: AccountListEntryJson[];
+  /**
+   * The one run-readiness gate for this agent on this box (PHNX-4116). Absent on
+   * an older remote CLI, whose readers fall back to per-version `launchable`.
+   */
+  runReady?: ViewJsonRunReady;
   harnesses: ProfileSummary[];
 }
 

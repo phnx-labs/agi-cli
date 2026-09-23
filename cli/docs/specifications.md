@@ -2960,6 +2960,17 @@ candidates MUST remain in `rotation.healthy` so bounded post-rejection failover
 account and refusing to FAIL OVER to it after a real 429 are different calls.
 A pool that is merely BLIND (no snapshot at all — GWT-E5c) is NOT stale and
 still draws a pick; `hasStaleUsage` requires a present, dated, windowed snapshot.
+A row whose `freshness.source` is `sync` is ALSO never stale, however old
+(D1, PHNX-4116): the box that holds it cannot refresh it — the account's poller
+lives on the headed device that published it — so its age is shown, never used
+to refuse. `hasStaleUsage` returns false for a synced row, so an all-synced pool
+takes a floor-weight pick (like a blind pool) and `rotationFailoverChain` handles
+a real 429; `formatNoVerifiedUsageError` labels a synced candidate as `synced` so
+it does not read as the culprit. This E5d refusal therefore keeps its meaning
+ONLY for a row captured on the box itself (`poll` / `statusline`), where a broken
+local poller is the failure it exists to catch. This is also what a worker's
+`runReady` on `agents view --json` reports as ready (GWT placement, hosts.md):
+usage age weights the pick, it never decides eligibility.
 
 **GWT-E6 — `--device` forwards actor env, refuses `--secrets`.**
 Given `agents run claude "..." --device workbox --secrets prod`; When the

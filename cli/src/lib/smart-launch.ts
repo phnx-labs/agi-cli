@@ -150,7 +150,10 @@ export function formatNoHealthyDeviceError(
       reason = signal.headroom === 'loaded'
         ? 'overloaded'
         : signal.installed !== true || signal.signedIn !== true
-          ? 'no ready harness account'
+          // Surface the box's OWN reason (`runReady.reason`, e.g. "all
+          // signed_out") when it gave one, rather than a bare "no ready harness
+          // account" that leaves the operator guessing (PHNX-4116).
+          ? `no ready harness account${signal.reason ? ` (${signal.reason})` : ''}`
           : 'ineligible';
     } else if (signal?.timedOut) {
       // A slow link is not an offline box. Saying "unreachable" here sent
