@@ -91,10 +91,12 @@ if (process.argv[2] === '__claude-statusline') {
   process.exit(await runClaudeStatusLine());
 }
 
-// Fleet usage-sync receiver: a headed peer pipes its identity-keyed usage rows to
-// stdin, we merge them newest-wins into this box's cache (PHNX-3392). Above the
-// bootstrap line for the same reason as __claude-statusline — no update check, no
-// detached sync fork, and nothing writes to stdout to corrupt the caller's view.
+// Fleet usage-sync receiver: a headed peer pipes its daemon-state envelope to
+// stdin; we store it as that peer's file, merge its usage rows newest-wins into
+// this box's cache, and with `--reply` print our own envelope back (PHNX-3392,
+// PHNX-4116). Above the bootstrap line for the same reason as
+// __claude-statusline — no update check, no detached sync fork, and without
+// `--reply` nothing writes to stdout to corrupt the ready probe's view.
 if (process.argv[2] === '__usage-ingest') {
   const { runUsageIngest } = await import('./lib/accounting/usage-ingest.js');
   process.exit(await runUsageIngest());
