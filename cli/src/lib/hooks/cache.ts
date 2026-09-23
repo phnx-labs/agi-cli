@@ -432,19 +432,6 @@ FAIL_CLOSED=${failClosed ? 1 : 0}
 
 mkdir -p "$CACHE_DIR" "$LOGS_DIR" "$PERF_DIR"
 
-# A source that is not on disk cannot be executed: bash exits 127, and every
-# harness treats anything but exit 2 as "allow". For a PreToolUse hook that
-# is a guard silently disabled, so it denies instead and names the repair.
-# Other shims keep their existing path (a cached hook still serves its cache).
-if [ "$FAIL_CLOSED" = 1 ] && [ ! -f "$SOURCE" ]; then
-  _TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  printf '{"ts":"%s","event":"hook.fire","hook":"%s","ms":0,"cache":"missing-source","exit":2}\\n' \\
-    "$_TS" "$HOOK_NAME" >>"$LOGS_DIR/events-$(date -u +%Y-%m-%d).jsonl" 2>/dev/null || true
-  printf '%s: hook source is missing (%s); refusing the tool call unchecked (fail-closed). Run: agents hooks sync\\n' \\
-    "$HOOK_NAME" "$SOURCE" >&2
-  exit 2
-fi
-
 # Resolve a real Python. On Windows, bare python3 is often a Microsoft Store
 # app-execution alias stub that prints to stderr and exits non-zero (0 bytes on
 # stdout) -- command -v finds it but it cannot run, which silently empties the
@@ -504,6 +491,30 @@ if [ -n "$MATCHES_JSON" ]; then
     printf '{"ts_ms":%s,"kind":"hook.fire","label":"%s","duration_ms":0,"cache":"skip","exit_code":0,"hostname":"%s"%s}\\n' \\
       "$_TS_MS" "$HOOK_NAME" "$_HOST" "$HOOK_EXTRA_JSON" >>"$PERF_SPOOL" 2>/dev/null || true
     exit 0
+  fi
+fi
+# A source that is not on disk cannot be executed: bash exits 127, and the
+# harnesses that share the exit-2 deny contract (Claude Code, Codex, Droid)
+# read anything else as "allow" -- a guard silently disabled. Deny instead and
+# name the repair, but only for a PreToolUse firing that the matches: gate
+# above let through: one shim serves every event a hook declares, so a
+# SessionStart or Stop leg of the same hook must not wedge a session, and a
+# fire the predicates would have skipped must not turn into a denial. Other
+# shims keep their existing path (a cached hook still serves its cache).
+if [ "$FAIL_CLOSED" = 1 ] && [ ! -f "$SOURCE" ]; then
+  _EVT="$(printf '%s' "$STDIN_PAYLOAD" | "$PY" -c 'import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    d = {}
+print(d.get("hook_event_name") or d.get("hookEventName") or "")' 2>/dev/null || true)"
+  if [ -z "$_EVT" ] || [ "$_EVT" = PreToolUse ]; then
+    _TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    printf '{"ts":"%s","event":"hook.fire","hook":"%s","ms":0,"cache":"missing-source","exit":2}\\n' \\
+      "$_TS" "$HOOK_NAME" >>"$LOGS_DIR/events-$(date -u +%Y-%m-%d).jsonl" 2>/dev/null || true
+    printf '%s: hook source is missing (%s); refusing the tool call unchecked (fail-closed). Run: agents hooks sync\\n' \\
+      "$HOOK_NAME" "$SOURCE" >&2
+    exit 2
   fi
 fi
 ${cache ? CACHE_TAIL : PASSTHROUGH_TAIL}

@@ -1807,8 +1807,14 @@ export function removeVersion(agent: AgentId, version: string): boolean {
 
   // The global hook shims embed one SOURCE path. When it pointed into this
   // version home every shimmed guard would exit 127 (allow) until a self-heal
-  // pass ran, and that pass needs a live daemon. Re-point them now.
-  repairManagedHookRuntimeArtifacts();
+  // pass ran, and that pass needs a live daemon. Re-point them now. Best
+  // effort: the removal itself already succeeded, and a repair failure on an
+  // unrelated harness's shim must not abort a bulk removal.
+  try {
+    repairManagedHookRuntimeArtifacts();
+  } catch (err) {
+    console.warn(`hook shim repair after removing ${agent}@${version} failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
 
   emit('version.remove', { agent, version });
   return true;

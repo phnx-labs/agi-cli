@@ -307,8 +307,8 @@ describe('generated shim — missing source', () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
-  function run(shim: string): { status: number | null; stderr: string } {
-    const res = spawnSync('bash', [shim], { input: JSON.stringify({ tool_name: 'Bash' }), encoding: 'utf-8' });
+  function run(shim: string, payload: Record<string, unknown> = { tool_name: 'Bash' }): { status: number | null; stderr: string } {
+    const res = spawnSync('bash', [shim], { input: JSON.stringify(payload), encoding: 'utf-8' });
     return { status: res.status, stderr: res.stderr };
   }
 
@@ -354,6 +354,32 @@ describe('generated shim — missing source', () => {
     expect(res.status).toBe(127);
     expect(res.stderr).not.toContain('fail-closed');
     expect(loggedExit()).toBe(127);
+  });
+
+  it.skipIf(process.platform === 'win32')('the matches: gate runs first: a fire the predicates skip is never a denial', () => {
+    const shim = generateHookShim({
+      name: 'scoped-guard',
+      scriptPath: path.join(tmp, 'not-here.sh'),
+      matches: { tool_name: 'Bash' },
+      failClosed: true,
+      paths,
+    });
+    const res = run(shim, { tool_name: 'Read', hook_event_name: 'PreToolUse' });
+    expect(res.status).toBe(0);
+    expect(res.stderr).not.toContain('fail-closed');
+  });
+
+  it.skipIf(process.platform === 'win32')('a non-PreToolUse firing of the same shim stays fail-open', () => {
+    const shim = generateHookShim({
+      name: 'two-event-hook',
+      scriptPath: path.join(tmp, 'not-here.sh'),
+      matches: { tool_name: 'Bash' },
+      failClosed: true,
+      paths,
+    });
+    const res = run(shim, { tool_name: 'Bash', hook_event_name: 'PostToolUse' });
+    expect(res.status).toBe(127);
+    expect(res.stderr).not.toContain('fail-closed');
   });
 
   it.skipIf(process.platform === 'win32')('a present source is untouched by the check', () => {
