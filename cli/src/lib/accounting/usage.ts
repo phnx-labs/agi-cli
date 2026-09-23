@@ -35,7 +35,7 @@ import {
 import { getCacheDir } from '../state.js';
 import type { AgentId } from '../types.js';
 import { mapBounded } from '../concurrency.js';
-import { atomicWriteFileSync, ensureLockTarget, withFileLock } from '../fs-atomic.js';
+import { atomicWriteFileSync, ensureLockTarget, withFileLock, withFileLockAsync } from '../fs-atomic.js';
 import { withRefreshLease } from '../refresh-coordinator.js';
 import { padToWidth } from '../session/width.js';
 
@@ -2536,7 +2536,9 @@ function parseCapturedAtMs(capturedAt: string | null | undefined): number | null
  * a fresher row another peer (or, on a headed receiver, the local status-line)
  * already wrote. An incoming row with no `capturedAt` cannot prove it is newer, so
  * it never displaces an existing timestamped row. Returns the count updated.
- * Locked + atomic like every other cache writer.
+ * Locked + atomic like every other cache writer, but through the ASYNC lock: it
+ * runs on the daemon's usage-sync tick once per peer reply (PHNX-4116), where
+ * the sync lock's `sleepSync` would freeze every other service under contention.
  *
  * Deliberately NOT role-gated on the receiver. "Consume only on worker/unmarked"
  * is a SENDER-side optimization (don't waste a push on a headed peer that reads
@@ -2546,10 +2548,10 @@ function parseCapturedAtMs(capturedAt: string | null | undefined): number | null
  * runs now shows a usage bar), so gating here on the receiver's own — laggier —
  * view of its role would only reject legitimate data.
  */
-export function ingestPeerClaudeUsageRows(
+export async function ingestPeerClaudeUsageRows(
   rows: Record<string, CachedUsageSnapshot>,
   cachePath = getClaudeUsageCachePath(),
-): number {
+): Promise<number> {
   const incoming = Object.entries(rows).filter(
     ([, row]) => row && Array.isArray(row.windows) && row.windows.length > 0,
   );
@@ -2557,7 +2559,7 @@ export function ingestPeerClaudeUsageRows(
   let merged = 0;
   try {
     ensureLockTarget(cachePath, '{}');
-    withFileLock(cachePath, () => {
+    await withFileLockAsync(cachePath, () => {
       const cache = readClaudeUsageCacheFile(cachePath);
       for (const [key, row] of incoming) {
         const prior = cache[key];

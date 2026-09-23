@@ -114,10 +114,10 @@ export async function runUsageIngest(argv: string[] = process.argv.slice(3)): Pr
       return 2;
     }
     if (payload.v === 1) {
-      ingestPeerClaudeUsageRows(payload.rows);
+      await ingestPeerClaudeUsageRows(payload.rows);
     } else {
       try {
-        applyPeerFleetState(payload.state);
+        await applyPeerFleetState(payload.state);
       } catch (err) {
         // A well-formed envelope we refuse (it names this device) is the
         // sender's mistake, not malformed input: say so on stderr and in the

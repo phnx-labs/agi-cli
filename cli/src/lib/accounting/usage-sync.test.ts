@@ -54,7 +54,7 @@ describe('usage sync envelope: headed box publishes, peer applies (real files, n
     expect(payload.state.device).toBe('zion');
     expect(payload.state.receivedAt).toBeUndefined();
 
-    const applied = applyPeerFleetState(payload.state, {
+    const applied = await applyPeerFleetState(payload.state, {
       userAgentsDir: worker, cachePath: workerCache, device: 'worker-a', receivedAt: 1_700_000_000_000,
     });
     expect(applied).toMatchObject({ merged: 1, receivedAt: 1_700_000_000_000 });
@@ -84,8 +84,8 @@ describe('usage sync envelope: headed box publishes, peer applies (real files, n
       envelopes.push(buildFleetStatePayload({ device, userAgentsDir: home }).state);
     }
     // The newer (desktop) envelope arrives first; the older laptop one must not displace it.
-    expect(applyPeerFleetState(envelopes[0], { userAgentsDir: worker, cachePath: workerCache, device: 'worker-a' }).merged).toBe(1);
-    expect(applyPeerFleetState(envelopes[1], { userAgentsDir: worker, cachePath: workerCache, device: 'worker-a' }).merged).toBe(0);
+    expect((await applyPeerFleetState(envelopes[0], { userAgentsDir: worker, cachePath: workerCache, device: 'worker-a' })).merged).toBe(1);
+    expect((await applyPeerFleetState(envelopes[1], { userAgentsDir: worker, cachePath: workerCache, device: 'worker-a' })).merged).toBe(0);
     expect(readClaudeUsageCache('claude:org=alpha', workerCache, new Date('2026-08-30T20:06:00.000Z'))?.windows[0].usedPercent).toBe(80);
     expect(readFleetSharedDeviceStates(worker).states.map((s) => s.device)).toEqual(['desktop', 'laptop']);
   });
@@ -102,13 +102,13 @@ describe('usage sync envelope: headed box publishes, peer applies (real files, n
     expect(buildFleetStatePayload({ device: 'zion', cachePath: cache, role: 'personal', usageOnly: true }).state.usage?.rows['claude:org=alpha'].windows[0].usedPercent).toBe(10);
   });
 
-  it('a partial (usage-only) envelope refreshes usage without erasing the peer\'s other fields', () => {
+  it('a partial (usage-only) envelope refreshes usage without erasing the peer\'s other fields', async () => {
     const root = tempDir();
-    applyPeerFleetState(
+    await applyPeerFleetState(
       { version: 1, device: 'zion', auth: { status: 'ready' }, usage: { rows: { 'claude:org=alpha': row('2026-08-30T20:00:00.000Z', 10) } } },
       { userAgentsDir: root, cachePath: path.join(root, 'c.json'), device: 'worker-a', receivedAt: 1 },
     );
-    applyPeerFleetState(
+    await applyPeerFleetState(
       { version: 1, device: 'zion', usage: { rows: { 'claude:org=alpha': row('2026-08-30T20:10:00.000Z', 55) } } },
       { userAgentsDir: root, cachePath: path.join(root, 'c.json'), device: 'worker-a', receivedAt: 2 },
     );
@@ -118,10 +118,10 @@ describe('usage sync envelope: headed box publishes, peer applies (real files, n
     expect(peer.usage?.rows['claude:org=alpha'].windows[0].usedPercent).toBe(55);
   });
 
-  it('refuses an envelope naming this device — the own file is never overwritten by a peer', () => {
+  it('refuses an envelope naming this device — the own file is never overwritten by a peer', async () => {
     const root = tempDir();
-    expect(() => applyPeerFleetState({ version: 1, device: 'worker-a' }, { userAgentsDir: root, device: 'worker-a' }))
-      .toThrow(/names this device/);
+    await expect(applyPeerFleetState({ version: 1, device: 'worker-a' }, { userAgentsDir: root, device: 'worker-a' }))
+      .rejects.toThrow(/names this device/);
     expect(fs.existsSync(path.join(root, 'devices'))).toBe(false);
   });
 
@@ -143,10 +143,10 @@ describe('usage sync envelope: headed box publishes, peer applies (real files, n
     expect(() => parseFleetStateReply('some noise')).toThrow(/no reply envelope/);
   });
 
-  it('readOwnFleetSharedDeviceState strips a stray receivedAt and yields a bare envelope for a never-published device', () => {
+  it('readOwnFleetSharedDeviceState strips a stray receivedAt and yields a bare envelope for a never-published device', async () => {
     const root = tempDir();
     expect(readOwnFleetSharedDeviceState('fresh', root)).toEqual({ version: 1, device: 'fresh' });
-    applyPeerFleetState({ version: 1, device: 'zion', auth: { status: 'ready' } }, { userAgentsDir: root, device: 'worker-a', receivedAt: 5 });
+    await applyPeerFleetState({ version: 1, device: 'zion', auth: { status: 'ready' } }, { userAgentsDir: root, device: 'worker-a', receivedAt: 5 });
     expect(readOwnFleetSharedDeviceState('zion', root)).toEqual({ version: 1, device: 'zion', auth: { status: 'ready' } });
   });
 });

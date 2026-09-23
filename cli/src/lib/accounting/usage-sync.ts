@@ -316,19 +316,21 @@ export interface ApplyPeerStateResult {
  * Take a peer's envelope in: store it as that peer's file (stamped `receivedAt`)
  * and merge its usage rows into this box's cache newest-wins. The same step runs
  * on both ends — the worker on the pushed envelope, the headed box on the reply.
+ * Both writes take their file lock asynchronously: this runs on the daemon tick
+ * once per peer, and a `sleepSync` lock there freezes every other service.
  */
-export function applyPeerFleetState(
+export async function applyPeerFleetState(
   state: FleetSharedDeviceState,
   options: ApplyPeerStateOptions = {},
-): ApplyPeerStateResult {
+): Promise<ApplyPeerStateResult> {
   const self = normalizeHost(options.device ?? machineId());
   if (normalizeHost(state.device) === self) {
     throw new Error(`peer envelope names this device (${state.device}); refusing to overwrite the own state file`);
   }
   const receivedAt = options.receivedAt ?? Date.now();
-  const write = storePeerFleetSharedDeviceState(state, options.userAgentsDir ?? getUserAgentsDir(), receivedAt);
+  const write = await storePeerFleetSharedDeviceState(state, options.userAgentsDir ?? getUserAgentsDir(), receivedAt);
   const merged = state.usage
-    ? ingestPeerClaudeUsageRows(stampSyncRows(state.usage.rows, state.device), options.cachePath)
+    ? await ingestPeerClaudeUsageRows(stampSyncRows(state.usage.rows, state.device), options.cachePath)
     : 0;
   return { path: write.path, merged, receivedAt };
 }
@@ -420,7 +422,7 @@ export async function exchangeFleetStateWithPeers(options: ExchangeOptions = {})
       if (normalizeHost(reply.state.device) !== normalizeHost(peer.name)) {
         throw new Error(`reply names device '${reply.state.device}', expected '${peer.name}'`);
       }
-      const applied = applyPeerFleetState(reply.state, {
+      const applied = await applyPeerFleetState(reply.state, {
         device,
         userAgentsDir: options.userAgentsDir,
         cachePath: options.cachePath,
