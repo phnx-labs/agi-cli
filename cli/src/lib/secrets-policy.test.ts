@@ -274,6 +274,13 @@ describe('peerPresentKeys', () => {
   it('keys presence by (harness, accountId), so a same-id account on another harness does not count', () => {
     expect(peerPresentKeys(accounts, [verdict({ accountId: 'a1', harness: 'grok', verdict: 'live' })]).__claude__).toBeUndefined();
   });
+  it('resolves a legacy pre-T1 claude row (bundle `auth`) through the same per-account verdict path', () => {
+    // Replaces the removed coarse `auth.status === 'ready'` presence signal: the
+    // legacy `auth` key now rides its account's own verdict like any T1 key.
+    expect(peerPresentKeys(accounts, [verdict({ accountId: 'l1', verdict: 'live' })]).auth).toEqual(new Set(['LK']));
+    expect(peerPresentKeys(accounts, [verdict({ accountId: 'l1', verdict: 'missing' })]).auth).toBeUndefined();
+    expect(peerPresentKeys(accounts, []).auth).toBeUndefined();
+  });
 });
 
 describe('reconcileLocalWorkerSlots', () => {

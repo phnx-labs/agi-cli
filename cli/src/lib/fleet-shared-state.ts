@@ -93,7 +93,7 @@ export interface FleetSharedDeviceState {
   /**
    * Epoch ms this box received the envelope from its owner over the SSH
    * exchange. Present ONLY in a peer's file on this box, never in a device's own
-   * file. `newestPeerReceivedAtMs` reads it as the exchange freshness signal.
+   * file. auth-sync reads it per peer to know that peer has replied at all.
    */
   receivedAt?: number;
 }
@@ -301,19 +301,4 @@ export function storePeerFleetSharedDeviceState(
   if (state.sessions !== undefined) patch.sessions = state.sessions;
   if (state.accounts !== undefined) patch.accounts = state.accounts;
   return updateFleetSharedDeviceState(state.device, patch, userAgentsDir);
-}
-
-/**
- * Epoch ms of the most recent peer envelope this box received over the exchange,
- * or `null` when no peer has ever answered (or pushed to) this box. On a headed
- * publisher this is the last reply it collected; on a worker, the last push a
- * headed box delivered. Per-peer values sit in each file's `receivedAt`.
- */
-export function newestPeerReceivedAtMs(userAgentsDir = getUserAgentsDir()): number | null {
-  let newest: number | null = null;
-  for (const state of readFleetSharedDeviceStates(userAgentsDir).states) {
-    if (typeof state.receivedAt !== 'number') continue;
-    if (newest === null || state.receivedAt > newest) newest = state.receivedAt;
-  }
-  return newest;
 }

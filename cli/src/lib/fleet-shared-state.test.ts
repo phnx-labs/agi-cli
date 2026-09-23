@@ -5,7 +5,6 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   FLEET_SHARED_STATE_FILE,
-  newestPeerReceivedAtMs,
   readFleetSharedDeviceStates,
   storePeerFleetSharedDeviceState,
   updateFleetSharedDeviceState,
@@ -113,9 +112,8 @@ describe('fleet shared daemon state (real files)', () => {
 });
 
 describe('peer envelopes received over the exchange (PHNX-4116)', () => {
-  it('stores a peer envelope stamped receivedAt, merges field-by-field, and reports the newest stamp', () => {
+  it('stores a peer envelope stamped receivedAt and merges field-by-field', () => {
     const root = tempStore();
-    expect(newestPeerReceivedAtMs(root)).toBeNull();
     const first = storePeerFleetSharedDeviceState(
       { version: 1, device: 'peer-b', auth: { status: 'ready' }, accounts: { rows: [{ accountId: 'x' }] } },
       root,
@@ -135,7 +133,6 @@ describe('peer envelopes received over the exchange (PHNX-4116)', () => {
       receivedAt: 2_000,
     });
     expect(byDevice['peer-c'].receivedAt).toBe(1_500);
-    expect(newestPeerReceivedAtMs(root)).toBe(2_000);
     // An unchanged re-store at the same stamp is a no-op write.
     expect(storePeerFleetSharedDeviceState({ version: 1, device: 'peer-c' }, root, 1_500).changed).toBe(false);
   });

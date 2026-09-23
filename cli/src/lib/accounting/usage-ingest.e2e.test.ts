@@ -6,7 +6,7 @@ import * as path from 'path';
 
 import type { DeviceProfile } from '../devices/registry.js';
 import { REMOTE_STDOUT_MAX_BYTES, type SshExecResult } from '../ssh-exec.js';
-import { readFleetSharedDeviceStates, newestPeerReceivedAtMs } from '../fleet-shared-state.js';
+import { readFleetSharedDeviceStates } from '../fleet-shared-state.js';
 import {
   exchangeFleetStateWithPeers,
   FLEET_STATE_REPLY_MARKER,
@@ -269,7 +269,6 @@ describe('usage-sync exchange: headed box dials peers over ssh, each answered by
     const peerB = onHeaded.find((s) => s.device === 'peer-b')!;
     expect(peerB.auth).toEqual({ status: 'missing' });
     expect(peerB.receivedAt).toBe(byDevice['peer-b'].receivedAt);
-    expect(newestPeerReceivedAtMs(headedRoot)).toBe(byDevice['peer-b'].receivedAt);
     // The headed box's own file never carries a receivedAt.
     expect(onHeaded.find((s) => s.device === 'headed-a')!.receivedAt).toBeUndefined();
   });
@@ -291,14 +290,13 @@ describe('usage-sync exchange: headed box dials peers over ssh, each answered by
       .toEqual({ skipped: 'no dialable peer in the device registry', outcomes: [] });
   });
 
-  it('newestPeerReceivedAtMs reads the newest peer receivedAt the exchange stamped', () => {
+  it('the __usage-ingest verb stamps receivedAt on the stored peer envelope', () => {
     // Per-peer `receivedAt` is what auth-sync now reads first-hand (PHNX-4116 PR 5,
-    // replacing the fleet-wide freshness gate); pinned here via the real HOME the
-    // ingest verb writes under so the stamped reader is exercised end to end.
+    // replacing the fleet-wide freshness gate); the ingest verb is what stamps it,
+    // pinned here through the real HOME switch the verb writes under.
     const peerHome = home('usage-exchange-marker-');
     expect(run(peerHome, JSON.stringify(envelope('zion', 12)), [], 'peer-b').status).toBe(0);
     const stamped = readFleetSharedDeviceStates(path.join(peerHome, '.agents')).states[0].receivedAt;
     expect(typeof stamped).toBe('number');
-    expect(newestPeerReceivedAtMs(path.join(peerHome, '.agents'))).toBe(stamped);
   });
 });
