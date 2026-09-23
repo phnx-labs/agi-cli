@@ -123,10 +123,34 @@ describe('summarizeQuota', () => {
     expect(q.usedPercent).toBe(99);
   });
 
+  // #3705: status and usedPercent must read from the SAME live windows. A 100%
+  // window whose reset already passed has rolled over — its usedPercent is the
+  // PREVIOUS period, so it must not colour the displayed percentage while the
+  // status (from `deriveUsageStatusFromSnapshot`) reads `available`.
+  it('a 100% window past its reset yields available status and a percent not from that window', () => {
+    const rolledOver: UsageWindow = {
+      key: 'week', label: 'week', shortLabel: 'week',
+      usedPercent: 100, resetsAt: new Date(Date.now() - 60_000), windowMinutes: null,
+    };
+    // With a live sibling window, the percent comes from the live one, never the
+    // rolled-over 100%.
+    const withLive = summarizeQuota(snapshot([rolledOver, win('session', 20)]), null, 'available');
+    expect(withLive.status).toBe('available');
+    expect(withLive.usedPercent).toBe(20);
+
+    // With only the rolled-over window, there is no live utilization to show at all.
+    const onlyRolled = summarizeQuota(snapshot([rolledOver]), null, 'available');
+    expect(onlyRolled.status).toBe('available');
+    expect(onlyRolled.usedPercent).toBe(0);
+  });
+
   it('exposes verdict, capture time, earliest reset, and no unavailable reason', () => {
-    const capturedAt = new Date('2026-08-10T10:00:00.000Z');
-    const later = new Date('2026-08-11T10:00:00.000Z');
-    const earlier = new Date('2026-08-10T12:00:00.000Z');
+    // The reset times must be LIVE (in the future) — a window past its reset is
+    // rolled over and dropped from both the status and the projected resetsAt
+    // (#3705), so a past reset would no longer surface as the account's reset.
+    const capturedAt = new Date(Date.now() - 60_000);
+    const later = new Date(Date.now() + 2 * 3600_000);
+    const earlier = new Date(Date.now() + 3600_000);
     const snap = snapshot([
       { ...win('session', 20), resetsAt: later },
       { ...win('week', 40), resetsAt: earlier },
