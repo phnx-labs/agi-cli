@@ -5,9 +5,10 @@
  * used to render as a bare `[host/<peer>]` row with no topic, and its preview
  * pane fetched the peer's digest LIVE over SSH per row — slow, and blank when
  * the peer is asleep. This module mirrors each box's own session digests into
- * its conflict-free `~/.agents/devices/<device>/daemon-state.json`, which the
- * daemon's existing bounded Git transport (`fleet-shared-repo-sync.ts`) already
- * delivers fleet-wide with no operator step. The consuming device folds peer
+ * its own `~/.agents/devices/<device>/daemon-state.json`, which the usage-sync
+ * SSH exchange (`accounting/usage-sync.ts`, PHNX-4116) carries to every peer:
+ * a headed box's tick sends its envelope and stores each peer's reply, so both
+ * directions land with no operator step and nothing rides the user repo. The consuming device folds peer
  * digests into its local `sessions` index as mirror rows, so the picker/list/
  * focus read a LOCAL row instead of dialing the peer. No transcript is shipped —
  * only topic/label, the peer's daemon-generated title (PHNX-3797), a

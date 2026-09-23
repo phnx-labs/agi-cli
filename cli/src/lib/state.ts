@@ -961,18 +961,6 @@ function writeIfChanged(filePath: string, content: string): boolean {
 }
 
 /**
- * True in the always-on daemon process (launched as `agents __daemon-run`,
- * see cli/src/index.ts). The daemon owns central git commits through
- * fleet-shared-repo-sync's publish tick, so a central write from inside the
- * daemon must NOT also commit here — that would race the publisher's own
- * add/commit/rebase/push on the same index. Every ordinary CLI invocation
- * returns false and commits its own central edit synchronously.
- */
-function isDaemonProcess(): boolean {
-  return process.argv[2] === '__daemon-run';
-}
-
-/**
  * Commit the central `agents.yaml` in the user repo, synchronously, so a CLI
  * config mutation never leaves the working tree dirty on that one shared-line
  * file at rest.
@@ -989,8 +977,11 @@ function isDaemonProcess(): boolean {
  * never run inside the short, non-heartbeated lockfile window; the user repo
  * already pushes.
  *
- * Scoped tightly: only called when the central bytes actually changed, and never
- * from the daemon (see {@link isDaemonProcess}). A commit failure fails open —
+ * Scoped tightly: only called when the central bytes actually changed — from a
+ * CLI command and from the daemon alike, since no daemon tick commits the user
+ * repo any more (the shared-state exchange moved to SSH, PHNX-4116), so a
+ * daemon-side central write would otherwise sit dirty until the next CLI
+ * central edit. A commit failure fails open —
  * a concurrent daemon holding `index.lock`, a mid-rebase repo — leaving
  * agents.yaml dirty; the next successful central write commits it, and until
  * then a pull that would collide refuses rather than losing data. A config
@@ -1768,13 +1759,10 @@ export function updateMeta(updates: Partial<Meta> | ((meta: Meta) => Meta)): Met
  * A CLI command that actually moved the fleet-shared central agents.yaml commits
  * it so the tree is never left dirty on that file at rest — the window that
  * trips `dirtyTreeRefusal` and wedges pulls fleet-wide (PHNX-3968). Gated on a
- * real byte change and never run in the daemon, whose publish tick owns central
- * commits. See {@link commitCentralConfig}.
+ * real byte change. See {@link commitCentralConfig}.
  */
 export function commitCentralConfigAfterWrite(centralChanged: boolean): void {
-  if (centralChanged && !isDaemonProcess()) {
-    commitCentralConfig(USER_AGENTS_DIR);
-  }
+  if (centralChanged) commitCentralConfig(USER_AGENTS_DIR);
 }
 
 /** Derive a filesystem-safe local clone path for a package source URL. */

@@ -100,31 +100,13 @@ function syncMarketplacesForDefaults(): void {
   }
 }
 
-/** Write this device's account metadata before the user repo is committed. */
-async function publishUserRepoAccountState(provisionAuth: boolean): Promise<void> {
-  const { publishUsageSnapshotToSharedStore } = await import('../lib/accounting/usage-sync.js');
-  const usage = await publishUsageSnapshotToSharedStore();
-  if (usage.error) console.error(chalk.yellow(`Usage snapshot: ${usage.error}`));
-
-  if (provisionAuth) {
-    const { syncReservedAuthBundle } = await import('../lib/secrets-policy.js');
-    const auth = await syncReservedAuthBundle();
-    if (auth.pushed.length > 0) console.log(chalk.gray(`Auth bundle: pushed to ${auth.pushed.join(', ')}`));
-    for (const err of auth.errors) console.error(chalk.yellow(`Auth bundle: ${err.device}: ${err.message}`));
-    return;
-  }
-  const { publishReservedAuthVerdict } = await import('../lib/secrets-policy.js');
-  const auth = await publishReservedAuthVerdict();
-  if (auth.error) console.error(chalk.yellow(`Auth verdict: ${auth.device}: ${auth.error}`));
-}
-
-/** Consume freshly pulled usage/auth metadata from the local user-repo checkout. */
-async function consumeUserRepoAccountState(): Promise<void> {
-  const { consumeUsageSnapshotsFromSharedStore } = await import('../lib/accounting/usage-sync.js');
-  const usage = consumeUsageSnapshotsFromSharedStore();
-  if (usage.merged > 0) console.log(chalk.gray(`Usage snapshot: merged ${usage.merged} row(s) from ${usage.sources.join(', ')}`));
-  for (const err of usage.errors) console.error(chalk.yellow(`Usage snapshot: ${err.device}: ${err.message}`));
-
+/**
+ * Push the reserved auth bundle to peers whose last-received verdict says
+ * `missing`. Daemon state (usage, verdicts, session digests) no longer rides the
+ * user repo — it moves over SSH on the usage-sync tick (PHNX-4116) — so a repo
+ * push/sync of human-authored resources only runs this credential half.
+ */
+async function syncUserRepoAuthBundle(): Promise<void> {
   const { syncReservedAuthBundle } = await import('../lib/secrets-policy.js');
   const auth = await syncReservedAuthBundle();
   if (auth.pushed.length > 0) console.log(chalk.gray(`Auth bundle: pushed to ${auth.pushed.join(', ')}`));
@@ -1255,7 +1237,7 @@ export function registerRepoCommands(program: Command): void {
           result.unresolved.length ? `${result.unresolved.length} approved but unavailable` : null,
         ].filter(Boolean);
         if (parts.length > 0) console.log(chalk.gray(`Device policy: ${parts.join(' · ')}`));
-        await consumeUserRepoAccountState();
+        await syncUserRepoAuthBundle();
       }
     });
 
@@ -1292,9 +1274,7 @@ export function registerRepoCommands(program: Command): void {
         return;
       }
       for (const t of pushable) {
-        // Account snapshots must exist BEFORE commitAndPush or this push ships
-        // the previous tick's state and delays propagation by one repo cycle.
-        if (t.alias === 'user') await publishUserRepoAccountState(true);
+        if (t.alias === 'user') await syncUserRepoAuthBundle();
         const spinner = interruptibleSpinner(`Pushing ${formatRepoTarget(t.alias, t.dir)}...`).start();
         const result = await commitAndPush(t.dir, options.message);
         if (result.success) {
@@ -1363,22 +1343,10 @@ Examples:
           }
         }
         const push = t.alias !== 'system';
-        // syncRepoGit pulls then pushes. Seed our conflict-free owner file first
-        // so the same transaction carries it; consume peers after the pull.
-        if (t.alias === 'user') await publishUserRepoAccountState(false);
+        // A plain pull/rebase (+ push) of human-authored resources for every
+        // alias, the user repo included: daemon state left git (PHNX-4116).
         const spinner = interruptibleSpinner(`Syncing ${formatRepoTarget(t.alias, t.dir)}...`).start();
-        const result = t.alias === 'user'
-          ? await (async () => {
-              const { syncFleetSharedStateRepo } = await import('../lib/fleet-shared-repo-sync.js');
-              const synced = await syncFleetSharedStateRepo({ userAgentsDir: t.dir });
-              return {
-                success: synced.success,
-                commit: synced.commit ?? '',
-                pushed: synced.pushed,
-                error: synced.error ?? synced.skipped ?? undefined,
-              };
-            })()
-          : await syncRepoGit(t.dir, { push });
+        const result = await syncRepoGit(t.dir, { push });
         if (result.success) {
           const pushed = result.pushed ? ' (pushed)' : '';
           spinner.succeed(`${formatRepoTarget(t.alias, t.dir)}: ${result.commit}${pushed}`);
@@ -1387,7 +1355,7 @@ Examples:
             if (u) recordUserRepoRemote(t.dir, u);
             const { reconcileDeviceDiscoveryPolicies } = await import('../lib/devices/discovery-policy.js');
             await reconcileDeviceDiscoveryPolicies();
-            await consumeUserRepoAccountState();
+            await syncUserRepoAuthBundle();
           }
         } else {
           spinner.fail(`${formatRepoTarget(t.alias, t.dir)}: ${result.error}`);
