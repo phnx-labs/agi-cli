@@ -1,5 +1,5 @@
 /**
- * Daemon self-heal: heartbeat, wedged detection, path guard, pid-reuse safety.
+ * Daemon self-heal: heartbeat, path guard, pid-reuse safety.
  * RUSH-1669 / RUSH-1670 / RUSH-1672 / RUSH-1673.
  */
 
@@ -12,7 +12,6 @@ import {
   writeHeartbeat,
   readHeartbeat,
   removeHeartbeat,
-  isDaemonWedged,
   isDaemonRunning,
   claimDaemonInstance,
   writeDaemonPid,
@@ -79,38 +78,6 @@ describe('heartbeat read/write', () => {
   });
 });
 
-describe('isDaemonWedged', () => {
-  let priorPid: number | null;
-  beforeEach(() => { priorPid = readDaemonPid(); });
-  afterEach(() => {
-    removeHeartbeat();
-    if (priorPid === null) removeDaemonPid();
-    else writeDaemonPid(priorPid);
-  });
-
-  it('returns false when daemon is not running', () => {
-    removeDaemonPid();
-    expect(isDaemonWedged()).toBe(false);
-  });
-
-  it('returns false when heartbeat is fresh (pid alive + recent tick)', async () => {
-    const daemon = await spawnDaemonStandIn();
-    writeDaemonPid(daemon.pid!);
-    writeHeartbeat(daemon.pid!);
-    expect(isDaemonWedged()).toBe(false);
-  });
-
-  it('returns true when heartbeat is stale (pid alive but tick > 3 minutes old)', async () => {
-    const daemon = await spawnDaemonStandIn();
-    writeDaemonPid(daemon.pid!);
-    const stale = new Date(Date.now() - 4 * 60_000).toISOString();
-    const hbPath = path.join(getDaemonDir(), 'heartbeat.json');
-    fs.mkdirSync(path.dirname(hbPath), { recursive: true });
-    fs.writeFileSync(hbPath, JSON.stringify({ lastTick: stale, pid: daemon.pid }));
-    expect(isDaemonWedged()).toBe(true);
-  });
-});
-
 describe('getDaemonStatus', () => {
   let priorPid: number | null;
   beforeEach(() => { priorPid = readDaemonPid(); });
@@ -136,15 +103,18 @@ describe('getDaemonStatus', () => {
     expect(s.binaryPath).toBeTruthy();
   });
 
-  it('reports wedged when heartbeat is stale', async () => {
-    const daemon = await spawnDaemonStandIn();
-    writeDaemonPid(daemon.pid!);
+  // There is no `wedged` state (PHNX-4116): a stalled daemon exits for a
+  // supervised systemd/launchd restart rather than sitting unresponsive, so a
+  // stale heartbeat on a pid that no longer passes the liveness check reads as
+  // `stopped`, not a distinct `wedged`.
+  it('reports stopped, never a wedged state, when the heartbeat is stale and the pid is not a live daemon', async () => {
     const stale = new Date(Date.now() - 4 * 60_000).toISOString();
     const hbPath = path.join(getDaemonDir(), 'heartbeat.json');
     fs.mkdirSync(path.dirname(hbPath), { recursive: true });
-    fs.writeFileSync(hbPath, JSON.stringify({ lastTick: stale, pid: daemon.pid }));
+    fs.writeFileSync(hbPath, JSON.stringify({ lastTick: stale, pid: 999_999 }));
+    writeDaemonPid(999_999); // not a live process
     const s = getDaemonStatus();
-    expect(s.state).toBe('wedged');
+    expect(s.state).toBe('stopped');
   });
 });
 

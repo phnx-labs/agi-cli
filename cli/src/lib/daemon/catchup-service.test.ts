@@ -1,8 +1,8 @@
 /**
- * CatchupService (PHNX-3608): catch-up recovery under the ServiceSupervisor with
- * a real per-tick deadline + AbortSignal + circuit breaker, replacing the bare
- * `setInterval` the daemon used to boot/stop alongside the scheduler. Driven
- * through the real supervisor so the deadline/abort/park path is exercised.
+ * CatchupService (PHNX-3608, PHNX-4116): catch-up recovery under the
+ * ServiceSupervisor with a real per-tick deadline + AbortSignal, replacing the
+ * bare `setInterval` the daemon used to boot/stop alongside the scheduler. Driven
+ * through the real supervisor so the deadline/abort/exit-on-breach path is exercised.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
@@ -51,30 +51,26 @@ describe('CatchupService', () => {
     await supervisor.stopAll();
   });
 
-  it('a hung pass is abandoned at the deadline and restarted on backoff (PHNX-3608)', async () => {
-    let hang = true;
-    const runPass = vi.fn(async () => { if (hang) return new Promise<void>(() => {}); });
-    const supervisor = new ServiceSupervisor({ backoffBaseMs: 5_000 });
+  it('a hung pass breaches its deadline and exits the daemon for a supervised restart (PHNX-4116)', async () => {
+    const exit = vi.fn();
+    const runPass = vi.fn(async () => new Promise<void>(() => {})); // never settles
+    const supervisor = new ServiceSupervisor({ exit: exit as unknown as (code: number) => never });
     supervisor.register(new CatchupService({ isSchedulerBooted: () => true, runPass }));
 
     await supervisor.startAll(makeCtx());
     await vi.advanceTimersByTimeAsync(0); // first pass hangs
     expect(runPass).toHaveBeenCalledTimes(1);
 
-    // The 4-minute deadline elapses -> parked, not latched forever.
+    // The 4-minute deadline elapses -> the supervisor exits for an OS restart,
+    // rather than latching or parking forever.
     await vi.advanceTimersByTimeAsync(4 * 60_000);
-    expect(supervisor.health()['catchup'].state).toBe('parked');
-
-    // Heal and let the backoff restart fire: the pass runs again.
-    hang = false;
-    await vi.advanceTimersByTimeAsync(5_000);
-    expect(supervisor.health()['catchup'].state).toBe('running');
-    expect(runPass.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(exit).toHaveBeenCalledWith(70);
 
     await supervisor.stopAll();
   });
 
   it('passes an AbortSignal that aborts at the deadline', async () => {
+    const exit = vi.fn();
     let seen: AbortSignal | undefined;
     const runPass = vi.fn(async (signal: AbortSignal) => {
       seen = signal;
@@ -83,7 +79,7 @@ describe('CatchupService', () => {
         signal.addEventListener('abort', () => resolve(), { once: true });
       });
     });
-    const supervisor = new ServiceSupervisor({ backoffBaseMs: 60_000 });
+    const supervisor = new ServiceSupervisor({ exit: exit as unknown as (code: number) => never });
     supervisor.register(new CatchupService({ isSchedulerBooted: () => true, runPass }));
 
     await supervisor.startAll(makeCtx());
@@ -91,8 +87,9 @@ describe('CatchupService', () => {
     expect(seen).toBeDefined();
     expect(seen!.aborted).toBe(false);
 
-    await vi.advanceTimersByTimeAsync(4 * 60_000); // deadline aborts the tick's signal
+    await vi.advanceTimersByTimeAsync(4 * 60_000); // deadline aborts the tick's signal, then exits
     expect(seen!.aborted).toBe(true);
+    expect(exit).toHaveBeenCalledWith(70);
 
     await supervisor.stopAll();
   });
