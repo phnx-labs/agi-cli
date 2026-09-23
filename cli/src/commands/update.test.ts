@@ -88,6 +88,13 @@ describe('agents update', () => {
     await expectFailure(['update', 'notanagent'], /notanagent/);
   });
 
+  it('takes the run-style <agent>#<account> selector and names an unknown account, not the agent (PHNX-4116)', async () => {
+    // `agents update claude#work` used to die with "Unknown agent 'claude#work'"
+    // while `agents run claude#work` accepted the same selector.
+    await expectFailure(['update', 'claude#work'], /Unknown Claude account 'work'.*agents accounts list claude/);
+    await expectFailure(['update', 'claude#'], /Select an account after #/);
+  });
+
   it('rejects a bare @ with no installation', async () => {
     await expectFailure(['update', 'claude@'], /Missing installation/);
   });
