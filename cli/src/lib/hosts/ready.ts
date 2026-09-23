@@ -14,8 +14,6 @@ import type { Host } from './types.js';
 import { hostIdentityArgs, sshTargetFor } from './types.js';
 import { remoteShellFor, buildWindowsAgentsCommand, encodePowershell, powershellQuote, POWERSHELL_PROGRESS_SILENCE } from './remote-cmd.js';
 import { resolveRemoteOsSync } from './remote-os.js';
-import { AUTH_PROBE_MAX_AGE_MS, isDeadVerdict, type AuthVerdict } from '../auth-health.js';
-import { USAGE_STALE_REFUSAL_MAX_AGE_MS } from '../accounting/rotate.js';
 
 /** Resolve this CLI's own version by walking up to the nearest package.json. */
 export function localCliVersion(): string | null {
@@ -250,6 +248,12 @@ interface ViewAgentAccountEligibility {
   signedIn: boolean | undefined;
   /** At least one account can launch immediately or enter the harness login flow. */
   pickerEligible: boolean | undefined;
+  /**
+   * The remote box's own aggregate exclusion reason when it is not signed in
+   * (`runReady.reason` — e.g. `all signed_out`), for the operator-facing
+   * placement error. Undefined when ready, absent, or on an older remote CLI.
+   */
+  reason?: string;
 }
 
 /**
@@ -258,61 +262,57 @@ interface ViewAgentAccountEligibility {
  * the login flow, but it must not route to a device whose every signed-in
  * account is throttled.
  *
- * The sign-in gate reads the per-version `launchable` field — the strict
- * per-version launch truth (`isLaunchableSignedIn`) — so a remote box is judged
- * by the SAME launchability the local candidate uses (`collectRunCandidates` →
- * `isLaunchableSignedIn`), not the display `signedIn` that inherits the
- * active/global HOME login and passes a box that dies at spawn (PHNX-3466). An
- * older remote CLI omits `launchable`, so it falls back to `signedIn` — the
- * pre-fix behavior, so a rolling fleet does not regress.
+ * ONE readiness gate, computed on the box that runs (PHNX-4116). The remote box
+ * publishes `runReady` — the router's own `collectRunCandidates` →
+ * `readinessFromCandidate` verdict over its native slots AND version homes — so
+ * this reads that answer rather than re-deriving freshness here. The
+ * dispatching box re-deriving from the per-version `versions[]` list was the bug:
+ * that list enumerates version homes, misses the account slots a run picks from,
+ * and applied a 40-minute usage-freshness refusal a synced-only worker could
+ * never satisfy, turning a usage-sync lag into "no ready device" while
+ * `--device <name>` on the same box launched fine.
+ *
+ * An older remote CLI omits `runReady`; the one-release fallback trusts the
+ * strict per-version `launchable` signal (`isLaunchableSignedIn`, PHNX-3466) for
+ * sign-in and leaves the finer picker decision to the remote's own run path.
  */
-export function viewAgentAccountEligibility(view: string, agent: string, now: number = Date.now()): ViewAgentAccountEligibility {
+export function viewAgentAccountEligibility(view: string, agent: string): ViewAgentAccountEligibility {
   try {
     const rows = JSON.parse(view) as Array<{
       agent?: string;
-      versions?: Array<{
-        signedIn?: boolean;
-        launchable?: boolean;
-        authVerdict?: AuthVerdict | null;
-        authCheckedAt?: number | null;
-        usageStatus?: 'available' | 'rate_limited' | 'out_of_credits' | null;
-        usageCapturedAt?: string | null;
-      }>;
+      runReady?: {
+        ready?: boolean;
+        reason?: string;
+        accounts?: Array<{ ready?: boolean; reason?: string }>;
+      };
+      versions?: Array<{ signedIn?: boolean; launchable?: boolean }>;
     }>;
     const row = rows.find((candidate) => candidate.agent?.toLowerCase() === agent.toLowerCase());
     if (!row) return { signedIn: undefined, pickerEligible: undefined };
-    const verdicts = (row.versions ?? []).flatMap((version) => {
+
+    const runReady = row.runReady;
+    if (runReady && typeof runReady.ready === 'boolean') {
+      // A signed-out / revoked account is picker-eligible even when not ready —
+      // launching it IS the login flow. A throttled account is not.
+      const accounts = runReady.accounts ?? [];
+      const pickerEligible = runReady.ready
+        || accounts.some((a) => a.reason === 'signed_out' || a.reason === 'revoked');
+      return {
+        signedIn: runReady.ready,
+        pickerEligible,
+        reason: runReady.ready ? undefined : runReady.reason,
+      };
+    }
+
+    // One-release fallback for an older remote CLI without `runReady`.
+    const launchables = (row.versions ?? []).flatMap((version) => {
       if (typeof version.signedIn !== 'boolean') return [];
       // Prefer the strict per-version launch signal; fall back to the display
-      // `signedIn` for an older remote CLI that does not emit `launchable`.
-      const launchable = typeof version.launchable === 'boolean' ? version.launchable : version.signedIn;
-      const usageCapturedAt = version.usageCapturedAt ? Date.parse(version.usageCapturedAt) : Number.NaN;
-      const usageFresh = Number.isFinite(usageCapturedAt)
-        ? now - usageCapturedAt <= USAGE_STALE_REFUSAL_MAX_AGE_MS
-        : version.usageCapturedAt === undefined;
-      const authFresh = typeof version.authCheckedAt === 'number'
-        ? now - version.authCheckedAt <= AUTH_PROBE_MAX_AGE_MS
-        : version.authCheckedAt === undefined;
-      const throttled = usageFresh
-        && (version.usageStatus === 'rate_limited' || version.usageStatus === 'out_of_credits');
-      const authBlocked = version.authVerdict !== null
-        && version.authVerdict !== undefined
-        && authFresh
-        && isDeadVerdict(version.authVerdict);
-      // A stale usage reading makes the account UNVERIFIED, not unusable: the
-      // number is ignored (`throttled` above only trusts a fresh one) and the
-      // remote `agents run` weights an unverified account at the floor. Refusing
-      // the whole device here turned a fleet-wide usage-sync outage into "no
-      // healthy device can run claude" while `--device <name>` on the same box
-      // launched fine (PHNX-4116). Only a fresh dead auth verdict blocks.
-      const ready = launchable && !authBlocked && !throttled;
-      return [{ ready, pickerEligible: ready || !launchable || authBlocked }];
+      // `signedIn` for a CLI old enough to omit `launchable` too.
+      return [typeof version.launchable === 'boolean' ? version.launchable : version.signedIn];
     });
-    if (verdicts.length === 0) return { signedIn: undefined, pickerEligible: undefined };
-    return {
-      signedIn: verdicts.some((verdict) => verdict.ready),
-      pickerEligible: verdicts.some((verdict) => verdict.pickerEligible),
-    };
+    if (launchables.length === 0) return { signedIn: undefined, pickerEligible: undefined };
+    return { signedIn: launchables.some(Boolean), pickerEligible: true };
   } catch {
     return { signedIn: undefined, pickerEligible: undefined };
   }

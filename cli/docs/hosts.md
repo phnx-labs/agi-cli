@@ -213,15 +213,25 @@ offer `launch to sign in`. A device whose picker would contain only throttled
 rows remains excluded; ordinary automatic runs still require a healthy,
 signed-in account before placement.
 
-The sign-in a device is judged by is the **strict per-version launch truth**, not
-the display "who is logged in": a box whose selected harness only inherits the
-active/global HOME login but has no credential in the per-version home the
-isolated run launches is **not** a valid `--device auto` target and is excluded,
-because such a launch would die at spawn. This is the same launchability the
-local candidate uses (`isLaunchableSignedIn`), carried to remote candidates by a
-per-version `launchable` field in `agents view --json` (PHNX-3466). A blind
-worker with a real per-version credential but no readable usage snapshot stays
-eligible — unverified usage is not a logout.
+**Readiness is decided once, on the box that runs (PHNX-4116).** The device is
+ready iff it can start the harness with a credential of its own and nothing it
+has itself seen says that credential or quota is dead right now: a launchable
+per-version home or account slot, no dead-auth verdict younger than the probe
+window, and no throttle whose window has not yet reset. The running box computes
+that verdict — over its native account **slots** and version homes, the same
+enumeration the local router picks from (`collectRunCandidates` →
+`readinessFromCandidate`) — and publishes it as `runReady` on `agents view
+--json`. The `--device auto` dispatcher **reads** that answer; it does not
+re-derive freshness on its own machine. Usage AGE only weights the pick, it never
+decides eligibility: a worker that only ever sees a synced usage row (its poller
+lives on the headed box that published it) is **ready** on the strength of its
+token, not refused for a stale number — **unverified usage is not a logout**. A
+blind worker with a real credential but no readable usage snapshot stays eligible
+for the same reason. The sign-in judged here is still the strict per-version
+launch truth (`isLaunchableSignedIn`), not the display "who is logged in" — a home
+that only inherits the active/global login dies at spawn and is not ready. An
+older remote CLI that predates `runReady` falls back to the per-version
+`launchable` field (PHNX-3466) for one release.
 
 **One carve-out: a missing login is not an exhausted account.** When the only
 thing wrong is that an account is signed out (or its token was revoked), a

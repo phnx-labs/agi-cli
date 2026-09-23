@@ -349,10 +349,18 @@ export function hasStaleUsage(candidate: RotateCandidate, nowMs: number = Date.n
   const snapshot = candidate.usageSnapshot;
   const capturedAt = snapshot?.capturedAt;
   if (!capturedAt || !snapshot?.windows.length) return false;
+  // A row that arrived via sync (D1, PHNX-4116) cannot be refreshed on THIS box —
+  // the account's poller lives on the headed device that published it, not here.
+  // Its age is shown, never used to refuse: a blind synced pool takes a
+  // floor-weight pick (capacityWeight → UNVERIFIED_WEIGHT) and
+  // rotationFailoverChain handles a real 429. Only a locally-captured reading a
+  // broken poller left hours old is genuinely "stale" for a refusal. See the
+  // GWT-E5d amendment.
+  if (snapshot.freshness?.source === 'sync') return false;
   return nowMs - capturedAt.getTime() > USAGE_STALE_REFUSAL_MAX_AGE_MS;
 }
 
-function hasUsageAvailable(candidate: RotateCandidate): boolean {
+function hasUsageAvailable(candidate: RotateCandidate, now: number = Date.now()): boolean {
   const snapshot = candidate.usageSnapshot;
   if (snapshot) {
     // Eligibility mirrors the `agents view` throttle badge exactly
@@ -363,7 +371,7 @@ function hasUsageAvailable(candidate: RotateCandidate): boolean {
     // stayed "eligible" and the router kept launching into it while `ag view`
     // showed it rate-limited. Capacity *weighting* still ranks eligible accounts
     // by weekly headroom; this gate only decides can-it-run-right-now.
-    const status = deriveUsageStatusFromSnapshot(snapshot);
+    const status = deriveUsageStatusFromSnapshot(snapshot, now);
     if (status !== null) return status !== 'rate_limited';
   }
 
@@ -439,12 +447,12 @@ export function readinessFromCandidate(
       return { ready: false, reason: 'model_limited', email: candidate.email };
     }
   }
-  if (hasUsageAvailable(candidate)) {
+  if (hasUsageAvailable(candidate, now)) {
     return { ready: true };
   }
   const snap = candidate.usageSnapshot;
   const snapRateLimited =
-    !!snap && snap.windows.length > 0 && deriveUsageStatusFromSnapshot(snap) === 'rate_limited';
+    !!snap && snap.windows.length > 0 && deriveUsageStatusFromSnapshot(snap, now) === 'rate_limited';
   const reason: 'rate_limited' | 'out_of_credits' =
     !snapRateLimited && candidate.usageStatus === 'out_of_credits' ? 'out_of_credits' : 'rate_limited';
   return { ready: false, reason, email: candidate.email };
@@ -799,11 +807,11 @@ export function classifyHarnessCandidates(
 ): HarnessSummary[] {
   const summaries: HarnessSummary[] = [];
   for (const [agent, candidates] of byHarness) {
-    const eligible = candidates.filter((c) => isRotationEligible(c));
+    const eligible = candidates.filter((c) => isRotationEligible(c, nowMs));
     if (eligible.length === 0) {
       const counts = new Map<string, number>();
       for (const c of candidates) {
-        const readiness = readinessFromCandidate(c);
+        const readiness = readinessFromCandidate(c, nowMs);
         const reason = readiness.ready ? 'ineligible' : readiness.reason;
         counts.set(reason, (counts.get(reason) ?? 0) + 1);
       }
@@ -906,7 +914,7 @@ export function formatNoHealthyAccountError(
   const excludedStr = excluded.length === 0
     ? 'no installed versions'
     : excluded.map((c) => {
-        const readiness = readinessFromCandidate(c);
+        const readiness = readinessFromCandidate(c, nowMs);
         const reason = readiness.ready ? 'ineligible' : readiness.reason;
         return `${c.version} (${reason})`;
       }).join(', ');
@@ -944,7 +952,12 @@ export function formatNoVerifiedUsageError(
     ? 'no signed-in accounts'
     : candidates.map((c) => {
         const age = snapshotAgeMinutes(c, nowMs);
-        const staleness = age === null ? 'no usage snapshot' : `usage ${age}m old`;
+        // A synced row's age never drives a refusal (see hasStaleUsage), so name
+        // it as synced rather than letting the operator read it as the culprit.
+        const synced = c.usageSnapshot?.freshness?.source === 'sync';
+        const staleness = age === null
+          ? 'no usage snapshot'
+          : `usage ${age}m old${synced ? ', synced' : ''}`;
         return `${c.version} (${staleness})`;
       }).join(', ');
   const maxAgeMin = Math.round(USAGE_STALE_REFUSAL_MAX_AGE_MS / 60_000);

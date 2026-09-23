@@ -83,6 +83,26 @@ it('truthfully describes installed devices with no ready account', () => {
   ]))).toContain("local (no ready harness account), busy (overloaded)");
 });
 
+it("surfaces the box's own reason for a no-ready device (PHNX-4116)", () => {
+  // The incident message was a bare "no ready harness account" for all 8 boxes,
+  // leaving the operator to guess. When the box reported WHY (runReady.reason,
+  // threaded into the signal), name it so the outage is legible.
+  const msg = formatNoHealthyDeviceError(['w1', 'w2'], new Map([
+    ['w1', { reachable: true, headroom: 'idle', installed: true, signedIn: false, reason: 'all signed_out' }],
+    ['w2', { reachable: true, headroom: 'idle', installed: true, signedIn: false, reason: 'all rate_limited' }],
+  ]), 'claude');
+  expect(msg).toContain('w1 (no ready harness account (all signed_out))');
+  expect(msg).toContain('w2 (no ready harness account (all rate_limited))');
+});
+
+it('falls back to the bare reason when the box gave none (older CLI)', () => {
+  // A signal with no `reason` (older remote CLI, or the local path) keeps the
+  // original wording rather than printing an empty parenthetical.
+  expect(formatNoHealthyDeviceError(['w1'], new Map([
+    ['w1', { reachable: true, headroom: 'idle', installed: true, signedIn: false }],
+  ]), 'claude')).toContain('w1 (no ready harness account)');
+});
+
 describe('sampleWeighted', () => {
   it('returns null for empty candidates', () => {
     expect(sampleWeighted([])).toBeNull();
