@@ -1,27 +1,41 @@
 /**
- * The `agents __usage-ingest` receiver (PHNX-3392 usage-sync).
+ * The `agents __usage-ingest` receiver — the worker side of the usage exchange
+ * (PHNX-3392 usage-sync, PHNX-4116 transport over SSH).
  *
- * A legacy headed peer may pipe a {@link UsageSyncPayload} JSON envelope to our
- * stdin; we merge its identity-keyed rows into the local usage cache newest-wins
- * ({@link ingestPeerClaudeUsageRows}). Hidden internal verb — intercepted in
- * index.ts before bootstrap, so it never triggers an update check or a detached
- * sync, and it writes NOTHING to stdout (the caller only reads the exit code).
+ * A headed peer pipes its daemon-state envelope ({@link FleetStateExchangePayload},
+ * v2) to our stdin. We store it as that peer's `devices/<peer>/daemon-state.json`
+ * (stamped `receivedAt`) and merge its usage rows into the local cache
+ * newest-wins ({@link applyPeerFleetState}). With `--reply` we then refresh our
+ * own fields (session digests, reserved-auth verdict, and usage if this box is
+ * headed) and print our own envelope to stdout after a marker line, so the
+ * headed box holds this device's state without a second round-trip. Without
+ * `--reply` nothing is written to stdout: the ready probe runs this verb ahead
+ * of `agents --version`/`agents view --json` in one shell and parses that
+ * stdout, so a silent ingest is what keeps the probe parseable.
  *
- * Exit codes: 0 = merged (or nothing to merge — an empty payload is not an error),
- * 2 = malformed input. It fails loud on a bad envelope rather than silently
- * accepting a wrong shape, but a busy cache lock degrades to best-effort inside
- * `ingestPeerClaudeUsageRows` like every other cache writer.
+ * The legacy v1 envelope (`{v:1, rows}`) from an older headed peer is still
+ * merged. Hidden internal verb — intercepted in index.ts before bootstrap, so
+ * it never triggers an update check or a detached sync.
  *
- * New daemon ticks use the fleet-shared store instead. This compatibility
- * receiver remains for older installed versions. The payload arrives on stdin,
- * EXCEPT on a Windows receiver: the `agents.ps1`
- * shim does not forward ssh-piped stdin to the node process, so the pusher writes
- * the payload to a temp file and passes `agents __usage-ingest --from <path>`
- * (the same workaround the secrets push uses — `buildWindowsStdinImportCommand`).
+ * Exit codes: 0 = applied (or nothing to apply — an empty payload is not an
+ * error), 2 = malformed input. It fails loud on a bad envelope rather than
+ * silently accepting a wrong shape, but a busy cache lock degrades to
+ * best-effort inside `ingestPeerClaudeUsageRows` like every other cache writer.
+ *
+ * The payload arrives on stdin, EXCEPT on a Windows receiver: the `agents.ps1`
+ * shim does not forward ssh-piped stdin to the node process, so the pusher
+ * writes the payload to a temp file and passes `--from <path>`
+ * (`buildWindowsStdinAgentsCommand`).
  */
 import * as fs from 'fs';
 import { ingestPeerClaudeUsageRows } from './usage.js';
-import type { UsageSyncPayload } from './usage-sync.js';
+import {
+  applyPeerFleetState,
+  buildFleetStatePayload,
+  formatFleetStateReply,
+  parseFleetStateExchangeInput,
+  publishOwnFleetState,
+} from './usage-sync.js';
 
 function readStdin(): Promise<string> {
   return new Promise((resolve) => {
@@ -41,8 +55,9 @@ function fromFileArg(argv: string[]): string | null {
   return i !== -1 && argv[i + 1] ? argv[i + 1] : null;
 }
 
-export async function runUsageIngest(): Promise<number> {
-  const fromPath = fromFileArg(process.argv.slice(3));
+export async function runUsageIngest(argv: string[] = process.argv.slice(3)): Promise<number> {
+  const reply = argv.includes('--reply');
+  const fromPath = fromFileArg(argv);
   let source: string;
   if (fromPath) {
     try {
@@ -55,27 +70,35 @@ export async function runUsageIngest(): Promise<number> {
     source = await readStdin();
   }
   const raw = source.trim();
-  if (!raw) return 0; // nothing piped — a no-op tick, not a failure.
-
-  let payload: UsageSyncPayload;
-  try {
-    payload = JSON.parse(raw) as UsageSyncPayload;
-  } catch {
-    process.stderr.write('[agents] __usage-ingest: malformed JSON payload\n');
-    return 2;
+  const errors: string[] = [];
+  if (raw) {
+    let payload;
+    try {
+      payload = parseFleetStateExchangeInput(raw);
+    } catch (err) {
+      process.stderr.write(`[agents] __usage-ingest: ${(err as Error).message}\n`);
+      return 2;
+    }
+    if (payload.v === 1) {
+      ingestPeerClaudeUsageRows(payload.rows);
+    } else {
+      try {
+        applyPeerFleetState(payload.state);
+      } catch (err) {
+        // A well-formed envelope we refuse (it names this device) is the
+        // sender's mistake, not malformed input: say so on stderr and in the
+        // reply, and still answer so the sender learns what this box holds.
+        const message = (err as Error).message;
+        process.stderr.write(`[agents] __usage-ingest: ${message}\n`);
+        errors.push(`ingest: ${message}`);
+        if (!reply) return 2;
+      }
+    }
   }
-
-  if (
-    !payload ||
-    payload.v !== 1 ||
-    typeof payload.rows !== 'object' ||
-    payload.rows === null ||
-    Array.isArray(payload.rows) // `typeof [] === 'object'` — an array is NOT a rows map
-  ) {
-    process.stderr.write('[agents] __usage-ingest: unrecognized usage-sync payload shape\n');
-    return 2;
-  }
-
-  ingestPeerClaudeUsageRows(payload.rows);
+  if (!reply) return 0;
+  const published = await publishOwnFleetState();
+  errors.push(...published.errors);
+  for (const message of published.errors) process.stderr.write(`[agents] __usage-ingest: ${message}\n`);
+  process.stdout.write(formatFleetStateReply(buildFleetStatePayload({ errors })));
   return 0;
 }
