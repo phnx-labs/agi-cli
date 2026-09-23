@@ -11,11 +11,14 @@ import {
   peerPresentKeys,
   planAuthBundlePush,
   planReservedStoreSync,
+  readPeerAccountVerdicts,
   reconcileLocalWorkerSlots,
   reservedSyncTargets,
+  SKIP_REASON_NO_PEER_REPLY,
   syncReservedAuthBundle,
   syncReservedStores,
   type AuthSyncDevice,
+  type PeerAccountVerdict,
   type ReservedSyncAccount,
   type ReservedSyncPeer,
 } from './secrets-policy.js';
@@ -148,11 +151,11 @@ describe('auth sync through real fleet-shared files', () => {
 // --- Generalized reserved-store sync (PHNX-3940 T6) -------------------------
 
 function acct(over: Partial<ReservedSyncAccount>): ReservedSyncAccount {
-  return { accountId: 'a1', harness: 'claude', bundle: '__claude__', key: 'CLAUDE_CODE_OAUTH_TOKEN_a1', fingerprint: 'm1', ...over };
+  return { accountId: 'a1', harness: 'claude', bundle: '__claude__', key: 'CLAUDE_CODE_OAUTH_TOKEN_a1', ...over };
 }
 
 function peer(over: Partial<ReservedSyncPeer>): ReservedSyncPeer {
-  return { name: 'w1', headed: false, reachable: true, pinned: true, presentKeys: {}, ...over };
+  return { name: 'w1', headed: false, reachable: true, pinned: true, hasReply: true, presentKeys: {}, ...over };
 }
 
 describe('planReservedStoreSync — per key, per role', () => {
@@ -188,6 +191,11 @@ describe('planReservedStoreSync — per key, per role', () => {
     ]);
   });
 
+  it('skips a peer that has never sent a reply (no first-hand knowledge of it)', () => {
+    const plan = planReservedStoreSync([acct({ key: 'K1' })], [peer({ name: 'fresh', hasReply: false })]);
+    expect(plan).toEqual([{ action: 'skip', device: 'fresh', reason: SKIP_REASON_NO_PEER_REPLY }]);
+  });
+
   it('groups keys per bundle and is deterministic across peers and bundles', () => {
     const accounts = [
       acct({ accountId: 'c1', harness: 'claude', bundle: '__claude__', key: 'CK' }),
@@ -207,11 +215,11 @@ describe('reservedSyncTargets', () => {
   function metaWith(rows: NativeAccountRecord[]): Pick<Meta, 'accounts' | 'deviceAccounts'> {
     return { accounts: { native: Object.fromEntries(rows.map((r) => [r.id, r])) } };
   }
-  it('resolves a T1 workerCredential row to its bundle/key/fingerprint', () => {
+  it('resolves a T1 workerCredential row to its bundle/key', () => {
     const m = metaWith([
       { id: 'a1', name: 'work', agent: 'claude', identityKey: 'claude:account=a:org=o', scope: 'version', identityLabel: 'w@x.io', workerCredential: { bundle: '__claude__', key: 'CLAUDE_CODE_OAUTH_TOKEN_a1', kind: 'setup-token', mintedAt: 'm1' } },
     ]);
-    expect(reservedSyncTargets(m)).toEqual([{ accountId: 'a1', harness: 'claude', bundle: '__claude__', key: 'CLAUDE_CODE_OAUTH_TOKEN_a1', fingerprint: 'm1' }]);
+    expect(reservedSyncTargets(m)).toEqual([{ accountId: 'a1', harness: 'claude', bundle: '__claude__', key: 'CLAUDE_CODE_OAUTH_TOKEN_a1' }]);
   });
   it('falls back to the legacy auth bundle for a claude row predating T1', () => {
     const m = metaWith([
@@ -219,7 +227,7 @@ describe('reservedSyncTargets', () => {
     ]);
     const targets = reservedSyncTargets(m);
     expect(targets).toHaveLength(1);
-    expect(targets[0]).toMatchObject({ accountId: 'l1', bundle: 'auth', fingerprint: 'legacy' });
+    expect(targets[0]).toMatchObject({ accountId: 'l1', bundle: 'auth' });
     expect(targets[0].key).toMatch(/^CLAUDE_CODE_OAUTH_TOKEN_/);
   });
   it('drops a non-claude row with no workerCredential (no derivable durable credential)', () => {
@@ -230,20 +238,41 @@ describe('reservedSyncTargets', () => {
   });
 });
 
+describe('readPeerAccountVerdicts', () => {
+  it('narrows a peer envelope\'s opaque account rows to {accountId, harness, verdict}', () => {
+    const state = { version: 1 as const, device: 'w1', accounts: { rows: [
+      { accountId: 'a1', harness: 'claude', authMode: 'durable', verdict: 'live', checkedAt: 't' },
+      { accountId: 'a2', harness: 'grok', authMode: 'durable', verdict: 'missing' },
+      { bogus: true }, // dropped — missing required fields
+    ] } };
+    expect(readPeerAccountVerdicts(state)).toEqual([
+      { accountId: 'a1', harness: 'claude', verdict: 'live' },
+      { accountId: 'a2', harness: 'grok', verdict: 'missing' },
+    ]);
+  });
+  it('is empty for a peer with no reply or no account rows', () => {
+    expect(readPeerAccountVerdicts(undefined)).toEqual([]);
+    expect(readPeerAccountVerdicts({ version: 1, device: 'w1' })).toEqual([]);
+  });
+});
+
 describe('peerPresentKeys', () => {
   const accounts = [
-    acct({ accountId: 'a1', bundle: '__claude__', key: 'RK', fingerprint: 'm1' }),
-    acct({ accountId: 'l1', bundle: 'auth', key: 'LK', fingerprint: 'legacy' }),
+    acct({ accountId: 'a1', harness: 'claude', bundle: '__claude__', key: 'RK' }),
+    acct({ accountId: 'l1', harness: 'claude', bundle: 'auth', key: 'LK' }),
   ];
-  it('marks a reserved key present only on a fingerprint-matching memo hit', () => {
-    const memo = { 'w1 __claude__ RK': 'm1' };
-    expect(peerPresentKeys('w1', accounts, memo, false).__claude__).toEqual(new Set(['RK']));
-    // Stale fingerprint (re-mint) is NOT present → will re-push.
-    expect(peerPresentKeys('w1', accounts, { 'w1 __claude__ RK': 'old' }, false).__claude__).toBeUndefined();
+  const verdict = (over: Partial<PeerAccountVerdict>): PeerAccountVerdict => ({ accountId: 'a1', harness: 'claude', verdict: 'live', ...over });
+  it('marks a reserved key present when the peer reports a non-missing verdict for its account', () => {
+    expect(peerPresentKeys(accounts, [verdict({ accountId: 'a1', verdict: 'unverified' })]).__claude__).toEqual(new Set(['RK']));
   });
-  it('marks legacy auth keys present when the peer reports coarse ready', () => {
-    expect(peerPresentKeys('w1', accounts, {}, true).auth).toEqual(new Set(['LK']));
-    expect(peerPresentKeys('w1', accounts, {}, false).auth).toBeUndefined();
+  it('does NOT mark it present when the peer reports the account missing, so the key is re-pushed', () => {
+    expect(peerPresentKeys(accounts, [verdict({ accountId: 'a1', verdict: 'missing' })]).__claude__).toBeUndefined();
+  });
+  it('treats an account with no verdict row at all as not present', () => {
+    expect(peerPresentKeys(accounts, []).__claude__).toBeUndefined();
+  });
+  it('keys presence by (harness, accountId), so a same-id account on another harness does not count', () => {
+    expect(peerPresentKeys(accounts, [verdict({ accountId: 'a1', harness: 'grok', verdict: 'live' })]).__claude__).toBeUndefined();
   });
 });
 
@@ -537,7 +566,6 @@ describe('electPublisher', () => {
 
     const reserved = await syncReservedStores({
       userAgentsDir: root,
-      cacheDir: tempStore(),
       localName: 'zion',
       localReady: true,
       listDevices: () => devices,
@@ -560,11 +588,13 @@ describe('electPublisher', () => {
     // the moment the new release runs — and an adoption failure is reported
     // against the local box instead of being swallowed.
     const root = tempStore();
+    // mac-mini has replied (its daemon-state file exists) but reports no verdict
+    // for this account, so the publisher pushes the key.
+    updateFleetSharedDeviceState('mac-mini', { auth: { status: 'ready' } }, root);
     const meta = { accounts: { native: { a1: { id: 'a1', name: 'gmail', agent: 'cursor', identityKey: 'cursor:user=u', scope: 'version', identityLabel: 'g.io', workerCredential: { bundle: '__cursor__', key: 'CURSOR_API_KEY_a1', kind: 'api-key', mintedAt: 'm1' } } } } } as const;
     const seen: unknown[] = [];
     const reserved = await syncReservedStores({
       userAgentsDir: root,
-      cacheDir: tempStore(),
       localName: 'zion',
       localReady: true,
       listDevices: () => [profile('mac-mini')],
@@ -598,7 +628,6 @@ describe('syncReservedStores adopts a legacy raw reserved item through the real 
 
     const result = await syncReservedStores({
       userAgentsDir: tempStore(),
-      cacheDir: tempStore(),
       localName: 'zion',
       localReady: true,
       listDevices: () => [],

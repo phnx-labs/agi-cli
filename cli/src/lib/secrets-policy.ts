@@ -8,8 +8,6 @@
  * this module only decides WHICH bundle/key, WHO may reach it, and WHERE it
  * gets pushed.
  */
-import * as fs from 'node:fs';
-import * as path from 'node:path';
 import {
   pushBundleToHostAsync,
   listBundles,
@@ -25,9 +23,10 @@ import { machineId, normalizeHost } from './session/sync/config.js';
 import {
   readFleetSharedDeviceStates,
   updateFleetSharedDeviceStateAsync,
+  type FleetSharedDeviceState,
   type SharedAuthStatus,
 } from './fleet-shared-state.js';
-import { getCacheDir, getUserAgentsDir, readMeta } from './state.js';
+import { getUserAgentsDir, readMeta } from './state.js';
 import { dropSlots, listNativeAccounts, readSlots } from './account-registry.js';
 import { claudeAccountTokenKey, isClaudeWorkerHomeSeeded, provisionWorkerSlot, readReservedCredential } from './claude-account-token.js';
 import { configuredDeviceRole, isHeadedDeviceRole, selfConfiguredDeviceRole } from './device-config.js';
@@ -355,6 +354,19 @@ export async function syncReservedAuthBundle(deps: AuthSyncDeps = {}): Promise<A
 // The functions below fix both. The plan is per ACCOUNT and per KEY
 // (`<ENV>_<accountId>`), not per bundle, and targets `role=worker` peers only.
 //
+// PRESENCE IS FIRST-HAND, from the peer's own daemon-state reply (PHNX-4116).
+// Each device's account-state daemon publishes a per-account verdict row into
+// `accounts.rows` (`account-state-daemon-service.ts`), and the usage-sync SSH
+// exchange stores each peer's reply at `devices/<peer>/daemon-state.json`. A
+// peer whose reply reports a NON-`missing` verdict for an account holds a
+// working credential for it (its slot materialized), so it holds that account's
+// reserved key; a `missing` verdict — or no row for the account — means it does
+// not, so the key is (re)pushed. This replaced a publisher-side delivery memo
+// that recorded what WE pushed: the memo could never see a key removed on the
+// worker out of band, so a peer that lost its credential read as `present`
+// forever. The reply is self-correcting — a removed key flips the next verdict
+// to `missing` and the push resumes within a tick.
+//
 // INVARIANT 1 (transport, retain nothing): materializing a worker slot happens
 // on the box where the key LANDED (`reconcileLocalWorkerSlots` ->
 // `provisionWorkerSlot`); the credential itself only ever moves over the
@@ -366,6 +378,15 @@ export async function syncReservedAuthBundle(deps: AuthSyncDeps = {}): Promise<A
 
 const EMPTY_KEY_SET: ReadonlySet<string> = new Set();
 
+/**
+ * Skip reason for a peer that has never sent a daemon-state reply (no
+ * `devices/<peer>/daemon-state.json`). auth-sync logs these at INFO — a
+ * brand-new or never-dialed worker legitimately has no reply on an early tick,
+ * so it is informational, not a warning. Stable so the service classifies the
+ * skip without matching a substring.
+ */
+export const SKIP_REASON_NO_PEER_REPLY = 'no daemon-state reply from this peer yet';
+
 /** One account's durable worker credential, resolved to (bundle, key). */
 export interface ReservedSyncAccount {
   accountId: string;
@@ -374,11 +395,6 @@ export interface ReservedSyncAccount {
   bundle: string;
   /** Storage key `<ENV>_<accountId>` (or the legacy email-keyed claude key). */
   key: string;
-  /**
-   * `workerCredential.mintedAt` -- a re-mint bumps it, so a delivered-memo hit on
-   * the old value re-pushes. `'legacy'` for a pre-T1 claude row with no field.
-   */
-  fingerprint: string;
 }
 
 /** A peer as the plan sees it: its role, reachability, and the keys it is KNOWN to hold. */
@@ -388,7 +404,13 @@ export interface ReservedSyncPeer {
   headed: boolean;
   reachable: boolean;
   pinned: boolean;
-  /** bundle -> keys the peer already holds at the current fingerprint. Absent ⇒ none known. */
+  /**
+   * Whether this peer has ever sent a daemon-state reply on this box
+   * (`devices/<peer>/daemon-state.json` exists). Without one there is no
+   * first-hand knowledge of what it holds, so the peer is skipped this tick.
+   */
+  hasReply: boolean;
+  /** bundle -> keys the peer's own reply verdicts prove it holds. Absent ⇒ none known. */
   presentKeys: Record<string, ReadonlySet<string>>;
 }
 
@@ -399,7 +421,9 @@ type ReservedSyncPlanItem =
 /**
  * Pure plan: for each worker peer, push each bundle it is missing at least one
  * key of. Deterministic (peers and bundles sorted) so it pins exactly in tests.
- * A headed peer is skipped BEFORE any key comparison -- it never receives a key.
+ * A headed peer is skipped BEFORE any key comparison -- it never receives a key;
+ * a peer with no reply yet (`hasReply: false`) is skipped next -- there is no
+ * first-hand knowledge of what it holds, so nothing is pushed to it this tick.
  */
 export function planReservedStoreSync(
   accounts: ReservedSyncAccount[],
@@ -418,6 +442,7 @@ export function planReservedStoreSync(
       items.push({ action: 'skip', device: peer.name, reason: 'headed device receives the account row, never a durable key' });
       continue;
     }
+    if (!peer.hasReply) { items.push({ action: 'skip', device: peer.name, reason: SKIP_REASON_NO_PEER_REPLY }); continue; }
     if (!peer.reachable) { items.push({ action: 'skip', device: peer.name, reason: 'unreachable' }); continue; }
     if (!peer.pinned) {
       items.push({ action: 'skip', device: peer.name, reason: `host key not pinned; run \`agents ssh ${peer.name}\` once` });
@@ -451,62 +476,63 @@ export function reservedSyncTargets(meta: Pick<Meta, 'accounts' | 'deviceAccount
   for (const account of listNativeAccounts(meta)) {
     const cred = account.workerCredential;
     if (cred) {
-      out.push({ accountId: account.id, harness: account.agent, bundle: cred.bundle, key: cred.key, fingerprint: cred.mintedAt });
+      out.push({ accountId: account.id, harness: account.agent, bundle: cred.bundle, key: cred.key });
     } else if (account.agent === 'claude' && account.identityLabel) {
-      out.push({ accountId: account.id, harness: 'claude', bundle: AUTH_STORE_ALIAS, key: claudeAccountTokenKey(account.identityLabel), fingerprint: 'legacy' });
+      out.push({ accountId: account.id, harness: 'claude', bundle: AUTH_STORE_ALIAS, key: claudeAccountTokenKey(account.identityLabel) });
     }
   }
   return out;
 }
 
-// --- publisher-side delivery memo -----------------------------------------
-// A push sends a WHOLE bundle; the receiver reports no per-key inventory today
-// (that is T3's per-account verdict seam). So the publisher records what it has
-// delivered to each peer, keyed by the credential's fingerprint, to answer "does
-// the peer already have this key" without re-pushing an unchanged bundle every
-// tick. A new account (no memo entry) or a re-mint (fingerprint change) is not a
-// hit, so it propagates within one tick. The memo is LOCAL publisher bookkeeping,
-// never synced.
+// --- per-account presence from the peer's own reply ------------------------
+// A peer's daemon-state reply carries a per-account verdict row per registered
+// account (`accounts.rows`, published by `account-state-daemon-service.ts`). The
+// envelope types the rows as opaque, so we narrow the two fields the planner
+// reads: which account, and whether the peer holds a working credential for it.
 
-function deliveryMemoPath(root = getCacheDir()): string {
-  return path.join(root, 'reserved-sync-delivered.json');
+/** The subset of a peer's per-account verdict row this planner reads. */
+export interface PeerAccountVerdict {
+  accountId: string;
+  harness: string;
+  /** `missing` ⇒ no working credential on the peer; anything else ⇒ present. */
+  verdict: string;
 }
 
-function memoKey(peer: string, bundle: string, key: string): string {
-  return `${normalizeHost(peer)} ${bundle} ${key}`;
-}
-
-function readDeliveryMemo(root?: string): Record<string, string> {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(deliveryMemoPath(root), 'utf-8')) as unknown;
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, string>;
-  } catch { /* missing/malformed → empty memo */ }
-  return {};
-}
-
-function writeDeliveryMemo(memo: Record<string, string>, root = getCacheDir()): void {
-  fs.mkdirSync(root, { recursive: true });
-  fs.writeFileSync(deliveryMemoPath(root), `${JSON.stringify(memo, null, 2)}\n`, 'utf-8');
+/** Narrow a peer's opaque `accounts.rows` to the verdict fields the planner reads. */
+export function readPeerAccountVerdicts(state: FleetSharedDeviceState | undefined): PeerAccountVerdict[] {
+  const rows = state?.accounts?.rows;
+  if (!Array.isArray(rows)) return [];
+  const out: PeerAccountVerdict[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
+    const r = row as Record<string, unknown>;
+    if (typeof r.accountId === 'string' && typeof r.harness === 'string' && typeof r.verdict === 'string') {
+      out.push({ accountId: r.accountId, harness: r.harness, verdict: r.verdict });
+    }
+  }
+  return out;
 }
 
 /**
- * The keys a peer is KNOWN to hold, per bundle, from what we have delivered to it
- * (memo, matched by fingerprint) plus the coarse legacy-`auth` verdict: a peer
- * reporting `auth.status === 'ready'` is known to hold every legacy `auth` key.
- * Reserved `__<harness>__` bundles have no coarse verdict, so their presence comes
- * from the memo alone -- which is what makes a newly-added reserved account push.
+ * The reserved keys a peer is KNOWN to hold, per bundle, from the per-account
+ * verdicts in its own daemon-state reply (PHNX-4116). A peer reporting a
+ * NON-`missing` verdict for an account has a working credential for it (its slot
+ * materialized), so it holds that account's reserved key; a `missing` verdict --
+ * or no row for the account at all -- means it does not, so the key is
+ * (re)pushed. First-hand and self-correcting: a key removed on the worker flips
+ * its next verdict to `missing` and the push resumes, which the old
+ * publisher-side delivery memo could never see.
  */
 export function peerPresentKeys(
-  peer: string,
   accounts: ReservedSyncAccount[],
-  memo: Record<string, string>,
-  legacyAuthReady: boolean,
+  verdicts: PeerAccountVerdict[],
 ): Record<string, ReadonlySet<string>> {
+  const held = new Set(
+    verdicts.filter((v) => v.verdict !== 'missing').map((v) => `${v.harness}:${v.accountId}`),
+  );
   const present: Record<string, Set<string>> = {};
   for (const account of accounts) {
-    const known = memo[memoKey(peer, account.bundle, account.key)] === account.fingerprint
-      || (legacyAuthReady && account.bundle === AUTH_STORE_ALIAS);
-    if (!known) continue;
+    if (!held.has(`${account.harness}:${account.accountId}`)) continue;
     (present[account.bundle] ??= new Set()).add(account.key);
   }
   return present;
@@ -525,7 +551,6 @@ interface ReservedStoreSyncDeps {
   listDevices?: () => DeviceProfile[];
   localName?: string;
   userAgentsDir?: string;
-  cacheDir?: string;
   readMetaFn?: () => Pick<Meta, 'accounts' | 'deviceAccounts'>;
   isPinned?: (name: string) => boolean;
   peerRole?: (name: string) => ReturnType<typeof selfConfiguredDeviceRole>;
@@ -600,15 +625,18 @@ export async function syncReservedStores(deps: ReservedStoreSyncDeps = {}): Prom
     return result;
   }
 
-  const memo = readDeliveryMemo(deps.cacheDir);
   const pinned = deps.isPinned ?? ((name: string) => isHostPinned(name, managedKnownHostsPath()));
-  const peers: ReservedSyncPeer[] = devices.map((d) => ({
-    name: d.name,
-    headed: isHeadedDeviceRole(peerRole(d.name)),
-    reachable: isDialableDevice(d),
-    pinned: isDevicePinned(d, pinned),
-    presentKeys: peerPresentKeys(d.name, targets, memo, stateByDevice.get(normalizeHost(d.name))?.auth?.status === 'ready'),
-  }));
+  const peers: ReservedSyncPeer[] = devices.map((d) => {
+    const state = stateByDevice.get(normalizeHost(d.name));
+    return {
+      name: d.name,
+      headed: isHeadedDeviceRole(peerRole(d.name)),
+      reachable: isDialableDevice(d),
+      pinned: isDevicePinned(d, pinned),
+      hasReply: state !== undefined,
+      presentKeys: peerPresentKeys(targets, readPeerAccountVerdicts(state)),
+    };
+  });
 
   const plan = planReservedStoreSync(targets, peers);
   const byName = new Map(devices.map((d) => [d.name, d]));
@@ -625,10 +653,6 @@ export async function syncReservedStores(deps: ReservedStoreSyncDeps = {}): Prom
       const out = await push(item.bundle, sshTarget(profile));
       if (out.ok) {
         result.pushed.push({ device: item.device, bundle: item.bundle, keys: item.keys });
-        for (const key of item.keys) {
-          const fp = targets.find((t) => t.bundle === item.bundle && t.key === key)?.fingerprint;
-          if (fp) memo[memoKey(item.device, item.bundle, key)] = fp;
-        }
       } else {
         result.errors.push({ device: item.device, message: out.message });
       }
@@ -636,7 +660,6 @@ export async function syncReservedStores(deps: ReservedStoreSyncDeps = {}): Prom
       result.errors.push({ device: item.device, message: (err as Error).message });
     }
   }
-  writeDeliveryMemo(memo, deps.cacheDir ?? getCacheDir());
   return result;
 }
 

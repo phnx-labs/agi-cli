@@ -233,10 +233,27 @@ from the single legacy `auth` bundle to every portable account:
   of its keys — so a newly-added account propagates within one tick, instead of
   being hidden behind a bundle-coarse "already has the bundle" verdict.
   (`planReservedStoreSync` / `reservedSyncTargets`, `lib/secrets-policy.ts`.)
+- **Presence is read first-hand, from each peer's own reply, and there is no
+  fleet-wide freshness gate (PHNX-4116 PR 5).** Each device's account-state daemon
+  publishes a per-account verdict row into `accounts.rows`, and the usage-sync SSH
+  exchange stores each peer's reply at `devices/<peer>/daemon-state.json` stamped
+  `receivedAt`. `auth-sync` plans per peer off that reply: a `missing` verdict for
+  an account means the peer lacks that reserved key, so it is (re)pushed; anything
+  else means the peer holds it (`peerPresentKeys`, keyed by `(harness, accountId)`).
+  A peer that has never replied (no file) is skipped this tick and logged at INFO,
+  not WARN — a brand-new or never-dialed worker legitimately has none early on. The
+  push is idempotent, so a stale reply is safe (a stale "has key" is harmless, a
+  stale "missing" costs one redundant push), which is why the per-peer `receivedAt`
+  replaced the old global marker (`readLastSuccessfulExchangeMs`, now removed) that
+  skipped **every** push when the newest exchange across the fleet went stale. This
+  also retired the publisher-side delivery memo: the memo recorded what WE pushed
+  and could never see a key removed on the worker out of band, so a peer that lost
+  its credential read as present forever — the reply verdict is self-correcting.
 - **The publisher is a ready HEADED device.** `electPublisher` ranks every device
-  reporting `auth: ready` headed-first (`personal`/`desktop`, where tokens are
-  minted and the copy of record lives), then by name to break ties, so every box
-  elects the same one. A worker is elected only when no headed device is ready.
+  reporting `auth: ready` (the verdict now rides the SSH reply, not Git) headed-first
+  (`personal`/`desktop`, where tokens are minted and the copy of record lives), then
+  by name to break ties, so every box elects the same one. A worker is elected only
+  when no headed device is ready.
   Sorting by name alone (the pre-fix rule) elected `mac-mini` — a worker holding a
   six-day-old copy of `auth` — over `zion`, and zion then skipped every peer as
   "another ready device is the elected publisher".

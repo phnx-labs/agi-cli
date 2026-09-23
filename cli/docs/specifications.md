@@ -1995,12 +1995,21 @@ engine.
   `reconcileLocalWorkerSlots` plus the targeted SSH push
   (`syncReservedAuthBundle` / `syncReservedStores`, `secrets-policy.ts`, through
   the client's `pushBundleToHostAsync`) — delivering the real bundle only to a
-  pinned, reachable, `role=worker` peer whose last-received verdict says `missing`.
+  pinned, reachable, `role=worker` peer whose reserved key it is missing. Presence
+  is read first-hand from that peer's own reply: a `missing` per-account verdict in
+  its `accounts.rows` means it lacks the key; a peer that has never replied (no
+  `devices/<peer>/daemon-state.json`) is skipped this tick, logged at INFO
+  (`peerPresentKeys` / `SKIP_REASON_NO_PEER_REPLY`). There is **no** fleet-wide
+  exchange-freshness gate (PHNX-4116 PR 5 removed the `readLastSuccessfulExchangeMs`
+  marker): the push is idempotent, so a stale reply is safe, and a key removed on a
+  worker flips its next verdict to `missing` so the push resumes within a tick.
   **Given**
-  a local file-backed `auth` bundle and a pinned worker peer reporting
-  `missing` **When** this device is the one deterministically elected ready
-  publisher **Then** the push is async, `--backend file`, and the destination
-  auto-provisions its own machine-local key — no credential ever enters Git.
+  a local file-backed `auth` bundle and a pinned worker peer whose reply reports
+  the account `missing` **When** this device is the one deterministically elected
+  ready HEADED publisher **Then** the push is async, `--backend file`, and the
+  destination auto-provisions its own machine-local key — no credential ever
+  enters Git; **and Given** a peer that has never sent a reply **Then** it is
+  skipped this tick with an INFO line, never a WARN.
 
 ---
 
