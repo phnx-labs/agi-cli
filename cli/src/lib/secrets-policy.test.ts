@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { updateFleetSharedDeviceState } from './fleet-shared-state.js';
 import type { DeviceProfile } from './devices/registry.js';
@@ -20,10 +20,10 @@ import {
   type ReservedSyncPeer,
 } from './secrets-policy.js';
 import { claudeAccountTokenKey, readClaudeAccountEmail } from './claude-account-token.js';
-import { readSlots, slotDir } from './accounts/slots.js';
+import { readSlots, recordSlot, slotDir } from './accounts/slots.js';
 import { bundleExistsSync, keychainRef, secretsKeychainItem, storeSetSync, writeBundleWithItemsSync } from './secrets-client.js';
 import type { SecretsBundle } from './secrets-types.js';
-import { readMeta } from './state.js';
+import { readMeta, updateMeta } from './state.js';
 import { useFreshSecretsHome } from '../../tests/secrets-standalone.js';
 import type { Meta, NativeAccountRecord } from './types.js';
 
@@ -405,6 +405,70 @@ describe('reconcileLocalWorkerSlots through the real auth bundle', () => {
     const second = reconcileLocalWorkerSlots({ selfRole: 'worker', readMetaFn });
     expect(second.provisioned).toEqual([]);
     expect(second.skipped.map((s) => s.accountId).sort()).toEqual(['lm', 'lp', 'lt']);
+  });
+});
+
+// A worker holds a slot for every current account AND stale duplicates from an
+// older account-id generation (8 per box, PHNX-4116). Each stale slot is a full
+// HOME with a live `.claude/.oauth_token`. The reconcile drops the record and
+// deletes the credential, but keeps the dir (`.claude/projects` = transcripts).
+// Real sandbox meta + real files; no mocks.
+describe('reconcileLocalWorkerSlots drops stale slots (PHNX-4116)', () => {
+  const created: string[] = [];
+  function resetMeta(): void {
+    updateMeta((c) => ({
+      ...c,
+      accounts: { ...c.accounts, native: {} },
+      deviceAccounts: { ...c.deviceAccounts, slots: {} },
+    }));
+  }
+  beforeEach(() => { resetMeta(); });
+  afterEach(() => {
+    for (const dir of created.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+    resetMeta();
+  });
+
+  function seedSlot(id: string): string {
+    const dir = slotDir('claude', id);
+    created.push(dir);
+    fs.mkdirSync(path.join(dir, '.claude', 'projects'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.claude', '.oauth_token'), 'sk-ant-oat01-x', { mode: 0o600 });
+    fs.writeFileSync(path.join(dir, '.claude', 'projects', 'session.jsonl'), '{}\n');
+    recordSlot(id, { accountId: id, slotDir: dir, authMode: 'durable', verdict: 'unverified' });
+    return dir;
+  }
+
+  it('removes the unregistered slot record + its token, keeps its dir, keeps the registered slot', () => {
+    const regDir = seedSlot('reg');
+    const staleDir = seedSlot('stale');
+    updateMeta((c) => ({
+      ...c,
+      accounts: {
+        ...c.accounts,
+        native: { reg: { id: 'reg', name: 'work', agent: 'claude', identityKey: 'claude:account=a:org=o', scope: 'version', identityLabel: 'w@x.io' } as NativeAccountRecord },
+      },
+    }));
+
+    const res = reconcileLocalWorkerSlots({ selfRole: 'worker', hasLocalKey: () => false });
+
+    expect(res.dropped).toEqual(['stale']);
+    // Credential gone, but the directory and its transcripts survive.
+    expect(fs.existsSync(path.join(staleDir, '.claude', '.oauth_token'))).toBe(false);
+    expect(fs.existsSync(staleDir)).toBe(true);
+    expect(fs.existsSync(path.join(staleDir, '.claude', 'projects', 'session.jsonl'))).toBe(true);
+    // The registered slot is untouched — token and record both remain.
+    expect(fs.existsSync(path.join(regDir, '.claude', '.oauth_token'))).toBe(true);
+    expect(Object.keys(readSlots(readMeta()))).toEqual(['reg']);
+  });
+
+  it('drops nothing when the registry is empty (fail closed)', () => {
+    const staleDir = seedSlot('stale');
+    // No native accounts registered → listNativeAccounts() is empty: a transient
+    // read must never strip the box's whole slot set.
+    const res = reconcileLocalWorkerSlots({ selfRole: 'worker', hasLocalKey: () => false });
+    expect(res.dropped).toEqual([]);
+    expect(fs.existsSync(path.join(staleDir, '.claude', '.oauth_token'))).toBe(true);
+    expect(Object.keys(readSlots(readMeta()))).toEqual(['stale']);
   });
 });
 

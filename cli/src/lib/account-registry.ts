@@ -56,7 +56,7 @@ export interface NativeAccount extends NativeAccountRecord {
   kind: 'native';
 }
 
-export { recordSlot, readSlots } from './accounts/slots.js';
+export { recordSlot, readSlots, dropSlots } from './accounts/slots.js';
 export { registeredNativeAccountForEmail, parseNativeIdentityKey } from './native-accounts.js';
 export type UnifiedAccount = (CredentialAccount & { kind: 'provider' }) | NativeAccount;
 

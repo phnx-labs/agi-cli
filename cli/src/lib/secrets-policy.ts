@@ -16,7 +16,7 @@ import {
   type SecretsContext,
 } from './secrets-client.js';
 import type { PushBundleResult } from './secrets-types.js';
-import type { AgentId, Meta, NativeAccountRecord } from './types.js';
+import type { AgentId, DeviceAccountSlot, Meta, NativeAccountRecord } from './types.js';
 import { filterNamesForActiveResourceProfile, getActiveResourceProfile } from './resource-profiles.js';
 import { isDialableDevice, loadDevicesSync, type DeviceProfile } from './devices/registry.js';
 import { sshTargetFor } from './devices/connect.js';
@@ -28,7 +28,7 @@ import {
   type SharedAuthStatus,
 } from './fleet-shared-state.js';
 import { getCacheDir, getUserAgentsDir, readMeta } from './state.js';
-import { listNativeAccounts, readSlots } from './account-registry.js';
+import { dropSlots, listNativeAccounts, readSlots } from './account-registry.js';
 import { claudeAccountTokenKey, isClaudeWorkerHomeSeeded, provisionWorkerSlot, readReservedCredential } from './claude-account-token.js';
 import { configuredDeviceRole, isHeadedDeviceRole, selfConfiguredDeviceRole } from './device-config.js';
 import {
@@ -642,6 +642,8 @@ export async function syncReservedStores(deps: ReservedStoreSyncDeps = {}): Prom
 
 interface ReconcileWorkerSlotsResult {
   provisioned: string[];
+  /** Stale slots removed from the device doc (accountId no longer registered). */
+  dropped: string[];
   skipped: Array<{ accountId: string; reason: string }>;
   errors: Array<{ accountId: string; message: string }>;
 }
@@ -653,6 +655,20 @@ interface ReconcileWorkerSlotsDeps {
   provision?: (account: NativeAccountRecord) => void;
   /** True when an existing durable slot already carries everything provisioning seeds. */
   slotSeeded?: (harness: AgentId, slotDir: string) => boolean;
+  /** Remove stale slot records from the device doc. Default: {@link dropSlots}. */
+  dropSlots?: (accountIds: readonly string[]) => void;
+  /** Emit an operational log line. Default: the daemon log (fire-and-forget). */
+  log?: (level: 'INFO' | 'WARN', message: string) => void;
+}
+
+/**
+ * Fire-and-forget the daemon log without pulling its module graph into every
+ * consumer of this file: `reconcileLocalWorkerSlots` is synchronous and only
+ * runs inside the daemon (where daemon.js is already loaded), so the dynamic
+ * import is paid only on the rare tick that actually drops a slot.
+ */
+function defaultWorkerSlotLog(level: 'INFO' | 'WARN', message: string): void {
+  void import('./daemon/daemon.js').then((m) => m.log(level, message)).catch(() => {});
 }
 
 function defaultSlotSeeded(harness: AgentId, slotDir: string): boolean {
@@ -669,7 +685,7 @@ function defaultSlotSeeded(harness: AgentId, slotDir: string): boolean {
  * seeded (no `hasCompletedOnboarding`) is provisioned again so it converges.
  */
 export function reconcileLocalWorkerSlots(deps: ReconcileWorkerSlotsDeps = {}): ReconcileWorkerSlotsResult {
-  const result: ReconcileWorkerSlotsResult = { provisioned: [], skipped: [], errors: [] };
+  const result: ReconcileWorkerSlotsResult = { provisioned: [], dropped: [], skipped: [], errors: [] };
   const role = deps.selfRole ?? selfConfiguredDeviceRole();
   if (isHeadedDeviceRole(role)) return result; // headed boxes provision via native login
   const meta = (deps.readMetaFn ?? readMeta)();
@@ -678,6 +694,37 @@ export function reconcileLocalWorkerSlots(deps: ReconcileWorkerSlotsDeps = {}): 
   const provision = deps.provision ?? provisionWorkerSlot;
   const slotSeeded = deps.slotSeeded ?? defaultSlotSeeded;
   const byId = new Map(listNativeAccounts(meta).map((account) => [account.id, account]));
+
+  // Drop stale worker slots (PHNX-4116). A `deviceAccounts.slots` record whose
+  // accountId is no longer a registered native account is a leftover from an
+  // older account-id generation — every worker held 8 such duplicates, each a
+  // full HOME carrying a live setup-token in `.claude/.oauth_token`. Delete that
+  // credential (a 0600 file) and drop the record, but KEEP the slot directory:
+  // `.claude/projects` holds session transcripts. Fail closed — an empty
+  // registry is a transient read, and stripping every slot on it would wipe a
+  // healthy box's whole slot set, so drop nothing until the registry answers.
+  if (byId.size > 0) {
+    const stale = Object.values(slots).filter((slot) => !byId.has(slot.accountId));
+    const droppable: DeviceAccountSlot[] = [];
+    for (const slot of stale) {
+      try {
+        // force ignores an already-absent token; a real failure (EACCES) keeps
+        // the slot so the record is never dropped while its credential lingers.
+        fs.rmSync(path.join(slot.slotDir, '.claude', '.oauth_token'), { force: true });
+        droppable.push(slot);
+      } catch (err) {
+        result.errors.push({ accountId: slot.accountId, message: `stale slot credential not removed, slot kept: ${(err as Error).message}` });
+      }
+    }
+    if (droppable.length > 0) {
+      (deps.dropSlots ?? dropSlots)(droppable.map((slot) => slot.accountId));
+      const log = deps.log ?? defaultWorkerSlotLog;
+      for (const slot of droppable) {
+        result.dropped.push(slot.accountId);
+        log('INFO', `worker-slot: dropped stale slot ${slot.accountId} — no longer a registered account; removed its credential, kept ${slot.slotDir} for transcripts`);
+      }
+    }
+  }
   // Resolve each account to the one (bundle, key) the push plan uses: a T1 row's
   // reserved `__<harness>__` key, or the legacy `auth` key by email for a claude
   // row predating T1. Both are worker credentials this box may already hold, so

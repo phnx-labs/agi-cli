@@ -26,13 +26,29 @@ describe('runFailureReason', () => {
     expect(r).toBe('auth_failed: Please run /login');
   });
 
-  it('names a wedged (active_run) skip in human terms, not the verbose errorMessage', () => {
-    // A wedged skip stores no errorMessage on some paths; the skipReason is the signal.
-    const r = runFailureReason(meta({ status: 'skipped', skipReason: 'active_run', exitCode: null }));
-    expect(r).toBe('wedged: a prior run is still active');
+  it('names an active-run overlap skip as blocked on the live run + when it started (PHNX-4116)', () => {
+    // The live run id is a timestamp-shaped run id, so "active since" reverses it.
+    const r = runFailureReason(meta({
+      status: 'skipped', skipReason: 'active_run', exitCode: null,
+      activeRunId: '2026-08-08T21-24-00-005Z',
+    }));
+    expect(r).toBe('blocked: run 2026-08-08T21-24-00-005Z active since 2026-08-08T21:24:00.005Z');
   });
 
-  it('prefers errorMessage when present, even for a skip', () => {
+  it('reads blocked without a time when the live run id is not timestamp-shaped', () => {
+    const r = runFailureReason(meta({
+      status: 'skipped', skipReason: 'active_run', exitCode: null, activeRunId: 'manual-xyz',
+    }));
+    expect(r).toBe('blocked: run manual-xyz still active');
+  });
+
+  it('names an active_run skip in human terms, not the removed "wedged" wording', () => {
+    // No structured activeRunId and no errorMessage: the skipReason is the only signal.
+    const r = runFailureReason(meta({ status: 'skipped', skipReason: 'active_run', exitCode: null }));
+    expect(r).toBe('blocked: a prior run is still active');
+  });
+
+  it('falls back to the errorMessage for a legacy active_run record with no activeRunId', () => {
     const r = runFailureReason(meta({
       status: 'skipped', skipReason: 'active_run', exitCode: null,
       errorMessage: "skipped — 'x' already has an active run (2026-08-08T21-24-00-005Z)",

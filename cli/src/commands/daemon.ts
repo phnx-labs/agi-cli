@@ -343,6 +343,14 @@ function humanDuration(seconds: number): string {
 interface SecretsBrokerHealth {
   reachable: boolean;
   /**
+   * True when this box routes `keychain`-backend items to the standalone's
+   * encrypted file store (a headless worker with no reachable keyring). The
+   * broker exists only to hold an UNLOCKED keychain across reads without a
+   * Touch ID prompt — a file-backed box reads every secret one-shot with no
+   * broker at all, so an absent broker there is normal, not a fault (PHNX-4116).
+   */
+  fileBacked: boolean;
+  /**
    * Always `null` — the broker's socket now lives entirely inside the
    * standalone `secrets` engine's own process (PHNX-3989 OWN-1); the daemon
    * neither hosts it nor knows its transport details. Kept in the shape for
@@ -360,15 +368,20 @@ interface SecretsBrokerHealth {
 
 /** Reachability probe only — the daemon does not host, supervise, or take over the broker (OWN-1). */
 async function probeSecretsBroker(): Promise<SecretsBrokerHealth> {
+  const { agentPing, agentStatus, keychainUsesFileFallback } = await import('../lib/secrets-client.js');
   try {
-    const { agentPing, agentStatus } = await import('../lib/secrets-client.js');
     const ping = await agentPing();
-    if (!ping.reachable) return { reachable: false, socketPath: null, heldBundles: null, record: null };
-    const entries = await agentStatus();
-    return { reachable: true, socketPath: null, heldBundles: entries.length, record: null };
-  } catch {
-    return { reachable: false, socketPath: null, heldBundles: null, record: null };
-  }
+    if (ping.reachable) {
+      const entries = await agentStatus();
+      return { reachable: true, fileBacked: false, socketPath: null, heldBundles: entries.length, record: null };
+    }
+  } catch { /* fall through to the unreachable classification below */ }
+  // Unreachable: distinguish "broker needed and absent" (a keychain-backed box)
+  // from "no broker needed" (a file-backed worker reads secrets one-shot). An
+  // unknown store defaults to broker-needed, the louder verdict.
+  let fileBacked = false;
+  try { fileBacked = await keychainUsesFileFallback(); } catch { /* unknown → not file-backed */ }
+  return { reachable: false, fileBacked, socketPath: null, heldBundles: null, record: null };
 }
 
 // ─── Scheduler summary (routine count / next fire / failing count) ──────────
@@ -423,6 +436,24 @@ function healthLine(label: string, live: boolean, record: SubsystemHealth | null
       ? chalk.gray(`(last ok ${record.lastOkAt})`)
       : '';
   return `  ${chalk.red('down')}  ${label} ${detail}`;
+}
+
+/**
+ * The `secrets broker` health line. Reachable → healthy. Unreachable is a FAULT
+ * (`down`) only when the store is keychain-backed — there the broker is what
+ * holds the unlocked keychain across reads. On a file-backed box (every
+ * headless worker) no broker is needed: secrets read one-shot, so an absent
+ * broker is expected and reads as INFO, not `down` (PHNX-4116). Pure, so the
+ * three cases are unit-tested with no live daemon.
+ */
+export function secretsBrokerHealthLine(secrets: SecretsBrokerHealth): string {
+  if (secrets.reachable) {
+    return healthLine(`secrets broker  (${secrets.socketPath}, ${secrets.heldBundles} bundle(s) held)`, true, secrets.record);
+  }
+  if (secrets.fileBacked) {
+    return `  ${chalk.cyan('info')}  secrets agent not running (file-backed stores)`;
+  }
+  return healthLine('secrets broker  (unreachable)', false, secrets.record);
 }
 
 async function runStatus(opts: { json?: boolean }): Promise<void> {
@@ -550,7 +581,7 @@ async function runStatus(opts: { json?: boolean }): Promise<void> {
   }
 
   console.log(chalk.bold('\nHealth\n'));
-  console.log(healthLine(`secrets broker  ${secrets.reachable ? `(${secrets.socketPath}, ${secrets.heldBundles} bundle(s) held)` : '(unreachable)'}`, secrets.reachable, secrets.record));
+  console.log(secretsBrokerHealthLine(secrets));
 
   const schedulerEnabled = getConfigValue('scheduler.enabled').value !== false;
   console.log(`  ${schedulerEnabled ? chalk.green('enabled') : chalk.yellow('disabled')}  scheduler — ${scheduler.enabledCount}/${scheduler.routineCount} routine(s) enabled` +
@@ -646,7 +677,7 @@ async function runServices(opts: { json?: boolean }): Promise<void> {
     if (row.lastError) console.log(chalk.gray(`    last-error: ${row.lastError}`));
   }
   console.log(chalk.bold('\nHosted sockets\n'));
-  console.log(healthLine(`secrets broker  ${secrets.reachable ? `(${secrets.socketPath}, ${secrets.heldBundles} bundle(s) held)` : '(unreachable)'}`, secrets.reachable, secrets.record));
+  console.log(secretsBrokerHealthLine(secrets));
   console.log(chalk.gray('\nScheduled routines run through `agents routines` — see: agents routines stats'));
   console.log(chalk.gray('agents daemon services enable|disable|restart <id> apply live for supervised services.'));
 }
