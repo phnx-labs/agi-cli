@@ -3077,6 +3077,32 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
       // the only `continue` is the preflight exhaustion handoff below, which
       // consumes one entry of the `--fallback` spec before retrying as that
       // alternate. The spec is finite, so this terminates (PHNX-3999 F19).
+      // A balanced pick or the no-fresh-usage picker returns a CANDIDATE. Since
+      // PHNX-3940 a native candidate is a registered account SLOT, not the
+      // version home the executable lives in, so the spawn must resolve that
+      // slot (home + durable env) through the canonical local launch resolver.
+      // Without this the run launched the version home and whichever login it
+      // held: on yosemite-m0 (2026-09-23) the picker chose trp and Claude
+      // started as a different account in its first-run wizard. A remote run
+      // re-resolves on the peer, which runs this same code locally.
+      const applyPickedCandidate = async (candidate: import('../lib/accounting/rotate.js').RotateCandidate): Promise<void> => {
+        if (!candidate.nativeAccount || options.host || options.device) return;
+        const { resolveLocalAccountLaunch } = await import('../lib/accounting/account-launch.js');
+        try {
+          launchAccount = await resolveLocalAccountLaunch({
+            agent,
+            executableVersion: version ?? candidate.version,
+            candidate,
+            useDefault: false,
+          });
+        } catch (err) {
+          console.error(chalk.red((err as Error).message));
+          process.exit(1);
+        }
+        if (launchAccount.execHome) execHome = launchAccount.execHome;
+        if (launchAccount.configVersion) accountConfigVersion = launchAccount.configVersion;
+        if (Object.keys(launchAccount.env).length > 0) accountEnv = { ...accountEnv, ...launchAccount.env };
+      };
       preflight: for (;;) {
       if (!accountPickerRequested && !configuredAccount && (!version || strategy !== 'pinned' || options.balanced || explicitStrategy)) {
         if (version) {
@@ -3212,6 +3238,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
                 // Keep the rotation so mid-run failover can still cascade across
                 // the other (stale) healthy accounts after a real rejection.
                 rotationResult = resolved.rotation;
+                await applyPickedCandidate(selected);
                 if (!options.quiet) {
                   const identity = selected.accountLabel || 'signed-in account';
                   process.stderr.write(chalk.gray(
@@ -3232,12 +3259,13 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
               if (resolved.rotation) {
                 launchSignedIn = resolved.rotation.picked.signedIn;
                 launchEmail = resolved.rotation.picked.email;
+                await applyPickedCandidate(resolved.rotation.picked);
               }
               // A balanced/available pick of a PROVIDER account (setup-token /
               // API-key) carries `providerAccount`. Resolve its env through the
               // same `resolveSpawnAccount` path an explicit `--account` uses, so
               // exec injects the credential; a native pick has no providerAccount
-              // and runs from its own version home unchanged (RUSH-3182).
+              // and resolved its slot home in applyPickedCandidate above.
               const pickedProviderAccount = resolved.rotation?.picked.providerAccount;
               if (pickedProviderAccount) {
                 try {
