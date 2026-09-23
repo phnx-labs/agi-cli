@@ -570,7 +570,7 @@ interface DaemonServiceRow {
   enabled: boolean;
   /**
    * `ServiceSupervisor`'s real lifecycle state when `supervised` is true
-   * (`idle`/`running`/`parked`/`stopped`, written cross-process via
+   * (`idle`/`running`/`stopped`, written cross-process via
    * `recordSubsystemState`). A legacy `setInterval`-driven service has no such
    * record, so its state is inferred from `enabled` + whether the daemon
    * process is up — labelled distinctly so a reader can't mistake it for a
