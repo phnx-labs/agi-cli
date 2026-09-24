@@ -172,6 +172,66 @@ function codexWorkspaceTrusted(version: string, cwd: string): boolean {
 }
 
 /**
+ * Verdicts a routine's activation auth check accepts as usable. `no_evidence` is
+ * here for robustness (a payload that still carries one), but a box that cannot
+ * probe DROPS it in {@link probeLocalFleetAuth}, so the real path for those boxes
+ * is the absent-row + launchability fallback in {@link decideRoutineAuthReadiness}
+ * (PHNX-4116).
+ */
+const ROUTINE_AUTH_ACCEPTED: ReadonlySet<AuthVerdict> = new Set<AuthVerdict>([
+  'live', 'rate_limited', 'unverified', 'no_evidence',
+]);
+
+/**
+ * ONE decision the local ({@link evaluateActivationReadinessLive}) and host
+ * ({@link evaluateHostActivationReadiness}) readiness paths share, so both reach
+ * the SAME answer for the same box (PHNX-4116). `row` is that box's probe verdict
+ * for the routine's agent — ABSENT when the box could not probe (a worker's
+ * setup-token box, or a headed box that spent its hourly usage-endpoint budget,
+ * both drop `no_evidence` in `probeLocalFleetAuth`). `launchable` is whether the
+ * box holds a launchable signed-in credential, from the SAME
+ * `collectRunCandidates`/`isLaunchableSignedIn` the run router uses — so a
+ * token-backed routine on a box that cannot probe stays activatable, a box with
+ * no credential at all fails `unconfigured`, and a server rejection (`revoked` —
+ * the only present-but-not-accepted verdict these force-probed paths produce)
+ * blocks regardless of a token on disk.
+ */
+export function decideRoutineAuthReadiness(
+  row: { verdict: AuthVerdict } | undefined,
+  launchable: boolean,
+): { ok: boolean; reason?: string } {
+  if (row && ROUTINE_AUTH_ACCEPTED.has(row.verdict)) return { ok: true };
+  if (!row) return launchable ? { ok: true } : { ok: false, reason: 'unconfigured' };
+  return { ok: false, reason: row.verdict };
+}
+
+/**
+ * Decide a host-placed routine's auth readiness from the REMOTE box's `devices
+ * ping --local --json` payload (PHNX-4116). Pure over the payload TEXT so it is
+ * unit-tested without SSH: it finds this agent's probe row (ABSENT when the box
+ * dropped its `no_evidence` row) and reads the box's per-agent launchability the
+ * ping now carries, then runs {@link decideRoutineAuthReadiness} — so a host box
+ * that could not probe but holds a token is ready, exactly as the local path
+ * decides for the same box. Returns null when the payload cannot be parsed; the
+ * caller treats that as a probe failure, never as "no credential".
+ */
+export function decideHostAuthFromPing(
+  stdout: string,
+  agent: string,
+): { ok: boolean; reason?: string } | null {
+  let payload: unknown;
+  try { payload = JSON.parse(stdout); } catch { return null; }
+  if (!payload || typeof payload !== 'object') return null;
+  const { rows, launchable } = payload as {
+    rows?: Array<{ agent?: string; health?: { verdict?: AuthVerdict } }>;
+    launchable?: string[];
+  };
+  const verdict = rows?.find((row) => row.agent === agent)?.health?.verdict;
+  const row = verdict ? { verdict } : undefined;
+  return decideRoutineAuthReadiness(row, launchable?.includes(agent) ?? false);
+}
+
+/**
  * Interactive setup/repair readiness. Unlike the scheduler's deterministic
  * structural gate, this completes a real local auth request and reads Codex's
  * native trust record before add/edit/resume can activate the definition.
@@ -187,25 +247,14 @@ export async function evaluateActivationReadinessLive(config: JobConfig): Promis
   if (!version) return structural;
   const context = resolveJobExecutionContext(config, { mode: 'local' });
 
-  let authVerdict: { ok: boolean; reason?: string };
+  // The probe row (absent when this box could not probe — a worker's setup-token
+  // box drops `no_evidence`) plus the run-router launchability, run through the
+  // ONE decision the host path also uses so both agree for the same box.
   const rows = await probeLocalFleetAuth({ agents: [config.agent as never] });
   const row = rows.find((candidate) => candidate.version === version);
-  const accepted = new Set(['live', 'rate_limited', 'unverified', 'no_evidence']);
-  if (row && accepted.has(row.health.verdict)) {
-    authVerdict = { ok: true };
-  } else if (!row) {
-    // A worker no longer writes a probe row — `no_evidence` is dropped, not
-    // published (PHNX-4116) — so an absent row is NOT "unconfigured". Fall back
-    // to the same launchability the router uses (a signed-in slot or version
-    // home), which reads the token, not a probe verdict. This keeps a worker's
-    // token-backed routine activatable while still failing a box with no
-    // credential at all.
-    const { collectRunCandidates } = await import('./accounting/rotate.js');
-    const launchable = (await collectRunCandidates(config.agent as never)).some((candidate) => candidate.signedIn);
-    authVerdict = launchable ? { ok: true } : { ok: false, reason: 'unconfigured' };
-  } else {
-    authVerdict = { ok: false, reason: row.health.verdict };
-  }
+  const { collectRunCandidates } = await import('./accounting/rotate.js');
+  const launchable = (await collectRunCandidates(config.agent as never)).some((candidate) => candidate.signedIn);
+  const authVerdict = decideRoutineAuthReadiness(row?.health, launchable);
 
   return evaluateRoutineReadiness(context, {
     agentInstalled: () => true,
@@ -281,16 +330,20 @@ export async function evaluateHostActivationReadiness(config: JobConfig): Promis
         ? `powershell -NoProfile -EncodedCommand ${encodePowershell(`${POWERSHELL_PROGRESS_SILENCE}; & agents ${pingArgs.map(powershellQuote).join(' ')}`)}`
         : `agents ${pingArgs.map(shellQuote).join(' ')}`;
       const probe = sshExec(target, command, { timeoutMs: 30_000, extraSshArgs: identity });
-      let verdict = 'error';
-      if (probe.code === 0) {
-        try {
-          const payload = JSON.parse(probe.stdout) as { rows?: Array<{ agent: string; health: { verdict: string } }> };
-          verdict = payload.rows?.find((row) => row.agent === config.agent)?.health.verdict ?? 'unconfigured';
-        } catch { verdict = 'error'; }
-      }
-      if (!new Set(['live', 'rate_limited', 'unverified', 'no_evidence']).has(verdict)) {
+      // A ping that could not run or parse is a probe FAILURE, never mistaken for
+      // "no credential": block with the failure so the operator sees it. A parsed
+      // payload runs the shared decision — an ABSENT row (the remote dropped its
+      // `no_evidence`) plus the launchability the ping now carries is ready,
+      // exactly as the local path decides for the same box (PHNX-4116).
+      const decision = probe.code === 0 ? decideHostAuthFromPing(probe.stdout, config.agent) : null;
+      if (!decision) {
         return evaluateRoutineReadiness(unprobed, {
-          authOk: () => ({ ok: false, reason: verdict }),
+          authOk: () => ({ ok: false, reason: `devices ping --local failed on ${host.name}` }),
+        }, { agent: config.agent });
+      }
+      if (!decision.ok) {
+        return evaluateRoutineReadiness(unprobed, {
+          authOk: () => decision,
         }, { agent: config.agent });
       }
     }
