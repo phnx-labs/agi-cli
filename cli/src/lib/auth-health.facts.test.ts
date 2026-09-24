@@ -71,6 +71,24 @@ describe('runOutcomeVersionKey (pure fallback key)', () => {
   });
 });
 
+describe('probeAuthHealth — the row a non-headed box drops (why the host path needs launchability, PHNX-4116)', () => {
+  it('a signed-in claude account on a non-headed box yields no_evidence, not a probe verdict', async () => {
+    // The temp HOME has no configured role, so it is not headed and cannot read
+    // the usage endpoint (RUSH-2392). With no usageKey there is no fresh-usage
+    // shortcut either, so the honest verdict is "we did not look" — no_evidence.
+    // `probeLocalFleetAuth` DROPS that row, which is exactly why the host
+    // readiness path must fall back to launchability rather than read the absent
+    // row as 'unconfigured'. Real behavior: no network probe is issued on this path.
+    const info = {
+      accountKey: 'acct-1', usageKey: null, accountId: null, organizationId: null,
+      userId: null, email: 'bot@example.com', plan: null, usageStatus: null,
+      overageCredits: null, lastActive: null, signedIn: true,
+    };
+    const health = await authHealth.probeAuthHealth('claude', undefined, { info });
+    expect(health.verdict).toBe('no_evidence');
+  });
+});
+
 describe('recordRunAuthOutcome -> the auth cache -> the fact (real IO, temp HOME)', () => {
   it('records a clean run as "last used ok" on the account row', () => {
     authHealth.recordRunAuthOutcome({ agent: 'claude', version: 'ver-ok', host: HOST, outcome: { ok: true }, now: Date.now() });

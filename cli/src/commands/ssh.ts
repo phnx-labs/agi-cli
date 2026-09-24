@@ -978,7 +978,18 @@ async function runFleetPing(opts: { json?: boolean; local?: boolean; verbose?: b
   if (opts.local) {
     const { authRows: rows } = await refreshLocalFleetAuthState({ force: true });
     if (opts.json) {
-      console.log(JSON.stringify({ host: self, rows }));
+      // Per-agent launchability from the SAME run-router path the local readiness
+      // check uses (`collectRunCandidates`/`isLaunchableSignedIn`), so a consumer
+      // can tell a box that simply could not probe — a worker's setup-token box,
+      // or a headed box that spent its usage-endpoint budget, both DROP their
+      // `no_evidence` row — from a box with no credential at all. From `rows`
+      // alone the two are indistinguishable, which broke `--host` routine
+      // readiness on every worker (PHNX-4116).
+      const { collectRunCandidates } = await import('../lib/accounting/rotate.js');
+      const launchable = (await Promise.all(ALL_AGENT_IDS.map(async (agent) =>
+        (await collectRunCandidates(agent)).some((candidate) => candidate.signedIn) ? agent : null,
+      ))).filter((agent): agent is AgentId => agent !== null);
+      console.log(JSON.stringify({ host: self, rows, launchable }));
     } else {
       for (const line of renderAuthMatrix([{ host: self, rows }], { verbose: opts.verbose })) console.log(line);
     }

@@ -21,3 +21,15 @@
   now returns the honest `no_evidence` verdict (dropped from the published probe
   rows) instead of the overloaded `unverified`, so eight identical workers read one
   distinct picture instead of five. Source: `cli/src/lib/auth-health.ts`.
+
+- **A `--host <worker>` routine activates on a token-backed worker again
+  (PHNX-4116).** Dropping the worker's `no_evidence` probe row left `agents devices
+  ping --local --json` with no row for the agent, so host-placed routine readiness
+  read the absent row as `unconfigured` and reported `agent_auth_failed` with a
+  valid token on disk. `devices ping --local --json` now also emits `launchable`
+  (the agents this box holds a launchable signed-in credential for, from the same
+  `collectRunCandidates` the run router uses), and one shared decision
+  (`decideRoutineAuthReadiness`) is used by both the local and host readiness paths:
+  an absent row plus a launchable credential is ready, a box with no credential
+  fails, and a fresh `revoked` blocks — so both paths reach the same answer for the
+  same box. Source: `cli/src/lib/routine-readiness.ts`, `cli/src/commands/ssh.ts`.
