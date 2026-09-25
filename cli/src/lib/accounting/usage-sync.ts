@@ -33,6 +33,7 @@ import {
 import { getUserAgentsDir } from '../state.js';
 import { machineId, normalizeHost } from '../session/sync/config.js';
 import type { DeviceProfile } from '../devices/registry.js';
+import { resolveDeviceProfile } from '../devices/resolve-profile.js';
 import type { SshExecResult } from '../ssh-exec.js';
 import {
   exportClaudeUsageCacheRows,
@@ -413,7 +414,6 @@ export async function exchangeFleetStateWithPeers(options: ExchangeOptions = {})
     try {
       // Resolve the operator config (`platform`) before picking the shell family,
       // matching the profile sshTargetFor/deviceIdentityArgs dial with.
-      const { resolveDeviceProfile } = await import('../devices/resolve-profile.js');
       const remoteCmd = await buildFleetStateExchangeCommand(resolveDeviceProfile(peer).shell === 'powershell' ? 'windows' : undefined);
       const res = await dial(peer, remoteCmd, input);
       if (res.timedOut) throw new Error(`timed out after ${Math.round(timeoutMs / 1000)}s`);
