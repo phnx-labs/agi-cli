@@ -5,6 +5,7 @@ import { pushBundleToHost } from '../secrets-client.js';
 import type { RemoteBackend } from '../secrets-types.js';
 import { AUTH_STORE_ALIAS, inspectReservedAuthBundle, isReservedBundleName } from '../secrets-policy.js';
 import { deviceIdentityArgs, sshTargetFor } from '../devices/connect.js';
+import { resolveDeviceProfile } from '../devices/resolve-profile.js';
 import { readyProbe, bootstrapAgentsCli } from '../hosts/ready.js';
 import { buildRemoteAgentsInvocation } from '../hosts/remote-cmd.js';
 import { sshExec } from '../ssh-exec.js';
@@ -257,7 +258,8 @@ interface ProbeOptions {
   withSecrets?: boolean;
 }
 
-export function probeDevice(device: DeviceProfile, opts?: ProbeOptions): DeviceProbe {
+export function probeDevice(rawDevice: DeviceProfile, opts?: ProbeOptions): DeviceProbe {
+  const device = resolveDeviceProfile(rawDevice);
   let target: string;
   try {
     target = sshTargetFor(device);
@@ -348,7 +350,8 @@ interface ExecContext {
   dryRun?: boolean;
 }
 
-async function reconcileDevice(row: DeviceDiff, device: DeviceProfile, ctx: ExecContext): Promise<DeviceApplyResult> {
+async function reconcileDevice(row: DeviceDiff, rawDevice: DeviceProfile, ctx: ExecContext): Promise<DeviceApplyResult> {
+  const device = resolveDeviceProfile(rawDevice);
   if (!row.probe.reachable) {
     return { device: row.device, ok: false, steps: [], note: row.probe.note ?? 'unreachable' };
   }
