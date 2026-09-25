@@ -25,6 +25,7 @@ import { resolveHost } from '../lib/hosts/registry.js';
 import { sshExecAsync } from '../lib/ssh-exec.js';
 import { hostIdentityArgs, sshTargetFor } from '../lib/hosts/types.js';
 import { deviceIdentityArgs } from '../lib/devices/connect.js';
+import { resolveDeviceProfile } from '../lib/devices/resolve-profile.js';
 import { machineId, normalizeHost } from '../lib/session/sync/config.js';
 import { findAmbiguousDevicePins } from '../lib/scheduling/routines.js';
 import { findLeakedDaemons } from '../lib/daemon/leaked-daemons.js';
@@ -262,12 +263,17 @@ async function resolveFleetTargets(opts: DoctorOptions): Promise<FleetTarget[]> 
   const localName = machineId();
   return Object.values(registry)
     .filter((d) => normalizeHost(d.name) !== localName)
-    .map((d) => ({
-      name: d.name,
-      sshTarget: d.name,
-      os: d.platform !== 'unknown' ? d.platform : undefined,
-      extraSshArgs: deviceIdentityArgs(d),
-    }));
+    .map((d) => {
+      // The operator config (`platform`) decides the remote shell family, never
+      // the registry's discovered platform.
+      const platform = resolveDeviceProfile(d).platform;
+      return {
+        name: d.name,
+        sshTarget: d.name,
+        os: platform !== 'unknown' ? platform : undefined,
+        extraSshArgs: deviceIdentityArgs(d),
+      };
+    });
 }
 
 async function probeFleetTarget(target: FleetTarget): Promise<DeviceDoctorResult> {
