@@ -2,6 +2,7 @@
 import { execFile } from 'child_process';
 import type { DeviceProfile } from './registry.js';
 import { buildSshInvocation, writeAskpassShim } from './connect.js';
+import { resolveDeviceProfile } from './resolve-profile.js';
 
 export const PROBE_TIMEOUT_MS = 2_500;
 
@@ -216,6 +217,17 @@ export function headroom(stats: DeviceStats | undefined): Headroom {
   return 'loaded';
 }
 
+// Resolves the operator profile first so the snippet family and budget match the profile buildSshInvocation dials.
+export function buildProbeInvocation(
+  device: DeviceProfile,
+  askpassShimPath: string,
+): { args: string[]; env: Record<string, string>; isWin: boolean; budgetMs: number } {
+  const resolved = resolveDeviceProfile(device);
+  const isWin = resolved.shell === 'powershell';
+  const { args, env } = buildSshInvocation(resolved, [isWin ? WIN_PROBE_SNIPPET : PROBE_SNIPPET], askpassShimPath, {}, { agentOnly: true });
+  return { args, env, isWin, budgetMs: probeBudgetMs(resolved) };
+}
+
 // Stats probes are agentOnly so listing devices never opens credential UI; a timeout means slow, not conclusively unreachable.
 export function probeDeviceStats(
   device: DeviceProfile,
@@ -223,12 +235,12 @@ export function probeDeviceStats(
 ): Promise<DeviceStats> {
   const host = device.name;
   const fetchedAt = opts.now ?? Date.now();
-  const isWin = device.shell === 'powershell';
   let args: string[];
   let env: Record<string, string>;
+  let isWin: boolean;
+  let budgetMs: number;
   try {
-    const shim = writeAskpassShim();
-    ({ args, env } = buildSshInvocation(device, [isWin ? WIN_PROBE_SNIPPET : PROBE_SNIPPET], shim, {}, { agentOnly: true }));
+    ({ args, env, isWin, budgetMs } = buildProbeInvocation(device, writeAskpassShim()));
   } catch {
     return Promise.resolve({ host, reachable: false, fetchedAt });
   }
@@ -239,7 +251,7 @@ export function probeDeviceStats(
       {
         encoding: 'utf-8',
         env: { ...process.env, ...env },
-        timeout: opts.timeoutMs ?? probeBudgetMs(device),
+        timeout: opts.timeoutMs ?? budgetMs,
       },
       (err, stdout) => {
         if (err || !stdout) {
