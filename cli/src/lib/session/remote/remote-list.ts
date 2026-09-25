@@ -26,6 +26,7 @@ import {
 } from '../../ssh-exec.js';
 import { connectionEndedNotice } from '../../hosts/reconnect.js';
 import { sshTargetFor } from '../../devices/connect.js';
+import { resolveDeviceProfile } from '../../devices/resolve-profile.js';
 import { resolveExplicitTargetSet } from '../../devices/resolve-target.js';
 import { loadDevices, isDialableDevice, type DeviceProfile } from '../../devices/registry.js';
 import { remoteShellFor, buildWindowsAgentsCommand, stripClixml } from '../../hosts/remote-cmd.js';
@@ -543,7 +544,9 @@ export async function gatherRemoteToolSearch(
     for (const d of Object.values(reg)) {
       if (!isAutomaticSessionPeer(d, self)) continue;
       try {
-        targets.push({ target: sshTargetFor(d), machine: normalizeHost(d.name), name: d.name, os: d.platform });
+        // The operator config (`platform`) decides the remote shell family, exactly
+        // as sshTargetFor dials it — never the registry's discovered platform.
+        targets.push({ target: sshTargetFor(d), machine: normalizeHost(d.name), name: d.name, os: resolveDeviceProfile(d).platform });
       } catch {
         // A registered control record without a dialable address is not a query target.
       }
@@ -611,7 +614,7 @@ export async function resolvePeerTarget(machine: string): Promise<{ target: stri
   for (const d of Object.values(reg)) {
     if (normalizeHost(d.name) !== machine) continue;
     try {
-      return { target: sshTargetFor(d), os: d.platform };
+      return { target: sshTargetFor(d), os: resolveDeviceProfile(d).platform };
     } catch {
       return undefined; // matched the machine, but it has no address to dial
     }
