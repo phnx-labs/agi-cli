@@ -12,6 +12,7 @@ import {
 } from '../../ssh-exec.js';
 import { connectionEndedNotice } from '../../hosts/reconnect.js';
 import { sshTargetFor } from '../../devices/connect.js';
+import { resolveDeviceProfile } from '../../devices/resolve-profile.js';
 import { loadDevices, isDialableDevice, type DeviceProfile } from '../../devices/registry.js';
 import { remoteShellFor, buildWindowsAgentsCommand, stripClixml } from '../../hosts/remote-cmd.js';
 import { gatherRemoteAgentsJson, type RemoteAgentsJsonParseResult } from '../../remote-agents-json.js';
@@ -180,7 +181,7 @@ export async function resolvePeerTarget(machine: string): Promise<{ target: stri
   for (const d of Object.values(reg)) {
     if (normalizeHost(d.name) !== machine) continue;
     try {
-      return { target: sshTargetFor(d), os: d.platform };
+      return { target: sshTargetFor(d), os: resolveDeviceProfile(d).platform };
     } catch {
       return undefined;
     }
