@@ -1157,7 +1157,9 @@ async function runDevicesCheck(opts: DoctorOptions, cwd: string): Promise<void> 
   const remoteTargets: CheckFanOutTarget[] = remoteFleetTargets(planned, self)
     .map((t) => ({
       name: t.device.name,
-      platform: t.device.platform,
+      // Resolved: the shell family must follow the operator platform, as
+      // fleetDialTarget does — the sibling fan-outs in commands/ssh.ts already do.
+      platform: resolveDeviceProfile(t.device).platform,
       skip: t.skip,
       dialTarget: fleetDialTarget(t.device),
       extraSshArgs: deviceIdentityArgs(t.device),
