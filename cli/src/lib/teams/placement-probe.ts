@@ -3,6 +3,7 @@ import { buildFleetStatePayload } from '../accounting/usage-sync.js';
 import { probeFleetStats, headroom, type DeviceStats } from '../devices/health.js';
 import { loadDevicesSync, type DeviceProfile } from '../devices/registry.js';
 import { buildSshInvocation, writeAskpassShim } from '../devices/connect.js';
+import { resolveDeviceProfile } from '../devices/resolve-profile.js';
 import {
   buildReadyProbeCommand,
   parseReadyProbe,
@@ -56,7 +57,7 @@ function probeRemoteReadiness(
   let env: Record<string, string>;
   try {
     const shim = writeAskpassShim();
-    const cmd = buildReadyProbeCommand(device.shell === 'powershell' ? 'windows' : undefined, { ingestUsage: true });
+    const cmd = buildReadyProbeCommand(resolveDeviceProfile(device).shell === 'powershell' ? 'windows' : undefined, { ingestUsage: true });
     ({ args, env } = buildSshInvocation(device, [cmd], shim, {}, { agentOnly: true }));
   } catch {
     return Promise.resolve(unknown);
