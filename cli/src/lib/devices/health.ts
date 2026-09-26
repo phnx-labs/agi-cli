@@ -15,6 +15,7 @@
 import { execFile } from 'child_process';
 import type { DeviceProfile } from './registry.js';
 import { buildSshInvocation, writeAskpassShim } from './connect.js';
+import { resolveDeviceProfile } from './resolve-profile.js';
 
 /** Default per-device probe budget, for a device reachable over a DIRECT
  * Tailscale path. Short enough that the list never hangs on a wedged box. */
@@ -291,6 +292,31 @@ export function headroom(stats: DeviceStats | undefined): Headroom {
   return 'loaded';
 }
 
+/** The ssh argv, env, snippet family and budget for one device's stats probe.
+ * Resolves the operator config (`platform`, `ssh.user`, ...) FIRST: the
+ * snippet and budget must follow the same profile buildSshInvocation dials
+ * with. Without this a Windows-discovered box whose config says
+ * `platform: linux` (an sshd that lands in WSL) was dialed as a POSIX login
+ * shell but handed the PowerShell snippet — empty stdout, so every refresh
+ * rendered it offline while `agents ssh <name>` worked fine. Exported so the
+ * decision is testable against the real config read path without dialing. */
+export function buildProbeInvocation(
+  device: DeviceProfile,
+  askpassShimPath: string,
+): { args: string[]; env: Record<string, string>; isWin: boolean; budgetMs: number } {
+  const resolved = resolveDeviceProfile(device);
+  const isWin = resolved.shell === 'powershell';
+  // buildSshInvocation joins the cmd with spaces and hands the string to the
+  // remote login shell, which evaluates the snippet's `;`/`||` directly — no
+  // `sh -c` wrapper needed (and a wrapper would only re-quote the first token).
+  // For powershell devices it base64-encodes the snippet instead.
+  // agentOnly: this is a read-only stats probe. A password-auth device must
+  // resolve its bundle broker-only — never force a foreground Touch ID sheet
+  // just to render the load/mem columns of `agents devices` (RUSH-1970).
+  const { args, env } = buildSshInvocation(resolved, [isWin ? WIN_PROBE_SNIPPET : PROBE_SNIPPET], askpassShimPath, {}, { agentOnly: true });
+  return { args, env, isWin, budgetMs: probeBudgetMs(resolved) };
+}
+
 /** Probe one device over the same ssh path as `agents ssh <name>`. Never throws;
  * an unreachable/slow/misconfigured device resolves to `reachable: false`. */
 export function probeDeviceStats(
@@ -299,19 +325,12 @@ export function probeDeviceStats(
 ): Promise<DeviceStats> {
   const host = device.name;
   const fetchedAt = opts.now ?? Date.now();
-  const isWin = device.shell === 'powershell';
   let args: string[];
   let env: Record<string, string>;
+  let isWin: boolean;
+  let budgetMs: number;
   try {
-    const shim = writeAskpassShim();
-    // buildSshInvocation joins the cmd with spaces and hands the string to the
-    // remote login shell, which evaluates the snippet's `;`/`||` directly — no
-    // `sh -c` wrapper needed (and a wrapper would only re-quote the first token).
-    // For powershell devices it base64-encodes the snippet instead.
-    // agentOnly: this is a read-only stats probe. A password-auth device must
-    // resolve its bundle broker-only — never force a foreground Touch ID sheet
-    // just to render the load/mem columns of `agents devices` (RUSH-1970).
-    ({ args, env } = buildSshInvocation(device, [isWin ? WIN_PROBE_SNIPPET : PROBE_SNIPPET], shim, {}, { agentOnly: true }));
+    ({ args, env, isWin, budgetMs } = buildProbeInvocation(device, writeAskpassShim()));
   } catch {
     return Promise.resolve({ host, reachable: false, fetchedAt });
   }
@@ -322,7 +341,7 @@ export function probeDeviceStats(
       {
         encoding: 'utf-8',
         env: { ...process.env, ...env },
-        timeout: opts.timeoutMs ?? probeBudgetMs(device),
+        timeout: opts.timeoutMs ?? budgetMs,
       },
       (err, stdout) => {
         // execFile kills an over-budget child with a signal; that is a slow link,

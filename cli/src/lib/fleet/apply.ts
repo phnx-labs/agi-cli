@@ -14,6 +14,7 @@ import { pushBundleToHost } from '../secrets-client.js';
 import type { RemoteBackend } from '../secrets-types.js';
 import { AUTH_STORE_ALIAS, inspectReservedAuthBundle, isReservedBundleName } from '../secrets-policy.js';
 import { deviceIdentityArgs, sshTargetFor } from '../devices/connect.js';
+import { resolveDeviceProfile } from '../devices/resolve-profile.js';
 import { readyProbe, bootstrapAgentsCli } from '../hosts/ready.js';
 import { buildRemoteAgentsInvocation } from '../hosts/remote-cmd.js';
 import { sshExec } from '../ssh-exec.js';
@@ -350,7 +351,10 @@ interface ProbeOptions {
 
 /** Probe one device: reachability + agents-cli version + installed agent ids
  * (and, when `withVersions`, the installed version strings per agent). */
-export function probeDevice(device: DeviceProfile, opts?: ProbeOptions): DeviceProbe {
+export function probeDevice(rawDevice: DeviceProfile, opts?: ProbeOptions): DeviceProbe {
+  // Effective profile: the operator config (`platform`) decides the remote shell
+  // family and env, exactly as sshTargetFor/deviceIdentityArgs dial it.
+  const device = resolveDeviceProfile(rawDevice);
   let target: string;
   try {
     target = sshTargetFor(device);
@@ -462,7 +466,8 @@ interface ExecContext {
 }
 
 /** Execute one device's planned actions in order. Real SSH — no mocks. */
-async function reconcileDevice(row: DeviceDiff, device: DeviceProfile, ctx: ExecContext): Promise<DeviceApplyResult> {
+async function reconcileDevice(row: DeviceDiff, rawDevice: DeviceProfile, ctx: ExecContext): Promise<DeviceApplyResult> {
+  const device = resolveDeviceProfile(rawDevice);
   if (!row.probe.reachable) {
     return { device: row.device, ok: false, steps: [], note: row.probe.note ?? 'unreachable' };
   }
