@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { classifyActionDanger } from './schema2-danger.js';
-import { tokenizeBash } from '../session/bash-command.js';
+import { tokenizeBash } from '@phnx-labs/sessions-cli/reader';
 
 /** Tokenize a single command into its first segment's argv, as the producer does. */
 function argv(cmd: string): string[] {

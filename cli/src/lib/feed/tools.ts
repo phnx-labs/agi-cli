@@ -30,7 +30,7 @@
 import { createHash } from 'node:crypto';
 import { normalizeHost } from '../machine-id.js';
 import { sessionHeadline } from '../session/title.js';
-import type { SessionMeta } from '../session/types.js';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import type { BrowserSessionRow, ArtifactKind } from '../browser/sessions-list.js';
 import type { ComputerRunRow } from '../computer/sessions-list.js';
 

@@ -21,7 +21,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import chalk from 'chalk';
 import type { Command } from 'commander';
-import type { SessionMeta } from '../lib/session/types.js';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import { discoverSessions, resolveSessionById, looksLikeSessionId } from '../lib/session/discover.js';
 import { findSessionsById } from '../lib/session/db.js';
 import { filterSessionsByQuery, parseAgentFilter } from './sessions.js';

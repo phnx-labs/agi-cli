@@ -64,7 +64,7 @@ import { getCacheDir } from '../state.js';
 import { machineId } from '../machine-id.js';
 import { query, truncate, type EventRecord } from '../feed/events.js';
 import { formatRelativeTime } from '../session/relative-time.js';
-import type { SessionMeta } from '../session/types.js';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import { getSessionById, listComputerSessionRecords, pruneToolSessions } from '../session/db.js';
 import { sessionHeadline } from '../session/title.js';
 import {

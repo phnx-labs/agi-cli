@@ -7,7 +7,7 @@ const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-affinity-'))
 process.env.HOME = TEST_HOME;
 
 const { getDB, closeDB, upsertSession, queryAffinityRollup } = await import('../db.js');
-type SessionMeta = import('../types.js').SessionMeta;
+type SessionMeta = import('@phnx-labs/sessions-cli/reader').SessionMeta;
 
 const FILES = path.join(TEST_HOME, 'files');
 fs.mkdirSync(FILES, { recursive: true });

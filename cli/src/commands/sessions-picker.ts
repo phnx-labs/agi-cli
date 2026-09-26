@@ -9,23 +9,23 @@ import fs from 'node:fs';
 import path from 'node:path';
 import chalk from 'chalk';
 import { truncate, humanDuration, formatBytes } from '../lib/format.js';
-import type { SessionEvent, SessionMeta, TodoItem, TodoProgress } from '../lib/session/types.js';
-import { sessionDisplayAgent } from '../lib/session/types.js';
+import type { SessionEvent, SessionMeta, TodoItem, TodoProgress } from '@phnx-labs/sessions-cli/reader';
+import { sessionDisplayAgent } from '@phnx-labs/sessions-cli/reader';
 import { fetchPeerPreviewDigest } from '../lib/session/remote-list.js';
-import { parseSession, sanitizeForTerminal, SNAPSHOT_TODO_TOOLS } from '../lib/session/parse.js';
-import { readSessionTail, readSessionHead } from '../lib/session/tail.js';
-import { safeTeamText } from '../lib/session/team-filter.js';
-import { cleanSessionPrompt, extractSessionTopic, isSyntheticUserMessage, firstUserMessageFromEvents } from '../lib/session/prompt.js';
-import { linkPath, linkUrl, relativeToCwd, shortenModel } from '../lib/session/render.js';
-import { linearIssueUrl } from '../lib/session/linear.js';
-import { extractTodoProgress, WORKTREE_RE } from '../lib/session/state.js';
+import { parseSession, sanitizeForTerminal, SNAPSHOT_TODO_TOOLS } from '@phnx-labs/sessions-cli/reader';
+import { readSessionTail, readSessionHead } from '@phnx-labs/sessions-cli/reader';
+import { safeTeamText } from '@phnx-labs/sessions-cli/reader';
+import { cleanSessionPrompt, extractSessionTopic, isSyntheticUserMessage, firstUserMessageFromEvents } from '@phnx-labs/sessions-cli/reader';
+import { linkPath, linkUrl, relativeToCwd, shortenModel } from '@phnx-labs/sessions-cli/reader';
+import { linearIssueUrl } from '@phnx-labs/sessions-cli/reader';
+import { extractTodoProgress, WORKTREE_RE } from '@phnx-labs/sessions-cli/reader';
 import { renderMarkdown } from '../lib/markdown.js';
 import { wrapToWidth } from '../lib/wrap.js';
 import { terminalWidth, stringWidth } from '../lib/session/width.js';
 import { itemPicker } from '../lib/picker.js';
 import { createMemoryCache } from '../lib/memory-cache.js';
-import { classifyFileChanges, changeCounts, toolHistogram, detectTestResult } from '../lib/session/digest.js';
-import type { FileChange, FileOp } from '../lib/session/digest.js';
+import { classifyFileChanges, changeCounts, toolHistogram, detectTestResult } from '@phnx-labs/sessions-cli/reader';
+import type { FileChange, FileOp } from '@phnx-labs/sessions-cli/reader';
 import {
   extractArtifacts,
   extractBackgroundShells,
@@ -36,7 +36,7 @@ import {
   harnessTracksBackgroundShells,
   isBackgroundShellStart,
   isSubAgentTool,
-} from '../lib/session/highlights.js';
+} from '@phnx-labs/sessions-cli/reader';
 import { getSessionPlugins, readSessionPreviewCache, writeSessionPreviewCache, readSessionContent, readArchivedSessionPreview } from '../lib/session/db.js';
 import { machineId } from '../lib/session/sync/config.js';
 /** A session whose transcript FILE is on another machine: its `filePath` is on

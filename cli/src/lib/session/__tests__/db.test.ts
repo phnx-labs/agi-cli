@@ -26,7 +26,7 @@ const {
 } = await import('../db.js');
 const { costOfUsage } = await import('../../pricing/index.js');
 const { emit } = await import('../../feed/events.js');
-type SessionMeta = import('../types.js').SessionMeta;
+type SessionMeta = import('@phnx-labs/sessions-cli/reader').SessionMeta;
 
 // JSONL files live under TEST_HOME so they're isolated and torn down with it.
 // querySessions filters out rows whose file_path no longer exists on disk

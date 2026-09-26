@@ -11,7 +11,7 @@
 import { describe, it, expect } from 'vitest';
 import { groupSessionsByMachine, dedupeByMachineSession, mergeLocalFirst, pickerColumnsFor } from '../sessions.js';
 import type { ActiveSession } from '../../lib/session/active.js';
-import type { SessionMeta } from '../../lib/session/types.js';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 
 function mk(overrides: Partial<ActiveSession>): ActiveSession {
   return {

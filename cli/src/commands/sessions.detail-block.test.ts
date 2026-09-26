@@ -14,8 +14,8 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { buildSessionDetailBlock } from './sessions.js';
-import type { SessionEvent, SessionMeta } from '../lib/session/types.js';
-import { parseSession } from '../lib/session/parse.js';
+import type { SessionEvent, SessionMeta } from '@phnx-labs/sessions-cli/reader';
+import { parseSession } from '@phnx-labs/sessions-cli/reader';
 
 function claudeFixture(dir: string): string {
   const filePath = path.join(dir, 'session.jsonl');

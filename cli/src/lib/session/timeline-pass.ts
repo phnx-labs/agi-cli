@@ -22,9 +22,9 @@
 import * as fs from 'fs';
 import type { ActiveSession } from './active.js';
 import { readSessionTimelineEntry, writeSessionTimeline, type SessionTimelineCacheRow, type SessionTimelineEntry } from './db.js';
-import { parseClaudeContent, parseCodexItemsContent, parseSession } from './parse.js';
+import { parseClaudeContent, parseCodexItemsContent, parseSession } from '@phnx-labs/sessions-cli/reader';
 import { toolEvidenceSourcePath } from './tool-store.js';
-import type { SessionAgentId, SessionEvent } from './types.js';
+import type { SessionAgentId, SessionEvent } from '@phnx-labs/sessions-cli/reader';
 import {
   compactTimelineState,
   emptyTimelineState,
@@ -34,7 +34,7 @@ import {
   unavailableTimeline,
   TIMELINE_EXTRACTOR_VERSION,
   type TimelineState,
-} from './timeline.js';
+} from '@phnx-labs/sessions-cli/reader';
 
 /** Sessions folded per tick. The tick's own deadline is 30 s; this stays well inside it. */
 const TIMELINE_PASS_MAX_PER_TICK = 8;

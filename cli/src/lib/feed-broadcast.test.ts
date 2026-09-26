@@ -4,7 +4,6 @@ import * as os from 'os';
 import * as path from 'path';
 import type { Meta } from './types.js';
 import { mailboxDir, peek } from './mailbox.js';
-import { _resetLinearWorkspaceCache } from './session/linear.js';
 import { registerBuiltinProviders } from './channels/providers/index.js';
 import {
   registerChannelProvider,
@@ -234,13 +233,11 @@ describe('message composition (plain — iMessage / owner / command sinks)', () 
 describe('Slack mrkdwn labeled links (PHNX-3698)', () => {
   const savedEnv = process.env.LINEAR_WORKSPACE;
   beforeEach(() => {
-    _resetLinearWorkspaceCache();
     process.env.LINEAR_WORKSPACE = 'getrush';
   });
   afterEach(() => {
     if (savedEnv === undefined) delete process.env.LINEAR_WORKSPACE;
     else process.env.LINEAR_WORKSPACE = savedEnv;
-    _resetLinearWorkspaceCache();
   });
 
   it('turns the session crumb into a labeled console link, keeping the human sentence', () => {
@@ -732,7 +729,6 @@ describe('runFeedBroadcast owner fan-out composes per destination (PHNX-3698)', 
       `version: 1\nowner:\n  channels:\n    - id: imessage\n      transport: rush\n      to: phone-owner\n    - id: slack\n      transport: rush\n      to: C0SLACKOWNER\n  policy:\n    normal: [imessage, slack]\n`,
     );
     process.env.LINEAR_WORKSPACE = 'getrush';
-    _resetLinearWorkspaceCache();
     // Overlay spies AFTER the guard is set, so sendToOwner's internal
     // registerBuiltinProviders() is a no-op and cannot restore the real ones.
     registerBuiltinProviders();
@@ -749,7 +745,6 @@ describe('runFeedBroadcast owner fan-out composes per destination (PHNX-3698)', 
     else process.env.AGENTS_HUMANS_FILE = savedHumans;
     if (savedWorkspace === undefined) delete process.env.LINEAR_WORKSPACE;
     else process.env.LINEAR_WORKSPACE = savedWorkspace;
-    _resetLinearWorkspaceCache();
     for (const k of Object.keys(captured)) delete captured[k];
     fs.rmSync(tmp, { recursive: true, force: true });
   });

@@ -13,7 +13,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { Server, type Connection } from 'ssh2';
 import { sessionHeadline } from '../title.js';
-import type { SessionMeta } from '../types.js';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import {
   REMOTE_STDOUT_MAX_BYTES,
   REMOTE_TOOL_AGGREGATE_MAX_BYTES,
