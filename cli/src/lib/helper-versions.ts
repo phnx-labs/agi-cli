@@ -56,7 +56,7 @@ interface HelperRelease {
  * it would claim a distribution responsibility agents-cli no longer has.
  */
 export const HELPER_RELEASES: Readonly<Record<HelperName, HelperRelease>> = {
-  menubar: { tagPrefix: 'menubar', floor: '1.6.1' },
+  menubar: { tagPrefix: 'menubar', floor: '1.6.2' },
 };
 
 /** The release tag for one helper at one version, e.g. `menubar/v1.0.0`. */
