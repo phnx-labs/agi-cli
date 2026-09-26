@@ -592,6 +592,16 @@ describe('version resource sync path handling', () => {
     fs.writeFileSync(path.join(versionSkillRoot, 'routines', 'SKILL.md'), 'stale routines body\n', 'utf-8');
     fs.mkdirSync(path.join(versionSkillRoot, 'old-shadow'), { recursive: true });
     fs.writeFileSync(path.join(versionSkillRoot, 'old-shadow', 'SKILL.md'), 'orphaned body\n', 'utf-8');
+    // Claude Code's own synced-skills bucket: never written by a sync, so never swept.
+    fs.mkdirSync(path.join(versionSkillRoot, 'synced', 'bucket'), { recursive: true });
+    fs.writeFileSync(
+      path.join(home, '.agents', '.history', 'versions', 'claude', '2.0.65', 'home', '.sync-manifest.json'),
+      JSON.stringify({
+        v: 1,
+        writtenTargets: [path.join(versionSkillRoot, 'old-shadow'), path.join(versionSkillRoot, 'routines')],
+      }),
+      'utf-8'
+    );
 
     const result = runVersionSync(
       home,
@@ -623,6 +633,7 @@ describe('version resource sync path handling', () => {
     expect(result.plugins).toEqual(['agents']);
     expect(fs.existsSync(path.join(versionSkillRoot, 'routines'))).toBe(false);
     expect(fs.existsSync(path.join(versionSkillRoot, 'old-shadow'))).toBe(false);
+    expect(fs.existsSync(path.join(versionSkillRoot, 'synced', 'bucket'))).toBe(true);
     expect(fs.existsSync(marketplaceSkill)).toBe(true);
   });
 

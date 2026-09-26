@@ -2836,8 +2836,12 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
     // different cwd. Only runs in "full sync" mode (no explicit selection) —
     // see the matching guard on the commands sweep above for why. Skip
     // dot-dirs to keep plugin-managed subtrees (.plugins/, .promptcuts) intact.
+    // Only a directory the previous full sync recorded writing is a candidate:
+    // skills/ also holds the harness's own entries (Claude Code's skills/synced
+    // bucket), which the sync never placed and must never delete.
     const skillsTargetSweep = path.join(agentDir, 'skills');
     if (!userPassedSelection && fs.existsSync(skillsTargetSweep) && !fs.lstatSync(skillsTargetSweep).isSymbolicLink()) {
+      const previouslyWritten = new Set(loadManifest(agent, version)?.writtenTargets ?? []);
       // Trust real skills AND command-skills: when commandsInstallAsSkills, the
       // commands writer (above) materialized each command as a skill dir under
       // skills/. Those names are not in skillsToSync, so without this they'd be
@@ -2847,8 +2851,9 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
       if (commandsInstallAsSkills) for (const cmd of commandsToSync) trustedSkills.add(cmd);
       for (const entry of fs.readdirSync(skillsTargetSweep, { withFileTypes: true })) {
         if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
-        if (!trustedSkills.has(entry.name)) {
-          removePath(safeJoin(skillsTargetSweep, entry.name));
+        const target = safeJoin(skillsTargetSweep, entry.name);
+        if (!trustedSkills.has(entry.name) && previouslyWritten.has(target)) {
+          removePath(target);
         }
       }
     }
