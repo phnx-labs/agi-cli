@@ -2835,25 +2835,21 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
     // Orphan-sweep stale skill directories from previous syncs under a
     // different cwd. Only runs in "full sync" mode (no explicit selection) —
     // see the matching guard on the commands sweep above for why. Skip
-    // dot-dirs to keep plugin-managed subtrees (.plugins/, .promptcuts) intact.
-    // Only a directory the previous full sync recorded writing is a candidate:
-    // skills/ also holds the harness's own entries (Claude Code's skills/synced
-    // bucket), which the sync never placed and must never delete.
+    // dot-dirs to keep plugin-managed subtrees (.plugins/, .promptcuts) intact,
+    // and the harness's own directories (ownedSkillDirs), which it writes itself.
     const skillsTargetSweep = path.join(agentDir, 'skills');
     if (!userPassedSelection && fs.existsSync(skillsTargetSweep) && !fs.lstatSync(skillsTargetSweep).isSymbolicLink()) {
-      const previouslyWritten = new Set(loadManifest(agent, version)?.writtenTargets ?? []);
       // Trust real skills AND command-skills: when commandsInstallAsSkills, the
       // commands writer (above) materialized each command as a skill dir under
       // skills/. Those names are not in skillsToSync, so without this they'd be
       // swept as orphans — silently deleting every converted command (e.g.
       // /recap on Kimi or newer Codex releases).
-      const trustedSkills = new Set(skillsToSync);
+      const trustedSkills = new Set([...skillsToSync, ...(agentConfig.ownedSkillDirs ?? [])]);
       if (commandsInstallAsSkills) for (const cmd of commandsToSync) trustedSkills.add(cmd);
       for (const entry of fs.readdirSync(skillsTargetSweep, { withFileTypes: true })) {
         if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
-        const target = safeJoin(skillsTargetSweep, entry.name);
-        if (!trustedSkills.has(entry.name) && previouslyWritten.has(target)) {
-          removePath(target);
+        if (!trustedSkills.has(entry.name)) {
+          removePath(safeJoin(skillsTargetSweep, entry.name));
         }
       }
     }
