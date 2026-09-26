@@ -348,6 +348,7 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
     variableSyntax: '$ARGUMENTS',
     supportsHooks: true,
     nativePluginSkills: true,
+    ownedSkillDirs: ['synced'],
     // Claude Code grew a native `claude --cloud "<prompt>"` (Anthropic-managed
     // infra, claude.ai/code; requires claude.ai subscription auth). Routing
     // still goes to Rush Cloud deliberately — it keeps cloud tasks in one

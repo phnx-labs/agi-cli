@@ -230,6 +230,12 @@ export interface AgentConfig {
    */
   nativePluginSkills?: boolean;
   /**
+   * Directories under the version home's `skills/` that the harness itself
+   * writes (Claude Code's `synced` bucket). The sync never placed them, so the
+   * full-sync orphan sweep and skill cleanup must never remove them.
+   */
+  ownedSkillDirs?: readonly string[];
+  /**
    * This agent's *own* cloud backend. `agents cloud run --agent <id>` routes
    * here when no `--provider` is given (precedence: --provider > this >
    * cloud.default_provider > rush). Undefined means the agent has no native
