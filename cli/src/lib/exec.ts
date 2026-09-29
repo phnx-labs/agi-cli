@@ -39,7 +39,7 @@ import { machineId } from './machine-id.js';
 import { shellQuote } from './ssh-exec.js';
 import { codexEditWritableRoots, codexPolicyArgs } from './codex-policy.js';
 import { probeUnprivilegedUserns, type UsernsStatus } from './linux-userns.js';
-import { resolveClaudeSetupToken } from './claude-account-token.js';
+import { resolveClaudeSetupToken, seedClaudeWorkerHomeIdentity } from './claude-account-token.js';
 import { applyAddDirs } from './add-dir.js';
 import { applyActiveRulesPresetAtRun } from './rules/run-sync.js';
 import { applySystemResourcesAtRun } from './system-run-sync.js';
@@ -2329,6 +2329,11 @@ async function spawnAgentLeased(options: ExecOptions): Promise<SpawnResult> {
       process.stderr.write(`\x1b[31m${loginTrap}\x1b[0m\n`);
       return { exitCode: 1, stdout: '', stderr: loginTrap };
     }
+    // A run that carries a credential never needs Claude Code's first-run
+    // onboarding, and in a provider (setup-token) launch's shared version home
+    // nothing else completes it: the tab opened on the theme picker instead of
+    // the agent (yosemite-m1, 2026-09-28).
+    if (hasWorkerCredential && versionHome) seedClaudeWorkerHomeIdentity(versionHome);
   }
 
   // Budget live kill-switch (issue #346). For headless runs we incrementally

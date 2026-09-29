@@ -417,10 +417,15 @@ export function isClaudeWorkerHomeSeeded(home: string): boolean {
  * at it, so nothing else can complete Claude Code's first-run onboarding (theme
  * picker, "Let's get started"); without the flag every slot launch re-onboarded.
  * Everything else in the document is preserved.
+ *
+ * Without an email only the onboarding flag is seeded: a provider (setup-token)
+ * launch runs in the shared version home, whose identity belongs to whatever
+ * native login lives there, so it must not be rewritten. A document already
+ * carrying the requested state is left untouched, so a launch never rewrites a
+ * config Claude Code is using.
  */
-export function seedClaudeWorkerHomeIdentity(versionHome: string, email: string): void {
-  const trimmed = email.trim();
-  if (!trimmed) return;
+export function seedClaudeWorkerHomeIdentity(versionHome: string, email?: string): void {
+  const trimmed = email?.trim() || undefined;
   for (const p of [
     path.join(versionHome, '.claude', '.claude.json'),
     path.join(versionHome, '.claude.json'),
@@ -437,7 +442,8 @@ export function seedClaudeWorkerHomeIdentity(versionHome: string, email: string)
     const existing = (doc.oauthAccount && typeof doc.oauthAccount === 'object'
       ? (doc.oauthAccount as Record<string, unknown>)
       : {});
-    doc.oauthAccount = { ...existing, emailAddress: trimmed };
+    if (doc.hasCompletedOnboarding === true && (!trimmed || existing.emailAddress === trimmed)) continue;
+    if (trimmed) doc.oauthAccount = { ...existing, emailAddress: trimmed };
     doc.hasCompletedOnboarding = true;
     fs.mkdirSync(path.dirname(p), { recursive: true });
     // Temp-write + rename: a reader mid-write never sees a truncated doc.
