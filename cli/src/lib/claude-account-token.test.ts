@@ -458,6 +458,20 @@ describe('claude-account-token (standalone secrets)', () => {
       expect(bare).toEqual({ hasCompletedOnboarding: true });
     });
 
+    it('writes through the .claude/.claude.json link instead of replacing it', () => {
+      // Version homes link the two config paths; a rename onto the link split them
+      // into two diverging files (yosemite-m6 2.1.263, 2026-09-29).
+      const home = makeHome();
+      fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+      fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ numStartups: 3 }));
+      const link = path.join(home, '.claude', '.claude.json');
+      fs.symlinkSync('../.claude.json', link);
+      seedClaudeWorkerHomeIdentity(home);
+      expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+      const doc = JSON.parse(fs.readFileSync(link, 'utf-8')) as { numStartups: number; hasCompletedOnboarding: boolean };
+      expect(doc).toEqual({ numStartups: 3, hasCompletedOnboarding: true });
+    });
+
     it('leaves an already-onboarded document byte-identical', () => {
       const home = makeHome();
       const cfg = path.join(home, '.claude', '.claude.json');

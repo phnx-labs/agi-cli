@@ -426,10 +426,23 @@ export function isClaudeWorkerHomeSeeded(home: string): boolean {
  */
 export function seedClaudeWorkerHomeIdentity(versionHome: string, email?: string): void {
   const trimmed = email?.trim() || undefined;
+  // A version home usually links `.claude/.claude.json -> ../.claude.json`. The
+  // temp-write + rename below would replace that link with a regular file and
+  // split one config into two, so write through a link to the file it names.
+  const targets = new Set<string>();
   for (const p of [
     path.join(versionHome, '.claude', '.claude.json'),
     path.join(versionHome, '.claude.json'),
   ]) {
+    let target = p;
+    try {
+      if (fs.lstatSync(p).isSymbolicLink()) target = path.resolve(path.dirname(p), fs.readlinkSync(p));
+    } catch {
+      // Missing: written fresh below.
+    }
+    targets.add(target);
+  }
+  for (const p of targets) {
     let doc: Record<string, unknown> = {};
     try {
       doc = JSON.parse(fs.readFileSync(p, 'utf-8')) as Record<string, unknown>;
