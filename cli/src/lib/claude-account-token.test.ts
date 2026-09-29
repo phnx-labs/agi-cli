@@ -442,6 +442,46 @@ describe('claude-account-token (standalone secrets)', () => {
       expect(doc.oauthAccount.displayName).toBe('Keep');
       expect(doc.oauthAccount.emailAddress).toBe('tech@prix.dev');
     });
+
+    it('seeds only onboarding when no email is given, keeping the home login identity', () => {
+      // A provider (setup-token) launch spawns in the shared version home, whose
+      // identity belongs to the native login there (yosemite-m1, 2026-09-28).
+      const home = makeHome();
+      const cfg = path.join(home, '.claude', '.claude.json');
+      fs.mkdirSync(path.dirname(cfg), { recursive: true });
+      fs.writeFileSync(cfg, JSON.stringify({ oauthAccount: { emailAddress: 'muqsit@getrush.ai' } }));
+      seedClaudeWorkerHomeIdentity(home);
+      const doc = JSON.parse(fs.readFileSync(cfg, 'utf-8')) as { hasCompletedOnboarding: boolean; oauthAccount: { emailAddress: string } };
+      expect(doc.hasCompletedOnboarding).toBe(true);
+      expect(doc.oauthAccount.emailAddress).toBe('muqsit@getrush.ai');
+      const bare = JSON.parse(fs.readFileSync(path.join(home, '.claude.json'), 'utf-8')) as Record<string, unknown>;
+      expect(bare).toEqual({ hasCompletedOnboarding: true });
+    });
+
+    it('writes through the .claude/.claude.json link instead of replacing it', () => {
+      // Version homes link the two config paths; a rename onto the link split them
+      // into two diverging files (yosemite-m6 2.1.263, 2026-09-29).
+      const home = makeHome();
+      fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+      fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ numStartups: 3 }));
+      const link = path.join(home, '.claude', '.claude.json');
+      fs.symlinkSync('../.claude.json', link);
+      seedClaudeWorkerHomeIdentity(home);
+      expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+      const doc = JSON.parse(fs.readFileSync(link, 'utf-8')) as { numStartups: number; hasCompletedOnboarding: boolean };
+      expect(doc).toEqual({ numStartups: 3, hasCompletedOnboarding: true });
+    });
+
+    it('leaves an already-onboarded document byte-identical', () => {
+      const home = makeHome();
+      const cfg = path.join(home, '.claude', '.claude.json');
+      fs.mkdirSync(path.dirname(cfg), { recursive: true });
+      const written = JSON.stringify({ hasCompletedOnboarding: true, oauthAccount: { emailAddress: 'dev@getrush.ai' } }, null, 2);
+      fs.writeFileSync(cfg, written);
+      seedClaudeWorkerHomeIdentity(home);
+      seedClaudeWorkerHomeIdentity(home, 'dev@getrush.ai');
+      expect(fs.readFileSync(cfg, 'utf-8')).toBe(written);
+    });
   });
 
   describe('resolveClaudeSetupToken identity self-heal from .oauth_token (PHNX-3660)', () => {

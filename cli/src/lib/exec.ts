@@ -34,12 +34,12 @@ import { recordRunName } from './session/run-names.js';
 import { mailboxDir, isValidMailboxId } from './mailbox.js';
 import { composeWin32CommandLine } from './platform/index.js';
 import { isTmuxInstalled } from './tmux/binary.js';
-import { isTmuxEnabled, selfConfiguredDeviceRole } from './device-config.js';
+import { isHeadedDeviceRole, isTmuxEnabled, selfConfiguredDeviceRole } from './device-config.js';
 import { machineId } from './machine-id.js';
 import { shellQuote } from './ssh-exec.js';
 import { codexEditWritableRoots, codexPolicyArgs } from './codex-policy.js';
 import { probeUnprivilegedUserns, type UsernsStatus } from './linux-userns.js';
-import { resolveClaudeSetupToken } from './claude-account-token.js';
+import { resolveClaudeSetupToken, seedClaudeWorkerHomeIdentity } from './claude-account-token.js';
 import { applyAddDirs } from './add-dir.js';
 import { applyActiveRulesPresetAtRun } from './rules/run-sync.js';
 import { applySystemResourcesAtRun } from './system-run-sync.js';
@@ -2328,6 +2328,14 @@ async function spawnAgentLeased(options: ExecOptions): Promise<SpawnResult> {
     if (loginTrap) {
       process.stderr.write(`\x1b[31m${loginTrap}\x1b[0m\n`);
       return { exitCode: 1, stdout: '', stderr: loginTrap };
+    }
+    // A credentialed run on a worker never needs Claude Code's first-run
+    // onboarding, and in a provider (setup-token) launch's shared version home
+    // nothing else completes it: the tab opened on the theme picker instead of
+    // the agent (yosemite-m1, 2026-09-28). A headed device keeps its own
+    // onboarding; the person at it answers it.
+    if (hasWorkerCredential && versionHome && !isHeadedDeviceRole(selfConfiguredDeviceRole())) {
+      seedClaudeWorkerHomeIdentity(versionHome);
     }
   }
 
