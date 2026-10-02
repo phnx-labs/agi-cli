@@ -30,11 +30,15 @@ let shell: ChildProcess | undefined;
 async function startTab(count: number, layout = 'siblings', kind = 'claude'): Promise<number[]> {
   // A fresh directory per tab: overwriting a binary that an earlier tab's process is
   // still executing fails with ETXTBSY. The basename stays `claude` because the
-  // scan recognises agents by process name.
+  // scan recognises agents by process name. macOS kills a relocated copy of an
+  // arm64e platform binary at exec (exit 137), so there it is a symlink instead.
   const binary = path.join(root, `bin-${tabCount++}`, 'claude');
   fs.mkdirSync(path.dirname(binary), { recursive: true });
-  fs.copyFileSync('/bin/sleep', binary);
-  fs.chmodSync(binary, 0o755);
+  if (process.platform === 'darwin') fs.symlinkSync('/bin/sleep', binary);
+  else {
+    fs.copyFileSync('/bin/sleep', binary);
+    fs.chmodSync(binary, 0o755);
+  }
   shell = spawn('bash', [path.join(fixtures, 'terminal-agent-children.sh'), binary, String(count), layout], {
     cwd, detached: true, stdio: ['pipe', 'pipe', 'pipe'],
   });
