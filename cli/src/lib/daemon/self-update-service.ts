@@ -174,7 +174,7 @@ export async function installAndVerifyDefault(
   try {
     await sweepStaleInstallStaging(packageRoot);
     if (detectPackageManager(packageRoot) === 'bun') {
-      await installPackageWithBun(tarball, signal);
+      await installPackageWithBun(tarball, deriveGlobalPrefix(packageRoot), signal);
     } else {
       await installPackageIntoPrefix(tarball, deriveGlobalPrefix(packageRoot), signal);
     }

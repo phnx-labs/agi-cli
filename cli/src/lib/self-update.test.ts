@@ -17,6 +17,7 @@ import {
   downloadVerifiedTarball,
   findAgentsCliInstalls,
   installPackageIntoPrefix,
+  installPackageWithBun,
   isMultiInstallScanFresh,
   isNpxCacheInstall,
   isTouchIdStormFixedVersion,
@@ -41,6 +42,16 @@ import {
   type AgentsCliInstall,
   type MultiInstallScanCache,
 } from './self-update.js';
+
+/** Whether a real `bun` is on PATH — the bun upgrade path is untestable without one. */
+function hasBun(): boolean {
+  try {
+    execFileSync('bun', ['--version'], { stdio: 'ignore', shell: needsWindowsShell('bun') });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 const tempDirs: string[] = [];
 
@@ -1259,5 +1270,163 @@ describe('installLooksSettled', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-settled-none-'));
     roots.push(root);
     expect(installLooksSettled(root, 60_000)).toBe(false);
+  });
+});
+
+/**
+ * The bun upgrade path, driven against a real `bun add -g` into a throwaway
+ * BUN_INSTALL. This is the regression that wedged every bun-installed copy at
+ * 1.22.115: bun rejects a tarball whose name is already pinned to an exact
+ * version in its global manifest, so `agents upgrade` failed with
+ * `DependencyLoop` on every attempt and the CLI could never leave that version.
+ */
+describe.skipIf(!hasBun())('installPackageWithBun', () => {
+  const savedBunInstall = process.env.BUN_INSTALL;
+  afterEach(() => {
+    if (savedBunInstall === undefined) delete process.env.BUN_INSTALL;
+    else process.env.BUN_INSTALL = savedBunInstall;
+  });
+
+  /** A local tarball carrying agents-cli's own name — what the upgrade hands bun. */
+  function packAgentsCli(version: string): string {
+    const src = makeTempDir('bun-pack');
+    fs.mkdirSync(path.join(src, 'dist'));
+    fs.writeFileSync(path.join(src, 'dist', 'index.js'), '#!/usr/bin/env node\n');
+    fs.writeFileSync(
+      path.join(src, 'package.json'),
+      JSON.stringify({
+        name: NPM_PACKAGE_NAME,
+        version,
+        license: 'MIT',
+        bin: { agents: 'dist/index.js', ag: 'dist/index.js' },
+      }),
+    );
+    const tarball = execFileSync('npm', ['pack', '--silent'], {
+      cwd: src,
+      encoding: 'utf-8',
+      shell: needsWindowsShell('npm'),
+    }).trim();
+    return path.join(src, tarball);
+  }
+
+  /** Point BUN_INSTALL at a fresh prefix whose global manifest is `manifest`. */
+  function seedBunPrefix(manifest: Record<string, unknown>): string {
+    const bunInstall = makeTempDir('bun-install');
+    process.env.BUN_INSTALL = bunInstall;
+    fs.mkdirSync(bunGlobalDir(), { recursive: true });
+    fs.writeFileSync(path.join(bunGlobalDir(), 'package.json'), JSON.stringify(manifest, null, 2));
+    return bunInstall;
+  }
+
+  function readManifest(): { dependencies?: Record<string, string>; trustedDependencies?: string[] } {
+    return JSON.parse(fs.readFileSync(path.join(bunGlobalDir(), 'package.json'), 'utf-8'));
+  }
+
+  it('installs over an exact-version pin instead of failing with DependencyLoop', { timeout: 120_000 }, async () => {
+    seedBunPrefix({
+      dependencies: { [NPM_PACKAGE_NAME]: '1.22.115' },
+      trustedDependencies: ['@homebridge/node-pty-prebuilt-multiarch', NPM_PACKAGE_NAME],
+    });
+
+    await installPackageWithBun(packAgentsCli('1.22.117'), bunGlobalDir());
+
+    const installedRoot = path.join(bunGlobalDir(), 'node_modules', NPM_PACKAGE_NAME);
+    expect(await readInstalledVersion(installedRoot)).toBe('1.22.117');
+    // The pin is what bun choked on, so it must not survive as one.
+    expect(readManifest().dependencies?.[NPM_PACKAGE_NAME]).toBe('1.22.117');
+  });
+
+  it('leaves no tarball path behind in the manifest', { timeout: 120_000 }, async () => {
+    seedBunPrefix({ dependencies: { [NPM_PACKAGE_NAME]: '1.22.115' } });
+    const tarball = packAgentsCli('1.22.117');
+
+    await installPackageWithBun(tarball, bunGlobalDir());
+
+    // bun records whatever spec it was handed. Left alone, the manifest names a
+    // download under a temp dir the upgrade deletes on its way out, and every
+    // later `bun install -g` fails to resolve it.
+    expect(readManifest().dependencies?.[NPM_PACKAGE_NAME]).toBe('1.22.117');
+    expect(fs.existsSync(path.join(bunGlobalDir(), 'node_modules', NPM_PACKAGE_NAME, 'package.json'))).toBe(true);
+  });
+
+  it('carries the rest of the manifest through untouched', { timeout: 120_000 }, async () => {
+    const trusted = ['@homebridge/node-pty-prebuilt-multiarch', NPM_PACKAGE_NAME];
+    seedBunPrefix({ dependencies: { [NPM_PACKAGE_NAME]: '1.22.115' }, trustedDependencies: trusted });
+
+    await installPackageWithBun(packAgentsCli('1.22.117'), bunGlobalDir());
+
+    expect(readManifest().trustedDependencies).toEqual(trusted);
+  });
+
+  it('surfaces an unwritable global dir instead of letting bun fail on the stale pin', { timeout: 120_000 }, async () => {
+    // The pre-install clear is deliberately NOT best-effort. If it cannot write,
+    // the install could not have succeeded anyway, and EACCES on the manifest
+    // names the real problem — where swallowing it would hand the caller bun's
+    // DependencyLoop instead, which describes a symptom of this failure.
+    seedBunPrefix({ dependencies: { [NPM_PACKAGE_NAME]: '1.22.115' } });
+    const globalDir = bunGlobalDir();
+    fs.chmodSync(globalDir, 0o555);
+
+    try {
+      await expect(installPackageWithBun(packAgentsCli('1.22.117'), globalDir)).rejects.toThrow(/EACCES/);
+    } finally {
+      fs.chmodSync(globalDir, 0o755);
+    }
+    // Nothing was written, so the pin the upgrade found is still there.
+    expect(readManifest().dependencies?.[NPM_PACKAGE_NAME]).toBe('1.22.115');
+  });
+
+  it('installs into the directory it is given, not the one BUN_INSTALL names', { timeout: 120_000 }, async () => {
+    // detectPackageManager() routes a relocated bun install here whose
+    // BUN_INSTALL this process never saw. If the parameter steered only the
+    // manifest edit, bun would install into the env's directory instead: the
+    // real pin would never be cleared, the loop would not be fixed, and the
+    // upgrade would land somewhere other than the running copy.
+    const target = seedBunPrefix({ dependencies: { [NPM_PACKAGE_NAME]: '1.22.115' } });
+    const targetGlobalDir = bunGlobalDir();
+    const decoy = makeTempDir('bun-decoy');
+    fs.mkdirSync(path.join(decoy, 'install', 'global'), { recursive: true });
+    process.env.BUN_INSTALL = decoy;
+
+    await installPackageWithBun(packAgentsCli('1.22.117'), targetGlobalDir);
+
+    expect(await readInstalledVersion(path.join(targetGlobalDir, 'node_modules', NPM_PACKAGE_NAME))).toBe('1.22.117');
+    expect(fs.existsSync(path.join(decoy, 'install', 'global', 'node_modules'))).toBe(false);
+    expect(target).not.toBe(decoy);
+  });
+
+  it('puts the pin back when the install fails', { timeout: 120_000 }, async () => {
+    // The package stays installed when `bun add` fails, and bun treats an
+    // unpinned package as absent: `bun remove -g` would report success and
+    // remove nothing. A failed upgrade must not leave that behind.
+    seedBunPrefix({ dependencies: { [NPM_PACKAGE_NAME]: '1.22.115' } });
+
+    await expect(
+      installPackageWithBun(path.join(makeTempDir('bun-missing'), 'nonexistent.tgz'), bunGlobalDir()),
+    ).rejects.toThrow();
+
+    expect(readManifest().dependencies?.[NPM_PACKAGE_NAME]).toBe('1.22.115');
+  });
+
+  it('installs into a prefix whose manifest has no dependencies yet', { timeout: 120_000 }, async () => {
+    // A global manifest can exist with no `dependencies` at all — bun writes one
+    // for `trustedDependencies` alone. Clearing the pin must no-op here rather
+    // than throw on the missing key, or the upgrade dies before it installs.
+    seedBunPrefix({ trustedDependencies: [NPM_PACKAGE_NAME] });
+
+    await installPackageWithBun(packAgentsCli('1.22.117'), bunGlobalDir());
+
+    expect(await readInstalledVersion(path.join(bunGlobalDir(), 'node_modules', NPM_PACKAGE_NAME))).toBe('1.22.117');
+    expect(readManifest().dependencies?.[NPM_PACKAGE_NAME]).toBe('1.22.117');
+  });
+
+  it('installs into a prefix that has no global manifest yet', { timeout: 120_000 }, async () => {
+    const bunInstall = makeTempDir('bun-install-bare');
+    process.env.BUN_INSTALL = bunInstall;
+    fs.mkdirSync(bunGlobalDir(), { recursive: true });
+
+    await installPackageWithBun(packAgentsCli('1.22.117'), bunGlobalDir());
+
+    expect(await readInstalledVersion(path.join(bunGlobalDir(), 'node_modules', NPM_PACKAGE_NAME))).toBe('1.22.117');
   });
 });
