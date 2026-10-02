@@ -9,6 +9,8 @@ import { shellQuote } from '../../ssh-exec.js';
 import { streamFromPeer } from './peer-stream.js';
 import { buildWindowsAgentsCommand, remoteShellFor } from '../../hosts/remote-cmd.js';
 import { isReapableOrphan, sessionAccountLabel, type ActiveSession } from '../active.js';
+import { listNativeAccounts } from '../../account-registry.js';
+import { readMeta } from '../../state.js';
 import { querySessions, readSessionSummaryAny, readSessionTimelineAny } from '../db.js';
 import { linearIssueUrl } from '../linear.js';
 import { sessionAgentSupportsResume } from '../recovery.js';
@@ -131,7 +133,7 @@ function previousRowTitle(session: SessionMeta, foldedHeadline: string | undefin
 
 /** Project one durable indexed session into the same canonical watch contract
  * as live sessions. This is the only history backfill consumed by AGI EXT. */
-export function toPreviousSessionWatchRow(scope: string, session: SessionMeta): SessionWatchRow {
+export function toPreviousSessionWatchRow(scope: string, session: SessionMeta, accounts = listNativeAccounts(readMeta())): SessionWatchRow {
   const resumable = sessionAgentSupportsResume(session.agent);
   const sourceDevice = normalizeHost(session.machine ?? scope);
   const startedAtMs = epochMs(session.timestamp);
@@ -177,7 +179,7 @@ export function toPreviousSessionWatchRow(scope: string, session: SessionMeta): 
     ...(session.firstUserMessage ? { firstUserMessage: session.firstUserMessage } : {}),
     ...(session.version ? { version: session.version } : {}),
     ...(session.account ? { account: session.account } : {}),
-    accountLabel: sessionAccountLabel(session.agent, session),
+    accountLabel: sessionAccountLabel(session.agent, session, accounts),
     ...(session.prUrl ? { pr: { url: session.prUrl, number: session.prNumber } } : {}),
     ...(worktree ? { worktree } : {}),
     ...(session.gitBranch ? { branch: session.gitBranch } : {}),
@@ -284,9 +286,10 @@ export class SessionWatchState {
     const liveRows = sourceRows.map((row) => toSessionWatchRow(scope, row));
     const sourceIds = new Set(liveRows.map((row) => row.sessionId).filter((id): id is string => Boolean(id)));
     const rows = new Map<string, SessionWatchRow>(liveRows.map((row) => [row.rowKey, row]));
+    const accounts = indexedRows.length ? listNativeAccounts(readMeta()) : [];
     for (const indexed of indexedRows) {
       if (sourceIds.has(indexed.id)) continue;
-      const row = toPreviousSessionWatchRow(scope, indexed);
+      const row = toPreviousSessionWatchRow(scope, indexed, accounts);
       rows.set(row.rowKey, row);
     }
     this.prunePrevious(scope, rows);
