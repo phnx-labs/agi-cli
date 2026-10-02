@@ -28,17 +28,17 @@ import {
   tokenizeBash,
   unwrapCommand,
   type BashCategory as ClassifierCategory,
-} from '../session/bash-command.js';
-import { computeSummaryStats } from '../session/render.js';
-import { extractShellPrograms } from '../session/shell-programs.js';
+} from '@phnx-labs/sessions-cli/reader';
+import { computeSummaryStats } from '@phnx-labs/sessions-cli/reader';
+import { extractShellPrograms } from '@phnx-labs/sessions-cli/reader';
 import {
   effectiveProgram,
   eventTimestampsMs,
   pairSteps,
   type SessionTrajectory,
   type StepDraft,
-} from '../session/trajectory.js';
-import type { SessionEvent } from '../session/types.js';
+} from '@phnx-labs/sessions-cli/reader';
+import type { SessionEvent } from '@phnx-labs/sessions-cli/reader';
 import { classifyActionDanger } from './schema2-danger.js';
 import type {
   BashAction,

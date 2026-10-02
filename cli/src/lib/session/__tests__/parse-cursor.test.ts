@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { readCursorMeta } from '../discover.js';
-import { detectAgent, parseCursor, parseSession } from '../parse.js';
+import { detectAgent, parseCursor, parseSession } from '@phnx-labs/sessions-cli/reader';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE = path.join(__dirname, '..', 'testdata', 'cursor-session.jsonl');

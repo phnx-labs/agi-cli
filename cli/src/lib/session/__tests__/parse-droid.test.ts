@@ -9,7 +9,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'node:url';
-import { parseDroid, detectAgent, parseSession } from '../parse.js';
+import { parseDroid, detectAgent, parseSession } from '@phnx-labs/sessions-cli/reader';
 
 // fileURLToPath (not new URL().pathname) — on Windows the latter yields
 // "/C:/…", so path.join produces a doubled-drive "C:\C:\…" that ENOENTs.

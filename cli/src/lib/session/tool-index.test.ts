@@ -20,7 +20,7 @@ const {
   BACKFILL_MAX_STREAM_SOURCE_BYTES,
 } = await import('./tool-index.js');
 const { persistToolCalls } = await import('./tool-store.js');
-type SessionMeta = import('./types.js').SessionMeta;
+type SessionMeta = import('@phnx-labs/sessions-cli/reader').SessionMeta;
 
 afterAll(() => {
   closeDB();

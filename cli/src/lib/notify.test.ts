@@ -9,7 +9,6 @@ import {
   sendToOwner,
 } from './notify.js';
 import { ownerMessageComposer } from './owner-message.js';
-import { _resetLinearWorkspaceCache } from './session/linear.js';
 import type { Meta } from './types.js';
 import type { OpenBlock } from './feed/feed.js';
 
@@ -239,7 +238,6 @@ describe('sendToOwner composes per destination (PHNX-3698)', () => {
       `version: 1\nowner:\n  channels:\n    - id: imessage\n      transport: rush\n      to: phone-owner\n    - id: slack\n      transport: rush\n      to: C0SLACKOWNER\n  policy:\n    normal: [imessage, slack]\n`,
     );
     process.env.LINEAR_WORKSPACE = 'getrush';
-    _resetLinearWorkspaceCache();
   });
 
   afterEach(() => {
@@ -247,7 +245,6 @@ describe('sendToOwner composes per destination (PHNX-3698)', () => {
     else process.env.AGENTS_HUMANS_FILE = savedHumans;
     if (savedWorkspace === undefined) delete process.env.LINEAR_WORKSPACE;
     else process.env.LINEAR_WORKSPACE = savedWorkspace;
-    _resetLinearWorkspaceCache();
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 

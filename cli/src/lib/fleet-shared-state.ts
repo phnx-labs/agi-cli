@@ -56,17 +56,17 @@ export interface SessionMirrorRow {
   /** Daemon-computed goal (PHNX-3939) — carried so a peer renders it with no transcript. */
   goal?: string;
   /** Daemon-computed progress checkpoints, newest last (PHNX-3939). */
-  checkpoints?: import('./session/types.js').SessionCheckpoint[];
+  checkpoints?: import('@phnx-labs/sessions-cli/reader').SessionCheckpoint[];
   /** Daemon-computed detailed checklist (PHNX-3939). */
-  summaryChecklist?: import('./session/types.js').SessionChecklistItem[];
+  summaryChecklist?: import('@phnx-labs/sessions-cli/reader').SessionChecklistItem[];
   /** Lifecycle of the daemon-computed summary (PHNX-3939). */
-  summaryState?: import('./session/types.js').SummaryState;
+  summaryState?: import('@phnx-labs/sessions-cli/reader').SummaryState;
   /** Tidied latest user turn, so a peer row shows what the agent was asked (PHNX-3939). */
-  request?: import('./session/types.js').SessionRequest;
+  request?: import('@phnx-labs/sessions-cli/reader').SessionRequest;
   /** Bounded narration-anchored steps, so a peer row shows what the agent did. */
-  timeline?: import('./session/types.js').SessionTimeline;
+  timeline?: import('@phnx-labs/sessions-cli/reader').SessionTimeline;
   /** Bounded file-change list for the peer row. */
-  files?: import('./session/types.js').SessionFiles;
+  files?: import('@phnx-labs/sessions-cli/reader').SessionFiles;
   capturedAt: number;
 }
 

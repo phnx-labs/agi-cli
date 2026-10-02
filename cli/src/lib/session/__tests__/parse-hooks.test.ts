@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { parseClaudeContent, parseSession } from '../parse.js';
+import { parseClaudeContent, parseSession } from '@phnx-labs/sessions-cli/reader';
 
 function writeTempTranscript(lines: string[]): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-hooks-'));

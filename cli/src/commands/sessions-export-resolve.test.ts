@@ -25,7 +25,7 @@ process.env.USERPROFILE = TEST_HOME;
 
 const { upsertSession, closeDB } = await import('../lib/session/db.js');
 const { selectSessions } = await import('./sessions-export.js');
-type SessionMeta = import('../lib/session/types.js').SessionMeta;
+type SessionMeta = import('@phnx-labs/sessions-cli/reader').SessionMeta;
 
 // findSessionsById (and the content search) drop rows whose transcript is gone,
 // so the fixture writes a real file rather than a dangling path.

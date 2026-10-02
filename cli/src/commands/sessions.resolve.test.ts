@@ -8,7 +8,7 @@ import {
   isUniqueEnoughSelector,
   metadataResolveForwardedArgs,
 } from './sessions.js';
-import type { SessionMeta } from '../lib/session/types.js';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import { repoRoot, writeUpdateCache, writeClaudeSession, runAgents } from './sessions.test-fixture.js';
 
 describe('resolveSessionQuery indexed metadata coverage', () => {

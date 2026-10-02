@@ -13,9 +13,9 @@
 import * as fs from 'fs';
 import chalk from 'chalk';
 import { Option, type Command } from 'commander';
-import { isAgentTmuxAlias, type SessionMeta } from '../lib/session/types.js';
+import { isAgentTmuxAlias, type SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import { discoverSessions } from '../lib/session/discover.js';
-import { filterTeamSessions } from '../lib/session/team-filter.js';
+import { filterTeamSessions } from '@phnx-labs/sessions-cli/reader';
 import { multiItemPicker, itemPicker } from '../lib/picker.js';
 import { buildPreview } from './sessions-picker.js';
 import {

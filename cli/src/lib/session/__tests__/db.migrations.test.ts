@@ -10,7 +10,7 @@ const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-db-migration
 process.env.HOME = TEST_HOME;
 
 const { getDB, closeDB, upsertSession, getSessionById, SCHEMA_VERSION } = await import('../db.js');
-type SessionMeta = import('../types.js').SessionMeta;
+type SessionMeta = import('@phnx-labs/sessions-cli/reader').SessionMeta;
 
 function openDBInChild(): Promise<void> {
   const dbModule = new URL('../db.ts', import.meta.url).href;

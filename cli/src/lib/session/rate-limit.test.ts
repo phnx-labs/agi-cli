@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { detectRateLimited, inferSessionState } from './state.js';
-import type { SessionEvent } from './types.js';
+import { detectRateLimited, inferSessionState } from '@phnx-labs/sessions-cli/reader';
+import type { SessionEvent } from '@phnx-labs/sessions-cli/reader';
 
 describe('detectRateLimited (RUSH-1523)', () => {
   it('matches common rate-limit shapes', () => {

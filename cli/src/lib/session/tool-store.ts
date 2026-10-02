@@ -10,8 +10,8 @@ import {
   type IndexedToolCall,
   type ToolCallCollectorSnapshot,
   type EventToolScanResumePoint,
-} from './tool-calls.js';
-import type { SessionMeta } from './types.js';
+} from '@phnx-labs/sessions-cli/reader';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 
 export function canonicalToolLedgerPath(filePath: string): string {
   let probe = path.resolve(filePath);

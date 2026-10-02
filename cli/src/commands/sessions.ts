@@ -20,9 +20,9 @@ import { listProjectDefs, resolveProjectNameForCwd, type ProjectDef } from '../l
 import ora from 'ora';
 import { interruptibleSpinner } from '../lib/spinner.js';
 import type { AgentId } from '../lib/types.js';
-import type { SessionAgentId, SessionEvent, SessionMeta, ViewMode } from '../lib/session/types.js';
-import { SESSION_AGENTS, isAgentTmuxAlias, sessionDisplayAgent } from '../lib/session/types.js';
-import { discoverArtifacts, readArtifact, resolveArtifact } from '../lib/session/artifacts.js';
+import type { SessionAgentId, SessionEvent, SessionMeta, ViewMode } from '@phnx-labs/sessions-cli/reader';
+import { SESSION_AGENTS, isAgentTmuxAlias, sessionDisplayAgent } from '@phnx-labs/sessions-cli/reader';
+import { discoverArtifacts, readArtifact, resolveArtifact } from '@phnx-labs/sessions-cli/reader';
 import { looksLikePath, toComparablePath, homeDir, needsWindowsShell, composeWin32CommandLine } from '../lib/platform/index.js';
 import { getActiveSessions, describeActiveDiscoveryHealth, sessionProcessIsLocal, backfillActiveRowsFromIndex, backfillActiveRowsFromMeta, isRunningLiveSession, serializeActiveSessionsForJson, serializeSessionsJson, shortIdFromName, type ActiveSession, type BackfillMeta } from '../lib/session/active.js';
 export { activeSessionProjectKey, backfillActiveRowsFromIndex, backfillActiveRowsFromMeta, isRunningLiveSession, serializeActiveSessionsForJson, serializeSessionsJson, type BackfillMeta } from '../lib/session/active.js';
@@ -39,12 +39,12 @@ import {
 import { gatherRemoteList, gatherRemoteToolProgramCounts, gatherRemoteToolSearch, runOnPeer } from '../lib/session/remote-list.js';
 import { gatherRemoteAgentsJson, type RemoteAgentsJsonParseResult } from '../lib/remote-agents-json.js';
 import { stringWidth, truncateToWidth, padToWidth, terminalWidth } from '../lib/session/width.js';
-import type { SessionActivity, AwaitingReason } from '../lib/session/state.js';
-import { inferSessionState } from '../lib/session/state.js';
+import type { SessionActivity, AwaitingReason } from '@phnx-labs/sessions-cli/reader';
+import { inferSessionState } from '@phnx-labs/sessions-cli/reader';
 import { discoverSessions, queryIndexedSessions, countSessionsInScope, resolveSessionById, isCompleteSessionId, looksLikeSessionId, searchContentIndex, parseTimeFilter, getSessionRoots, scopeToManaged, type DiscoverOptions, type ScanProgress } from '../lib/session/discover.js';
 import { findSessionsById, querySessions, getSessionById, readSessionContent, readArchivedSessionPreview, readSessionTimelineAny } from '../lib/session/db.js';
-import { foldTimeline, emptyTimelineState, projectTimeline, projectSessionFiles } from '../lib/session/timeline.js';
-import { readSessionTail } from '../lib/session/tail.js';
+import { foldTimeline, emptyTimelineState, projectTimeline, projectSessionFiles } from '@phnx-labs/sessions-cli/reader';
+import { readSessionTail } from '@phnx-labs/sessions-cli/reader';
 import { liveSessionMetas, fleetExecutionMachineById, reconcileLiveMetaMachine } from '../lib/session/live-metadata.js';
 import { sessionHeadline } from '../lib/session/title.js';
 import {
@@ -54,12 +54,12 @@ import {
   groupSessionsByTeam,
   NO_TEAM_GROUP_KEY,
   type TeamSessionGroup,
-} from '../lib/session/team-filter.js';
-import { parseSession } from '../lib/session/parse.js';
+} from '@phnx-labs/sessions-cli/reader';
+import { parseSession } from '@phnx-labs/sessions-cli/reader';
 import { runRemoteSessions, buildForwardedArgs, ensureWholeIndex } from '../lib/session/remote.js';
 import { formatRelativeTime, formatCompactAge, sessionAgeParts, type SessionAgeParts } from '../lib/session/relative-time.js';
-import { renderConversationMarkdown, renderSummary, renderSummaryHeader, computeSummaryStats, renderJson, filterEvents, parseRoleList, linkPath, linkUrl, shortenModel, formatTokenCount, type FilterOptions } from '../lib/session/render.js';
-import { linearIssueUrl } from '../lib/session/linear.js';
+import { renderConversationMarkdown, renderSummary, renderSummaryHeader, computeSummaryStats, renderJson, filterEvents, parseRoleList, linkPath, linkUrl, shortenModel, formatTokenCount, type FilterOptions } from '@phnx-labs/sessions-cli/reader';
+import { linearIssueUrl } from '@phnx-labs/sessions-cli/reader';
 import { sessionOwnerDevice, RESUME_PINNED_ENV } from '../lib/session/resume-owner.js';
 import { renderMarkdown } from '../lib/markdown.js';
 import { AGENTS, colorAgent, resolveAgentName } from '../lib/agents.js';

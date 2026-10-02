@@ -23,7 +23,7 @@ import {
 } from './sessions.js';
 import type { RunMeta } from '../lib/scheduling/routines.js';
 import { needsWindowsShell, composeWin32CommandLine } from '../lib/platform/index.js';
-import type { SessionMeta } from '../lib/session/types.js';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import type { ActiveSession } from '../lib/session/active.js';
 
 // Pure unit tests for src/commands/sessions.ts exports. The subprocess-heavy

@@ -39,7 +39,7 @@ import { isOwnerAlias, readOwnerDest, resolveSendEnvelope, deliverEnvelope } fro
 import { lookupTransport } from './channels/resolve.js';
 import { registerBuiltinProviders } from './channels/providers/index.js';
 import { sendToOwner } from './notify.js';
-import { linearIssueUrl, linearIssueKeys } from './session/linear.js';
+import { linearIssueUrl, linearIssueKeys } from '@phnx-labs/sessions-cli/reader';
 import { isValidMailboxId } from './mailbox.js';
 import { forwardOwnerNotifyToPeer } from './channels/owner-forward.js';
 import { sinkMessageFormat, type SinkMessageFormat } from './sink-format.js';

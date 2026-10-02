@@ -27,7 +27,7 @@
  * (lib/session/resume-command.ts), which routes itself.
  */
 
-import type { SessionMeta } from './types.js';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import { isSelfHost } from '../devices/self-host.js';
 
 /**

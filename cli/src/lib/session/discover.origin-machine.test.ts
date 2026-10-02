@@ -33,7 +33,7 @@ process.env.AGENTS_SYNC_MACHINE_ID = 'dispatcher-box';
 
 const { upsertSession, closeDB } = await import('./db.js');
 const { queryIndexedSessions } = await import('./discover.js');
-type SessionMeta = import('./types.js').SessionMeta;
+type SessionMeta = import('@phnx-labs/sessions-cli/reader').SessionMeta;
 
 afterAll(() => {
   closeDB();

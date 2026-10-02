@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import type { SessionMeta } from './types.js';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 
 // RUSH-2436: the local DB is authoritative for content. A session whose
 // transcript file is gone must still LIST and RENDER its user turns (served from

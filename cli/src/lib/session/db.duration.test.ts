@@ -17,7 +17,7 @@ process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 
 const { upsertSession, getSessionById } = await import('./db.js');
-type SessionMeta = import('./types.js').SessionMeta;
+type SessionMeta = import('@phnx-labs/sessions-cli/reader').SessionMeta;
 type ScanStamp = import('./db.js').ScanStamp;
 
 function rushMeta(id: string, extra: Partial<SessionMeta> = {}): SessionMeta {

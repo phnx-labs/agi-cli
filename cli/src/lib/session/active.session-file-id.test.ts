@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import type { SessionMeta } from './types.js';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 
 // RUSH-2691: `findSessionFileForKind` took a `sessionId` and, for every harness
 // except Claude, threw it away — it answered from `latestSessionFileForCwd`, i.e.

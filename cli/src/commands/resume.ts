@@ -5,7 +5,7 @@
  */
 import { spawn } from 'child_process';
 import chalk from 'chalk';
-import type { SessionMeta } from '../lib/session/types.js';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import { resolveSessionMetadataValue } from './sessions.js';
 import { sessionOwnerDevice, consumeResumePinned, RESUME_PINNED_ENV } from '../lib/session/resume-owner.js';
 import { machineId } from '../lib/machine-id.js';

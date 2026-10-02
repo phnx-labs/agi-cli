@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import type { ActiveSession } from '../active.js';
 import { sessionAgentSupportsResume } from '../recovery.js';
-import type { SessionMeta } from '../types.js';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import {
   SessionWatchState,
   sessionWatchRowKey,

@@ -35,7 +35,7 @@ const {
   preferOwnerAttribution,
 } = await import('./sessions.js');
 type ActiveSession = import('../lib/session/active.js').ActiveSession;
-type SessionMeta = import('../lib/session/types.js').SessionMeta;
+type SessionMeta = import('@phnx-labs/sessions-cli/reader').SessionMeta;
 type LoadActive = typeof import('../lib/session/session-cache.js').loadLocalActiveSessions;
 type GatherRemoteList = typeof import('../lib/session/remote/remote-list.js').gatherRemoteList;
 

@@ -40,7 +40,7 @@ import {
 } from '../lib/feed/activity.js';
 import { projectKeyFromCwd } from '../lib/project-key.js';
 import { postFeedStatus } from '../lib/feed-post.js';
-import { linearIssueUrl } from '../lib/session/linear.js';
+import { linearIssueUrl } from '@phnx-labs/sessions-cli/reader';
 import {
   parseFeedPostLevel,
   planFeedBroadcast,

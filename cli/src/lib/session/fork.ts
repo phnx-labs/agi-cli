@@ -13,7 +13,7 @@
  * source is resolved cross-fleet by the same resolver `preview` uses; this module
  * owns only the pure recap text the resolved data folds into.
  */
-import type { SessionMeta } from './types.js';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import { sessionHeadline } from './title.js';
 
 /** File-change tally as `sessions preview --json` serializes it (digest.changes). */

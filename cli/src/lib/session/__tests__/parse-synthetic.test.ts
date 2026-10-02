@@ -11,8 +11,8 @@ import { describe, expect, test } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { parseSession } from '../parse.js';
-import { filterEvents } from '../render.js';
+import { parseSession } from '@phnx-labs/sessions-cli/reader';
+import { filterEvents } from '@phnx-labs/sessions-cli/reader';
 
 function writeClaudeFixture(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'synthetic-'));

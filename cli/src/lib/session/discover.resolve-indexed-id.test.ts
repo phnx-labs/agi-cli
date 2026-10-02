@@ -32,7 +32,7 @@ process.env.AGENTS_SYNC_MACHINE_ID = 'this-box';
 const dbModule = await import('./db.js');
 const { upsertSession, closeDB } = dbModule;
 const { resolveIndexedSessionById } = await import('./discover.js');
-type SessionMeta = import('./types.js').SessionMeta;
+type SessionMeta = import('@phnx-labs/sessions-cli/reader').SessionMeta;
 
 afterAll(() => {
   closeDB();

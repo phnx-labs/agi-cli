@@ -1708,9 +1708,21 @@ src/
     profiles.ts        # Host CLI + endpoint + model bundles
 ```
 
-Note: `src/lib/session/` here is the transcript **reader**. The live-session
-**writer** is a separate package, [`packages/session-tracker`](../../packages/session-tracker)
-— different data, different consumer; see its AGENTS.md.
+Note: the pure transcript **reader** — parse/render/state/trajectory/timeline/
+insights/tool-calls/digest/highlights/prompt/tail/share-html and the `SessionEvent`/
+`SessionMeta`/`SessionStep` types — no longer lives here. It is imported from
+[`@phnx-labs/sessions-cli/reader`](https://www.npmjs.com/package/@phnx-labs/sessions-cli)
+(PHNX-4118), the same parse→normalize→render pipeline the `sessions` bin runs,
+imported **in-process** (a normal node_modules import — never a subprocess) so the
+indexer warm-tick (`db.ts`), the eval loop (`lib/traces/sync.ts`), and live-state
+(`active.ts`) parse without shelling out. What remains under `src/lib/session/` is the
+CLI-owned half: the writer/indexer (`db.ts`, `tool-index.ts`, `tool-store.ts`,
+`timeline-pass.ts`, `title.ts`), lifecycle/live-identity (`active.ts`, `discover.ts`,
+`pid-registry.ts`, `recovery.ts`, `mirror.ts`, `sync/`, `presence.ts`, `watch.ts`,
+`remote*`, `projection.ts`, `session-cache.ts`), and `migrate-targets.ts`. The
+live-session **writer** is a separate package,
+[`packages/session-tracker`](../../packages/session-tracker) — different data,
+different consumer; see its AGENTS.md.
 
 ### `agents sessions` preview architecture (map before you touch it)
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cleanSessionPrompt, extractSessionTopic } from '../prompt.js';
+import { cleanSessionPrompt, extractSessionTopic } from '@phnx-labs/sessions-cli/reader';
 
 describe('extractSessionTopic', () => {
   it('strips the HEADLESS PLAN MODE prefix and summary suffix', () => {

@@ -20,7 +20,7 @@ import {
   type QueryOptions,
 } from '../lib/session/db.js';
 import { formatUsd, PRICING_VERSION } from '../lib/pricing/index.js';
-import { formatDuration } from '../lib/session/render.js';
+import { formatDuration } from '@phnx-labs/sessions-cli/reader';
 import { terminalWidth, truncateToWidth, stringWidth, padToWidth } from '../lib/session/width.js';
 import { sessionHeadline } from '../lib/session/title.js';
 

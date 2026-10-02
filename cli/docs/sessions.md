@@ -5,6 +5,16 @@ transcript format; it discovers those transcripts and builds a normalized, searc
 history across harnesses and devices. The transcript remains durable truth. SQLite,
 live-process state, summaries, and UI streams are derived views that can be rebuilt.
 
+> **Where the reader lives (PHNX-4118).** The pure parse→render→analyze pipeline —
+> the parsers, the normalized event/step/meta types, and every rendered/redacted view
+> (`--json`, `--markdown`, `trace`, `timeline`, `insights`, share HTML) — is imported
+> from the published [`@phnx-labs/sessions-cli/reader`](https://www.npmjs.com/package/@phnx-labs/sessions-cli)
+> package (the same code the standalone `sessions` bin runs), not kept as an in-repo
+> copy. It is imported **in-process** (a normal node_modules import, never a subprocess),
+> so the indexer, the eval loop, and live-state parse transcripts without shelling out.
+> The CLI still owns the writer/indexer (SQLite, tool index, timelines), the live pid
+> registry, and the discovery/sync/remote code under `cli/src/lib/session/`.
+
 ```mermaid
 flowchart LR
   H1[Claude transcript] --> D[Discovery and parsers]

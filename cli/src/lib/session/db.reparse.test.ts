@@ -2,7 +2,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import type { SessionEvent, SessionMeta } from './types.js';
+import type { SessionEvent, SessionMeta } from '@phnx-labs/sessions-cli/reader';
 
 const originalHome = process.env.HOME;
 const originalUserProfile = process.env.USERPROFILE;

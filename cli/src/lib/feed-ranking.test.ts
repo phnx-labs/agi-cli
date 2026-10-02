@@ -7,7 +7,7 @@ import {
   runawayControlCards,
 } from './feed-ranking.js';
 import type { ActiveSession } from './session/active.js';
-import type { SessionMeta } from './session/types.js';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 
 function block(id: string, ts: string, extra?: Partial<OpenBlock>): OpenBlock {
   return {

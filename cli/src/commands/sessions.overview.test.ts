@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { overviewProjectKey, buildOverviewGroups } from './sessions.js';
-import type { SessionMeta } from '../lib/session/types.js';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 
 function s(id: string, project: string | undefined, timestamp: string, cwd?: string, lastActivity?: string): SessionMeta {
   return { id, shortId: id.slice(0, 8), agent: 'claude', timestamp, lastActivity, project, cwd, filePath: '' } as SessionMeta;

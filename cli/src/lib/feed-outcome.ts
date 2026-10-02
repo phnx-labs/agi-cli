@@ -16,7 +16,7 @@
  * Pure functions, no I/O — unit-testable and shared by `agents feed` rendering
  * and any UI that collapses blocks under deliverables.
  */
-import { detectTicket, extractPrUrl } from './session/state.js';
+import { detectTicket, extractPrUrl } from '@phnx-labs/sessions-cli/reader';
 import { deriveBlockState, type OpenBlock } from './feed/feed.js';
 
 type OutcomeKind = 'ticket' | 'pr' | 'worktree' | 'unassigned';

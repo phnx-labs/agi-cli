@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { parseClaudeContent } from '../parse.js';
+import { parseClaudeContent } from '@phnx-labs/sessions-cli/reader';
 
 describe('session attachment parsing', () => {
   test('Claude image blocks preserve path, display name, media type, and size', () => {

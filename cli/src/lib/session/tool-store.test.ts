@@ -8,7 +8,7 @@ process.env.HOME = TEST_HOME;
 
 const { closeDB, getDB, querySessions, upsertSession } = await import('./db.js');
 const { canonicalToolLedgerPath, persistToolCalls, purgeMissingToolCallsInDirectory } = await import('./tool-store.js');
-type SessionMeta = import('./types.js').SessionMeta;
+type SessionMeta = import('@phnx-labs/sessions-cli/reader').SessionMeta;
 
 afterAll(() => {
   closeDB();

@@ -6,7 +6,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { resolveCwds, enrichProvenance, LSOF_CONCURRENCY, agentKindFromComm, sessionAgentComms, activeStatusFromCloudStatus, resolveFallbackStatus, lifecycleStatus, ABANDONED_STALE_MS, resolvePaneIdentity, matchOriginDevice, annotateOrchestratorLabels, summarizeMission, deriveSessionRecap, deriveImportantMessage, foldRecap, isReapableOrphan, backfillActiveRowsFromMeta } from './active.js';
 import type { ActiveSession } from './active.js';
-import { SESSION_AGENTS } from './types.js';
+import { SESSION_AGENTS } from '@phnx-labs/sessions-cli/reader';
 import type { HookSessionIndex } from './hook-sessions.js';
 import type { DeviceProfile, DeviceRegistry } from '../devices/registry.js';
 

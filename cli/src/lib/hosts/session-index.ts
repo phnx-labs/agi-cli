@@ -19,8 +19,8 @@
 
 import * as fs from 'fs';
 import { upsertSession } from '../session/db.js';
-import type { SessionMeta, SessionAgentId } from '../session/types.js';
-import { isSessionTrackedAgent } from '../session/types.js';
+import type { SessionMeta, SessionAgentId } from '@phnx-labs/sessions-cli/reader';
+import { isSessionTrackedAgent } from '@phnx-labs/sessions-cli/reader';
 import { localLogPath, updateTask, type HostTask } from './tasks.js';
 import { parseSessionIdMarker } from './session-marker.js';
 import { deriveShortId } from '../text/short-id.js';

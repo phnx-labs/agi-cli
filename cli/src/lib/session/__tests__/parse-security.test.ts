@@ -18,7 +18,7 @@ import {
   sanitizeForTerminal,
   safeReadSessionFile,
   SESSION_FILE_MAX_BYTES,
-} from '../parse.js';
+} from '@phnx-labs/sessions-cli/reader';
 
 const tmpFiles: string[] = [];
 

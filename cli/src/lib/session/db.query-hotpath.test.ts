@@ -25,7 +25,7 @@ const {
   querySessions,
   ftsSearch,
 } = await import('./db.js');
-type SessionMeta = import('./types.js').SessionMeta;
+type SessionMeta = import('@phnx-labs/sessions-cli/reader').SessionMeta;
 
 afterAll(() => {
   closeDB();

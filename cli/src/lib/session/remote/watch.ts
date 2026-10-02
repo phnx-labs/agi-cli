@@ -12,9 +12,9 @@ import { isReapableOrphan, sessionAccountLabel, type ActiveSession } from '../ac
 import { listNativeAccounts } from '../../account-registry.js';
 import { readMeta } from '../../state.js';
 import { querySessions, readSessionSummaryAny, readSessionTimelineAny } from '../db.js';
-import { linearIssueUrl } from '../linear.js';
+import { linearIssueUrl } from '@phnx-labs/sessions-cli/reader';
 import { sessionAgentSupportsResume } from '../recovery.js';
-import { SESSION_AGENTS, type SessionMeta } from '../types.js';
+import { SESSION_AGENTS, type SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import {
   activeSessionsJournalPath,
   activeSessionJournalIdentity,

@@ -13,10 +13,10 @@ import {
 } from './sessions-trace.js';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildTrajectory } from '../lib/session/trajectory.js';
-import { diffTrajectories } from '../lib/session/trajectory-compare.js';
-import { buildLineage } from '../lib/session/trajectory-lineage.js';
-import type { SessionEvent, SessionMeta } from '../lib/session/types.js';
+import { buildTrajectory } from '@phnx-labs/sessions-cli/reader';
+import { diffTrajectories } from '@phnx-labs/sessions-cli/reader';
+import { buildLineage } from '@phnx-labs/sessions-cli/reader';
+import type { SessionEvent, SessionMeta } from '@phnx-labs/sessions-cli/reader';
 
 function meta(overrides: Partial<SessionMeta> = {}): SessionMeta {
   return { id: 'sess-0001', shortId: 'sess0001', agent: 'claude', timestamp: '2026-08-01T00:00:00Z', filePath: '/tmp/s.jsonl', ...overrides };
