@@ -87,7 +87,7 @@ describe('analytics usage warehouse', () => {
     legacy.prepare(
       `INSERT INTO usage_events (ts, bundle, event, agent, host, source, status, key_count)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run('2026-07-01T00:00:00.000Z', 'legacy-bundle', 'access', 'codex', 'zion', 'cli', 'success', 2);
+    ).run(new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(), 'legacy-bundle', 'access', 'codex', 'zion', 'cli', 'success', 2);
     legacy.close();
 
     const since = '2020-01-01T00:00:00.000Z';
