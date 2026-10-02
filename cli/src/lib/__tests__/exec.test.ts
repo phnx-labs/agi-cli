@@ -113,13 +113,6 @@ describeExec('buildExecCommand', () => {
       expect(cmd).not.toContain('--sandbox');
     });
 
-    it('cursor plan produces --plan', () => {
-      const cmd = buildExecCommand(opts({ agent: 'cursor', mode: 'plan' }));
-      expect(cmd).toContain('--plan');
-      expect(cmd).not.toContain('-f');
-      expect(cmd[0]).toBe('cursor-agent');
-    });
-
     it('antigravity plan degrades to edit (no read-only mode)', () => {
       // A prompt is present (opts default), so both runs resolve headless and emit --print.
       const planCmd = buildExecCommand(opts({ agent: 'antigravity', mode: 'plan' }));
@@ -137,11 +130,19 @@ describeExec('buildExecCommand', () => {
       expect(cmd).not.toContain('-f');
     });
 
-    it('cursor headless plan trusts the workspace so it never stalls on the trust prompt', () => {
+    it('cursor headless plan runs read-only ask mode in a trusted workspace', () => {
       const cmd = buildExecCommand(opts({ agent: 'cursor', mode: 'plan', headless: true }));
-      expect(cmd).toContain('--plan');
-      expect(cmd).toContain('--trust');
+      // --plan answers through the createPlan tool, which -p text output never prints.
+      expect(cmd).toEqual(expect.arrayContaining(['--trust', '--mode', 'ask']));
+      expect(cmd).not.toContain('--plan');
       expect(cmd).not.toContain('-f');
+    });
+
+    it('cursor interactive plan keeps --plan and Cursor trust prompting', () => {
+      const cmd = buildExecCommand(opts({ agent: 'cursor', mode: 'plan', prompt: undefined, interactive: true }));
+      expect(cmd).toContain('--plan');
+      expect(cmd).not.toContain('--trust');
+      expect(cmd).not.toContain('ask');
     });
 
     it('cursor interactive edit preserves Cursor workspace trust prompting', () => {

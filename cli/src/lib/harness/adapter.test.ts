@@ -70,6 +70,14 @@ describe('launch-arg quirks (behavior parity with the old name-chain)', () => {
     expect(cursor.execPreModeArgs?.({ ...baseCtx, resolvedMode: 'skip' })).toBeUndefined();
   });
 
+  it('cursor maps headless plan to ask mode and leaves every other mode to modeFlags', () => {
+    const cursor = resolveHarnessAdapter('cursor');
+    expect(cursor.execModeArgs?.({ ...baseCtx, resolvedMode: 'plan' })).toEqual(['--mode', 'ask']);
+    expect(cursor.execModeArgs?.({ ...baseCtx, resolvedMode: 'plan', interactive: true })).toBeUndefined();
+    expect(cursor.execModeArgs?.(baseCtx)).toBeUndefined();
+    expect(cursor.execModeArgs?.({ ...baseCtx, resolvedMode: 'skip' })).toBeUndefined();
+  });
+
   it('kimi emits no mode flag headless, defers when interactive, throws on headless plan', () => {
     const kimi = resolveHarnessAdapter('kimi');
     expect(kimi.execModeArgs?.(baseCtx)).toEqual([]);

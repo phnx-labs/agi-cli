@@ -159,8 +159,8 @@ describe('cursor loop routine mode warning', () => {
         runIteration: async (options) => {
           expect(options.version).toBeUndefined();
           const argv = buildExecCommand(options);
-          expect(argv).toContain('--plan');
-          expect(argv).toContain('--trust');
+          expect(argv).toEqual(expect.arrayContaining(['--mode', 'ask', '--trust']));
+          expect(argv).not.toContain('--plan');
           expect(argv).not.toContain('-f');
           return { exitCode: 0, tokens: 0 };
         },
