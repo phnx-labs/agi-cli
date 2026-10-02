@@ -7,7 +7,7 @@
  *
  * This helper:
  *   1. Collects GitHub slugs from `~/.agents/projects/*.yaml` (`repo` / `repos[].slug`).
- *   2. Canonicalizes each slug (`gh repo view` — `phnx-labs/agents-cli` lists
+ *   2. Canonicalizes each slug (REST `repos/{slug}` — `phnx-labs/agents-cli` lists
  *      nothing; the live name is `phnx-labs/agi-cli`).
  *   3. Runs `gh pr list --repo <slug> --author @me` (cwd-independent).
  *   4. Keeps CI-green PRs with a merge-guard verdict (formal APPROVED review
@@ -79,12 +79,14 @@ export function projectRepoSlugs(defs: readonly ProjectDef[]): string[] {
 /**
  * Resolve a slug to GitHub's current `nameWithOwner`. A renamed repo
  * (`phnx-labs/agents-cli` → `phnx-labs/agi-cli`) lists zero PRs under the old
- * name; `gh repo view` returns the live one. On error, keep the input slug.
+ * name; the REST repo read follows the rename redirect and returns the live one.
+ * REST + a 24h gh cache: a rename is rare, and every `projects prs` refresh asks.
+ * On error, keep the input slug.
  */
 export async function canonicalizeRepo(slug: string, gh: GhExec): Promise<string> {
   try {
     const out = (await gh([
-      'repo', 'view', slug, '--json', 'nameWithOwner', '--jq', '.nameWithOwner',
+      'api', `repos/${slug}`, '--cache', '24h', '--jq', '.full_name',
     ])).trim();
     return out || slug;
   } catch {

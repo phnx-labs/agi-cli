@@ -62,15 +62,15 @@ describe('projectRepoSlugs', () => {
 });
 
 describe('canonicalizeRepo', () => {
-  it('uses gh repo view nameWithOwner so a renamed slug lists PRs', async () => {
+  it('follows the REST rename redirect so a renamed slug lists PRs', async () => {
     const gh = ghFromTable({
-      'repo view phnx-labs/agents-cli --json nameWithOwner --jq .nameWithOwner':
+      'api repos/phnx-labs/agents-cli --cache 24h --jq .full_name':
         'phnx-labs/agi-cli\n',
     });
     expect(await canonicalizeRepo('phnx-labs/agents-cli', gh)).toBe('phnx-labs/agi-cli');
   });
 
-  it('keeps the input slug when gh repo view fails', async () => {
+  it('keeps the input slug when the repo read fails', async () => {
     const gh: GhExec = async () => { throw new Error('nope'); };
     expect(await canonicalizeRepo('acme/widgets', gh)).toBe('acme/widgets');
   });
@@ -121,7 +121,7 @@ describe('selectListedMergeable', () => {
 describe('listMergeableRefs', () => {
   it('canonicalizes the slug and prints owner/repo#n for an approved+green PR', async () => {
     const gh = ghFromTable({
-      'repo view phnx-labs/agents-cli --json nameWithOwner --jq .nameWithOwner': 'phnx-labs/agi-cli\n',
+      'api repos/phnx-labs/agents-cli --cache 24h --jq .full_name': 'phnx-labs/agi-cli\n',
       'pr list --repo phnx-labs/agi-cli --author @me --state open --limit 50 --json number,reviewDecision,statusCheckRollup':
         JSON.stringify([{ number: 2847, reviewDecision: '', statusCheckRollup: GREEN }]),
       'api repos/phnx-labs/agi-cli/pulls/2847/reviews --cache 60s': '[]',
@@ -133,7 +133,7 @@ describe('listMergeableRefs', () => {
 
   it('is empty when the only candidate is unapproved', async () => {
     const gh = ghFromTable({
-      'repo view phnx-labs/agi-cli --json nameWithOwner --jq .nameWithOwner': 'phnx-labs/agi-cli\n',
+      'api repos/phnx-labs/agi-cli --cache 24h --jq .full_name': 'phnx-labs/agi-cli\n',
       'pr list --repo phnx-labs/agi-cli --author @me --state open --limit 50 --json number,reviewDecision,statusCheckRollup':
         JSON.stringify([{ number: 2849, reviewDecision: '', statusCheckRollup: GREEN }]),
       'api repos/phnx-labs/agi-cli/pulls/2849/reviews --cache 60s': '[]',
