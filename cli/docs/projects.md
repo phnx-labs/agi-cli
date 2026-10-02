@@ -345,6 +345,292 @@ A local workspace probe always feeds this footer (cheap, no SSH). The full per-h
 | `agents projects prs <name> [--json] [--repo owner/repo [--number n]]` | Every open PR across the project's attached repos, read over REST: drafts included, no author filter, each row with `createdAt`/`updatedAt`, author, branch, and body. The envelope carries `viewer` (the authenticated login) and, per repository, `sharedWith`. `--repo … --number` enriches one PR with checks, `reviewDecision`, `mergeable`, and `mergeableState`. In a shared monorepo the list is scoped; see [Monorepo subprojects](#monorepo-subprojects-which-project-owns-a-session). |
 | `agents projects prs merge <name> --repo owner/repo --number n --sha <head> [--method rebase\|squash\|merge] [--json]` | Merge one PR with a single REST call pinned to the head SHA the caller reviewed. GitHub refuses (exit 1, `merged: false`) if the branch moved, and branch protection, required checks, and reviews stay GitHub's to enforce. With no `--method`, it uses the first of rebase, squash, merge the repository allows. AGI Menu's Merge button runs this. |
 
+`agents teams create <team> --project <name>` binds a whole team to a project.
+
+`agents run --project <name>` is unchanged in spelling — it just resolves richer
+definitions now, and attaches the project's other directories as `--add-dir`
+grants.
+
+## Pulling every reachable checkout
+
+`agents projects pull <name>` fast-forwards every fleet checkout of a named project to
+its remote's default branch. It extends the `status` fleet fan-out — the same directory
+set that `status` probes is the set `pull` updates.
+
+```bash
+agents projects pull rush                        # pull every checkout in the project
+agents projects pull rush --device yosemite-s0  # scope to one device
+agents projects pull rush --devices s0,s1       # scope to multiple devices
+agents projects pull rush --json                # machine-readable results
+```
+
+**Safety contract — what pull will and will not do:**
+
+- **Only fast-forwards** — no rebase, no reset, no history rewrite.
+- **Dirty trees are blocked immediately.** The fetch is never attempted when there are
+  uncommitted changes.
+- **Only checkouts on the remote's default branch** are eligible. A checkout on
+  `feature/x` is blocked and reported.
+- **Local commits ahead of upstream block the pull.** The checkout must be strictly
+  behind (or equal to) its upstream before it is updated.
+- **Missing checkouts are skipped** — never cloned. If a project directory does not
+  exist on a device, it is reported as `missing` and the command moves on.
+- **The declared repo slug is verified first, on every device.** A bound directory whose
+  `origin` is a different repo than the project declares is blocked, as is one whose
+  `origin` cannot be resolved to an `owner/repo` slug at all — the checkout cannot be
+  confirmed to be the right repo, so it is never fast-forwarded.
+- **Git hooks are never installed** during a pull.
+
+Blocked (`blocked`) and failed (`failed`) checkouts drive a non-zero exit code.
+Missing checkouts (`missing`) do not.
+
+**Per-device output:**
+
+```
+rush
+  yosemite-m1
+    ✓ ~/src/github.com/phnx-labs/rush updated (main) a1b2c3d4→e5f6a7b8
+    · ~/src/github.com/phnx-labs/rush-infra already current (main)
+  yosemite-s0
+    ? ~/src/github.com/phnx-labs/rush missing — skipped
+  2 updated · 1 current · 1 missing
+```
+
+The fan-out uses the same `gatherRemoteAgentsJson` seam as `status`, with a
+120-second per-device timeout (vs the default 12s) to allow for large repos and
+slow links.
+
+### Devices that did not answer, and devices that answered unverifiably
+
+These are different states and the command keeps them apart:
+
+| State | Meaning | Reported as | Exit code |
+|---|---|---|---|
+| `unavailable` | The device never answered — offline, no `agents` CLI, or past the 120s budget. Nothing ran there. | `unavailable: <names>` | unaffected |
+| `unverified` | The device answered, but its response failed verification (wrong machine id, a target fingerprint that does not match the targets that were sent, or a malformed row). It already ran a real pull whose outcome cannot be read. | `unverified: <names>` | **non-zero** |
+
+An unverifiable answer is worse than silence, so it is never folded into the results as
+a device with nothing to report. Under `--json` both notes go to **stderr** (the JSON on
+stdout stays a clean result array), matching `projects status --json`.
+
+**How the fan-out stays verifiable.** Each peer runs the hidden
+`agents projects pull-local --json --targets <json>`, where `--targets` carries the full
+`{path, expectedSlug}` list — not bare paths. Both halves of a target have to cross that
+boundary: `expectedSlug` is what makes the peer refuse a directory hosting a different
+repo, and it is hashed into the target fingerprint the caller checks the peer's envelope
+against. A peer that cannot decode its targets exits non-zero rather than pulling a
+guessed subset.
+
+## Importing — from Linear
+
+`--from-linear` imports the workspace's Linear projects through the `linear` CLI.
+Each project becomes a def carrying `linear.projectId` and `linear.name` (+ `url` when
+the CLI reports one), and the `show` backlink lights up immediately. `linear.name` is the
+board's display name verbatim — `AGI`, not the slugified def name `agi`. A Linear project exists because someone
+deliberately created it, so the name and the link are trustworthy.
+
+The local checkout is bound **only on an exact normalized-name match** against the
+directories under the configured projects root (`matchLocalCheckoutExact`,
+`lib/linear-projects.ts`) — "Agents CLI" binds `agents-cli`, and nothing else. The
+containment fallback that powers `projects link`'s suggestion is deliberately not
+used on this write path: it would silently bind "Agents CLI" to `agents-cli-web`
+with nobody looking. A project with no exact local match still imports, carrying
+`name` + `linear` and nothing it cannot prove; fill the rest in with
+`projects set` or by editing the YAML.
+
+Re-importing is safe. An existing def is preserved field-for-field and only
+`linear` is overwritten, so a hand-set `description`, `goals`, `contexts`, or
+`integrations` survives. A def that already carries `root`/`repo` is skipped unless `--force`,
+so a re-import never re-points a project you have already bound by hand.
+
+Drop a bad import with `agents projects remove <name>` — it only unlinks the YAML, never the repo.
+
+## Not yet (fast-follow)
+
+- **Home-relative cwd matching across machines.** `status` now dials the whole
+  fleet by default (live-agent count via the sessions fan-out + per-device
+  workspace drift), but cwd matching is still local-home — a session recorded on
+  a different-home machine only matches once home-relative cwd matching lands.
+- **Re-point `agents factory snapshot`** per-project Linear rollup at defined projects.
+- **Per-repo release lines** — the `ships` release tag is the primary repo only.
+- **Persisted `project_id` session column** — today membership is derived from cwd.
+
+## The stored `repo` must match the checkout's remote
+
+A definition's `repo` is a plain string, so it can be confidently wrong — a repo cloned to
+`~/src/github.com/<you>/agents-cli` whose `origin` is `phnx-labs/agents-cli` might carry
+`<you>/agents-cli` when hand-authored or imported from a path-only heuristic.
+
+Both slugs resolve to real repositories, so no call fails. The card simply reads the merged-PR
+and release counts from a **different repo** — 0 merges in 7 days instead of 100. A wrong
+number that looks right is worse than a missing one. `status` and `show` print the disagreement
+with its fix attached whenever a def's `repo` differs from the remote of its `root`:
+
+  ```
+  repos    muqsitnawaz/agents-cli
+  !        repo is muqsitnawaz/agents-cli but origin is phnx-labs/agents-cli —
+           PR and release counts are being read from the wrong repository
+           agents projects set agents-cli --repo phnx-labs/agents-cli
+  ```
+
+The check is silent when this machine has no checkout to read a remote from — absence of
+evidence is not a finding.
+
+## The Linear line is cached, and degrades to stale rather than absent
+
+Linear meters requests and query complexity separately, and only one of them binds. Measured
+on this workspace's response headers:
+
+```
+x-ratelimit-requests-limit:   2500      remaining: 2
+x-ratelimit-complexity-limit: 3000000   remaining: 2999987
+```
+
+Requests are scarce; complexity is essentially untouched. Since the card pages every issue in
+a project (up to 10 requests each), an agent running `status` in a loop exhausts the budget —
+which is exactly how it was exhausted during this feature's development.
+
+Answers are cached under `~/.agents/.cache/linear-projects/` for 10 minutes, matching the
+repo's existing `SKILL_INDEX_TTL_MS` convention — **one file per project**, written by atomic
+rename. A single shared JSON document would have to be read, modified, and written back, and
+that sequence is not atomic across processes: measured with two concurrent writers of 40
+distinct keys each, **8 of 80 entries survived**. A machine running a dozen agent sessions
+makes that the normal case rather than a corner. Per-key files have nothing to clobber, and the
+same measurement now yields 80 of 80. A second `status` inside the window makes no
+Linear request at all.
+
+The behavior that matters more is on failure: **a stale answer is served and labelled, never
+dropped.** A Linear row that was populated a minute ago must not blank out because one fetch
+timed out — the same invariant `mergeAuthHealthEntries` keeps for account health. A 429 records
+its reset time so subsequent runs skip the call entirely instead of spending a request to learn
+the budget is gone.
+
+`AGENTS_LINEAR_CACHE_PATH` overrides the location (tests use it; `getCacheDir()` resolves
+`HOME` once at module load, so a test swapping `process.env.HOME` would otherwise read and
+write the developer's real cache).
+
+## The headline counts live agents, and `planPct` is gone
+
+Two numbers used to sit on the headline and neither meant what it looked like.
+
+**The agent count included dead sessions.** A real project read `39 agents` while 19 of those
+had crashed. It now reads `19 live`, and the wreckage gets its own row — `dead  19 finished or
+lost (19 crashed)` — because 19 crashed sessions is a thing to go fix, not throughput to brag
+about. `orphaned` counts as **live**: `lib/session/active.ts` defines it as "alive, but no
+client is attached" (the agent outlived its window and is still working), and the repo's own
+dead rule (`commands/sessions.ts`) is `closed` and `crashed` only.
+
+The `agents` roster below the headline is filtered the same way. It used to list every matched
+session, so a card headed `23 live` went on to print `claude · crashed ×25` — the corpses the
+`dead` row already accounts for, shown a second time and contradicting the number above them.
+`isDeadStatus` is the single predicate behind both, and a test pins them to agree across every
+`ActiveStatus` so they cannot drift apart.
+
+**`planPct` measured whichever agent last wrote a todo list.** It summed each matched session's
+most recent checklist snapshot, so:
+
+- no session had ever called `TodoWrite` → `total = 0` → the figure silently disappeared;
+- one agent opened a fresh 40-item plan → `0/40` → the whole project read **`0% plan`** while
+  everyone else worked.
+
+It also counted crashed sessions' frozen final checklists forever, and summed unrelated
+denominators as though they were one plan. No repair makes a cross-session sum of ad-hoc
+checklists mean project progress, so it is removed from the card and from `--json`, replaced
+there by `live` and `dead`.
+
+## Milestones: all of them, and Linear's own "next"
+
+`status` shows the next checkpoint plus a pointer; `view <name>` shows every declared
+milestone with its date and progress. When Linear itself flags one (`status: "next"`) that is
+the one used — it is the answer showing in Linear's UI, whereas earliest-dated-unfinished is
+only our guess, used when nothing is flagged.
+
+A milestone with no issues assigned reports no progress, and `view` says so once rather than
+printing a column of silent `0%`s:
+
+```
+    !          no issues are assigned to any milestone — progress against them
+               cannot be measured
+```
+
+## `focus` — what was actually worked on
+
+The card could say how many agents ran and how many PRs merged, but not *what was worked on*.
+That answer is already in the checkout: every commit names the files it touched. `focus` ranks
+the directories the window's commits landed in, three levels deep so a monorepo reads as
+`cli/src` rather than `apps`:
+
+```
+focus    cli/src 2.3k  ·  cli/docs 302  file-touches (7d)  # git log --name-only buckets
+```
+
+Local `git log --name-only`, no GitHub API, no credential, no rate-limit budget — measured at
+**0.23s** over a 897-commit week, which is why it runs unconditionally rather than behind a flag.
+It reads the local ref and never fetches: a status command must not mutate the repo it describes,
+so the answer is as fresh as your last fetch.
+
+**Changelog fragments and lockfiles are excluded from the ranking, not just the display.** This
+repo files one fragment per PR, so `.changelog` otherwise ranks second by raw file-touches —
+presenting PR count as an engineering focus area.
+
+## `schedule` — only what the dates prove
+
+```
+schedule 3 milestones, no issues filed against any — progress is not measurable
+schedule Beta cut overdue by 6 days
+schedule GA due in 9 days
+```
+
+| Verdict | Fires when |
+| --- | --- |
+| `declared` | a human posted a Linear project health update — relayed and attributed (`per Linear: atRisk`) |
+| `overdue` | a milestone's `targetDate` has passed and it is unfinished |
+| `untracked` | milestones exist but no issue is filed against any of them |
+| `due-soon` | the next dated milestone lands within 14 days |
+| `scheduled` | dated milestones ahead, none due soon, work is filed |
+| `no-dates` | milestones exist, none carries a date |
+| `none` | the project declares no milestones — the line is omitted entirely |
+
+**There is deliberately no `on-track` or `at-risk`.** Producing one requires either project
+start+target dates to interpolate an expected-progress line, or a scope-history series to
+extrapolate a finish date. Probed against a live workspace, every one of those inputs is empty:
+
+```
+health: null       startDate: null        targetDate: null
+scopeHistory: []   completedScopeHistory: []   inProgressScopeHistory: []
+```
+
+So the chip would be invented. A blank is bad; a confident wrong answer that gets trusted is
+worse, and it is unfalsifiable from the card. The union has no such member, so it cannot be
+produced by accident later either.
+
+## Monorepo subprojects: which project owns a session
+
+Attribution (`projectNameForCwd`) matches a session's cwd against the paths each project
+claims, longest match winning so a nested project beats its parent. What a project *claims*
+is the part that needed fixing:
+
+- `root` says where the **checkout** is.
+- `defaultPath`, when nested under `root`, says which **work** is this project's, and takes
+  precedence over `root`.
+- a narrowed `root` still claims the rest of its checkout, but only as a fallback: any other
+  project claiming that path outright wins. So the umbrella takes `apps/web` when one exists,
+  while a lone project keeps attributing work across its own repo.
+- each `repos[].path`, and `repos[].path` + `subpath`, anchor as well.
+
+Without this, two definitions sharing one monorepo checkout — an umbrella `rush` at
+`~/src/rush` and a subproject `rush-cli` at `~/src/rush` with `defaultPath ~/src/rush/cli`
+— both anchored at `~/src/rush`. Longest-match had nothing to separate them, so a session in
+`rush/cli` was attributed to whichever definition was listed first, and the answer
+changed with definition order.
+
+A subproject scoped to `cli` deliberately does **not** own `apps/web`; that work falls to
+the umbrella. Set the scope with `agents projects add <name> --root <monorepo> --path <subdir>`.
+
+When the subproject is the *only* definition on that checkout there is no umbrella to fall to,
+so its `root` still covers `apps/web` and the repo root. `--path` chooses where an agent
+starts, and it must not silently shrink which work counts as the project's.
+
 The same claim scopes **pull requests** (`agents projects prs`). When a repository is
 attached to more than one project, a project that claims part of it lists only the PRs
 whose changed files touch its paths (`scope: project`) or touch no sharing project's paths

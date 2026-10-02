@@ -262,8 +262,10 @@ class PrFilesCache {
   private dirty = false;
 
   constructor() {
+    // A missing or unreadable cache only costs re-reads; it never fails a list.
     try {
-      this.entries = JSON.parse(fs.readFileSync(this.file, 'utf-8')) as Record<string, string[]>;
+      const parsed: unknown = JSON.parse(fs.readFileSync(this.file, 'utf-8'));
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) this.entries = parsed as Record<string, string[]>;
     } catch {
       this.entries = {};
     }
@@ -273,7 +275,8 @@ class PrFilesCache {
     const key = `${slug}@${pr.headSha}`;
     const hit = this.entries[key];
     if (hit) return hit;
-    const out = await gh(['api', `repos/${slug}/pulls/${pr.number}/files?per_page=100`, '--paginate', '--jq', '.[].filename']);
+    // A rename counts on both sides: moving a file out of a project's path touches that project.
+    const out = await gh(['api', `repos/${slug}/pulls/${pr.number}/files?per_page=100`, '--paginate', '--jq', '.[] | .filename, (.previous_filename // empty)']);
     const files = out.split('\n').map((l) => l.trim()).filter(Boolean);
     this.entries[key] = files;
     this.dirty = true;
@@ -443,11 +446,16 @@ export async function defaultMergeMethod(repo: string, gh: GhExec = ghExec): Pro
   return method;
 }
 
-/** gh prints GitHub's refusal on stderr (`gh: Required status check … (HTTP 405)`); keep that line. */
+/**
+ * gh prints GitHub's refusal on stderr (`gh: Required status check … (HTTP 405)`),
+ * sometimes followed by a hint line (a 401 adds `try authenticating with: gh auth
+ * login`). Keep the line carrying the HTTP status, else the first line.
+ */
 function ghFailure(err: unknown): string {
   const stderr = (err as { stderr?: unknown })?.stderr;
   const text = typeof stderr === 'string' && stderr.trim() ? stderr : err instanceof Error ? err.message : String(err);
-  const line = text.trim().split('\n').filter(Boolean).pop() ?? text;
+  const lines = text.trim().split('\n').map((l) => l.trim()).filter(Boolean);
+  const line = lines.find((l) => /\(HTTP \d{3}\)/.test(l)) ?? lines[0] ?? text;
   return line.replace(/^gh:\s*/, '');
 }
 
@@ -465,15 +473,21 @@ export async function mergeProjectPr(
   method: MergeMethod | undefined,
   gh: GhExec = ghExec,
 ): Promise<ProjectPrMergeResult> {
-  const chosen = method ?? await defaultMergeMethod(repo, gh);
+  let chosen: MergeMethod;
   try {
-    const out = await gh([
+    chosen = method ?? await defaultMergeMethod(repo, gh);
+  } catch (err) {
+    return { repo, number, method: method ?? MERGE_METHODS[0], merged: false, sha: null, message: ghFailure(err) };
+  }
+  let out: string;
+  try {
+    out = await gh([
       'api', '-X', 'PUT', `repos/${repo}/pulls/${number}/merge`,
-      '-f', `sha=${sha}`, '-f', `merge_method=${chosen}`,
+      '-f', `sha=${sha}`, '-f', `merge_method=${chosen}`, '--jq', '.sha',
     ]);
-    const body = JSON.parse(out) as { merged?: boolean; sha?: string; message?: string };
-    return { repo, number, method: chosen, merged: body.merged === true, sha: body.sha ?? null, message: body.message ?? '' };
   } catch (err) {
     return { repo, number, method: chosen, merged: false, sha: null, message: ghFailure(err) };
   }
+  // GitHub answers this endpoint 200 only once the PR is merged; anything else made gh exit non-zero.
+  return { repo, number, method: chosen, merged: true, sha: out.trim() || null, message: 'Merged' };
 }
