@@ -1118,15 +1118,18 @@ instruction.
 
 Cursor routines pass `--trust` because configuring a routine with a working
 directory is the user's workspace-trust decision. This is narrower than `--yolo`
-or `-f`: it accepts the workspace without bypassing tool permissions. Cursor's
-read-only plan mode exists in the CLI but is not enabled in the agents-cli
-capability registry yet (RUSH-2101), so `mode: plan` currently warns and runs the
-registry-selected writable mode.
+or `-f`: it accepts the workspace without bypassing tool permissions. A
+`mode: plan` routine runs Cursor's read-only ask mode (`--mode ask --trust`), not
+`--plan`: in plan mode Cursor delivers its answer through its createPlan tool,
+which headless text output never prints, so the run exited 0 with an empty
+stdout. Ask mode refuses file writes just like plan mode and prints its answer.
 
-The same trust rule applies to any headless `agents run cursor "<prompt>"` launch:
-agents-cli passes `--trust` because the caller selected both a working directory
-and a non-interactive prompt. Interactive `agents run cursor` launches preserve
-Cursor's own workspace-trust prompt and never add `--trust`.
+The same rules apply to any headless `agents run cursor "<prompt>"` launch,
+including a Cursor teammate: agents-cli passes `--trust` in every mode except
+skip (which already passes `-f`), because the caller selected both a working
+directory and a non-interactive prompt, and a headless `--mode plan` run uses
+`--mode ask`. Interactive `agents run cursor` launches keep `--plan` for plan mode,
+preserve Cursor's own workspace-trust prompt, and never add `--trust`.
 
 ### Pinning an account (avoid the OAuth-rotation revocation storm)
 

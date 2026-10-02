@@ -26,9 +26,18 @@ export const cursorAdapter: HarnessAdapter = {
     return ctx.resolvedMode !== 'skip' && !ctx.interactive ? ['--trust'] : undefined;
   },
 
+  // Headless read-only runs use ask mode, not --plan. In plan mode Cursor
+  // delivers its answer through the createPlan tool, which `-p` text output
+  // never prints, so the run exits 0 with an empty stdout. Ask mode is equally
+  // read-only (it refuses file writes) and prints its answer. Interactive plan
+  // keeps --plan, where the TUI renders the plan.
+  execModeArgs(ctx) {
+    return ctx.resolvedMode === 'plan' && !ctx.interactive ? ['--mode', 'ask'] : undefined;
+  },
+
   routineModeArgs(cmd, ctx) {
     if (ctx.mode === 'plan') {
-      cmd.push('--plan', '--trust');
+      cmd.push('--mode', 'ask', '--trust');
     } else if (ctx.mode === 'skip') {
       cmd.push('-f');
     } else {
