@@ -19,7 +19,7 @@
 import { composeBroadcastMessage, type FeedBroadcastContext } from './feed-broadcast.js';
 import { resolvePostIdentity } from './feed-post.js';
 import { getSessionById, resolveFullSessionId } from './session/db.js';
-import { linearIssueUrl } from './session/linear.js';
+import { linearIssueUrl } from '@phnx-labs/sessions-cli/reader';
 import type { SinkMessageFormat } from './sink-format.js';
 
 interface OwnerMessageOptions {

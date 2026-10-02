@@ -14,7 +14,7 @@
 import * as fs from 'node:fs';
 
 import type { ActiveSession } from '../session/active.js';
-import type { SessionCheckpoint } from '../session/types.js';
+import type { SessionCheckpoint } from '@phnx-labs/sessions-cli/reader';
 import {
   readSessionSummary,
   readSessionSummaryAny,

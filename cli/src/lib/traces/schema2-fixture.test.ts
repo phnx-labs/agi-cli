@@ -9,8 +9,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { buildSessionDetailV2, type SessionDetailV2 } from './schema2-build.js';
-import { buildTrajectory } from '../session/trajectory.js';
-import type { SessionEvent, SessionMeta } from '../session/types.js';
+import { buildTrajectory } from '@phnx-labs/sessions-cli/reader';
+import type { SessionEvent, SessionMeta } from '@phnx-labs/sessions-cli/reader';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 

@@ -8,7 +8,7 @@ import { describe, expect, test } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { parseRush, detectAgent, parseSession } from '../parse.js';
+import { parseRush, detectAgent, parseSession } from '@phnx-labs/sessions-cli/reader';
 
 function writeTmp(content: string): string {
   const p = path.join(os.tmpdir(), `rush-parse-${Date.now()}-${Math.random()}.jsonl`);

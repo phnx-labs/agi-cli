@@ -13,7 +13,7 @@ import {
   reconcileLiveMetaMachine,
 } from './live-metadata.js';
 import type { ActiveSession } from './active.js';
-import type { SessionMeta } from './types.js';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 
 function active(partial: Partial<ActiveSession>): ActiveSession {
   return {

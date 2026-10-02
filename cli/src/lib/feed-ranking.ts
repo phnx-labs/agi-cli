@@ -3,7 +3,7 @@ import type { Classification } from './ask-classifier.js';
 import { classifyBlock } from './ask-classifier.js';
 import { outcomeForBlock } from './feed-outcome.js';
 import type { ActiveSession } from './session/active.js';
-import type { SessionMeta } from './session/types.js';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import { projectKeyFromCwd } from './project-key.js';
 
 const MINUTES_PER_HOUR = 60;

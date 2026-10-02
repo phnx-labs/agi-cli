@@ -12,7 +12,7 @@
  * invokes it, debounced and reader-gated.
  */
 
-import type { TodoProgress } from '../session/types.js';
+import type { TodoProgress } from '@phnx-labs/sessions-cli/reader';
 
 /**
  * The `anthropic-version` header this request sends. Declared here because this

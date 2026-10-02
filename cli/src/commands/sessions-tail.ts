@@ -11,10 +11,10 @@ import * as fsp from 'fs/promises';
 import * as path from 'path';
 import chalk from 'chalk';
 import type { Command } from 'commander';
-import type { SessionMeta, SessionAgentId } from '../lib/session/types.js';
+import type { SessionMeta, SessionAgentId } from '@phnx-labs/sessions-cli/reader';
 import { discoverSessions, resolveSessionById } from '../lib/session/discover.js';
 import { setHelpSections } from '../lib/help.js';
-import { makeStreamRenderer } from '../lib/session/stream-render.js';
+import { makeStreamRenderer } from '@phnx-labs/sessions-cli/reader';
 
 const TAIL_SUPPORTED: SessionAgentId[] = ['claude', 'codex'];
 

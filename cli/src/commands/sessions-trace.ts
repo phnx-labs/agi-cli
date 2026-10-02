@@ -23,23 +23,23 @@ import { showFile } from '../lib/open-url.js';
 import { knownSecretValuesFromEnv } from '../lib/redact.js';
 import { getCacheDir } from '../lib/state.js';
 import { discoverSessions } from '../lib/session/discover.js';
-import { parseSession } from '../lib/session/parse.js';
-import { foldTimeline, projectSessionFiles, projectTimeline } from '../lib/session/timeline.js';
+import { parseSession } from '@phnx-labs/sessions-cli/reader';
+import { foldTimeline, projectSessionFiles, projectTimeline } from '@phnx-labs/sessions-cli/reader';
 import { parseTimelineEvents } from '../lib/session/timeline-pass.js';
-import type { SessionMeta, SessionStep } from '../lib/session/types.js';
-import { buildTrajectory } from '../lib/session/trajectory.js';
-import { diffTrajectories } from '../lib/session/trajectory-compare.js';
-import { buildLineage } from '../lib/session/trajectory-lineage.js';
-import { renderTrajectoryHtml, renderTrajectoryCompareHtml, renderLineageHtml } from '../lib/session/trajectory-html.js';
-import { renderTrajectoryText, renderTrajectoryCompareText, renderLineageText } from '../lib/session/trajectory-text.js';
-import type { SessionTrajectory } from '../lib/session/trajectory.js';
+import type { SessionMeta, SessionStep } from '@phnx-labs/sessions-cli/reader';
+import { buildTrajectory } from '@phnx-labs/sessions-cli/reader';
+import { diffTrajectories } from '@phnx-labs/sessions-cli/reader';
+import { buildLineage } from '@phnx-labs/sessions-cli/reader';
+import { renderTrajectoryHtml, renderTrajectoryCompareHtml, renderLineageHtml } from '@phnx-labs/sessions-cli/reader';
+import { renderTrajectoryText, renderTrajectoryCompareText, renderLineageText } from '@phnx-labs/sessions-cli/reader';
+import type { SessionTrajectory } from '@phnx-labs/sessions-cli/reader';
 import type {
   TrajectoryComparison,
   TrajectoryDivergence,
   TrajectorySummary,
-} from '../lib/session/trajectory-compare.js';
-import type { TrajectoryStep } from '../lib/session/trajectory.js';
-import type { LineageEdge, LineageNode, SessionLineage } from '../lib/session/trajectory-lineage.js';
+} from '@phnx-labs/sessions-cli/reader';
+import type { TrajectoryStep } from '@phnx-labs/sessions-cli/reader';
+import type { LineageEdge, LineageNode, SessionLineage } from '@phnx-labs/sessions-cli/reader';
 import { parseAgentFilter } from './sessions.js';
 import { selectSessions } from './sessions-export.js';
 

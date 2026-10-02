@@ -295,7 +295,7 @@ describe('session mirror (real DB + real shared-state files)', () => {
     const root = getUserAgentsDir();
     const id = '99999999-0000-0000-0000-0000000000dd';
     seedLocalSession({ id, topic: 'fold the timeline' });
-    const { foldTimeline, projectSessionFiles, projectTimeline } = await import('./timeline.js');
+    const { foldTimeline, projectSessionFiles, projectTimeline } = await import('@phnx-labs/sessions-cli/reader');
     const at = (n: number) => new Date(Date.UTC(2026, 8, 6, 0, 0, n)).toISOString();
     const state = foldTimeline([
       { type: 'message', agent: 'claude', timestamp: at(0), role: 'user', content: 'Ship the sidebar timeline.' },
@@ -380,7 +380,7 @@ describe('session mirror (real DB + real shared-state files)', () => {
           changes: Array.from({ length: 30 }, (_, i) => ({ path: `/repo/f${i}.ts`, op: 'modified' as const, edits: 1, at: '2026-09-06T00:00:00.000Z' })),
           total: 30, source: 'tools',
         },
-        state: (await import('./timeline.js')).emptyTimelineState(),
+        state: (await import('@phnx-labs/sessions-cli/reader')).emptyTimelineState(),
       },
     });
 

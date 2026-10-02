@@ -5,8 +5,8 @@ import {
   mapBashCategory,
   unwrapShellExec,
 } from './schema2-build.js';
-import { buildTrajectory } from '../session/trajectory.js';
-import type { SessionEvent, SessionMeta } from '../session/types.js';
+import { buildTrajectory } from '@phnx-labs/sessions-cli/reader';
+import type { SessionEvent, SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import type {
   BashExecution,
   EditExecution,

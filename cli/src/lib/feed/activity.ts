@@ -34,7 +34,7 @@ import type { EventRecord } from './events.js';
 import {
   pythonToolRegistryLiteral,
   pythonValueFlagsLiteral,
-} from '../session/bash-command.js';
+} from '@phnx-labs/sessions-cli/reader';
 
 /** Recognizable milestone events, ordered first in any activity lane. */
 type MilestoneEvent =

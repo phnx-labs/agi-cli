@@ -31,7 +31,7 @@
  */
 import { createHash } from 'node:crypto';
 import type { ActiveSession } from '../session/active.js';
-import type { StructuredQuestion } from '../session/state.js';
+import type { StructuredQuestion } from '@phnx-labs/sessions-cli/reader';
 import {
   blockGeneration,
   blockIdForSession,

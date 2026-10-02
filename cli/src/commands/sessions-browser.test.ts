@@ -18,7 +18,7 @@ import {
   type BrowserFilter,
 } from './sessions-browser.js';
 import { liveHostLabel } from './sessions.js';
-import type { SessionMeta } from '../lib/session/types.js';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import type { ActiveSession } from '../lib/session/active.js';
 
 const row = (over: Partial<SessionMeta> = {}): SessionMeta =>

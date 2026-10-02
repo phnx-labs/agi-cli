@@ -10,14 +10,14 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import Database from '../sqlite.js';
-import type { SessionAgentId, SessionCheckpoint, SessionChecklistItem, SessionEvent, SessionFiles, SessionMeta, SessionRequest, SessionRunMode, SessionTimeline, SummaryState } from './types.js';
-import { parseSession, sessionFilePathContainer } from './parse.js';
-import { extractRecentDirectoriesTouched, extractTodoProgressFromEvents } from './state.js';
+import type { SessionAgentId, SessionCheckpoint, SessionChecklistItem, SessionEvent, SessionFiles, SessionMeta, SessionRequest, SessionRunMode, SessionTimeline, SummaryState } from '@phnx-labs/sessions-cli/reader';
+import { parseSession, sessionFilePathContainer } from '@phnx-labs/sessions-cli/reader';
+import { extractRecentDirectoriesTouched, extractTodoProgressFromEvents } from '@phnx-labs/sessions-cli/reader';
 import { getSessionsDir, getSessionsDbPath } from '../state.js';
 import { query as queryEvents, queryToolUsageForSessions } from '../feed/events.js';
 import { machineForSessionFile } from '../origin-machine.js';
 import { loadSessionActorIndex, readSessionActorRecord } from './actor-sidecar.js';
-import { scanEventToolCalls, type IndexedToolCall } from './tool-calls.js';
+import { scanEventToolCalls, type IndexedToolCall } from '@phnx-labs/sessions-cli/reader';
 import { persistToolCalls, planEventToolResume, purgeToolCalls, toolEvidenceSourcePath, type ToolScanResumePoint } from './tool-store.js';
 import { buildClaudeAccountIndex, resolveClaudeAccount } from './claude-accounts.js';
 import {
@@ -26,13 +26,13 @@ import {
   extractSlashCommands,
   harnessTracksBackgroundShells,
   isSubAgentTool,
-} from './highlights.js';
+} from '@phnx-labs/sessions-cli/reader';
 import { resolveResource } from '../resources.js';
 import { discoverPlugins } from '../plugins/plugins.js';
 import { machineId } from '../machine-id.js';
 import type { DiscoveredPlugin } from '../types.js';
-import { firstUserMessageFromEvents, lastUserMessageFromEvents } from './prompt.js';
-import { emptyTimelineState, TIMELINE_EXTRACTOR_VERSION, type TimelineState } from './timeline.js';
+import { firstUserMessageFromEvents, lastUserMessageFromEvents } from '@phnx-labs/sessions-cli/reader';
+import { emptyTimelineState, TIMELINE_EXTRACTOR_VERSION, type TimelineState } from '@phnx-labs/sessions-cli/reader';
 
 const SESSIONS_DIR = getSessionsDir();
 const DB_PATH = getSessionsDbPath();

@@ -26,8 +26,6 @@ describe('agents send --to owner routes through the feed composer (PHNX-3698)', 
       stdout.push(args.map((a) => (typeof a === 'string' ? a : String(a))).join(' '));
     };
     console.error = () => {};
-    const { _resetLinearWorkspaceCache } = await import('../lib/session/linear.js');
-    _resetLinearWorkspaceCache();
     stash('LINEAR_WORKSPACE', 'getrush');
     // AGENT_SESSION_ID is checked first and is set by the real run this suite
     // executes inside — pin both to the fixture and clear the other signals so
@@ -52,8 +50,6 @@ describe('agents send --to owner routes through the feed composer (PHNX-3698)', 
       if (v === undefined) delete process.env[k];
       else process.env[k] = v;
     }
-    const { _resetLinearWorkspaceCache } = await import('../lib/session/linear.js');
-    _resetLinearWorkspaceCache();
   });
 
   it('--dry-run --json shows the composed message as a plain owner sentence with no dumped URLs', async () => {

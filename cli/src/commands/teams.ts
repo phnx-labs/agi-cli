@@ -91,7 +91,7 @@ import { AGENTS, warnAgentDeprecated } from '../lib/agents.js';
 import type { AgentId } from '../lib/types.js';
 import { discoverSessions, parseTimeFilter, resolveSessionById } from '../lib/session/discover.js';
 import { renderSessionLog } from './sessions.js';
-import type { SessionMeta } from '../lib/session/types.js';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import { buildPreview as buildSessionPreview } from './sessions-picker.js';
 import { parseExecEnv } from '../lib/exec.js';
 import { checkRunAccountReadiness, type AccountReadiness } from '../lib/accounting/rotate.js';

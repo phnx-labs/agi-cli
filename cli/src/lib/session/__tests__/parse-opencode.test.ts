@@ -17,8 +17,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import Database from '../../sqlite.js';
-import { parseOpenCode } from '../parse.js';
-import { extractTodoProgressFromEvents } from '../state.js';
+import { parseOpenCode } from '@phnx-labs/sessions-cli/reader';
+import { extractTodoProgressFromEvents } from '@phnx-labs/sessions-cli/reader';
 
 interface PartRow {
   id: string;

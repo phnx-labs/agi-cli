@@ -9,7 +9,7 @@ process.env.HOME = TEST_HOME;
 const { closeDB, getDB, getSessionById, upsertSession } = await import('../lib/session/db.js');
 const { discoverSessions } = await import('../lib/session/discover.js');
 const { backfillToolsLocal, runToolsBackfill, runTitlesBackfill } = await import('./sessions-backfill.js');
-type SessionMeta = import('../lib/session/types.js').SessionMeta;
+type SessionMeta = import('@phnx-labs/sessions-cli/reader').SessionMeta;
 
 afterAll(() => {
   closeDB();

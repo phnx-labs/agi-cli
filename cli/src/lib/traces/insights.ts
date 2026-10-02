@@ -30,7 +30,7 @@ import { classifyCause, type TraceFailureCause } from './classify.js';
 import type { FailurePhenotype } from './phenotype.js';
 import { computeLatency, type LatencyInsight, type SegmentSession } from './segments.js';
 import { failureDescription, type SyncRow, type ToolCallRow, type TracesIndexShard } from './sync.js';
-import type { InsightFacets } from '../session/insights.js';
+import type { InsightFacets } from '@phnx-labs/sessions-cli/reader';
 
 // ---------------------------------------------------------------------------
 // Public types

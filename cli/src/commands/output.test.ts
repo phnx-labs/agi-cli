@@ -14,7 +14,7 @@ const { Command } = await import('commander');
 // not a bare stand-in parent that never collides (the gap that let the bug ship).
 const { registerInsightsCommand } = await import('../commands/insights.js');
 const { upsertSession, closeDB } = await import('../lib/session/db.js');
-type SessionMeta = import('../lib/session/types.js').SessionMeta;
+type SessionMeta = import('@phnx-labs/sessions-cli/reader').SessionMeta;
 
 const FILES_DIR = path.join(TEST_HOME, 'output-cmd-files');
 fs.mkdirSync(FILES_DIR, { recursive: true });

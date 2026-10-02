@@ -18,7 +18,7 @@ import { isSessionIdShape } from '../lib/session/pid-registry.js';
 import { gatherRemoteActive } from '../lib/session/remote-active.js';
 import { discoverSessions } from '../lib/session/discover.js';
 import { deriveShortId } from '../lib/session/short-id.js';
-import type { SessionMeta, SessionAgentId } from '../lib/session/types.js';
+import type { SessionMeta, SessionAgentId } from '@phnx-labs/sessions-cli/reader';
 import {
   dedupeByMachineSession,
   mergeLocalFirst,

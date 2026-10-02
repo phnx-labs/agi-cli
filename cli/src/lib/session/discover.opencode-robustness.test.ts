@@ -29,7 +29,7 @@ const SHELL_CWD = path.join(CWD, 'packages', 'runner');
 
 type Discover = typeof import('./discover.js');
 type DB = typeof import('./db.js');
-type Parse = typeof import('./parse.js');
+type Parse = typeof import('@phnx-labs/sessions-cli/reader');
 type Sqlite = typeof import('../sqlite.js');
 let discover: Discover;
 let db: DB;
@@ -47,7 +47,7 @@ const BIG_STRING = 'X'.repeat(20_000);
 beforeAll(async () => {
   db = await import('./db.js');
   discover = await import('./discover.js');
-  parse = await import('./parse.js');
+  parse = await import('@phnx-labs/sessions-cli/reader');
   Database = (await import('../sqlite.js')).default;
 
   fs.mkdirSync(path.dirname(OPENCODE_DB), { recursive: true });

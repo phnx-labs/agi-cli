@@ -23,7 +23,7 @@ import * as path from 'path';
 
 import { getBrowserRuntimeDir, getProfileRuntimeDir, listProfileCacheDirs } from './paths.js';
 import { formatRelativeTime } from '../session/relative-time.js';
-import type { SessionMeta } from '../session/types.js';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import { getSessionById, listBrowserSessionRecords, pruneToolSessions } from '../session/db.js';
 import { listPidSessionEntries } from '../session/pid-registry.js';
 import { loadHookSessionIndex } from '../session/hook-sessions.js';

@@ -52,7 +52,7 @@ import {
   clearSessionInsights,
   type QueryOptions,
 } from '../lib/session/db.js';
-import { parseSession } from '../lib/session/parse.js';
+import { parseSession } from '@phnx-labs/sessions-cli/reader';
 import {
   computeInsightFacets,
   mergeFacets,
@@ -65,11 +65,11 @@ import {
   type InsightFacets,
   type InsightAction,
   type SessionSpan,
-} from '../lib/session/insights.js';
+} from '@phnx-labs/sessions-cli/reader';
 import { formatUsd } from '../lib/pricing/index.js';
-import { formatDuration } from '../lib/session/render.js';
+import { formatDuration } from '@phnx-labs/sessions-cli/reader';
 import { terminalWidth, truncateToWidth, stringWidth, padToWidth } from '../lib/session/width.js';
-import type { SessionMeta } from '../lib/session/types.js';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import { registerMixCommands } from '../lib/analytics/mix-commands.js';
 import { registerPerfSubcommand } from './perf.js';
 import { registerCostCommand } from './cost.js';

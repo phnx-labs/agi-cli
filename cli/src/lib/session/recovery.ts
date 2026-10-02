@@ -18,8 +18,8 @@ import { collectRunCandidatesForRun } from '../accounting/account-pool-collect.j
 import type { AgentId } from '../types.js';
 import { getVersionHomePath, resolveManagedInstallation } from '../installations/store.js';
 import { readSessionContent } from './db.js';
-import { parseOpenCode, splitSessionFilePath } from './parse.js';
-import type { SessionAgentId, SessionMeta } from './types.js';
+import { parseOpenCode, splitSessionFilePath } from '@phnx-labs/sessions-cli/reader';
+import type { SessionAgentId, SessionMeta } from '@phnx-labs/sessions-cli/reader';
 
 const RESUMABLE_SESSION_AGENTS = new Set<SessionAgentId>(['claude', 'codex', 'muse', 'opencode']);
 

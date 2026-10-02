@@ -30,11 +30,11 @@ const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-warmtick-inc
 process.env.HOME = TEST_HOME;
 
 const { closeDB, getDB, upsertSessionsBatch } = await import('./db.js');
-const { parseSession } = await import('./parse.js');
-const { scanEventToolCalls } = await import('./tool-calls.js');
+const { parseSession } = await import('@phnx-labs/sessions-cli/reader');
+const { scanEventToolCalls } = await import('@phnx-labs/sessions-cli/reader');
 const { planEventToolResume, persistToolCalls } = await import('./tool-store.js');
-const { TOOL_INDEX_VERSION } = await import('./tool-calls.js');
-type SessionMeta = import('./types.js').SessionMeta;
+const { TOOL_INDEX_VERSION } = await import('@phnx-labs/sessions-cli/reader');
+type SessionMeta = import('@phnx-labs/sessions-cli/reader').SessionMeta;
 
 afterAll(() => {
   closeDB();
