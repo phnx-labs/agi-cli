@@ -1,5 +1,71 @@
 # Changelog
 
+## 1.22.119
+
+- **A setup-token (provider) Claude account no longer opens on Claude Code's first-run
+  theme picker on a worker.** A provider account has no slot, so it runs in the
+  executable's shared version home, and nothing ever marked that home onboarded: an AGI
+  EXT tab dispatched to a worker landed on "Choose the text style…" instead of the agent.
+  A credentialed Claude spawn on a non-headed device now seeds `hasCompletedOnboarding` in
+  the home it runs in, right after the worker login-trap preflight in `spawnAgentLeased`
+  (explicit `#account`, default account, balanced pick, interactive tmux). Headless paths
+  that spawn elsewhere (`--loop`, routines) never show onboarding in print mode; the
+  Windows `.cmd` shim passthrough is not covered. With no email the seed writes only the
+  flag, so the home's own login identity is untouched; it writes through the
+  `.claude/.claude.json -> ../.claude.json` link instead of replacing it; and a document
+  already onboarded is left byte-identical. Source: `cli/src/lib/exec.ts`,
+  `cli/src/lib/claude-account-token.ts`.
+
+- **A headless Cursor run in plan mode now runs in folders Cursor has not seen
+  before, and prints its answer.** Two bugs stopped `agents run cursor "…" --mode
+  plan`, a Cursor teammate (`agents teams add … cursor …`), and a plan-mode Cursor
+  routine from working unattended:
+  - They passed `--plan` without `--trust`. In a directory Cursor had not seen,
+    Cursor stopped on "Do you trust the contents of this directory?" and exited
+    with no one to answer, so a teammate failed in 7 seconds with 0 tools. Every
+    headless mode except skip (which passes `-f`) now passes `--trust`. `--trust`
+    only accepts the configured working directory and does not bypass tool
+    permissions.
+  - In `--plan` mode Cursor delivers its answer through its createPlan tool, which
+    `-p` text output never prints. A run would read the repo for 3 minutes, exit 0,
+    and leave an empty log. A headless plan run now uses Cursor's read-only ask
+    mode (`--mode ask`), which refuses file writes the same way and prints its
+    answer.
+
+  Interactive Cursor runs keep `--plan` and Cursor's own trust prompt. Source:
+  `cli/src/lib/harness/adapters/cursor.ts`.
+
+- **Grok subscription seats log in per worker through the device-code flow.** `grok` now has the
+  same `per-device:device-auth` worker path as `codex`: `agents accounts add grok <name> --per-device`
+  registers the account with no API key, and `agents accounts login grok#<name> --per-device` on a
+  worker runs `grok login --device-auth` into that account's slot. The box prints a URL and code
+  that you approve in your own browser, so SuperGrok / X Premium+ seats run on workers without an
+  `XAI_API_KEY`, which bills API credits rather than the subscription. `accounts login --per-device`
+  is new and is the one login a worker may run for a dual-path harness (codex too); the plain
+  re-login stays headed-only. Source: `cli/src/lib/harness-auth-capabilities.ts`,
+  `cli/src/lib/accounts/add.ts`, `cli/src/commands/accounts.ts`.
+
+- **The `grok` shim runs the release `grok update` installed.** Grok's updater now writes
+  `~/.grok/bin/grok-<version>` and repoints `~/.grok/bin/grok`, leaving `downloads/` alone, but the
+  shim only scanned `downloads/`, so it kept running the old binary after an update (on one worker,
+  1.0.4, which xAI rejects with `426 ... outdated`). The shim, the `grok@<version>` alias, and
+  `getBinaryPath` now follow grok's own `bin/grok` pointer first and fall back to the `downloads/`
+  scan for older layouts. The shim schema version is bumped so installed shims regenerate.
+  Source: `cli/src/lib/installations/shims.ts`, `cli/src/lib/installations/store.ts`.
+
+- **Editor terminals follow the current agent session after a restart (PHNX-4218).**
+  Active/watch rows adopt the live agent descendant's recorded session, transcript,
+  terminal ID and launch ID while keeping the tab's shell PID and metadata. Only the
+  nearest recorded agents qualify, so nested agents cannot take over the tab. The most
+  recent recorded start wins at that depth, with PID as a stable tie-breaker; known
+  tab kinds must match. Windows retains the published identity until process starts
+  can be verified. Published terminal IDs
+  also survive when no descendant supplies one. Rows expose a display-only `accountLabel`
+  when the indexed account identifies one registered native slot; ambiguous identities
+  stay unlabeled, and org-only keys require a matching email.
+
+- **`agents projects prs` scopes a shared monorepo per project, and `agents projects prs merge` merges one PR (PHNX-4215).** When several projects share one repository, each project now lists only the PRs whose changed files touch the paths it claims (`scope: project`) or touch no sharing project's paths (`scope: repo-wide`). It uses the same `defaultPath`/`subpath` claim that attributes a session's cwd, and changed files are cached per head SHA. Rows gain `createdAt`. The envelope gains `viewer` and a per-repo `sharedWith`, and the `--number` detail adds `mergeable`/`mergeableState`. `agents projects prs merge <name> --repo … --number … --sha <head>` merges with one REST call pinned to the reviewed head, so GitHub refuses if the branch moved since. Repo canonicalization moved from GraphQL `gh repo view` to a cached REST read, which drops a warm refresh from about 2s to under 1s. Source: `cli/src/lib/github/project-prs.ts`, `cli/src/lib/projects.ts`, `cli/src/commands/projects.ts`.
+
 ## 1.22.118
 
 - **`agents sessions <read> --device <name>` routes a SINGLE-device READ through the standalone `sessions --host` when both sides support it (PHNX-4012).**
