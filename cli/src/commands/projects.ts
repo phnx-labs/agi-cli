@@ -963,8 +963,13 @@ async function runProjectCard(
 
 
   // ---- prs ----
+  // `list` is the default so `prs <name>` keeps its shape; a bare parent with
+  // no options of its own is what lets `prs merge` own --repo/--number/--json.
   const prsCmd = projects
-    .command('prs <name>')
+    .command('prs')
+    .description('A project\'s open pull requests: list them (default), or merge one.');
+  const prsListCmd = prsCmd
+    .command('list <name>', { isDefault: true })
     .description('Every OPEN pull request across a project\'s attached repos (drafts included, no author filter), scoped to this project\'s paths in a shared repo.')
     .option('--json', 'Machine-readable output (the AGI Menu contract shape)')
     .option('--repo <owner/repo>', 'Restrict to one of the project\'s attached repos')
@@ -1089,6 +1094,14 @@ async function runProjectCard(
   });
 
   setHelpSections(prsCmd, {
+    examples: `
+      agents projects prs rush --json                       # every open PR across rush's repos (= prs list rush)
+      agents projects prs rush --json --repo phnx-labs/agi-cli --number 3646  # one PR, with checks + mergeability
+      agents projects prs merge rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>
+    `,
+  });
+
+  setHelpSections(prsListCmd, {
     examples: `
       agents projects prs rush --json                       # every open PR across rush's repos
       agents projects prs rush --json --repo phnx-labs/agi-cli

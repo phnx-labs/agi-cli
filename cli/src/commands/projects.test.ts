@@ -548,3 +548,66 @@ describe('projects pull-local — CLI-arg round trip from pull', () => {
     })).toEqual({ items: [], valid: false });
   });
 });
+
+// `prs` is a group whose default subcommand is `list`, so `prs <name>` keeps the
+// shape AGI Menu calls and `prs merge` owns its own --repo/--number/--json. With
+// both options on one parent, commander handed `merge`'s flags to the parent
+// and every documented merge invocation failed to parse.
+describe('projects prs — list is the default, merge owns its flags', () => {
+  let projectsDir: string;
+  let priorEnv: string | undefined;
+
+  async function run(args: string[]): Promise<{ out: string; err: string; exit?: number }> {
+    const program = new Command();
+    program.exitOverride();
+    registerProjectsCommands(program);
+    const out: string[] = [];
+    const err: string[] = [];
+    const realLog = console.log;
+    const realError = console.error;
+    const realExit = process.exit;
+    console.log = (...a: unknown[]) => { out.push(a.join(' ')); };
+    console.error = (...a: unknown[]) => { err.push(a.join(' ')); };
+    let exit: number | undefined;
+    process.exit = ((code?: number) => { exit = code; throw new Error(`exit ${code}`); }) as typeof process.exit;
+    try {
+      await program.parseAsync(['projects', ...args], { from: 'user' });
+    } catch (e) {
+      if (exit === undefined) throw e;
+    } finally {
+      console.log = realLog;
+      console.error = realError;
+      process.exit = realExit;
+    }
+    return { out: out.join('\n'), err: stripAnsi(err.join('\n')), exit };
+  }
+
+  beforeEach(() => {
+    projectsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'projects-prs-'));
+    priorEnv = process.env.AGENTS_PROJECTS_DIR;
+    process.env.AGENTS_PROJECTS_DIR = projectsDir;
+    fs.writeFileSync(path.join(projectsDir, 'merge.yaml'), 'name: merge\n');
+  });
+
+  afterEach(() => {
+    if (priorEnv === undefined) delete process.env.AGENTS_PROJECTS_DIR;
+    else process.env.AGENTS_PROJECTS_DIR = priorEnv;
+    fs.rmSync(projectsDir, { recursive: true, force: true });
+  });
+
+  it('`prs <name> --json` lists, and a project named merge is reachable as `prs list merge`', async () => {
+    const listed = await run(['prs', 'list', 'merge', '--json']);
+    expect(JSON.parse(listed.out)).toEqual({ project: { name: 'merge', linearProjectId: null }, viewer: null, repositories: [], partial: false });
+    const implicit = await run(['prs', 'nosuch', '--json']);
+    expect(implicit.exit).toBe(1);
+    expect(implicit.err).toContain('No project named "nosuch"');
+  });
+
+  it('`prs merge` parses its own --repo/--number/--sha before touching GitHub', async () => {
+    const bad = await run(['prs', 'merge', 'merge', '--repo', 'acme/mono', '--number', '7', '--sha', 'nothex', '--json']);
+    expect(bad.exit).toBe(1);
+    expect(bad.err).toContain('--sha expects a commit SHA, got "nothex"');
+    const method = await run(['prs', 'merge', 'merge', '--repo', 'acme/mono', '--number', '7', '--sha', 'abc1234', '--method', 'fast']);
+    expect(method.err).toContain('--method expects one of rebase, squash, merge');
+  });
+});

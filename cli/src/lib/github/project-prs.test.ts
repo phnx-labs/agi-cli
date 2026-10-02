@@ -105,22 +105,28 @@ describe('mergeProjectPr', () => {
   it('pins the merge to the reviewed SHA with the first method the repo allows', async () => {
     const { gh, asked } = recordedGh({
       'repos/acme/mono': JSON.stringify({ rebase: false, squash: true, merge: true }),
-      'PUT repos/acme/mono/pulls/7/merge': JSON.stringify({ sha: 'm1', merged: true, message: 'Pull Request successfully merged' }),
+      'PUT repos/acme/mono/pulls/7/merge': 'm1\n',
     });
     const calls: string[][] = [];
     const result = await mergeProjectPr('acme/mono', 7, 'abc1234', undefined, async (args) => { calls.push(args); return gh(args); });
-    expect(result).toEqual({ repo: 'acme/mono', number: 7, method: 'squash', merged: true, sha: 'm1', message: 'Pull Request successfully merged' });
+    expect(result).toEqual({ repo: 'acme/mono', number: 7, method: 'squash', merged: true, sha: 'm1', message: 'Merged' });
     expect(asked).toContain('PUT repos/acme/mono/pulls/7/merge');
     expect(calls.at(-1)).toEqual(expect.arrayContaining(['sha=abc1234', 'merge_method=squash']));
   });
 
   it('reports GitHub\'s refusal as not merged with GitHub\'s own line', async () => {
     const refusal = Object.assign(new Error('Command failed: gh api'), {
-      stderr: 'gh: Head branch was modified. Review and try the merge again. (HTTP 409)\n',
+      stderr: 'gh: Head branch was modified. Review and try the merge again. (HTTP 409)\nsee: https://docs.github.com\n',
     });
     const { gh } = recordedGh({ 'PUT repos/acme/mono/pulls/7/merge': refusal });
     const result = await mergeProjectPr('acme/mono', 7, 'abc1234', 'rebase', gh);
     expect(result.merged).toBe(false);
     expect(result.message).toBe('Head branch was modified. Review and try the merge again. (HTTP 409)');
+  });
+
+  it('a repository read that fails is a refusal, not a crash', async () => {
+    const { gh } = recordedGh({ 'repos/acme/mono': Object.assign(new Error('x'), { stderr: 'gh: Not Found (HTTP 404)\n' }) });
+    const result = await mergeProjectPr('acme/mono', 7, 'abc1234', undefined, gh);
+    expect(result).toMatchObject({ merged: false, message: 'Not Found (HTTP 404)' });
   });
 });

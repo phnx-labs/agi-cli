@@ -540,7 +540,10 @@ function projectRootsAbs(defs: ProjectDef[]): ProjectRootAbs[] {
  * checkout: a `defaultPath` narrowed under `root` claims that subtree of the
  * primary `repo`, and a `repos[]` entry with a `subpath` claims that subpath. A
  * project with no narrowed claim on a repository claims all of it and yields no
- * row for it.
+ * row for it. Two cases of {@link projectRootsAbs} have no repository form and
+ * yield nothing here: a `defaultPath` outside `root` (no repo-relative path),
+ * and the weak root of a narrowed project (it only takes what nobody claims,
+ * which for a PR is the `repo-wide` scope).
  */
 export function repoPathClaims(def: ProjectDef): Array<{ slug: string; prefix: string }> {
   const out: Array<{ slug: string; prefix: string }> = [];
