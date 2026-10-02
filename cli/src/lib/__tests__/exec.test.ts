@@ -137,6 +137,13 @@ describeExec('buildExecCommand', () => {
       expect(cmd).not.toContain('-f');
     });
 
+    it('cursor headless plan trusts the workspace so it never stalls on the trust prompt', () => {
+      const cmd = buildExecCommand(opts({ agent: 'cursor', mode: 'plan', headless: true }));
+      expect(cmd).toContain('--plan');
+      expect(cmd).toContain('--trust');
+      expect(cmd).not.toContain('-f');
+    });
+
     it('cursor interactive edit preserves Cursor workspace trust prompting', () => {
       const cmd = buildExecCommand(opts({
         agent: 'cursor',

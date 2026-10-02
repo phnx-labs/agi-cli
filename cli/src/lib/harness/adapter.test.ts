@@ -62,9 +62,10 @@ describe('stripForeignConfigDir', () => {
 describe('launch-arg quirks (behavior parity with the old name-chain)', () => {
   const baseCtx = { resolvedMode: 'edit' as const, interactive: false, cwd: '/tmp', addDirs: [] };
 
-  it('cursor emits --trust only for a headless edit', () => {
+  it('cursor emits --trust for headless edit and plan, never interactive or skip', () => {
     const cursor = resolveHarnessAdapter('cursor');
     expect(cursor.execPreModeArgs?.(baseCtx)).toEqual(['--trust']);
+    expect(cursor.execPreModeArgs?.({ ...baseCtx, resolvedMode: 'plan' })).toEqual(['--trust']);
     expect(cursor.execPreModeArgs?.({ ...baseCtx, interactive: true })).toBeUndefined();
     expect(cursor.execPreModeArgs?.({ ...baseCtx, resolvedMode: 'skip' })).toBeUndefined();
   });
