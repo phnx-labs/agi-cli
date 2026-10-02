@@ -4,7 +4,7 @@ import path from 'node:path';
 import { updateMeta } from '../state.js';
 import { backfillActiveRowsFromMeta, type ActiveSession } from './active.js';
 import { getSessionById, upsertSessionsBatch, closeDB } from './db.js';
-import { toSessionWatchRow, toPreviousSessionWatchRow } from './remote/watch.js';
+import { SessionWatchState, toSessionWatchRow, toPreviousSessionWatchRow } from './remote/watch.js';
 import type { SessionMeta } from './types.js';
 
 beforeAll(() => {
@@ -17,6 +17,10 @@ describe('indexed account slot label on live/watch rows (PHNX-4218)', () => {
   it.each([
     ['recorded slot', 'claude', { accountId: 'team', account: 'same@example.test' }, 'work'],
     ['org and email', 'claude', { accountKey: 'claude:org=personal', account: 'same@example.test' }, 'gmail'],
+    ['org without email', 'claude', { accountKey: 'claude:org=personal' }, undefined],
+    ['org with unregistered email', 'claude', { accountKey: 'claude:org=personal', account: 'other@example.test' }, undefined],
+    ['exact org-only key without email', 'claude', { accountKey: 'claude:org=org-only' }, undefined],
+    ['exact org-only key with email', 'claude', { accountKey: 'claude:org=org-only', account: 'org@example.test' }, 'org'],
     ['full identity', 'codex', { accountKey: 'codex:account=two' }, 'code'],
     ['unique email', 'codex', { account: 'code@example.test' }, 'code'],
     ['ambiguous email', 'claude', { account: 'same@example.test' }, undefined],
@@ -39,5 +43,8 @@ describe('indexed account slot label on live/watch rows (PHNX-4218)', () => {
     expect(row.accountLabel).toBe(label);
     expect(toSessionWatchRow('test-device', row).accountLabel).toBe(label);
     expect(toPreviousSessionWatchRow('test-device', indexed).accountLabel).toBe(label);
+    const reset = new SessionWatchState().reset('test-device', [], [indexed]);
+    if (reset.type !== 'reset') throw new Error('expected reset');
+    expect(reset.rows[0].accountLabel).toBe(label);
   });
 });

@@ -234,13 +234,15 @@ export function sessionAccountLabel(
     if (account.agent !== kind) return false;
     if (session.accountId) return account.id === session.accountId;
     if (session.accountKey && !session.accountKey.startsWith('unattributed:')) {
-      if (account.identityKey === session.accountKey) return true;
       // Claude's index groups quota by org; the registry names a login within it.
       const indexed = parseNativeIdentityKey(account.agent, session.accountKey);
+      const emailMatches = !!session.account && account.identityLabel?.toLowerCase() === session.account.toLowerCase();
+      if (!indexed || (!indexed.account && !emailMatches)) return false;
+      if (account.identityKey === session.accountKey) return true;
       const registered = parseNativeIdentityKey(account.agent, account.identityKey);
-      return !!indexed && !!registered
+      return !!registered
         && Object.entries(indexed).every(([key, value]) => registered[key] === value)
-        && (!session.account || account.identityLabel?.toLowerCase() === session.account.toLowerCase());
+        && (!session.account || emailMatches);
     }
     return !!session.account && account.identityLabel?.toLowerCase() === session.account.toLowerCase();
   });
@@ -1670,8 +1672,9 @@ export async function listTerminalsActive(): Promise<ActiveSession[]> {
     // Keep the shell pid for tab ownership and headless suppression; the live
     // agent below it owns the session after an exit-and-rerun in the same tab.
     const directEntry = readPidSessionEntry(t.pid, procByPid.get(t.pid)?.startTime);
-    const pidEntry = directEntry?.sessionId ? directEntry
+    const candidate = directEntry?.sessionId ? directEntry
       : (!t.pidDead ? terminalDescendantEntry(t.pid, procByPid, children) : undefined) ?? directEntry;
+    const pidEntry = candidate && (!isSessionTrackedAgent(t.kind) || candidate.agent === t.kind) ? candidate : undefined;
     const resolvedId = pidEntry?.sessionId ?? t.sessionId;
     const cwd = pidEntry?.cwd ?? t.cwd ?? undefined;
     const sessionKind = pidEntry?.agent ?? t.kind;
@@ -1685,7 +1688,7 @@ export async function listTerminalsActive(): Promise<ActiveSession[]> {
     const { state, tokPerSec } = computeLiveSignals(sessionKind, sessionFile, cwd, pidAlive);
     return applyState({
       context: 'terminal',
-      kind: t.kind,
+      kind: sessionKind,
       harness: pidEntry?.harness,
       host: detectHost(t.pid, procByPid),
       tty: procByPid.get(t.pid)?.tty,
@@ -1852,20 +1855,33 @@ function terminalDescendantEntry(
   processes: Map<number, ProcRow>,
   children: Map<number, number[]>,
 ): PidSessionEntry | undefined {
-  const pending = [...(children.get(pid) ?? [])];
+  // Windows only proves pidExists: a recycled PID can be a live shell descendant.
+  // Retain the published identity until that platform can prove process starts.
+  if (process.platform === 'win32') return undefined;
+  let pending = children.get(pid) ?? [];
   const seen = new Set([pid]);
-  let newest: PidSessionEntry | undefined;
   while (pending.length) {
-    const child = pending.pop()!;
-    if (seen.has(child)) continue;
-    seen.add(child);
-    pending.push(...(children.get(child) ?? []));
-    const entry = readPidSessionEntry(child, processes.get(child)?.startTime);
-    if (!entry?.sessionId || !isSessionTrackedAgent(entry.agent)) continue;
-    if (!newest || entry.startedAtMs > newest.startedAtMs
-      || (entry.startedAtMs === newest.startedAtMs && entry.pid > newest.pid)) newest = entry;
+    const next: number[] = [];
+    let recordedAgent = false;
+    let newest: PidSessionEntry | undefined;
+    for (const child of pending) {
+      if (seen.has(child)) continue;
+      seen.add(child);
+      const entry = readPidSessionEntry(child, processes.get(child)?.startTime);
+      if (!entry || !isSessionTrackedAgent(entry.agent)) {
+        next.push(...(children.get(child) ?? []));
+        continue;
+      }
+      // A recorded agent is a boundary even before its session ID is known:
+      // its tools may launch agents of their own, which never own this tab.
+      recordedAgent = true;
+      if (entry.sessionId && (!newest || entry.startedAtMs > newest.startedAtMs
+        || (entry.startedAtMs === newest.startedAtMs && entry.pid > newest.pid))) newest = entry;
+    }
+    if (recordedAgent) return newest;
+    pending = next;
   }
-  return newest;
+  return undefined;
 }
 
 /**

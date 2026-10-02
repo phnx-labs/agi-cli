@@ -350,18 +350,26 @@ SSH access (§7); rendering sessions that no harness produced.
     session.
   Published editor-terminal rows retain the shell PID and tab metadata, but use
   a live agent descendant's verified by-pid session identity and transcript after
-  a restart in the same tab (PHNX-4218). The latest recorded `startedAtMs` wins;
-  equal timestamps use the higher PID. With no recorded live agent descendant,
-  the published session ID remains. A descendant's `terminalId` takes precedence
+  a restart in the same tab (PHNX-4218). Only the shallowest recorded agents are
+  candidates; the scan never descends through an agent record, even before its
+  session ID is known. Among those candidates, the latest recorded `startedAtMs`
+  wins; equal timestamps use the higher PID. A known published kind MUST match
+  the candidate's agent; otherwise the published session remains. The row kind
+  and transcript kind both follow the adopted agent. With no recorded live agent
+  descendant, the published session ID remains. A descendant's `terminalId` takes precedence
   over the optional published terminal ID. Descendants stay suppressed in the
   unattributed scan, including cached results. The shared process snapshot bounds
   this lookup to the published terminals' descendants; it adds no per-tab probes.
+  Windows does not adopt descendants because its PID-liveness check cannot
+  exclude a recycled descendant PID.
 
   Live/watch rows carry optional `accountLabel`, the human native account-slot name
   (such as `gmail` in `claude#gmail`). Index backfill resolves recorded `accountId`
   first, then an unambiguous registry match on `accountKey` or email. A known ID/key
   that has no matching slot MUST NOT fall through to email. Durable Previous watch
-  rows use the same resolver. Unknown or ambiguous slots remain undefined. Like
+  rows use the same resolver, sharing one account-list snapshot per reset. A key
+  without an `account=` component also requires a matching email, including an
+  exact org-only key match. Unknown or ambiguous slots remain undefined. Like
   `account`, this is display-only: group on the index's `accountKey`, never the label.
   Tests: `lib/session/active.terminal-child.test.ts`,
   `lib/session/active.account-label.test.ts`, `lib/session/active.unattrib-cache.test.ts`.

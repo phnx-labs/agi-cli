@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { spawn, spawnSync, type ChildProcess } from 'child_process';
+import { execFileSync, spawn, spawnSync, type ChildProcess } from 'child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,6 +17,7 @@ import {
   isSessionIdShape,
   pidSessionEntryMatchesLiveProcess,
   readLivePidSessionEntry,
+  processStartTimesMatch,
 } from './pid-registry.js';
 
 // A pid far above any real process on this box, so the test never clobbers a
@@ -30,6 +31,35 @@ afterEach(() => {
 });
 
 describe('pid session registry', () => {
+  it('compares normalized ps start times without treating missing or invalid evidence as a match', () => {
+    const recorded = 'Fri Oct  2 01:02:03 2026';
+    expect(processStartTimesMatch(recorded, '  Fri\tOct 02 01:02:03 2026\n')).toBe(true);
+    expect(processStartTimesMatch('  Fri\tOct 02 01:02:03 2026\n', recorded)).toBe(true);
+    expect(processStartTimesMatch(recorded, '2026-10-02T01:02:03Z')).toBe(true);
+    expect(processStartTimesMatch(recorded, 'Fri Oct  2 01:02:04 2026')).toBe(false);
+    expect(processStartTimesMatch(undefined, recorded)).toBeUndefined();
+    expect(processStartTimesMatch(recorded, '')).toBeUndefined();
+    expect(processStartTimesMatch('invalid', 'invalid')).toBeUndefined();
+    expect(processStartTimesMatch(JSON.parse('{"startTime":42}').startTime, recorded)).toBeUndefined();
+  });
+
+  it.skipIf(process.platform !== 'darwin')('uses the shared ps snapshot startTime to verify a Darwin PID entry', () => {
+    writePidSessionEntry({ pid: process.pid, agent: 'claude', sessionId: 'darwin-start', startedAtMs: Date.now() });
+    const snapshot = execFileSync('ps', ['-A', '-o', 'pid=,lstart='], { encoding: 'utf8' });
+    const startTime = snapshot.split('\n').map(line => line.trim().match(/^(\d+)\s+(.+)$/))
+      .find(match => Number(match?.[1]) === process.pid)?.[2];
+    expect(startTime).toBeDefined();
+    expect(readLivePidSessionEntry(process.pid, startTime)?.sessionId).toBe('darwin-start');
+    const entry = readPidSessionEntry(process.pid)!;
+    entry.processIdentity!.startTime = `  ${entry.processIdentity!.startTime!.trim().replace(/\s+/g, '\t')}\n`;
+    fs.writeFileSync(path.join(getTerminalsDir(), 'by-pid', `${process.pid}.json`), JSON.stringify(entry));
+    expect(readLivePidSessionEntry(process.pid, startTime?.replace(/\s+/g, ' '))?.sessionId).toBe('darwin-start');
+    expect(readLivePidSessionEntry(process.pid)?.sessionId).toBe('darwin-start');
+    const differentStart = new Date(Date.parse(startTime!) + 1000).toISOString();
+    expect(readLivePidSessionEntry(process.pid, differentStart)).toBeUndefined();
+    expect(readLivePidSessionEntry(process.pid, 'invalid')).toBeUndefined();
+  });
+
   it('migrates an existing native legacy launch without losing its session and pane joins', async () => {
     const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' });
     try {

@@ -107,6 +107,17 @@ function darwinStartTime(pid: number): string | undefined {
   } catch { return undefined; }
 }
 
+function processStartTimeMs(value: string | undefined): number {
+  return typeof value === 'string' ? Date.parse(value.trim().replace(/\s+/g, ' ')) : NaN;
+}
+
+/** ps lstart fields can differ in padding or date formatting between invocations. */
+export function processStartTimesMatch(recorded: string | undefined, observed: string | undefined): boolean | undefined {
+  const recordedMs = processStartTimeMs(recorded);
+  const observedMs = processStartTimeMs(observed);
+  return Number.isFinite(recordedMs) && Number.isFinite(observedMs) ? recordedMs === observedMs : undefined;
+}
+
 /** Read-only identity proof for exact joins. Unknown is never a positive match. */
 export function pidSessionEntryMatchesLiveProcess(entry: PidSessionEntry, startTime?: string): boolean | undefined {
   if (!Number.isInteger(entry.pid) || entry.pid < 1) return undefined;
@@ -114,7 +125,7 @@ export function pidSessionEntryMatchesLiveProcess(entry: PidSessionEntry, startT
     const exists = pidExists(entry.pid);
     if (exists !== true) return exists;
     const start = startTime ?? darwinStartTime(entry.pid);
-    return start && entry.processIdentity?.startTime ? start === entry.processIdentity.startTime : undefined;
+    return processStartTimesMatch(entry.processIdentity?.startTime, start);
   }
   if (process.platform !== 'linux') return undefined;
   const scope = hostProcessView();
@@ -286,7 +297,7 @@ export function readLivePidSessionEntry(pid: number, startTime?: string): PidSes
     // and the actual process start excludes a recycled PID. Hook timestamps may
     // be later than process start, but cannot predate this process incarnation.
     const start = startTime ?? darwinStartTime(pid);
-    const startMs = start ? Date.parse(start) : NaN;
+    const startMs = processStartTimeMs(start);
     if (Number.isFinite(startMs) && entry.startedAtMs >= startMs - 1000 && entry.startedAtMs <= Date.now()) {
       const scope = hostProcessView()!;
       entry.processIdentity = process.platform === 'linux'
