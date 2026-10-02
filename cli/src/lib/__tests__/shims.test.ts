@@ -96,8 +96,8 @@ describe('addShimsToPath', () => {
 });
 
 describe('SHIM_SCHEMA_VERSION', () => {
-  it('is 32 (PHNX-3940: the claude config-dir pin yields to an account-slot launch)', () => {
-    expect(SHIM_SCHEMA_VERSION).toBe(32);
+  it('is 33 (grok follows the vendor bin/grok pointer after grok update)', () => {
+    expect(SHIM_SCHEMA_VERSION).toBe(33);
   });
 });
 
