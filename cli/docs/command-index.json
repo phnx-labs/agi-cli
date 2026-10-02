@@ -113,7 +113,7 @@
             },
             {
               "flags": "--per-device",
-              "description": "codex: ChatGPT-plan account — no API key stored; workers log in per box",
+              "description": "codex/grok: subscription seat (ChatGPT plan, SuperGrok, X Premium+) — no API key stored; workers log in per box",
               "long": "--per-device",
               "required": false,
               "optional": false,
@@ -186,7 +186,7 @@
             }
           ],
           "examples": "agents accounts add claude work\nagents accounts add codex personal --api-key sk-…   # or omit --api-key to be prompted\nagents accounts add codex gmail --per-device        # ChatGPT-plan seat; workers log in per box\nagents accounts add claude                          # name derived from the login's email\nagents accounts add work --provider anthropic --auth setup-token   # provider form (non-harness name)\nagents run claude#work",
-          "notes": "Headed devices only: on a worker, add refuses before any slot, install, or browser — workers are provisioned automatically from the durable credential the add mints (claude: a setup-token; codex/grok/cursor/opencode: an API key via --api-key or a prompt; codex also accepts --per-device for a ChatGPT-plan seat; kimi/antigravity log in per box). An account is a credential SLOT, not a second installation: the harness has one managed install and each account is a HOME-shaped slot with its own native OAuth login (never copied, never fleet-synced). Re-running add for an already-added identity points at 'agents accounts login <harness>#<name>'. Supported: claude, codex, cursor, grok; other harnesses fail with the reason. An ambient CLAUDE_CODE_OAUTH_TOKEN in your shell refuses the mint (unset it or pass --no-worker-token).",
+          "notes": "Headed devices only: on a worker, add refuses before any slot, install, or browser — workers are provisioned automatically from the durable credential the add mints (claude: a setup-token; codex/grok/cursor/opencode: an API key via --api-key or a prompt; codex and grok also accept --per-device for a subscription seat; kimi/antigravity log in per box). An account is a credential SLOT, not a second installation: the harness has one managed install and each account is a HOME-shaped slot with its own native OAuth login (never copied, never fleet-synced). Re-running add for an already-added identity points at 'agents accounts login <harness>#<name>'. Supported: claude, codex, cursor, grok; other harnesses fail with the reason. An ambient CLAUDE_CODE_OAUTH_TOKEN in your shell refuses the mint (unset it or pass --no-worker-token).",
           "subcommands": []
         },
         {
@@ -340,6 +340,15 @@
               "negate": true
             },
             {
+              "flags": "--per-device",
+              "description": "codex/grok: sign this box in to the subscription seat via the device-code flow (allowed on workers)",
+              "long": "--per-device",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
               "flags": "--json",
               "description": "Machine-readable result (never includes a credential)",
               "long": "--json",
@@ -359,8 +368,8 @@
               "negate": false
             }
           ],
-          "examples": "agents accounts login claude#work\nagents accounts login codex#personal --api-key sk-…   # rotate the worker key\nagents accounts login kimi#main                       # per-device: logs THIS box in",
-          "notes": "Re-runs the native login into the SAME slot (never a new home) and fails closed when the completed login is a different identity than the account. Headed devices only for harnesses with a portable worker credential; a per-device harness (kimi) may log in on any box — that is how that box gets its login. The daemon re-syncs the account row and worker credential after a successful login.",
+          "examples": "agents accounts login claude#work\nagents accounts login codex#personal --api-key sk-…   # rotate the worker key\nagents accounts login kimi#main                       # per-device: logs THIS box in\nagents ssh <worker> agents accounts login grok#work --per-device   # the worker signs in to the subscription seat",
+          "notes": "Re-runs the native login into the SAME slot (never a new home) and fails closed when the completed login is a different identity than the account. Headed devices only for harnesses with a portable worker credential; a per-device harness (kimi) may log in on any box — that is how that box gets its login. With --per-device a codex or grok account signs THIS box in to its subscription seat through the device-code flow: the box prints a URL and code, you approve it in your own browser, and no API key is stored or synced. The daemon re-syncs the account row and worker credential after a successful login.",
           "subcommands": []
         },
         {
