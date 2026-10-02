@@ -1,0 +1,5 @@
+{
+  "personal": { "id": "personal", "name": "gmail", "agent": "claude", "identityKey": "claude:account=one:org=personal", "identityLabel": "same@example.test", "scope": "version" },
+  "team": { "id": "team", "name": "work", "agent": "claude", "identityKey": "claude:account=one:org=team", "identityLabel": "same@example.test", "scope": "version" },
+  "codex": { "id": "codex", "name": "code", "agent": "codex", "identityKey": "codex:account=two", "identityLabel": "code@example.test", "scope": "version" }
+}

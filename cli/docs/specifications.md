@@ -348,6 +348,24 @@ SSH access (§7); rendering sessions that no harness produced.
     `lib/session/types.ts:90`) is *row provenance* (live scan vs archived routine
     run), not launch location; `isTeamOrigin` (`:170`) flags a teams-spawned
     session.
+  Published editor-terminal rows retain the shell PID and tab metadata, but use
+  a live agent descendant's verified by-pid session identity and transcript after
+  a restart in the same tab (PHNX-4218). The latest recorded `startedAtMs` wins;
+  equal timestamps use the higher PID. With no recorded live agent descendant,
+  the published session ID remains. A descendant's `terminalId` takes precedence
+  over the optional published terminal ID. Descendants stay suppressed in the
+  unattributed scan, including cached results. The shared process snapshot bounds
+  this lookup to the published terminals' descendants; it adds no per-tab probes.
+
+  Live/watch rows carry optional `accountLabel`, the human native account-slot name
+  (such as `gmail` in `claude#gmail`). Index backfill resolves recorded `accountId`
+  first, then an unambiguous registry match on `accountKey` or email. A known ID/key
+  that has no matching slot MUST NOT fall through to email. Durable Previous watch
+  rows use the same resolver. Unknown or ambiguous slots remain undefined. Like
+  `account`, this is display-only: group on the index's `accountKey`, never the label.
+  Tests: `lib/session/active.terminal-child.test.ts`,
+  `lib/session/active.account-label.test.ts`, `lib/session/active.unattrib-cache.test.ts`.
+
 - **SES-14 (MUST).** `label` (the session name) MUST resolve by priority: agent
   title / `/rename` > `agents run --name` handle > unset (listing then falls back
   to `topic`); an empty incoming label MUST NOT clobber a stored non-empty one

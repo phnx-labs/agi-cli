@@ -1,0 +1,132 @@
+import { afterAll, afterEach, describe, expect, it } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { once } from 'node:events';
+import { fileURLToPath } from 'node:url';
+import { getTerminalsDir } from '../state.js';
+import { writePidSessionEntry, type PidSessionEntry } from './pid-registry.js';
+import { clearActiveScanCachesForTest, listTerminalsActive, listUnattributedActive, processTableLiveReadCountForTest } from './active.js';
+import { writerProcessView } from './process-view.js';
+import { closeDB } from './db.js';
+import { claudeProjectDirName } from '../project-key.js';
+
+const fixtures = fileURLToPath(new URL('./testdata/', import.meta.url));
+const root = fs.mkdtempSync(path.join(process.env.HOME!, 'terminal-child-'));
+let tabCount = 0;
+const registry = path.join(getTerminalsDir(), 'live-terminals.json');
+const cwd = path.join(root, 'project');
+fs.mkdirSync(cwd);
+const sessionA = '10000000-0000-4000-8000-000000000001';
+const sessionB = '10000000-0000-4000-8000-000000000002';
+const sessionC = '10000000-0000-4000-8000-000000000003';
+const transcriptDir = path.join(process.env.HOME!, '.claude', 'projects', claudeProjectDirName(cwd));
+fs.mkdirSync(transcriptDir, { recursive: true });
+for (const id of [sessionA, sessionB, sessionC]) {
+  fs.copyFileSync(path.join(fixtures, 'timeline-claude.jsonl'), path.join(transcriptDir, `${id}.jsonl`));
+}
+let shell: ChildProcess | undefined;
+
+async function startTab(count: number): Promise<number[]> {
+  // A fresh directory per tab: overwriting a binary that an earlier tab's process is
+  // still executing fails with ETXTBSY. The basename stays `claude` because the
+  // scan recognises agents by process name.
+  const binary = path.join(root, `bin-${tabCount++}`, 'claude');
+  fs.mkdirSync(path.dirname(binary), { recursive: true });
+  fs.copyFileSync('/bin/sleep', binary);
+  fs.chmodSync(binary, 0o755);
+  shell = spawn('bash', [path.join(fixtures, 'terminal-agent-children.sh'), binary, String(count)], {
+    cwd, detached: true, stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const pids: number[] = [];
+  let output = '';
+  shell.stdout!.on('data', chunk => {
+    output += chunk.toString();
+    pids.splice(0, pids.length, ...output.trim().split('\n').filter(Boolean).map(Number));
+  });
+  await once(shell, 'spawn');
+  await expect.poll(() => pids.length).toBe(count);
+  // Enroll the isolated test HOME before writing the hook's by-pid records.
+  expect(writerProcessView()).toBeDefined();
+  fs.writeFileSync(registry, JSON.stringify({ window: {
+    at: new Date().toISOString(), entries: [{ pid: shell.pid, sessionId: sessionA,
+      kind: 'claude', cwd, label: 'My tab', startedAtMs: Date.now(), tabIndex: 3 }],
+  } }));
+  return pids;
+}
+
+function record(pid: number, sessionId: string, extra: Partial<PidSessionEntry> = {}): void {
+  writePidSessionEntry({ pid, sessionId, agent: 'claude', cwd, startedAtMs: Date.now(), ...extra });
+}
+
+async function scan(): Promise<Awaited<ReturnType<typeof listTerminalsActive>>> {
+  clearActiveScanCachesForTest();
+  return listTerminalsActive();
+}
+
+afterEach(async () => {
+  if (shell?.pid) {
+    const exited = once(shell, 'exit');
+    process.kill(-shell.pid, 'SIGTERM');
+    await exited;
+  }
+  shell = undefined;
+  fs.rmSync(registry, { force: true });
+  clearActiveScanCachesForTest();
+});
+afterAll(() => closeDB());
+
+// These exercise real shell ancestry, ps, kernel-verified by-pid files and transcripts.
+describe.skipIf(process.platform === 'win32')('published shell adopts its live agent (PHNX-4218)', () => {
+  it('uses B and T through a wrapper, preserves tab metadata and suppresses the duplicate', async () => {
+    const [pid] = await startTab(1);
+    writePidSessionEntry({ pid: shell!.pid!, agent: 'claude', startedAtMs: Date.now(), launchId: 'wrapper' });
+    const published = JSON.parse(fs.readFileSync(registry, 'utf8'));
+    published.window.entries[0].terminalId = 'published-T';
+    fs.writeFileSync(registry, JSON.stringify(published));
+    record(pid, sessionB, { terminalId: 'T', launchId: 'launch-B', actor: 'test-owner', harness: 'custom' });
+    const rows = await scan();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ pid: shell!.pid, sessionId: sessionB, terminalId: 'T',
+      launchId: 'launch-B', harness: 'custom', owner: 'test-owner', label: 'My tab', kind: 'claude',
+      windowId: 'window', tabIndex: 3, sessionFile: path.join(transcriptDir, `${sessionB}.jsonl`) });
+    const unattributed = await listUnattributedActive(new Set(rows.map(row => row.pid!)));
+    expect(unattributed.some(row => row.pid === pid || row.sessionId === sessionB)).toBe(false);
+    expect(processTableLiveReadCountForTest()).toBe(1);
+    record(pid, sessionB);
+    expect((await scan())[0]).toMatchObject({ sessionId: sessionB, terminalId: 'published-T' });
+  });
+
+  it('keeps published A when the shell has no agent child, with optional terminalId', async () => {
+    await startTab(0);
+    const [before] = await scan();
+    expect(before).toMatchObject({ sessionId: sessionA, label: 'My tab', pid: shell!.pid });
+    expect(before.terminalId).toBeUndefined();
+    const published = JSON.parse(fs.readFileSync(registry, 'utf8'));
+    published.window.entries[0].terminalId = 'published-T';
+    fs.writeFileSync(registry, JSON.stringify(published));
+    expect((await scan())[0]).toMatchObject({ sessionId: sessionA, terminalId: 'published-T' });
+  });
+
+  it('selects the latest recorded start and breaks ties by pid, independent of traversal order', async () => {
+    const pids = (await startTab(2)).sort((a, b) => a - b);
+    const now = Date.now();
+    record(pids[0], sessionB, { startedAtMs: now, terminalId: 'newest' });
+    record(pids[1], sessionC, { startedAtMs: now - 1 });
+    expect((await scan())[0]).toMatchObject({ sessionId: sessionB, terminalId: 'newest', startedAtMs: now });
+    record(pids[1], sessionC, { startedAtMs: now });
+    expect((await scan())[0].sessionId).toBe(sessionC);
+    expect((await scan())[0].sessionId).toBe(sessionC);
+  });
+
+  it('never adopts an unrecorded child or a record for a reused process', async () => {
+    const [pid] = await startTab(1);
+    expect((await scan())[0].sessionId).toBe(sessionA);
+    record(pid, sessionB);
+    const file = path.join(getTerminalsDir(), 'by-pid', `${pid}.json`);
+    const entry = JSON.parse(fs.readFileSync(file, 'utf8'));
+    entry.processIdentity = { ...entry.processIdentity, startTicks: '0', startTime: 'not this process' };
+    fs.writeFileSync(file, JSON.stringify(entry));
+    expect((await scan())[0].sessionId).toBe(sessionA);
+  });
+});

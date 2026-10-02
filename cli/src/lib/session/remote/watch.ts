@@ -8,7 +8,7 @@ import { machineId, normalizeHost } from '../../machine-id.js';
 import { shellQuote } from '../../ssh-exec.js';
 import { streamFromPeer } from './peer-stream.js';
 import { buildWindowsAgentsCommand, remoteShellFor } from '../../hosts/remote-cmd.js';
-import { isReapableOrphan, type ActiveSession } from '../active.js';
+import { isReapableOrphan, sessionAccountLabel, type ActiveSession } from '../active.js';
 import { querySessions, readSessionSummaryAny, readSessionTimelineAny } from '../db.js';
 import { linearIssueUrl } from '../linear.js';
 import { sessionAgentSupportsResume } from '../recovery.js';
@@ -177,6 +177,7 @@ export function toPreviousSessionWatchRow(scope: string, session: SessionMeta): 
     ...(session.firstUserMessage ? { firstUserMessage: session.firstUserMessage } : {}),
     ...(session.version ? { version: session.version } : {}),
     ...(session.account ? { account: session.account } : {}),
+    accountLabel: sessionAccountLabel(session.agent, session),
     ...(session.prUrl ? { pr: { url: session.prUrl, number: session.prNumber } } : {}),
     ...(worktree ? { worktree } : {}),
     ...(session.gitBranch ? { branch: session.gitBranch } : {}),
