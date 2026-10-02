@@ -18,9 +18,10 @@ type HarnessIdentityKind = 'strong' | 'email' | 'opaque';
 
 /**
  * Durable worker credential, or `none` when the harness must log in per box.
- * Codex is both: an API key (portable, bills the API) OR a per-device
- * ChatGPT-plan device-auth login (the plan seat; never stored in the reserved
- * store because it is a rotating session).
+ * Codex and Grok are both: an API key (portable, bills the API) OR a
+ * per-device device-auth login (the subscription seat — ChatGPT plan,
+ * SuperGrok, X Premium+; never stored in the reserved store because it is a
+ * rotating session, so each box signs in for itself).
  */
 type HarnessWorkerKind =
   | 'setup-token'
@@ -49,7 +50,7 @@ export const HARNESS_AUTH: Record<AgentId, HarnessAuthCapability> = {
   // the OS defaults to. The device-code screen prints the URL + code instead,
   // so the human finishes it in the browser profile they choose — which is
   // what makes it usable over an SSH shell on a worker.
-  grok: { login: ['login', '--device-auth'], status: null, identity: 'strong', worker: 'api-key:XAI_API_KEY', slotEnv: 'GROK_HOME' },
+  grok: { login: ['login', '--device-auth'], status: null, identity: 'strong', worker: ['api-key:XAI_API_KEY', 'per-device:device-auth'], slotEnv: 'GROK_HOME' },
   // auth.json has no email claim; identity is the sorted provider-id join
   // (`resolveOpenCodeAccountId`). NATIVE_ACCOUNT_CAPABILITIES.opencode.inspection
   // is already 'opaque'.

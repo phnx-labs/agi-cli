@@ -216,8 +216,22 @@ credential** (see the per-harness map):
    is a harness limitation, not a bug, and it is why the fleet holds e.g. two
    separate antigravity subs on two boxes rather than one copied everywhere.
 
+3. **Subscription seats of dual-path harnesses → device-code login per box.**
+   `codex` and `grok` have a portable API key (path 1) but that key bills API
+   credits, not the subscription the account pays for (ChatGPT plan,
+   SuperGrok, X Premium+). To run the seat itself on a worker, register the
+   account on the laptop with `agents accounts add <harness> <name>
+   --per-device` (no key stored), then on each worker run `agents accounts
+   login <harness>#<name> --per-device`. That drives the harness's
+   device-code flow (`codex login --device-auth`, `grok login --device-auth`)
+   into the account's slot on that box: the worker only prints a URL and a
+   code, and the owner approves it in their own browser on the headed device.
+   The session it writes is that box's own; nothing is copied between devices
+   and nothing enters a reserved store.
+
 **Forbidden (the reverse of the above):** running an interactive OAuth flow on a
-worker; treating a copied long-term token as a headed device's own runtime
+worker, other than the path-3 device-code login, which runs no browser on the
+worker and is approved by the owner on the headed device; treating a copied long-term token as a headed device's own runtime
 credential; or copying a rotating native OAuth session between devices
 (invariant 2). Any of these is a regression.
 
@@ -356,9 +370,9 @@ The commands read like the task, object first:
 |---|---|
 | `agents accounts list [<harness>] [--fleet] [--json]` | One row per named harness account — a native login or a provider credential that authenticates that harness — rendered per account **per box as FACTS, never a word that means "we did not look" (PHNX-4116)**. The row carries the account **name**, its **usage** (bar + percent per blocking window, `*` stale; a synced reading names its origin, `(from zion)`, so a number from another box is not mistaken for a local capture), and two facts stated with their evidence: the **token** on disk (`sk-ant-oat01 (Sep 16)` = the slot's `.claude/.oauth_token` scheme prefix + file date, or `api key (present)`, or `no token`) and what happened when it was last **used** (`last used ok 12m ago` / `last auth failure 401 Sep 20 14:02` / `rate-limited until 15:00` / `not used on this box yet`). The auth fact is recorded from real run outcomes — an auth failure at the routine runner's `isAuthFailureFromLog` sites, a success at statusline ingest and a clean headless exit — into the auth-health cache with `source: 'run'`, and read back by `formatAuthFact`. A signed-out account (no credential) trails `signed out`; partial fleet coverage trails `usable on 3 of 5 boxes`; then `fix: <exact repair command>`. **There is no `unverified`/`live`/`no_evidence` verdict WORD on the row** — those became facts. `no_evidence` (credential present, nothing probed or run here yet) is the honest internal verdict a worker's account carries: the worker never probes and never publishes a probe row, so its facts come from token presence + run outcomes. The identity behind an account is `agents accounts view <name>`, per-device state is `--fleet`, the full record is `--json`. Honesty is unchanged: `rate_limited` is the usage snapshot (`deriveUsageStatusFromSnapshot`/`applyUsageHonesty`), never a probe 429 — a throttled probe keeps the previous verdict within 20 min, otherwise `unverified` with detail `probe throttled (HTTP 429)`; and a SYNCED usage snapshot no longer derives a `live` auth verdict (`verdictFromFreshUsage` refuses `freshness.source === 'sync'`) — a fresh file from another box's poller proves the shared token works somewhere, not that THIS box can authenticate. A harness filter emits only that harness's group; empty groups are omitted. A provider credential no harness uses is listed under Other accounts. `--json` is the version 2 account schema (see below), extended with per-account `token` and `lastAuth` fact strings for the emitting box. `--fleet` pivots native accounts as rows and devices as columns, and names devices whose daemon-state carries no account verdicts (older release) rather than leaving a blank column. Reserved credential stores are not shown here. |
 | `agents view <harness>` | Uses the same account-row renderer as `accounts list`, so state, device coverage, usage, and repair guidance cannot disagree — including the one-line legend, which both surfaces take from `ACCOUNT_LISTING_LEGEND`. Use the installation diagnostics view only for release/home details. |
-| `agents accounts add <harness> [name]` | The onboarding verb: one managed install (reused) + a fresh credential SLOT (HOME-shaped, no binary) + native login in the slot + fleet-wide row + durable worker credential (claude: `setup-token` driven in the slot; codex/grok/cursor/opencode: `--api-key` or a prompt; codex `--per-device` for a ChatGPT-plan seat; kimi/antigravity log in per box). **Headed devices only** — on a worker it refuses before any slot, install, or browser; workers are provisioned automatically from the minted credential. Idempotent: an already-registered name or identity points at `accounts login`. |
+| `agents accounts add <harness> [name]` | The onboarding verb: one managed install (reused) + a fresh credential SLOT (HOME-shaped, no binary) + native login in the slot + fleet-wide row + durable worker credential (claude: `setup-token` driven in the slot; codex/grok/cursor/opencode: `--api-key` or a prompt; codex/grok `--per-device` for a subscription seat (ChatGPT plan, SuperGrok, X Premium+); kimi/antigravity log in per box). **Headed devices only** — on a worker it refuses before any slot, install, or browser; workers are provisioned automatically from the minted credential. Idempotent: an already-registered name or identity points at `accounts login`. |
 | `agents accounts add <name> --provider <p> --auth <t>` | Provider form (first arg NOT a harness id): store a durable provider credential account. Mixing the two forms (harness id + `--provider`) fails loud as ambiguous. |
-| `agents accounts login <harness>#<name>` | Re-auth into the SAME slot (never a new home); fails closed on a different identity; re-mints + re-syncs the worker credential. On a per-device harness any box may run it — that is how that box logs in. |
+| `agents accounts login <harness>#<name>` | Re-auth into the SAME slot (never a new home); fails closed on a different identity; re-mints + re-syncs the worker credential. On a per-device harness any box may run it — that is how that box logs in. `--per-device` (codex, grok) runs the device-code login on any box, workers included, and stores no key (provisioning path 3). |
 | `agents accounts default <harness> [name]` | The one write path for the fleet-wide per-harness default (picker with no name, `--json` to list or report). The deleted `set-default`/`switch` verbs used to share it. |
 | `agents accounts view <account>` (alias `inspect`) | Show one account — kind, custody, and its attachments. Target may be `<harness>#<name>` when the same name exists for several harnesses; an ambiguous bare name is refused, never guessed. |
 | `agents accounts rename <old> <new>` / `remove <name>` | Rename or remove either kind. Target may be `<harness>#<name>` when the same name exists for several harnesses; an ambiguous bare name is refused, never guessed. `remove` refuses while a binding, a per-harness default, or a harness profile still references the account |
@@ -454,7 +468,7 @@ are already mapped in `profiles.ts:324-329` for BYOK profiles.
 |---|---|---|---|
 | claude | **keychain-ACL** | `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token`, 1yr) / `ANTHROPIC_API_KEY` | daemon-inject removed (PR1); `ANTHROPIC_AUTH_TOKEN` via profiles; Linux shim reads `.oauth_token` |
 | codex | file (`.codex/auth.json`) | `OPENAI_API_KEY` | yes (`profiles.ts:326`) |
-| grok | file | `XAI_API_KEY` | yes (`profiles.ts:328`) |
+| grok | file | `XAI_API_KEY` (API credits); subscription seat via per-box `grok login --device-auth` | yes (`profiles.ts:328`); `accounts login grok#<name> --per-device` |
 | opencode | file | `OPENCODE_API_KEY` | yes (`profiles.ts:329`) |
 | droid | file (locally-decrypted, no keychain) | `FACTORY_API_KEY` (`fk-…`) | **no** — unwired anywhere |
 | kimi | file (`.kimi-code/…`) | **none** — Kimi reads only `config.toml`, not env | **no** (not possible via env) |

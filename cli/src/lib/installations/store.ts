@@ -366,11 +366,33 @@ export function resolveGrokFallbackBinary(downloadsDir: string): string | null {
 }
 
 /**
+ * Grok's own current-release pointer, `<grokHome>/bin/grok`, resolved to the
+ * real binary, or null when absent or not a real binary. Grok's updater keeps
+ * it current in both of its layouts (`bin/grok -> ../downloads/grok-<v>-<arch>`
+ * and the newer `bin/grok -> grok-<v>`, which never touches downloads/), so it
+ * is the only location that tracks `grok update`. Mirrors the shim's
+ * `_resolve_grok_current`.
+ */
+export function resolveGrokCurrentBinary(grokHome: string): string | null {
+  try {
+    const target = fs.realpathSync(path.join(grokHome, 'bin', 'grok'));
+    const stat = fs.statSync(target);
+    if (!stat.isFile() || stat.size < MIN_GROK_BINARY_BYTES) return null;
+    fs.accessSync(target, fs.constants.X_OK);
+    return target;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Get the binary path for a specific agent version.
  */
 export function getBinaryPath(agent: AgentId, version: string): string {
   const agentConfig = AGENTS[agent];
   if (agent === 'grok') {
+    const current = resolveGrokCurrentBinary(path.join(getVersionHomePath(agent, version), '.grok'));
+    if (current) return current;
     const grokDownloads = path.join(getVersionHomePath(agent, version), '.grok', 'downloads');
     // The directory token is the stable installation/account label. A
     // self-updating slot may carry a newer vendor release, whose binary keeps

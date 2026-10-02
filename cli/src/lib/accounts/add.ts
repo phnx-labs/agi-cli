@@ -78,6 +78,14 @@ function hasPortableWorkerKind(agent: AgentId): boolean {
   return harnessWorkerKinds(agent).some((k) => k === 'setup-token' || k.startsWith('api-key:'));
 }
 
+function hasPerDeviceWorkerKind(agent: AgentId): boolean {
+  return harnessWorkerKinds(agent).some((k) => k.startsWith('per-device'));
+}
+
+function perDeviceRefusal(agent: AgentId): string {
+  return `--per-device is only valid for a harness with a per-device worker path; ${agent} is provisioned from ${workerProvisioningHint(agent)}.`;
+}
+
 /** Whether `accounts add` can drive this harness (nameable, version-scoped, a real login command). */
 export function addSupported(agent: AgentId): boolean {
   const cap = nativeAccountCapability(agent);
@@ -318,9 +326,7 @@ async function mintWorkerCredential(
     return { outcome: 'skipped', provisioning: 'per-device' };
   }
   if (opts.perDevice) {
-    if (!kinds.some((k) => k.startsWith('per-device'))) {
-      throw new Error(`--per-device is only valid for a harness with a per-device worker path (codex); ${agent} is provisioned from ${workerProvisioningHint(agent)}.`);
-    }
+    if (!hasPerDeviceWorkerKind(agent)) throw new Error(perDeviceRefusal(agent));
     return { outcome: 'per-device', provisioning: 'per-device' };
   }
 
@@ -351,7 +357,7 @@ async function mintWorkerCredential(
     if (!value) {
       if (!runners.promptApiKey) {
         throw new Error(
-          `${agent}'s worker credential is an ${env} API key. Pass --api-key <key> (or --no-worker-token to skip, --per-device for a codex ChatGPT-plan account).`,
+          `${agent}'s worker credential is an ${env} API key. Pass --api-key <key> (or --no-worker-token to skip, or --per-device for a subscription seat when the harness has one).`,
         );
       }
       const entered = await runners.promptApiKey(agent, env);
@@ -390,8 +396,8 @@ export async function runAdd(
   // before the lock, slot, install, or browser — no side effects on a worker.
   assertAddAllowedOnThisDevice(agent, name);
   const kinds = harnessWorkerKinds(agent);
-  if (opts.perDevice && !kinds.some((k) => k.startsWith('per-device'))) {
-    throw new Error(`--per-device is only valid for a harness with a per-device worker path (codex); ${agent} is provisioned from ${workerProvisioningHint(agent)}.`);
+  if (opts.perDevice && !hasPerDeviceWorkerKind(agent)) {
+    throw new Error(perDeviceRefusal(agent));
   }
   // The ambient-token refusal is checked up front (not at the mint step) so the
   // user doesn't complete a browser login only to be refused at the end.
@@ -528,7 +534,9 @@ async function _runAddLocked(
  * Drive one `agents accounts login <harness>#<name>`: re-auth into the SAME
  * slot (re-running add's steps 4–8), re-minting the worker credential and
  * re-syncing. On a per-device harness (worker `none`) any box may run it —
- * that IS how such a box logs in.
+ * that IS how such a box logs in. `--per-device` extends that to a dual-path
+ * harness (codex, grok): this box signs the account's subscription seat in for
+ * itself through the device-code flow instead of using a portable key.
  */
 export async function runLogin(
   agent: AgentId,
@@ -538,8 +546,10 @@ export async function runLogin(
 ): Promise<AddResult> {
   // A harness with a portable worker credential authenticates workers from that
   // credential, so the interactive re-login stays headed-only. A per-device
-  // harness (kimi) is logged in per box BY DESIGN — any role may run this.
-  if (hasPortableWorkerKind(agent)) assertAddAllowedOnThisDevice(agent, name);
+  // harness (kimi), or a per-device login of a dual-path harness, is logged in
+  // per box BY DESIGN — any role may run it.
+  if (opts.perDevice && !hasPerDeviceWorkerKind(agent)) throw new Error(perDeviceRefusal(agent));
+  if (hasPortableWorkerKind(agent) && !opts.perDevice) assertAddAllowedOnThisDevice(agent, name);
   if (!opts.noWorkerToken && harnessWorkerKinds(agent).includes('setup-token')) {
     const refusal = ambientTokenRefusal(agent, opts.env ?? process.env);
     if (refusal) throw new Error(refusal);
@@ -564,6 +574,7 @@ async function _runLoginLocked(
 ): Promise<AddResult> {
   const run = runners ?? await defaultAddRunners();
   lock.assertHeld();
+  const perDevice = !!opts.perDevice || !hasPortableWorkerKind(agent);
 
   const meta = readMeta();
   const account = findAddAccount(agent, name, meta);
@@ -582,7 +593,7 @@ async function _runLoginLocked(
     const slot = ensureSlot(agent, account.id);
     recordSlot(account.id, {
       ...slot,
-      authMode: hasPortableWorkerKind(agent) ? 'native' : 'per-device',
+      authMode: perDevice ? 'per-device' : 'native',
     });
   }
 
@@ -617,8 +628,8 @@ async function _runLoginLocked(
   const warnings: string[] = [];
   let outcome: WorkerCredentialOutcome = 'per-device';
   let ref: { bundle: string; key: string } | undefined;
-  let provisioning: 'portable' | 'per-device' = account.provisioning ?? (hasPortableWorkerKind(agent) ? 'portable' : 'per-device');
-  if (hasPortableWorkerKind(agent)) {
+  let provisioning: 'portable' | 'per-device' = perDevice ? 'per-device' : (account.provisioning ?? 'portable');
+  if (!perDevice) {
     if (opts.apiKey && workerApiKeyEnv(agent)) {
       // Explicit rotation of the stored API key.
       const minted = await mintWorkerCredential(agent, account, home, opts, run, warnings);
@@ -649,7 +660,7 @@ async function _runLoginLocked(
   recordSlot(account.id, {
     accountId: account.id,
     slotDir: home,
-    authMode: hasPortableWorkerKind(agent) ? 'native' : 'per-device',
+    authMode: perDevice ? 'per-device' : 'native',
     verdict: 'live',
     checkedAt: new Date().toISOString(),
   });

@@ -407,6 +407,49 @@ describe('grok binary resolution order', () => {
   });
 });
 
+describe('grok shim follows the vendor bin/grok pointer', () => {
+  it('execs the release `grok update` pointed bin/grok at, not the newest file in downloads/', () => {
+    // yosemite-s0, 2026-10-01: `grok update` installed bin/grok-1.0.46 and
+    // repointed bin/grok, leaving downloads/ holding only 1.0.4, which xAI
+    // rejects with 426. The downloads/ scan kept exec'ing 1.0.4.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'grok-current-'));
+    try {
+      const home = path.join(dir, 'home');
+      const project = path.join(dir, 'project');
+      const fakeAgents = path.join(dir, 'agents');
+      const logPath = path.join(dir, 'exec.log');
+      const version = '0.2.82';
+      const grokHome = path.join(home, '.agents', '.history', 'versions', 'grok', version, 'home', '.grok');
+      const padding = '# '.repeat(600_000);
+      const fakeGrok = (tag: string) => `#!/bin/sh\n${padding}\nprintf "${tag}:%s\\n" "$1" >> ${JSON.stringify(logPath)}\n`;
+
+      fs.mkdirSync(path.join(grokHome, 'downloads'), { recursive: true });
+      fs.mkdirSync(path.join(grokHome, 'bin'), { recursive: true });
+      fs.writeFileSync(path.join(grokHome, 'downloads', 'grok-1.0.4-linux-aarch64'), fakeGrok('STALE'), { mode: 0o755 });
+      fs.writeFileSync(path.join(grokHome, 'bin', 'grok-1.0.46'), fakeGrok('CURRENT'), { mode: 0o755 });
+      fs.symlinkSync('grok-1.0.46', path.join(grokHome, 'bin', 'grok'));
+      // downloads/ is the newer mtime, so the old scan alone picks the stale release.
+      fs.utimesSync(path.join(grokHome, 'bin', 'grok-1.0.46'), new Date('2026-09-01'), new Date('2026-09-01'));
+
+      fs.mkdirSync(project, { recursive: true });
+      fs.writeFileSync(path.join(project, 'agents.yaml'), `agents:\n  grok: "${version}"\n`, 'utf-8');
+      fs.writeFileSync(fakeAgents, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+
+      const shimPath = path.join(dir, 'grok-shim');
+      const shim = generateShimScript('grok').replace(/^AGENTS_BIN=.*$/m, `AGENTS_BIN=${JSON.stringify(fakeAgents)}`);
+      fs.writeFileSync(shimPath, shim, { mode: 0o755 });
+
+      const result = spawnSync('bash', [shimPath, 'ok'], { cwd: project, env: { ...process.env, HOME: home }, encoding: 'utf-8' });
+      expect(result.status, result.stderr).toBe(0);
+      const log = fs.readFileSync(logPath, 'utf-8');
+      expect(log).toContain('CURRENT:ok');
+      expect(log).not.toContain('STALE');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('claude shim .oauth_token fallback', () => {
   function buildTestShim(dir: string, opts: {
     tokenFileContent?: string;

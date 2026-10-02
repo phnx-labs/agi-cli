@@ -32,7 +32,7 @@ describe('HARNESS_AUTH', () => {
       login: ['login', '--device-auth'],
       status: null,
       identity: 'strong',
-      worker: 'api-key:XAI_API_KEY',
+      worker: ['api-key:XAI_API_KEY', 'per-device:device-auth'],
       slotEnv: 'GROK_HOME',
     });
     expect(HARNESS_AUTH.kimi).toMatchObject({ login: null, worker: 'none', identity: 'opaque' });
