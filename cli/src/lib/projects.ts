@@ -533,6 +533,32 @@ function projectRootsAbs(defs: ProjectDef[]): ProjectRootAbs[] {
   return out;
 }
 
+/**
+ * The repository paths a project claims, as `{ slug, prefix }` with `prefix`
+ * repo-relative and `dir/` shaped — the same ownership {@link projectRootsAbs}
+ * applies to a session's cwd, expressed against the repository instead of a
+ * checkout: a `defaultPath` narrowed under `root` claims that subtree of the
+ * primary `repo`, and a `repos[]` entry with a `subpath` claims that subpath. A
+ * project with no narrowed claim on a repository claims all of it and yields no
+ * row for it.
+ */
+export function repoPathClaims(def: ProjectDef): Array<{ slug: string; prefix: string }> {
+  const out: Array<{ slug: string; prefix: string }> = [];
+  const add = (slug: string, rel: string) => {
+    const trimmed = rel.split(path.sep).join('/').replace(/^\.\/+/, '').replace(/\/+$/, '');
+    if (trimmed && trimmed !== '.') out.push({ slug, prefix: `${trimmed}/` });
+  };
+  if (def.repo && def.root && def.defaultPath) {
+    const rootAbs = path.resolve(expandLocalHome(def.root));
+    const defaultAbs = path.resolve(expandLocalHome(def.defaultPath));
+    if (isUnder(defaultAbs, rootAbs)) add(def.repo, path.relative(rootAbs, defaultAbs));
+  }
+  for (const r of def.repos ?? []) {
+    if (r.slug && r.subpath) add(r.slug, r.subpath);
+  }
+  return out;
+}
+
 /** True when `child` is `parent` or nested under it (path-segment aware). */
 function isUnder(child: string, parent: string): boolean {
   if (child === parent) return true;

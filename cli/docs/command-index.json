@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 65,
-  "commands": 467,
+  "commands": 468,
   "root": {
     "name": "agents",
     "path": "",
@@ -10843,7 +10843,7 @@
           "name": "prs",
           "path": "projects prs",
           "aliases": [],
-          "description": "Every OPEN pull request across a project's attached repos (drafts included, no author filter).",
+          "description": "Every OPEN pull request across a project's attached repos (drafts included, no author filter), scoped to this project's paths in a shared repo.",
           "args": [
             {
               "name": "name",
@@ -10891,9 +10891,84 @@
               "negate": false
             }
           ],
-          "examples": "agents projects prs rush --json                       # every open PR across rush's repos\n      agents projects prs rush --json --repo phnx-labs/agi-cli\n      agents projects prs rush --json --repo phnx-labs/agi-cli --number 3646  # one PR, with checks + review",
-          "notes": "Repos come from the project definition's attached repos only (repo + repos[].slug);\n      --repo is refused unless it is one of them.\n\n      The list is read from GitHub over REST and paginated in full, drafts included,\n      with no author filter. checks and reviewDecision are null in the list; --number\n      enriches exactly that one PR against its live head SHA.\n\n      A repository whose fetch fails is reported with an error and marks the result\n      partial (JSON reports errors per repository; text mode exits non-zero).",
-          "subcommands": []
+          "examples": "agents projects prs rush --json                       # every open PR across rush's repos\n      agents projects prs rush --json --repo phnx-labs/agi-cli\n      agents projects prs rush --json --repo phnx-labs/agi-cli --number 3646  # one PR, with checks + review + mergeability\n      agents projects prs merge rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>",
+          "notes": "Repos come from the project definition's attached repos only (repo + repos[].slug);\n      --repo is refused unless it is one of them.\n\n      The list is read from GitHub over REST and paginated in full, drafts included,\n      with no author filter. checks and reviewDecision are null in the list; --number\n      enriches exactly that one PR against its live head SHA, with mergeable and\n      mergeableState.\n\n      A repository attached to several projects (a monorepo) is scoped by the paths\n      each project claims, the same rule that attributes a session's cwd: a\n      defaultPath narrowed under root, or a repos[] subpath. A PR is listed when it\n      touches this project's paths (scope: project) or no sharing project's paths\n      (scope: repo-wide). Changed files are cached per head SHA, so only a new push\n      costs a read.\n\n      A repository whose fetch fails is reported with an error and marks the result\n      partial (JSON reports errors per repository; text mode exits non-zero).",
+          "subcommands": [
+            {
+              "name": "merge",
+              "path": "projects prs merge",
+              "aliases": [],
+              "description": "Merge one open PR of a project, pinned to the head SHA you reviewed.",
+              "args": [
+                {
+                  "name": "name",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--repo <owner/repo>",
+                  "description": "One of the project's attached repos",
+                  "long": "--repo",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--number <n>",
+                  "description": "The PR number",
+                  "long": "--number",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--sha <head-sha>",
+                  "description": "The head SHA you reviewed; GitHub refuses if the branch moved since",
+                  "long": "--sha",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--method <method>",
+                  "description": "rebase | squash | merge (default: the first the repo allows, in that order)",
+                  "long": "--method",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--json",
+                  "description": "Machine-readable result",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "examples": "agents projects prs rush --json --repo phnx-labs/agi-cli --number 3646   # read headSha + mergeableState\n      agents projects prs merge rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>\n      agents projects prs merge rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha> --method squash --json",
+              "notes": "The merge is a single REST call pinned to --sha: if anything was pushed after\n      you read the PR, GitHub refuses and nothing merges. Branch protection, required\n      checks and reviews stay GitHub's to enforce; a refusal exits 1 with GitHub's\n      message (merged: false in --json).",
+              "subcommands": []
+            }
+          ]
         },
         {
           "name": "pull",

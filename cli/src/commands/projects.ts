@@ -83,7 +83,8 @@ import {
   type ImportPlan,
   type RawImportFlags,
 } from '../lib/project-import.js';
-import { buildProjectPrs } from '../lib/github/project-prs.js';
+import { buildProjectPrs, mergeProjectPr, resolveTargetSlugs, MERGE_METHODS, type MergeMethod } from '../lib/github/project-prs.js';
+import { ghExec } from '../lib/github/pr-mergeable.js';
 
 /** Recursion guard: a peer answering a probe fan-out never re-fans-out itself. */
 const PROJECTS_NO_FANOUT_ENV = 'AGENTS_PROJECTS_LOCAL';
@@ -964,7 +965,7 @@ async function runProjectCard(
   // ---- prs ----
   const prsCmd = projects
     .command('prs <name>')
-    .description('Every OPEN pull request across a project\'s attached repos (drafts included, no author filter).')
+    .description('Every OPEN pull request across a project\'s attached repos (drafts included, no author filter), scoped to this project\'s paths in a shared repo.')
     .option('--json', 'Machine-readable output (the AGI Menu contract shape)')
     .option('--repo <owner/repo>', 'Restrict to one of the project\'s attached repos')
     .option('--number <n>', 'Lazy detail: enrich exactly this PR with checks + reviewDecision (requires --repo)')
@@ -991,7 +992,7 @@ async function runProjectCard(
       }
       let envelope;
       try {
-        envelope = await buildProjectPrs(def, { repo: opts.repo, number }, undefined);
+        envelope = await buildProjectPrs(def, { repo: opts.repo, number }, undefined, listProjectDefs());
       } catch (e) {
         // A restriction error (repo not attached) is a hard, up-front failure —
         // distinct from a per-repo fetch failure, which rides in the envelope.
@@ -1015,7 +1016,8 @@ async function runProjectCard(
           console.log(`${chalk.bold(r.slug)}  ${chalk.dim(`${r.pullRequests.length} open`)}`);
           for (const pr of r.pullRequests) {
             const draft = pr.isDraft ? chalk.gray(' [draft]') : '';
-            console.log(`  #${pr.number}${draft}  ${pr.title}  ${chalk.gray(`@${pr.author.login} · ${pr.headRefName}`)}`);
+            const wide = pr.scope === 'repo-wide' ? chalk.gray(' [repo-wide]') : '';
+            console.log(`  #${pr.number}${draft}${wide}  ${pr.title}  ${chalk.gray(`@${pr.author.login} · ${pr.headRefName}`)}`);
           }
         }
         if (envelope.partial) {
@@ -1026,11 +1028,72 @@ async function runProjectCard(
       if (envelope.partial) process.exit(1);
     });
 
+  const mergeCmd = prsCmd
+    .command('merge <name>')
+    .description('Merge one open PR of a project, pinned to the head SHA you reviewed.')
+    .requiredOption('--repo <owner/repo>', 'One of the project\'s attached repos')
+    .requiredOption('--number <n>', 'The PR number')
+    .requiredOption('--sha <head-sha>', 'The head SHA you reviewed; GitHub refuses if the branch moved since')
+    .option('--method <method>', `${MERGE_METHODS.join(' | ')} (default: the first the repo allows, in that order)`)
+    .option('--json', 'Machine-readable result')
+    .action(async (name: string, opts: { repo: string; number: string; sha: string; method?: string; json?: boolean }) => {
+      const def = loadProjectDef(name);
+      if (!def) {
+        console.error(chalk.red(`No project named "${name}". List them: agents projects list`));
+        process.exit(1);
+      }
+      const raw = opts.number.trim();
+      const number = /^\d+$/.test(raw) ? Number.parseInt(raw, 10) : NaN;
+      if (!Number.isSafeInteger(number) || number <= 0) {
+        console.error(chalk.red(`--number expects a positive integer, got "${opts.number}".`));
+        process.exit(1);
+      }
+      if (!/^[0-9a-f]{7,40}$/i.test(opts.sha.trim())) {
+        console.error(chalk.red(`--sha expects a commit SHA, got "${opts.sha}".`));
+        process.exit(1);
+      }
+      if (opts.method !== undefined && !(MERGE_METHODS as readonly string[]).includes(opts.method)) {
+        console.error(chalk.red(`--method expects one of ${MERGE_METHODS.join(', ')}, got "${opts.method}".`));
+        process.exit(1);
+      }
+      let repo: string;
+      try {
+        [repo] = await resolveTargetSlugs(def, opts.repo, ghExec);
+      } catch (e) {
+        console.error(chalk.red(e instanceof Error ? e.message : String(e)));
+        process.exit(1);
+      }
+      const result = await mergeProjectPr(repo, number, opts.sha.trim(), opts.method as MergeMethod | undefined);
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else if (result.merged) {
+        console.log(`${chalk.green('Merged')} ${repo}#${number} (${result.method}) ${chalk.gray(result.sha ?? '')}`);
+      } else {
+        console.error(chalk.red(`Not merged: ${repo}#${number}: ${result.message}`));
+      }
+      if (!result.merged) process.exit(1);
+    });
+
+  setHelpSections(mergeCmd, {
+    examples: `
+      agents projects prs rush --json --repo phnx-labs/agi-cli --number 3646   # read headSha + mergeableState
+      agents projects prs merge rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>
+      agents projects prs merge rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha> --method squash --json
+    `,
+    notes: `
+      The merge is a single REST call pinned to --sha: if anything was pushed after
+      you read the PR, GitHub refuses and nothing merges. Branch protection, required
+      checks and reviews stay GitHub's to enforce; a refusal exits 1 with GitHub's
+      message (merged: false in --json).
+    `,
+  });
+
   setHelpSections(prsCmd, {
     examples: `
       agents projects prs rush --json                       # every open PR across rush's repos
       agents projects prs rush --json --repo phnx-labs/agi-cli
-      agents projects prs rush --json --repo phnx-labs/agi-cli --number 3646  # one PR, with checks + review
+      agents projects prs rush --json --repo phnx-labs/agi-cli --number 3646  # one PR, with checks + review + mergeability
+      agents projects prs merge rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>
     `,
     notes: `
       Repos come from the project definition's attached repos only (repo + repos[].slug);
@@ -1038,7 +1101,15 @@ async function runProjectCard(
 
       The list is read from GitHub over REST and paginated in full, drafts included,
       with no author filter. checks and reviewDecision are null in the list; --number
-      enriches exactly that one PR against its live head SHA.
+      enriches exactly that one PR against its live head SHA, with mergeable and
+      mergeableState.
+
+      A repository attached to several projects (a monorepo) is scoped by the paths
+      each project claims, the same rule that attributes a session's cwd: a
+      defaultPath narrowed under root, or a repos[] subpath. A PR is listed when it
+      touches this project's paths (scope: project) or no sharing project's paths
+      (scope: repo-wide). Changed files are cached per head SHA, so only a new push
+      costs a read.
 
       A repository whose fetch fails is reported with an error and marks the result
       partial (JSON reports errors per repository; text mode exits non-zero).
