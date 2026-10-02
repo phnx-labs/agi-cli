@@ -2,7 +2,7 @@
 # The test supplies a copy of sleep named claude so ps sees the agent executable.
 for ((i = 0; i < $2; i++)); do
   bash -c '
-    if [[ "$2" == nested ]]; then echo "$BASHPID"; fi
+    if [[ "$2" == nested ]]; then echo "$$"; fi
     "$1" 600 & echo "$!"
     wait
     if [[ "$2" == nested ]]; then sleep 600 & wait; fi

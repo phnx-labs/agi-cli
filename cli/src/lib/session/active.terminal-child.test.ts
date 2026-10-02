@@ -48,6 +48,7 @@ async function startTab(count: number, layout = 'siblings', kind = 'claude'): Pr
   await expect.poll(() => pids.length).toBe(count * (layout === 'nested' ? 2 : 1));
   // Enroll the isolated test HOME before writing the hook's by-pid records.
   expect(writerProcessView()).toBeDefined();
+  fs.mkdirSync(path.dirname(registry), { recursive: true });
   fs.writeFileSync(registry, JSON.stringify({ window: {
     at: new Date().toISOString(), entries: [{ pid: shell.pid, sessionId: sessionA,
       kind, cwd, label: 'My tab', startedAtMs: Date.now(), tabIndex: 3 }],
