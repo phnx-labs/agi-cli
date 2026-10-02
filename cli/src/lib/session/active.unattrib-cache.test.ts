@@ -58,6 +58,11 @@ describe('filterCachedUnattributed', () => {
     expect(seen).toEqual([{ pid: 42, startedAtMs: 1_700_000_000_000 }]);
   });
 
+  it('drops a cached child when its shell becomes attributed', () => {
+    const rows = [{ context: 'headless' as const, kind: 'claude', pid: 21, status: 'running' as const }];
+    expect(filterCachedUnattributed(rows, new Set([10]), () => true, new Map([[21, 20], [20, 10]]))).toEqual([]);
+  });
+
   it('drops rows with no pid', () => {
     const sessions: ActiveSession[] = [
       { context: 'headless', kind: 'claude', status: 'running' },
@@ -108,6 +113,12 @@ describe('unattributed rescan throttle (#2047)', () => {
     for (const s of second) {
       expect(firstPids.has(s.pid)).toBe(true);
     }
+
+    // A cached headless result also reuses its ancestry, even after ps's shorter TTL.
+    const processReads = processTableLiveReadCountForTest();
+    t += PROCESS_TABLE_FRESH_MS + 1;
+    await listUnattributedActive(new Set());
+    expect(processTableLiveReadCountForTest()).toBe(processReads);
 
     // Growing the attributed set filters without a full rescan.
     const samplePid = first.find((s) => s.pid != null)?.pid;

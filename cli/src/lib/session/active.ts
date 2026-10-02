@@ -25,7 +25,9 @@ import { promisify } from 'util';
 import { listActiveTasks } from '../cloud/store.js';
 import type { CloudTaskStatus } from '../cloud/types.js';
 import { AgentManager } from '../teams/agents.js';
-import { getTerminalsDir } from '../state.js';
+import { getTerminalsDir, readMeta } from '../state.js';
+import { listNativeAccounts } from '../account-registry.js';
+import { parseNativeIdentityKey } from '../native-accounts.js';
 import {
   readLivePidSessionEntry as readPidSessionEntry,
   listPidSessionEntries,
@@ -115,6 +117,7 @@ let unattributedCache: {
   at: number;
   attributed: Set<number>;
   sessions: ActiveSession[];
+  ppidMap: Map<number, number>;
 } | undefined;
 let unattributedFullRescans = 0;
 
@@ -158,10 +161,11 @@ export function filterCachedUnattributed(
   sessions: ActiveSession[],
   attributed: Set<number>,
   alive: (pid: number, startedAtMs?: number) => boolean,
+  ppidMap?: Map<number, number>,
 ): ActiveSession[] {
   return sessions.filter((s) => {
     if (s.pid == null) return false;
-    if (attributed.has(s.pid)) return false;
+    if (attributed.has(s.pid) || (ppidMap && hasAttributedAncestor(s.pid, ppidMap, attributed))) return false;
     return alive(s.pid, s.startedAtMs);
   });
 }
@@ -170,7 +174,7 @@ type ActiveContext = 'terminal' | 'teams' | 'cloud' | 'headless';
 
 /** The SessionMeta fields the live-row backfill reads — the enrichment a running process cannot report. */
 export type BackfillMeta = Pick<SessionMeta,
-  'version' | 'account' | 'timestamp' | 'label' | 'firstUserMessage' | 'lastUserMessage' | 'generatedTitle' | 'ticketId' | 'prUrl' | 'prNumber' | 'origin' | 'routineName' | 'harness' |
+  'version' | 'account' | 'accountId' | 'accountKey' | 'timestamp' | 'label' | 'firstUserMessage' | 'lastUserMessage' | 'generatedTitle' | 'ticketId' | 'prUrl' | 'prNumber' | 'origin' | 'routineName' | 'harness' |
   'tokenCount' | 'durationMs' | 'subAgentCount' | 'lastActivity'
 >;
 
@@ -186,12 +190,14 @@ export function backfillActiveRowsFromMeta(
   sessions: ActiveSession[],
   metaById: Map<string, BackfillMeta>,
 ): void {
+  const accounts = listNativeAccounts(readMeta());
   for (const s of sessions) {
     if (!s.sessionId) continue;
     const m = metaById.get(s.sessionId);
     if (!m) continue;
     if (!s.version && m.version) s.version = m.version;
     if (!s.account && m.account) s.account = m.account;
+    s.accountLabel ??= sessionAccountLabel(s.kind, m, accounts);
     if (!s.label && m.label) s.label = m.label;
     if (!s.firstUserMessage && m.firstUserMessage) s.firstUserMessage = m.firstUserMessage;
     if (!s.lastUserMessage && m.lastUserMessage) s.lastUserMessage = m.lastUserMessage;
@@ -216,6 +222,29 @@ export function backfillActiveRowsFromMeta(
     }
     applyRecap(s);
   }
+}
+
+/** Resolve a display name only when the indexed identity names one registered slot. */
+export function sessionAccountLabel(
+  kind: string,
+  session: Pick<SessionMeta, 'accountId' | 'accountKey' | 'account'>,
+  accounts = listNativeAccounts(readMeta()),
+): string | undefined {
+  const matches = accounts.filter(account => {
+    if (account.agent !== kind) return false;
+    if (session.accountId) return account.id === session.accountId;
+    if (session.accountKey && !session.accountKey.startsWith('unattributed:')) {
+      if (account.identityKey === session.accountKey) return true;
+      // Claude's index groups quota by org; the registry names a login within it.
+      const indexed = parseNativeIdentityKey(account.agent, session.accountKey);
+      const registered = parseNativeIdentityKey(account.agent, account.identityKey);
+      return !!indexed && !!registered
+        && Object.entries(indexed).every(([key, value]) => registered[key] === value)
+        && (!session.account || account.identityLabel?.toLowerCase() === session.account.toLowerCase());
+    }
+    return !!session.account && account.identityLabel?.toLowerCase() === session.account.toLowerCase();
+  });
+  return matches.length === 1 ? matches[0].name : undefined;
 }
 
 function loadBackfillMetaFor(sessions: ActiveSession[]): Map<string, BackfillMeta> {
@@ -536,6 +565,13 @@ export interface ActiveSession {
    */
   account?: string;
   /**
+   * Human account-slot name (e.g. `gmail` in `claude#gmail`), display-only.
+   * Backfilled alongside {@link account} from indexed accountId/accountKey/email
+   * and the account registry. Unknown or ambiguous slots stay undefined.
+   * Never group on this label; use the index's `accountKey`.
+   */
+  accountLabel?: string;
+  /**
    * Last-activity epoch — the transcript's last write (mtime). Distinct from
    * {@link startedAtMs} (session START): a session begun 3h ago but last touched
    * 20s ago has an old start and a fresh last-activity. The Floor renders "Xs ago"
@@ -699,7 +735,7 @@ export interface ActiveSession {
   viewingIn?: { app: string; tab?: number };
   /**
    * The editor tab that launched this agent (`AGENT_TERMINAL_ID`), from the pid
-   * registry. This is the one identifier that survives an SSH hop AND a session
+   * registry or the published terminal entry. This is the one identifier that survives an SSH hop AND a session
    * rotation: a Factory tab offloaded to a device has no local process to inspect,
    * and its spawn-time session id goes stale the moment the agent moves to another
    * session (`/clear`, exit-and-rerun), so `--active --device <device>` joined on
@@ -707,6 +743,8 @@ export interface ActiveSession {
    * did not inherit a terminal id.
    */
   terminalId?: string;
+  /** Published editor tab index, retained across agent restarts. */
+  tabIndex?: number;
   /**
    * The launch id (`AGENT_LAUNCH_ID`) the CLI stamps on every agent at spawn — a
    * stable UUID that is identical locally and across an SSH hop and survives a
@@ -714,9 +752,8 @@ export interface ActiveSession {
    * non-Claude harnesses only mint after boot) it exists from the first tick, so
    * it is the join key a client uses to re-identify a session on the watch stream.
    * Populated wherever the by-pid launch registry resolves — reliably for
-   * `agents run`-launched processes; still absent for editor-launched terminals
-   * whose shell pid does not line up with the agent-pid registry today (the same
-   * limitation the `readPidSessionEntry` call in `listTerminalsActive` documents).
+   * `agents run`-launched processes and editor terminals with a recorded live
+   * agent descendant.
    */
   launchId?: string;
   /**
@@ -1031,6 +1068,8 @@ export function isPidAlive(pid: number, startedAtMs?: number): boolean {
 
 interface LiveTerminalEntry {
   sessionId: string;
+  terminalId?: string;
+  tabIndex?: number;
   pid: number;
   kind: string;
   label?: string | null;
@@ -1619,6 +1658,7 @@ export async function listTerminalsActive(): Promise<ActiveSession[]> {
   // (code / cursor / codium) per entry rather than a generic 'terminal'.
   const procByPid = new Map<number, ProcRow>();
   for (const r of await readProcessTable()) procByPid.set(r.pid, r);
+  const children = childrenByParent(new Map([...procByPid.values()].map(r => [r.pid, r.ppid])));
 
   // Build label map from Claude's sessions/*.json for /rename support
   const labelMap = buildClaudeLabelMap();
@@ -1627,26 +1667,22 @@ export async function listTerminalsActive(): Promise<ActiveSession[]> {
   const runNameMap = buildRunNameMap();
 
   return entries.map((t): ActiveSession => {
-    // The id cached in live-terminals.json goes stale when Claude rotates its
-    // transcript uuid on resume/compact, so it often no longer matches any
-    // <id>.jsonl. When the pid registry knows this pid's current id, prefer it —
-    // the same source the headless path uses. NOTE: live-terminals.json stores the
-    // SHELL pid, while the by-pid registry is keyed by the AGENT pid, so for
-    // editor-launched terminals this lookup returns undefined today and we fall
-    // back to the stale cached id — the duplicate-card fix comes from
-    // pickSessionFile no longer borrowing a sibling, not from this lookup. Kept as
-    // a forward-looking hook for the cases where the pid does line up.
-    const pidEntry = readPidSessionEntry(t.pid);
+    // Keep the shell pid for tab ownership and headless suppression; the live
+    // agent below it owns the session after an exit-and-rerun in the same tab.
+    const directEntry = readPidSessionEntry(t.pid, procByPid.get(t.pid)?.startTime);
+    const pidEntry = directEntry?.sessionId ? directEntry
+      : (!t.pidDead ? terminalDescendantEntry(t.pid, procByPid, children) : undefined) ?? directEntry;
     const resolvedId = pidEntry?.sessionId ?? t.sessionId;
-    const sessionFile = findSessionFileForKind(t.kind, t.cwd ?? undefined, resolvedId);
-    // Prefer label from live terminal, fall back to Claude's session label
-    const label = t.label ?? (t.sessionId ? labelMap.get(t.sessionId) : undefined) ?? undefined;
+    const cwd = pidEntry?.cwd ?? t.cwd ?? undefined;
+    const sessionKind = pidEntry?.agent ?? t.kind;
+    const sessionFile = findSessionFileForKind(sessionKind, cwd, resolvedId);
+    const label = t.label ?? (resolvedId ? labelMap.get(resolvedId) : undefined) ?? undefined;
     // Durable run name from `agents run --name`, resolved by the run's session id.
     const name = resolvedId ? runNameMap.get(resolvedId) ?? undefined : undefined;
     // Extract topic from session file (first meaningful user message)
     const topic = sessionFile ? quickExtractTopic(sessionFile) : undefined;
     const pidAlive = isPidAlive(t.pid, t.startedAtMs);
-    const { state, tokPerSec } = computeLiveSignals(t.kind, sessionFile, t.cwd ?? undefined, pidAlive);
+    const { state, tokPerSec } = computeLiveSignals(sessionKind, sessionFile, cwd, pidAlive);
     return applyState({
       context: 'terminal',
       kind: t.kind,
@@ -1654,16 +1690,17 @@ export async function listTerminalsActive(): Promise<ActiveSession[]> {
       host: detectHost(t.pid, procByPid),
       tty: procByPid.get(t.pid)?.tty,
       pid: t.pid,
-      sessionId: t.sessionId ?? sessionIdFromFile(sessionFile),
+      sessionId: resolvedId ?? sessionIdFromFile(sessionFile),
       launchId: pidEntry?.launchId,
-      terminalId: pidEntry?.terminalId,
-      cwd: t.cwd ?? undefined,
+      terminalId: pidEntry?.terminalId ?? t.terminalId,
+      tabIndex: t.tabIndex,
+      cwd,
       label,
       name,
       topic,
       tokPerSec,
       sessionFile,
-      startedAtMs: t.startedAtMs,
+      startedAtMs: pidEntry?.startedAtMs ?? t.startedAtMs,
       lastActivityMs: sessionFileTimes(sessionFile).mtimeMs,
       windowId: t.windowId,
       windowHeartbeatMs: t.windowHeartbeatMs,
@@ -1692,7 +1729,7 @@ function listCloudActive(): ActiveSession[] {
   }));
 }
 
-interface ProcRow { pid: number; ppid: number; tty?: string; comm: string; kind?: string; }
+interface ProcRow { pid: number; ppid: number; tty?: string; comm: string; kind?: string; startTime?: string; }
 
 /**
  * Ordered ancestor-process matchers. First match wins (most specific to least),
@@ -1746,23 +1783,23 @@ async function readProcessTableLive(): Promise<ProcRow[]> {
   if (process.platform === 'win32') return readProcessTableWin32();
   let out: string;
   try {
-    ({ stdout: out } = await execFileAsync('ps', ['-A', '-o', 'pid=,ppid=,tty=,comm='], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: PS_SNAPSHOT_TIMEOUT_MS }));
+    ({ stdout: out } = await execFileAsync('ps', ['-A', '-o', 'pid=,ppid=,tty=,lstart=,comm='], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: PS_SNAPSHOT_TIMEOUT_MS }));
   } catch {
     return [];
   }
   const rows: ProcRow[] = [];
   for (const line of out.split('\n')) {
-    // pid ppid tty comm — tty is a single token ('ttys003', 's003', or '??'/'?'
+    // pid ppid tty lstart comm — tty is a single token ('ttys003', 's003', or '??'/'?'
     // for none); comm stays last so it may contain spaces.
-    const m = line.trim().match(/^(\d+)\s+(\d+)\s+(\S+)\s+(.+)$/);
+    const m = line.trim().match(/^(\d+)\s+(\d+)\s+(\S+)\s+(\S+\s+\S+\s+\d+\s+\S+\s+\d+)\s+(.+)$/);
     if (!m) continue;
     const pid = parseInt(m[1], 10);
     const ppid = parseInt(m[2], 10);
     if (!Number.isFinite(pid) || !Number.isFinite(ppid)) continue;
     const ttyRaw = m[3];
     const tty = ttyRaw === '??' || ttyRaw === '?' || ttyRaw === '-' ? undefined : ttyRaw;
-    const commRaw = m[4].trim();
-    rows.push({ pid, ppid, tty, comm: commRaw, kind: agentKindFromComm(commRaw) });
+    const commRaw = m[5].trim();
+    rows.push({ pid, ppid, tty, startTime: m[4], comm: commRaw, kind: agentKindFromComm(commRaw) });
   }
   return rows;
 }
@@ -1798,6 +1835,37 @@ export function parseWin32ProcessCsv(out: string): ProcRow[] {
     rows.push({ pid, ppid, comm, kind: agentKindFromComm(comm) });
   }
   return rows;
+}
+
+function childrenByParent(ppidMap: Map<number, number>): Map<number, number[]> {
+  const children = new Map<number, number[]>();
+  for (const [pid, ppid] of ppidMap) {
+    const siblings = children.get(ppid);
+    if (siblings) siblings.push(pid);
+    else children.set(ppid, [pid]);
+  }
+  return children;
+}
+
+function terminalDescendantEntry(
+  pid: number,
+  processes: Map<number, ProcRow>,
+  children: Map<number, number[]>,
+): PidSessionEntry | undefined {
+  const pending = [...(children.get(pid) ?? [])];
+  const seen = new Set([pid]);
+  let newest: PidSessionEntry | undefined;
+  while (pending.length) {
+    const child = pending.pop()!;
+    if (seen.has(child)) continue;
+    seen.add(child);
+    pending.push(...(children.get(child) ?? []));
+    const entry = readPidSessionEntry(child, processes.get(child)?.startTime);
+    if (!entry?.sessionId || !isSessionTrackedAgent(entry.agent)) continue;
+    if (!newest || entry.startedAtMs > newest.startedAtMs
+      || (entry.startedAtMs === newest.startedAtMs && entry.pid > newest.pid)) newest = entry;
+  }
+  return newest;
 }
 
 /**
@@ -2027,15 +2095,15 @@ export async function listUnattributedActive(attributed: Set<number>): Promise<A
     now - unattributedCache.at < UNATTRIBUTED_RESCAN_MS &&
     !attributedSetLostPids(unattributedCache.attributed, attributed)
   ) {
-    return filterCachedUnattributed(unattributedCache.sessions, attributed, isPidAlive);
+    return filterCachedUnattributed(unattributedCache.sessions, attributed, isPidAlive, unattributedCache.ppidMap);
   }
-  const out = await listUnattributedActiveLive(attributed);
-  unattributedCache = { at: now, attributed: new Set(attributed), sessions: out };
-  return out;
+  const result = await listUnattributedActiveLive(attributed);
+  unattributedCache = { at: now, attributed: new Set(attributed), ...result };
+  return result.sessions;
 }
 
 /** Unthrottled headless scan (live process table + cwd probes). */
-async function listUnattributedActiveLive(attributed: Set<number>): Promise<ActiveSession[]> {
+async function listUnattributedActiveLive(attributed: Set<number>): Promise<{ sessions: ActiveSession[]; ppidMap: Map<number, number> }> {
   unattributedFullRescans += 1;
   const table = await readProcessTable();
   const procByPid = new Map<number, ProcRow>();
@@ -2068,25 +2136,13 @@ async function listUnattributedActiveLive(attributed: Set<number>): Promise<Acti
   // lacks an exact launch-time id, so an all-Claude set does neither. The ~3s
   // poll must not re-read the dir (or re-invert the map) per candidate.
   let hookIndex: HookSessionIndex | undefined;
-  let childrenByParent: Map<number, number[]> | undefined;
+  let children: Map<number, number[]> | undefined;
   // Durable `agents run --name` handles keyed by session id — the same source the
   // terminal path uses to name a row. Headless agents have no live-terminals
   // label and no /rename, so without this a `--name`d headless run would surface
   // with only a topic and no tab title. Built once per scan.
   const runNameMap = buildRunNameMap();
-  const ensureChildren = (): Map<number, number[]> => {
-    if (childrenByParent) return childrenByParent;
-    const m = new Map<number, number[]>();
-    // The hook records under the agent pid; a wrapper/shell pid we recorded has
-    // the agent as a child, so we resolve via a recorded pid's immediate children.
-    for (const [childPid, parentPid] of ppidMap) {
-      const arr = m.get(parentPid);
-      if (arr) arr.push(childPid);
-      else m.set(parentPid, [childPid]);
-    }
-    childrenByParent = m;
-    return m;
-  };
+  const ensureChildren = (): Map<number, number[]> => children ??= childrenByParent(ppidMap);
 
   const out: ActiveSession[] = [];
   for (let i = 0; i < kept.length; i++) {
@@ -2173,7 +2229,7 @@ async function listUnattributedActiveLive(attributed: Set<number>): Promise<Acti
   }
   // Housekeeping: drop registry files for pids that have since died.
   prunePidSessionRegistry(isPidAlive);
-  return out;
+  return { sessions: out, ppidMap };
 }
 
 /** One tmux pane's resolved agent identity for the authoritative source. */

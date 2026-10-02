@@ -108,12 +108,12 @@ function darwinStartTime(pid: number): string | undefined {
 }
 
 /** Read-only identity proof for exact joins. Unknown is never a positive match. */
-export function pidSessionEntryMatchesLiveProcess(entry: PidSessionEntry): boolean | undefined {
+export function pidSessionEntryMatchesLiveProcess(entry: PidSessionEntry, startTime?: string): boolean | undefined {
   if (!Number.isInteger(entry.pid) || entry.pid < 1) return undefined;
   if (process.platform === 'darwin') {
     const exists = pidExists(entry.pid);
     if (exists !== true) return exists;
-    const start = darwinStartTime(entry.pid);
+    const start = startTime ?? darwinStartTime(entry.pid);
     return start && entry.processIdentity?.startTime ? start === entry.processIdentity.startTime : undefined;
   }
   if (process.platform !== 'linux') return undefined;
@@ -275,8 +275,9 @@ export function readPidSessionEntry(pid: number): PidSessionEntry | undefined {
   return undefined;
 }
 
-/** Live consumers require identity proof; raw history is not a PID binding. */
-export function readLivePidSessionEntry(pid: number): PidSessionEntry | undefined {
+/** Live consumers require identity proof; raw history is not a PID binding.
+ * A shared process snapshot may supply lstart to avoid a per-pid ps probe. */
+export function readLivePidSessionEntry(pid: number, startTime?: string): PidSessionEntry | undefined {
   const entry = readPidSessionEntry(pid);
   if (!entry || !hostProcessView()) return undefined;
   if (process.platform === 'win32') return pidExists(pid) === true ? entry : undefined;
@@ -284,7 +285,7 @@ export function readLivePidSessionEntry(pid: number): PidSessionEntry | undefine
     // Upgrade a native legacy launch only after the home namespace is proven,
     // and the actual process start excludes a recycled PID. Hook timestamps may
     // be later than process start, but cannot predate this process incarnation.
-    const start = darwinStartTime(pid);
+    const start = startTime ?? darwinStartTime(pid);
     const startMs = start ? Date.parse(start) : NaN;
     if (Number.isFinite(startMs) && entry.startedAtMs >= startMs - 1000 && entry.startedAtMs <= Date.now()) {
       const scope = hostProcessView()!;
@@ -294,7 +295,7 @@ export function readLivePidSessionEntry(pid: number): PidSessionEntry | undefine
       try { persistOwnership(entry); } catch { /* read remains useful */ }
     }
   }
-  return pidSessionEntryMatchesLiveProcess(entry) === true ? entry : undefined;
+  return pidSessionEntryMatchesLiveProcess(entry, startTime) === true ? entry : undefined;
 }
 
 /**
