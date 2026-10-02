@@ -48,6 +48,7 @@ import { resolveHost } from '../lib/hosts/registry.js';
 import { sshExecAsync } from '../lib/ssh-exec.js';
 import { hostIdentityArgs, sshTargetFor } from '../lib/hosts/types.js';
 import { deviceIdentityArgs } from '../lib/devices/connect.js';
+import { resolveDeviceProfile } from '../lib/devices/resolve-profile.js';
 import { machineId, normalizeHost } from '../lib/session/sync/config.js';
 import { findAmbiguousDevicePins } from '../lib/scheduling/routines.js';
 import { findLeakedDaemons } from '../lib/daemon/leaked-daemons.js';
@@ -320,12 +321,17 @@ async function resolveFleetTargets(opts: DoctorOptions): Promise<FleetTarget[]> 
     // Normalize names so zion/ZION/zion.local all match machineId() and we never
     // self-SSH the local box during fleet probes (RUSH-2114).
     .filter((d) => normalizeHost(d.name) !== localName)
-    .map((d) => ({
-      name: d.name,
-      sshTarget: d.name,
-      os: d.platform !== 'unknown' ? d.platform : undefined,
-      extraSshArgs: deviceIdentityArgs(d),
-    }));
+    .map((d) => {
+      // The operator config (`platform`) decides the remote shell family, never
+      // the registry's discovered platform.
+      const platform = resolveDeviceProfile(d).platform;
+      return {
+        name: d.name,
+        sshTarget: d.name,
+        os: platform !== 'unknown' ? platform : undefined,
+        extraSshArgs: deviceIdentityArgs(d),
+      };
+    });
 }
 
 async function probeFleetTarget(target: FleetTarget): Promise<DeviceDoctorResult> {
@@ -1427,7 +1433,9 @@ async function runDevicesCheck(opts: DoctorOptions, cwd: string): Promise<void> 
   const remoteTargets: CheckFanOutTarget[] = remoteFleetTargets(planned, self)
     .map((t) => ({
       name: t.device.name,
-      platform: t.device.platform,
+      // Resolved: the shell family must follow the operator platform, as
+      // fleetDialTarget does — the sibling fan-outs in commands/ssh.ts already do.
+      platform: resolveDeviceProfile(t.device).platform,
       skip: t.skip,
       dialTarget: fleetDialTarget(t.device),
       extraSshArgs: deviceIdentityArgs(t.device),

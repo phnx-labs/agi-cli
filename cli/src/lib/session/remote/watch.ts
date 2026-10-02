@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { loadDevices, isDialableDevice } from '../../devices/registry.js';
+import { resolveDeviceProfile } from '../../devices/resolve-profile.js';
 import { machineId, normalizeHost } from '../../machine-id.js';
 import { shellQuote } from '../../ssh-exec.js';
 import { streamFromPeer } from './peer-stream.js';
@@ -497,7 +498,9 @@ export async function watchFleetSessions(options: WatchFleetOptions): Promise<vo
   try { devices = await loadDevices(); }
   catch { await local; return; }
   const self = machineId();
-  const peers = Object.values(devices).filter((device) =>
+  // Resolved profiles: the operator config (`platform`) decides the remote shell
+  // family, exactly as streamFromPeer dials it — never the discovered platform.
+  const peers = Object.values(devices).map(resolveDeviceProfile).filter((device) =>
     isDialableDevice(device)
     && normalizeHost(device.name) !== self
     && ['windows', 'linux', 'macos'].includes(device.platform),

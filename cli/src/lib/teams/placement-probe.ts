@@ -29,6 +29,7 @@ import { buildFleetStatePayload } from '../accounting/usage-sync.js';
 import { probeFleetStats, headroom } from '../devices/health.js';
 import { loadDevicesSync, type DeviceProfile } from '../devices/registry.js';
 import { buildSshInvocation, writeAskpassShim } from '../devices/connect.js';
+import { resolveDeviceProfile } from '../devices/resolve-profile.js';
 import {
   buildReadyProbeCommand,
   parseReadyProbe,
@@ -89,7 +90,9 @@ function probeRemoteReadiness(
   let env: Record<string, string>;
   try {
     const shim = writeAskpassShim();
-    const cmd = buildReadyProbeCommand(device.shell === 'powershell' ? 'windows' : undefined, { ingestUsage: true });
+    // The operator config (`platform`) decides the remote shell family, exactly
+    // as buildSshInvocation dials it — never the registry's discovered shell.
+    const cmd = buildReadyProbeCommand(resolveDeviceProfile(device).shell === 'powershell' ? 'windows' : undefined, { ingestUsage: true });
     // agentOnly: a read-only probe must never force a foreground Touch ID sheet
     // on a password-auth device (mirrors probeDeviceStats in devices/health).
     ({ args, env } = buildSshInvocation(device, [cmd], shim, {}, { agentOnly: true }));

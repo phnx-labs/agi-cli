@@ -1,6 +1,9 @@
 import { readFileSync } from 'fs';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   parseUptime,
   parseVmStat,
@@ -320,4 +323,64 @@ describe('probeDeviceStats reports a timeout apart from unreachable (PHNX-3682)'
     expect(stats.reachable).toBe(false);
     expect(stats.timedOut).toBe(true);
   }, 20_000);
+});
+
+describe('buildProbeInvocation follows the operator platform, not the discovered shell', () => {
+  // Real config read path: temp HOME + a per-device doc, fresh modules per test
+  // (state.ts captures HOME at import time). A Windows-discovered box whose
+  // sshd lands in WSL is configured `platform: linux`; the probe must then dial
+  // the POSIX snippet on the POSIX budget — the PowerShell snippet fed to a
+  // bash login shell yields empty stdout and a permanently "offline" row.
+  let TMP = '';
+  let savedHome: string | undefined;
+
+  beforeEach(() => {
+    savedHome = process.env.HOME;
+    TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-health-probe-test-'));
+    process.env.HOME = TMP;
+    process.env.AGENTS_SYNC_MACHINE_ID = 'testbox';
+    process.env.AGENTS_DEVICES_DIR = path.join(TMP, '.agents', '.history', 'devices');
+  });
+  afterEach(() => {
+    process.env.HOME = savedHome;
+    delete process.env.AGENTS_SYNC_MACHINE_ID;
+    delete process.env.AGENTS_DEVICES_DIR;
+    try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* best-effort */ }
+  });
+
+  async function fresh() {
+    vi.resetModules();
+    return import('./health.js');
+  }
+
+  const windowsDiscovered = (): DeviceProfile => device({
+    name: 'jupiter',
+    platform: 'windows',
+    shell: 'powershell',
+    address: { via: 'tailscale', dnsName: 'jupiter.example.ts.net' },
+    tailscale: { online: true, direct: false, relay: 'sfo' },
+  });
+
+  it('dials the PowerShell snippet on the Windows budget when nothing overrides discovery', async () => {
+    const h = await fresh();
+    const inv = h.buildProbeInvocation(windowsDiscovered(), '/tmp/askpass.sh');
+    expect(inv.isWin).toBe(true);
+    expect(inv.budgetMs).toBe(h.WIN_PROBE_TIMEOUT_MS);
+    expect(inv.args.at(-1)).toContain('powershell -NoProfile');
+    expect(inv.args.at(-1)).not.toContain(h.PROBE_SNIPPET);
+  });
+
+  it('dials the POSIX snippet on the relayed POSIX budget once config says platform: linux', async () => {
+    const dir = path.join(TMP, '.agents', 'devices', 'jupiter');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'agents.yaml'), 'config:\n  platform: linux\n  sshUser: caleb\n');
+    const h = await fresh();
+    const inv = h.buildProbeInvocation(windowsDiscovered(), '/tmp/askpass.sh');
+    expect(inv.isWin).toBe(false);
+    expect(inv.budgetMs).toBe(h.RELAYED_PROBE_TIMEOUT_MS);
+    expect(inv.args.at(-1)).toContain(h.PROBE_SNIPPET);
+    expect(inv.args.at(-1)).not.toContain('powershell -NoProfile');
+    // The dial target follows the same resolved profile.
+    expect(inv.args).toContain('caleb@jupiter.example.ts.net');
+  });
 });

@@ -151,12 +151,14 @@ describe('isAutomaticSessionPeer', () => {
       name: 'manual-linux',
       platform: 'linux',
       address: { via: 'manual', host: 'manual.example' },
+      auth: { method: 'key' },
     } as DeviceProfile;
     const probed = {
       name: 'sleepy-mac',
       platform: 'macos',
       tailscale: { online: false },
       reachability: { reachable: true },
+      auth: { method: 'key' },
     } as DeviceProfile;
 
     expect(isAutomaticSessionPeer(manual, 'local')).toBe(true);
