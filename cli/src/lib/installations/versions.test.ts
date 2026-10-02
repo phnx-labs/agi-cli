@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 // runVersionSync's isolated-HOME subprocess below, like every other
 // versions.ts function whose paths derive from HOME.
 import { resolveGrokFallbackBinary, resolveHookSelection } from './versions.js';
+import { resolveGrokCurrentBinary } from './store.js';
 
 const tempDirs: string[] = [];
 
@@ -1206,6 +1207,39 @@ describe('installVersion Grok binary relocation', () => {
 // `grok-0.2.118-linux-aarch64` wrapper script (`exec cursor-agent "$@"`) that
 // sorted alphabetically before it — the old "no exact match -> first file"
 // fallback silently launched the wrapper, so `agents run grok` ran Cursor.
+describe('resolveGrokCurrentBinary', () => {
+  // `grok update` writes bin/grok-<v> and repoints bin/grok without touching
+  // downloads/; getBinaryPath resolves through this before any downloads/ scan.
+  function makeGrokHome(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-grok-home-'));
+    tempDirs.push(dir);
+    fs.mkdirSync(path.join(dir, 'bin'), { recursive: true });
+    return dir;
+  }
+
+  it('follows bin/grok to the release grok update installed', () => {
+    const home = makeGrokHome();
+    const target = path.join(home, 'bin', 'grok-1.0.46');
+    fs.writeFileSync(target, Buffer.alloc(2_000_000, 'a'));
+    fs.chmodSync(target, 0o755);
+    fs.symlinkSync('grok-1.0.46', path.join(home, 'bin', 'grok'));
+    expect(resolveGrokCurrentBinary(home)).toBe(fs.realpathSync(target));
+  });
+
+  it('returns null for a missing, dangling, or undersized pointer', () => {
+    expect(resolveGrokCurrentBinary(makeGrokHome())).toBeNull();
+
+    const dangling = makeGrokHome();
+    fs.symlinkSync('grok-9.9.9', path.join(dangling, 'bin', 'grok'));
+    expect(resolveGrokCurrentBinary(dangling)).toBeNull();
+
+    const tiny = makeGrokHome();
+    fs.writeFileSync(path.join(tiny, 'bin', 'grok-wrapper'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    fs.symlinkSync('grok-wrapper', path.join(tiny, 'bin', 'grok'));
+    expect(resolveGrokCurrentBinary(tiny)).toBeNull();
+  });
+});
+
 describe('resolveGrokFallbackBinary (RUSH-2459)', () => {
   function makeDownloadsDir(): string {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-grok-downloads-'));
