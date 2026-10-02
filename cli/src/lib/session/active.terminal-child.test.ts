@@ -179,6 +179,13 @@ describe.skipIf(process.platform === 'win32')('published shell adopts its live a
       sessionFile: path.join(transcriptDir, `${sessionB}.jsonl`) });
   });
 
+  it('adopts a bare agent the hook recorded without a kind, by its process name', async () => {
+    const [pid] = await startTab(1);
+    record(pid, sessionB, { agent: '' });
+    expect((await scan())[0]).toMatchObject({ kind: 'claude', sessionId: sessionB,
+      sessionFile: path.join(transcriptDir, `${sessionB}.jsonl`) });
+  });
+
   it('never adopts an unrecorded child or a record for a reused process', async () => {
     const [pid] = await startTab(1);
     expect((await scan())[0].sessionId).toBe(sessionA);

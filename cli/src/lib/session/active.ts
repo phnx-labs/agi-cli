@@ -1868,7 +1868,10 @@ function terminalDescendantEntry(
       if (seen.has(child)) continue;
       seen.add(child);
       const entry = readPidSessionEntry(child, processes.get(child)?.startTime);
-      if (!entry || !isSessionTrackedAgent(entry.agent)) {
+      // The SessionStart hook records a bare `claude` (no launcher) with an
+      // empty agent; the process name is that agent's kind.
+      const agent = entry?.agent || processes.get(child)?.kind;
+      if (!entry || !agent || !isSessionTrackedAgent(agent)) {
         next.push(...(children.get(child) ?? []));
         continue;
       }
@@ -1876,7 +1879,7 @@ function terminalDescendantEntry(
       // its tools may launch agents of their own, which never own this tab.
       recordedAgent = true;
       if (entry.sessionId && (!newest || entry.startedAtMs > newest.startedAtMs
-        || (entry.startedAtMs === newest.startedAtMs && entry.pid > newest.pid))) newest = entry;
+        || (entry.startedAtMs === newest.startedAtMs && entry.pid > newest.pid))) newest = { ...entry, agent };
     }
     if (recordedAgent) return newest;
     pending = next;
