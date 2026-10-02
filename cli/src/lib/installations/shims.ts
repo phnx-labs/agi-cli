@@ -287,7 +287,7 @@ async function promptConflictStrategy(
 // v32 — every config-dir pin (claude, grok, opencode, kimi, muse, copilot) yields to
 //        an account-slot launch (AGENTS_EXEC_HOME from `agents run`), so a slot run
 //        reads and writes its own slot home instead of the shared version home.
-export const SHIM_SCHEMA_VERSION = 32;
+export const SHIM_SCHEMA_VERSION = 33;
 
 /** Internal marker string used to embed the schema version in shim scripts. */
 const SHIM_VERSION_MARKER = 'agents-shim-version:';
@@ -325,7 +325,14 @@ function shellQuote(value: string): string {
  * versions.ts (which reads bare filenames via `fs.readdirSync` and so never
  * had the full-path-match bug).
  */
-const GROK_RESOLVE_BINARY_FN = `_resolve_grok_binary() {
+const GROK_RESOLVE_BINARY_FN = `_resolve_grok_current() {
+  local target
+  target=$(readlink -f "$1/bin/grok" 2>/dev/null) || return 0
+  [ -f "$target" ] && [ -x "$target" ] || return 0
+  [ "$(wc -c < "$target" 2>/dev/null || echo 0)" -ge 1000000 ] || return 0
+  printf '%s\\n' "$target"
+}
+_resolve_grok_binary() {
   local dir="$1" version_hint="$2"
   local candidate base size mtime
   for candidate in "$dir"/grok-*; do
@@ -592,12 +599,20 @@ ${GROK_RESOLVE_BINARY_FN}
   # Check the versioned home first — this is where the binary lands when the
   # installer runs with GROK_HOME set (i.e. via the shim or a correct
   # \`agents add grok\`), or when grok self-updates from within the shim.
+  # \`bin/grok\` is grok's own current-release pointer, kept by its updater in
+  # both layouts (\`bin/grok -> ../downloads/grok-<v>-<arch>\` and the newer
+  # \`bin/grok -> grok-<v>\`); \`grok update\` never touches downloads/ in the
+  # newer one, so scanning downloads/ alone keeps exec'ing a dead release.
+  BINARY=$(_resolve_grok_current "$VERSION_DIR/home/.grok")
   GROK_DOWNLOADS="$VERSION_DIR/home/.grok/downloads"
-  if [ -d "$GROK_DOWNLOADS" ]; then
+  if [ -z "$BINARY" ] && [ -d "$GROK_DOWNLOADS" ]; then
     BINARY=$(_resolve_grok_binary "$GROK_DOWNLOADS" "$VERSION")
   fi
   # Fall back to the global grok home (binary installed without GROK_HOME set,
   # e.g. an earlier \`agents add grok@latest\` before this resolution fix).
+  if [ -z "$BINARY" ] || [ ! -x "$BINARY" ]; then
+    BINARY=$(_resolve_grok_current "$HOME/.grok")
+  fi
   if [ -z "$BINARY" ] || [ ! -x "$BINARY" ]; then
     GROK_DOWNLOADS="$HOME/.grok/downloads"
     if [ -d "$GROK_DOWNLOADS" ]; then
@@ -1339,12 +1354,15 @@ export AGENT_CLI_CREDENTIAL_STORE="file"
       ? `# Grok ships its native binary in the versioned home's .grok/downloads (or,
 # for pre-fix installs, the global ~/.grok/downloads), not node_modules.
 ${GROK_RESOLVE_BINARY_FN}
+BINARY=$(_resolve_grok_current "${versionDir}/home/.grok")
 GROK_DOWNLOADS="${versionDir}/home/.grok/downloads"
-BINARY=""
-if [ -d "$GROK_DOWNLOADS" ]; then
+if [ -z "$BINARY" ] && [ -d "$GROK_DOWNLOADS" ]; then
   BINARY=$(_resolve_grok_binary "$GROK_DOWNLOADS" "${version}")
 fi
 # Fall back to the global grok home (binary installed without GROK_HOME set).
+if [ -z "$BINARY" ] || [ ! -x "$BINARY" ]; then
+  BINARY=$(_resolve_grok_current "$AGENTS_REAL_HOME/.grok")
+fi
 if [ -z "$BINARY" ] || [ ! -x "$BINARY" ]; then
   GROK_GLOBAL_DOWNLOADS="$AGENTS_REAL_HOME/.grok/downloads"
   if [ -d "$GROK_GLOBAL_DOWNLOADS" ]; then

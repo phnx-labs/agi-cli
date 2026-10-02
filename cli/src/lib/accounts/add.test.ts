@@ -336,6 +336,26 @@ describe('runAdd / runLogin (injected runners, real meta + filesystem)', () => {
     expect(listNativeAccounts(readMeta()).find(a => a.name === 'work')).toMatchObject({ identityKey: 'claude:user=1' });
   });
 
+  it('runLogin --per-device signs a grok seat in on a worker; the portable re-login stays headed-only', async () => {
+    const grokId = { identityKey: 'grok:user=G', email: 'g@example.com', signedIn: true };
+    const added = await runAdd('grok', 'grokseat', { meta: readMeta(), perDevice: true }, fakeRunners({ defaultObserved: grokId }));
+    trackResult(added);
+    setConfiguredDeviceRole(DEVICE, 'worker');
+
+    await expect(runLogin('grok', 'grokseat', { meta: readMeta() }, fakeRunners({ defaultObserved: grokId })))
+      .rejects.toThrow(/this device is a worker/);
+
+    const worker = fakeRunners({ defaultObserved: grokId });
+    const result = await runLogin('grok', 'grokseat', { meta: readMeta(), perDevice: true }, worker);
+    expect(worker.logins).toEqual([{ home: added.slotDir, args: ['login', '--device-auth'] }]);
+    expect(result.provisioning).toBe('per-device');
+    expect(result.workerCredential).toBe('per-device');
+    expect(readSlots(readMeta())[added.accountId]).toMatchObject({ authMode: 'per-device', verdict: 'live' });
+
+    await expect(runLogin('claude', 'work', { meta: readMeta(), perDevice: true }, fakeRunners()))
+      .rejects.toThrow(/--per-device is only valid/);
+  });
+
   it('runLogin on an unknown account fails loud with the add command', async () => {
     await expect(runLogin('claude', 'ghost', { meta: readMeta() }, fakeRunners()))
       .rejects.toThrow(/No claude account 'ghost'.*agents accounts add claude ghost/);

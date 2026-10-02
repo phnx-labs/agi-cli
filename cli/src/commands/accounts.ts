@@ -392,7 +392,7 @@ agents accounts list --fleet`,
   const addCmd = accounts.command('add <target> [name]')
     .description('Add an account. Harness form: add <harness> [name] runs the native login in a fresh credential slot and provisions workers. Provider form: add <name> --provider <p> --auth <t> stores a durable credential.')
     .option('--api-key <key>', 'Worker credential for api-key harnesses (codex/grok/cursor/opencode); prompted when omitted')
-    .option('--per-device', 'codex: ChatGPT-plan account — no API key stored; workers log in per box')
+    .option('--per-device', 'codex/grok: subscription seat (ChatGPT plan, SuperGrok, X Premium+) — no API key stored; workers log in per box')
     .option('--no-worker-token', 'Skip minting/collecting the worker credential (this device only)')
     .option('--provider <provider>', `Provider form: credential provider (${listAccountProviders().join(', ')})`)
     .option('--auth <type>', 'Provider form: api-key | setup-token | bearer-token')
@@ -460,15 +460,16 @@ agents accounts add codex gmail --per-device        # ChatGPT-plan seat; workers
 agents accounts add claude                          # name derived from the login's email
 agents accounts add work --provider anthropic --auth setup-token   # provider form (non-harness name)
 agents run claude#work`,
-    notes: `Headed devices only: on a worker, add refuses before any slot, install, or browser — workers are provisioned automatically from the durable credential the add mints (claude: a setup-token; codex/grok/cursor/opencode: an API key via --api-key or a prompt; codex also accepts --per-device for a ChatGPT-plan seat; kimi/antigravity log in per box). An account is a credential SLOT, not a second installation: the harness has one managed install and each account is a HOME-shaped slot with its own native OAuth login (never copied, never fleet-synced). Re-running add for an already-added identity points at 'agents accounts login <harness>#<name>'. Supported: ${addSupportedList()}; other harnesses fail with the reason. An ambient CLAUDE_CODE_OAUTH_TOKEN in your shell refuses the mint (unset it or pass --no-worker-token).`,
+    notes: `Headed devices only: on a worker, add refuses before any slot, install, or browser — workers are provisioned automatically from the durable credential the add mints (claude: a setup-token; codex/grok/cursor/opencode: an API key via --api-key or a prompt; codex and grok also accept --per-device for a subscription seat; kimi/antigravity log in per box). An account is a credential SLOT, not a second installation: the harness has one managed install and each account is a HOME-shaped slot with its own native OAuth login (never copied, never fleet-synced). Re-running add for an already-added identity points at 'agents accounts login <harness>#<name>'. Supported: ${addSupportedList()}; other harnesses fail with the reason. An ambient CLAUDE_CODE_OAUTH_TOKEN in your shell refuses the mint (unset it or pass --no-worker-token).`,
   });
 
   const loginCmd = accounts.command('login <account>')
     .description('Re-authenticate an account into its slot on this device (<harness>#<name>); re-mints and re-syncs the worker credential')
     .option('--api-key <key>', 'Rotate the stored worker API key (api-key harnesses)')
     .option('--no-worker-token', 'Skip re-minting the worker credential')
+    .option('--per-device', 'codex/grok: sign this box in to the subscription seat via the device-code flow (allowed on workers)')
     .option('--json', 'Machine-readable result (never includes a credential)')
-    .action(async (selector: string, o: { apiKey?: string; workerToken?: boolean; json?: boolean }, command: Command) => {
+    .action(async (selector: string, o: { apiKey?: string; workerToken?: boolean; perDevice?: boolean; json?: boolean }, command: Command) => {
       await runAccountsAction(command, async () => {
         const json = !!(o.json || command.optsWithGlobals().json);
         const parsed = parseAccountSelector(selector);
@@ -480,6 +481,7 @@ agents run claude#work`,
           onProgress: (m: string) => { if (!json) console.log(chalk.gray(`  ${m}`)); },
           apiKey: o.apiKey,
           noWorkerToken: o.workerToken === false,
+          perDevice: o.perDevice,
         });
         printAddResult(result, json);
       });
@@ -487,8 +489,9 @@ agents run claude#work`,
   setHelpSections(loginCmd, {
     examples: `agents accounts login claude#work
 agents accounts login codex#personal --api-key sk-…   # rotate the worker key
-agents accounts login kimi#main                       # per-device: logs THIS box in`,
-    notes: 'Re-runs the native login into the SAME slot (never a new home) and fails closed when the completed login is a different identity than the account. Headed devices only for harnesses with a portable worker credential; a per-device harness (kimi) may log in on any box — that is how that box gets its login. The daemon re-syncs the account row and worker credential after a successful login.',
+agents accounts login kimi#main                       # per-device: logs THIS box in
+agents ssh <worker> agents accounts login grok#work --per-device   # the worker signs in to the subscription seat`,
+    notes: 'Re-runs the native login into the SAME slot (never a new home) and fails closed when the completed login is a different identity than the account. Headed devices only for harnesses with a portable worker credential; a per-device harness (kimi) may log in on any box — that is how that box gets its login. With --per-device a codex or grok account signs THIS box in to its subscription seat through the device-code flow: the box prints a URL and code, you approve it in your own browser, and no API key is stored or synced. The daemon re-syncs the account row and worker credential after a successful login.',
   });
 
   const defaultCmd = accounts.command('default <harness> [name]')
