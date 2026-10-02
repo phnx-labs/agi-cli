@@ -19,14 +19,16 @@ export const cursorAdapter: HarnessAdapter = {
   },
 
   execPreModeArgs(ctx) {
-    // A configured headless run is the workspace trust decision. Keep this
-    // narrower than --yolo/-f, which also bypasses permission checks.
-    return ctx.resolvedMode === 'edit' && !ctx.interactive ? ['--trust'] : undefined;
+    // A configured headless run is the workspace trust decision, in plan mode
+    // too: an untrusted cwd otherwise stops on Cursor's trust prompt with no one
+    // to answer it. Keep this narrower than --yolo/-f, which skip already passes
+    // and which also bypasses permission checks.
+    return ctx.resolvedMode !== 'skip' && !ctx.interactive ? ['--trust'] : undefined;
   },
 
   routineModeArgs(cmd, ctx) {
     if (ctx.mode === 'plan') {
-      cmd.push('--plan');
+      cmd.push('--plan', '--trust');
     } else if (ctx.mode === 'skip') {
       cmd.push('-f');
     } else {
