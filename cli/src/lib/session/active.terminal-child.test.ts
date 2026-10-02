@@ -186,6 +186,13 @@ describe.skipIf(process.platform === 'win32')('published shell adopts its live a
       sessionFile: path.join(transcriptDir, `${sessionB}.jsonl`) });
   });
 
+  it('passes through a kindless record on a non-agent process to the agent below it', async () => {
+    const [wrapper, child] = await startTab(1, 'nested');
+    record(wrapper, sessionB, { agent: '' });
+    record(child, sessionC);
+    expect((await scan())[0].sessionId).toBe(sessionC);
+  });
+
   it('never adopts an unrecorded child or a record for a reused process', async () => {
     const [pid] = await startTab(1);
     expect((await scan())[0].sessionId).toBe(sessionA);
