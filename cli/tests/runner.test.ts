@@ -148,14 +148,18 @@ describe('buildJobCommand', () => {
       ]);
     });
 
-    it('builds the exact plan mode command with --plan', () => {
+    it('builds the exact plan mode command as read-only ask mode', () => {
+      // Headless --plan answers through createPlan, which -p output never prints;
+      // ask mode is equally read-only and prints its answer (6cb76420c).
       expect(buildJobCommand(makeConfig({ agent: 'cursor', mode: 'plan' }), 'hello')).toEqual([
         'cursor-agent',
         '-p',
         'hello',
         '--output-format',
         'stream-json',
-        '--plan',
+        '--mode',
+        'ask',
+        '--trust',
       ]);
     });
 
