@@ -27,6 +27,8 @@
 
 import { knownSecretValuesFromEnv, redactSecrets, sanitizeForTerminal } from '../redact.js';
 import { classifyBashCommand, detectBashMilestone } from './bash-command.js';
+import { emptyGlanceState, foldGlanceEvent, type GlanceState } from './glance.js';
+import { toolFailureKind } from './tool-outcome.js';
 import { firstSentence, tidyRequest } from './prompt.js';
 import type {
   SessionEvent,
@@ -43,7 +45,7 @@ import type {
  * CLI is recomputed rather than rendered. Same role as
  * `SESSION_SUMMARY_EXTRACTOR_VERSION`.
  */
-export const TIMELINE_EXTRACTOR_VERSION = 1;
+export const TIMELINE_EXTRACTOR_VERSION = 2;
 
 /** Steps carried on the row in full; everything older folds into a counter. */
 export const TIMELINE_KEEP_STEPS = 8;
@@ -88,9 +90,12 @@ interface TimelineFileEntry {
  * and `pending` are indices, not object references) so a resume is exact.
  */
 export interface TimelineState {
+  glance: GlanceState;
   version: number;
-  /** Byte offset just past the last COMPLETE record folded. */
+  /** Byte offset consumed; an incomplete large record is retained in partialLine. */
   offset: number;
+  /** Continuation of a record larger than one tick, with oversized image data elided. */
+  partialLine?: { text: string; skippingData: boolean; discarded?: boolean };
   steps: SessionStep[];
   /** Index of the currently open step in {@link steps}, or -1. */
   open: number;
@@ -167,6 +172,7 @@ export function compactTimelineState(
 export function emptyTimelineState(): TimelineState {
   return {
     version: TIMELINE_EXTRACTOR_VERSION,
+    glance: emptyGlanceState(),
     offset: 0,
     steps: [],
     open: -1,
@@ -222,9 +228,6 @@ const VERB_PHRASES: Record<SessionVerbClass, (n: number) => string> = {
 
 /** A shell redirection that WRITES a file (`> out`, `| tee f`), not `2>&1` / `>/dev/null`. */
 const WRITE_REDIRECT_RE = /(?:^|[^\d&>])>\s*[^&\s]|\btee\b|\bsed\s+-i\b/;
-
-/** Commands whose exit 1 means "no match", not "the work failed". */
-const BENIGN_EXIT1_RE = /^\s*(rg|grep|diff|test|\[)\b/;
 
 /**
  * Bucket one Bash command into a verb class, reusing the repo's single command
@@ -400,6 +403,7 @@ export function foldTimeline(
       default:
         break;
     }
+    foldGlanceEvent(state.glance, event);
   }
 
   if (opts.offset !== undefined) state.offset = opts.offset;
@@ -516,17 +520,8 @@ function resolveTool(state: TimelineState, event: SessionEvent): void {
   const step = index !== undefined ? state.steps[index] : openStepOf(state);
   if (event.callId !== undefined) delete state.pending[event.callId];
   if (!step) return;
-  if (event.blocked) {
-    step.blocked++;
-    return;
-  }
-  const failedOutcome = event.type === 'error' || event.outcome === 'error' || event.success === false;
-  if (!failedOutcome) return;
-  // A search that matched nothing exits 1. It ran, it did its job, and counting
-  // it as a failure made every ordinary session look broken.
-  const command = event.command ?? (typeof event.args?.command === 'string' ? event.args.command : undefined);
-  if (event.exitCode === 1 && command && BENIGN_EXIT1_RE.test(command)) return;
-  step.failed++;
+  const kind = toolFailureKind(event, event.callId ? state.glance.pending[event.callId] : undefined);
+  if (kind) step[kind]++;
 }
 
 function addMark(state: TimelineState, mark: string): void {

@@ -22,6 +22,7 @@ import { isCompletedTodoStatus, SNAPSHOT_TODO_TOOLS, summarizeToolUse } from './
 import { isShellExecTool } from './shell-programs.js';
 import { classifyFileChanges } from './digest.js';
 import { extractArtifacts, type ProducedArtifact } from './highlights.js';
+import { deriveGlance, projectGlance } from './glance.js';
 import { LINEAR_KEY_DENYLIST, linearIssueKeys } from './linear.js';
 
 // TodoItem / TodoProgress moved to ./types.ts so SessionMeta can carry `todos`
@@ -126,6 +127,9 @@ export function detectRateLimited(text?: string): boolean {
 }
 
 export interface SessionState {
+  model?: string;
+  failures?: import('./types.js').SessionFailure[];
+  userTurns?: import('./types.js').SessionUserTurn[];
   activity: SessionActivity;
   awaitingReason?: AwaitingReason;
   lastRole?: 'user' | 'assistant';
@@ -919,6 +923,7 @@ export function detectDurableSignals(events: SessionEvent[]): {
 export function inferSessionState(events: SessionEvent[], ctx: StateContext = {}): SessionState {
   const state = inferActivity(events, ctx);
   const { pr, ticket, createdTickets, spawnedTeam, attachments } = detectDurableSignals(events);
+  const { activityHistogram: _histogram, ...glance } = projectGlance(deriveGlance(events));
   const worktree = detectWorktree(ctx.cwd, ctx.gitBranch);
   const artifacts = extractArtifacts(classifyFileChanges(events));
   const planFile = artifacts.find((artifact) => artifact.bucket === 'plans')?.path;
@@ -939,12 +944,13 @@ export function inferSessionState(events: SessionEvent[], ctx: StateContext = {}
   if (!rateLimited && detectRateLimited(state.preview)) rateLimited = true;
   return {
     ...state,
+    ...glance,
     pr: pr ?? state.pr,
     worktree: worktree ?? state.worktree,
     ticket: ticket ?? detectTicket(undefined, ctx.gitBranch) ?? state.ticket,
     createdTickets,
     spawnedTeam,
-    attachments,
+    attachments: glance.attachments ?? attachments,
     artifacts: artifacts.length > 0 ? artifacts : undefined,
     planFile,
     rateLimited: rateLimited || undefined,

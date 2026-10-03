@@ -1,0 +1,4 @@
+{"timestamp": "2026-10-01T12:00:00.000Z", "type": "session_meta", "payload": {"id": "fixture-codex", "model": "gpt-6"}}
+{"timestamp": "2026-10-01T12:00:01.000Z", "type": "turn_context", "payload": {"model": "gpt-6-astra"}}
+{"timestamp": "2026-10-01T12:00:02.000Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Done."}]}}
+{"timestamp": "2026-10-01T12:00:02.000Z", "type": "event_msg", "payload": {"type": "item_completed", "item": {"type": "AgentMessage", "content": "Done."}}}

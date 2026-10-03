@@ -108,6 +108,10 @@ export interface SessionEvent {
   name?: string;
   mediaType?: string;
   sizeBytes?: number;
+  /** Inline image bytes retained only for the timeline's materialization pass. */
+  _imageData?: string;
+  /** Groups text blocks and attachments from one harness user message. */
+  _turnId?: string;
   // Fields for hook events (type === 'hook') — a harness hook firing recorded in
   // the transcript (Claude hook_success/hook_additional_context/hook_error
   // attachments). Hook name as configured (e.g. "SessionStart:startup").
@@ -157,6 +161,45 @@ export interface SessionAttachment {
   name?: string;
   mediaType: string;
   sizeBytes?: number;
+  turnIndex?: number;
+}
+
+export interface SessionFailure {
+  atMs: number;
+  tool: string;
+  summary: string;
+  error: string;
+  blocked: boolean;
+}
+
+export interface SessionActivityHistogram {
+  startMs: number;
+  endMs: number;
+  buckets: { tools: number; failed: number; blocked: number }[];
+  userAtMs: number[];
+}
+
+export interface SessionUserTurn { atMs: number; text: string; images: number }
+
+export interface SessionSubagent {
+  id: string;
+  agentType: string;
+  description: string;
+  status: 'running' | 'done' | 'failed';
+  startedAtMs?: number;
+  endedAtMs?: number;
+  toolCount: number;
+  resultExcerpt?: string;
+  transcriptPath: string;
+}
+
+/** Bounded projection derived alongside the incremental timeline. */
+export interface SessionGlance {
+  model?: string;
+  failures?: SessionFailure[];
+  activityHistogram?: SessionActivityHistogram;
+  userTurns?: SessionUserTurn[];
+  attachments?: SessionAttachment[];
 }
 
 /** One normalized checklist/task item emitted by any transcript harness. */

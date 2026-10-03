@@ -157,6 +157,8 @@ export function safeReadSessionFile(filePath: string, maxBytes: number = SESSION
 }
 
 export interface ParseSessionOptions {
+  /** Retain bounded inline images for local attachment materialization only. */
+  includeInlineImages?: boolean;
   /** Keep normalized tool results compact by default; renderers can request full output. */
   maxToolOutputChars?: number;
   /** Opt-in because interrupts are not user messages and would change the published event stream. */
@@ -429,6 +431,7 @@ export function parseClaudeContent(
               agent: 'claude',
               timestamp,
               role: 'assistant',
+              model: typeof raw.message?.model === 'string' ? raw.message.model : undefined,
               content: text,
             });
           }
@@ -471,8 +474,8 @@ export function parseClaudeContent(
         }
       }
       // Capture token usage and model from assistant turn
-      if (raw.message?.usage) {
-        const u = raw.message.usage;
+      if (raw.message?.usage || typeof raw.message?.model === 'string') {
+        const u = raw.message.usage ?? {};
         events.push({
           type: 'usage',
           agent: 'claude',
@@ -486,6 +489,7 @@ export function parseClaudeContent(
       }
     } else if (type === 'user') {
       const contentBlocks = raw.message?.content;
+      const turnStart = events.length;
 
       if (typeof contentBlocks === 'string') {
         // Simple user text
@@ -530,7 +534,11 @@ export function parseClaudeContent(
             const source = block.source || {};
             if (source.type === 'base64') {
               const sizeBytes = Math.ceil(((source.data as string)?.length || 0) * 0.75);
-              events.push(normalizedAttachmentEvent('claude', timestamp, block, source, 'image/png', sizeBytes));
+              const attachment = normalizedAttachmentEvent('claude', timestamp, block, source, 'image/png', sizeBytes);
+              if (opts.includeInlineImages && typeof source.data === 'string' && Buffer.byteLength(source.data, 'base64') <= 5 * 1024 * 1024) {
+                attachment._imageData = source.data;
+              }
+              events.push(attachment);
             } else {
               events.push(normalizedAttachmentEvent('claude', timestamp, block, source, 'image/png', 0));
             }
@@ -595,6 +603,15 @@ export function parseClaudeContent(
 
             if (toolId) toolUseMap.delete(toolId);
           }
+        }
+      }
+      const turnEvents = events.slice(turnStart);
+      const textEvents = turnEvents.filter(event => event.type === 'message' && event.role === 'user');
+      const syntheticTurn = raw.isMeta === true || (textEvents.length > 0 && textEvents.every(event => isSyntheticUserMessage(event.content)));
+      for (const event of turnEvents) {
+        if (event.type === 'message' || event.type === 'attachment') {
+          event._turnId = typeof raw.uuid === 'string' ? raw.uuid : timestamp;
+          if (syntheticTurn || isSyntheticUserMessage(event.content)) event._synthetic = true;
         }
       }
     } else if (type === 'result') {
@@ -708,6 +725,9 @@ export function parseCodexItemsContent(content: string): SessionEvent[] {
     if (!line.trim()) continue;
     let raw: any;
     try { raw = JSON.parse(line); } catch { continue; }
+    if ((raw?.type === 'session_meta' || raw?.type === 'turn_context') && typeof raw.payload?.model === 'string') {
+      events.push({ type: 'init', agent: 'codex', timestamp: raw.timestamp, model: raw.payload.model });
+    }
     if (raw?.type !== 'event_msg') continue;
     const payload = raw.payload || {};
     const timestamp = raw.timestamp || new Date().toISOString();
@@ -899,7 +919,13 @@ export function parseCodexContent(content: string): SessionEvent[] {
         agent: 'codex',
         timestamp,
         content: `Codex ${payload.cli_version || ''} session in ${payload.cwd || ''}`.trim(),
+        model: typeof payload.model === 'string' ? payload.model : undefined,
       });
+      continue;
+    }
+
+    if (lineType === 'turn_context' && typeof payload.model === 'string') {
+      events.push({ type: 'init', agent: 'codex', timestamp, model: payload.model });
       continue;
     }
 

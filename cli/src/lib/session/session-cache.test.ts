@@ -84,6 +84,7 @@ describe('loadLocalActiveSessions — cross-surface snapshot', () => {
     fs.rmSync(paths.dir, { recursive: true, force: true });
   });
 
+
   it('serves a fresh warm snapshot without re-gathering (cross-surface share)', async () => {
     const warm = [session({ sessionId: 'a', status: 'running', topic: 'warm topic' })];
     writeActiveSessionsCache('local', warm, { capturedAt: 10_000 });

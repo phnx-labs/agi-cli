@@ -14,12 +14,13 @@
  *     line-delimited JSON) a fold reads `size - offset` bytes, not the file.
  *     The same resume rule the tool index already uses (`tool-index.ts`).
  *   - **Complete records only.** Only newline-terminated lines are folded and
- *     the offset advances past those alone, so the 973,963-byte record in one
- *     live transcript on this fleet cannot be folded half-written; the next tick
- *     picks it up whole.
+ *     oversized records retain a continuation cursor across budgeted reads,
+ *     so no event is folded half-written or replayed at the next tick.
  */
 
 import * as fs from 'fs';
+import { projectGlance } from './glance.js';
+import { materializeInlineImages, readSessionSubagents } from './glance-files.js';
 import type { ActiveSession } from './active.js';
 import { readSessionTimelineEntry, writeSessionTimeline, type SessionTimelineCacheRow, type SessionTimelineEntry } from './db.js';
 import { parseClaudeContent, parseCodexItemsContent, parseSession } from './parse.js';
@@ -114,26 +115,82 @@ interface TimelinePassOptions {
   statFile?: (path: string) => { mtimeMs: number; size: number };
 }
 
-/** Read `[start, end)` of a file, keeping only complete newline-terminated lines. */
+// Ten supported images plus their envelope fit inside this continuation bound.
+const MAX_PARTIAL_LINE_BYTES = 80 * 1024 * 1024;
+const MAX_INLINE_IMAGE_BASE64 = 4 * Math.ceil(5 * 1024 * 1024 / 3);
+
+/** Keep the JSON envelope when an inline image is too large to materialize. */
+function appendLargeLine(line: NonNullable<TimelineState['partialLine']>, chunk: string): void {
+  if (line.discarded) return;
+  if (line.skippingData) {
+    const end = chunk.indexOf('"');
+    if (end < 0) return;
+    chunk = chunk.slice(end + 1);
+    line.skippingData = false;
+  }
+  line.text += chunk;
+  if (line.text.length > MAX_PARTIAL_LINE_BYTES) {
+    line.text = '';
+    line.discarded = true;
+    return;
+  }
+  const dataField = /"data"\s*:\s*"/g;
+  let match: RegExpExecArray | null;
+  let images = 0;
+  while ((match = dataField.exec(line.text))) {
+    images++;
+    const start = dataField.lastIndex;
+    const end = line.text.indexOf('"', start);
+    const length = (end < 0 ? line.text.length : end) - start;
+    if (images <= 10 && length <= MAX_INLINE_IMAGE_BASE64) continue;
+    if (end < 0) {
+      line.text = line.text.slice(0, start) + '"';
+      line.skippingData = true;
+      return;
+    }
+    line.text = line.text.slice(0, start) + line.text.slice(end);
+    dataField.lastIndex = start + 1;
+  }
+}
+
+/** Large JSONL records continue across budgeted reads; ordinary partial lines stay unconsumed. */
 function readCompleteLines(
   filePath: string,
   start: number,
   end: number,
   maxBytes: number,
-): { text: string; offset: number } {
+  partialLine?: TimelineState['partialLine'],
+): { text: string; offset: number; partialLine?: TimelineState['partialLine']; truncated?: boolean } {
   const stop = Math.min(end, start + maxBytes);
-  if (stop <= start) return { text: '', offset: start };
+  if (stop <= start) return { text: '', offset: start, partialLine };
   const fd = fs.openSync(filePath, 'r');
   try {
     const buffer = Buffer.alloc(stop - start);
     const read = fs.readSync(fd, buffer, 0, buffer.length, start);
     const lastNewline = buffer.lastIndexOf(0x0a, read - 1);
-    // Nothing complete in this window: leave the offset where it was so the
-    // record is folded whole once its closing newline lands.
-    if (lastNewline < 0) return { text: '', offset: start };
+    if (!partialLine && lastNewline >= 0) {
+      return { text: buffer.toString('utf8', 0, lastNewline + 1), offset: start + lastNewline + 1 };
+    }
+    if (!partialLine && (read < maxBytes || maxBytes < TIMELINE_PASS_MAX_BYTES_PER_SESSION)) return { text: '', offset: start };
+    // Latin-1 preserves raw bytes across a UTF-8 code point split by the budget.
+    // Convert to UTF-8 only after the whole record is complete.
+    const pieces = buffer.toString('latin1', 0, read).split('\n');
+    let truncated = partialLine?.discarded === true;
+    let line: NonNullable<TimelineState['partialLine']> = partialLine ?? { text: '', skippingData: false };
+    const complete: string[] = [];
+    for (let i = 0; i < pieces.length; i++) {
+      appendLargeLine(line, pieces[i]);
+      if (line.discarded) truncated = true;
+      if (i < pieces.length - 1) {
+        if (!line.discarded) complete.push(Buffer.from(line.text, 'latin1').toString('utf8'));
+        line = { text: '', skippingData: false };
+      }
+    }
     return {
-      text: buffer.toString('utf8', 0, lastNewline + 1),
-      offset: start + lastNewline + 1,
+      text: complete.length ? complete.join('\n') + '\n' : '',
+      offset: start + read,
+      ...(line.text || line.skippingData || line.discarded ? { partialLine: line } : {}),
+      ...(truncated ? { truncated: true } : {}),
     };
   } finally {
     fs.closeSync(fd);
@@ -152,7 +209,7 @@ function readCompleteLines(
  */
 function eventsForChunk(agent: SessionAgentId, text: string): SessionEvent[] {
   if (agent === 'claude') {
-    return parseClaudeContent(text, { includeInterrupts: true, includeFileHistory: true });
+    return parseClaudeContent(text, { includeInterrupts: true, includeFileHistory: true, includeInlineImages: true });
   }
   return parseCodexItemsContent(text);
 }
@@ -169,7 +226,7 @@ export function parseTimelineEvents(filePath: string, agent: SessionAgentId): Se
   if (isResumableTimelineSource(agent)) {
     return eventsForChunk(agent, fs.readFileSync(filePath, 'utf8'));
   }
-  return parseSession(filePath, agent, { includeInterrupts: true, includeFileHistory: true });
+  return parseSession(filePath, agent, { includeInterrupts: true, includeFileHistory: true, includeInlineImages: true });
 }
 
 /** One session's fold: the entry to cache, and what it actually cost to produce. */
@@ -232,12 +289,14 @@ function foldSessionTimeline(
     state = resumable ? prior!.state : emptyTimelineState();
     const start = resumable ? state.offset : 0;
     const maxBytes = Math.min(byteBudget, TIMELINE_PASS_MAX_BYTES_PER_SESSION);
-    const chunk = readCompleteLines(filePath, start, fileSize, maxBytes);
+    const chunk = readCompleteLines(filePath, start, fileSize, maxBytes, state.partialLine);
     // Nothing COMPLETE in the window this tick could read — a record still being
     // written, or a byte budget too small to reach the next newline. Leave the
     // cached row and its offset alone; writing here would stamp an empty fold
     // over a real one and move the resume point past bytes never folded.
     if (!chunk.text && chunk.offset === start) return undefined;
+    state.partialLine = chunk.partialLine;
+    if (chunk.truncated) state.truncated = true;
     events = eventsForChunk(agent, chunk.text);
     offset = chunk.offset;
     bytesRead = chunk.offset - start;
@@ -289,6 +348,7 @@ function foldSessionTimeline(
     bytesRead = fileSize;
   }
 
+  materializeInlineImages(events, session.sessionId!);
   const folded = compactTimelineState(
     foldTimeline(events, state, {
       attachments: session.attachments,
@@ -297,8 +357,12 @@ function foldSessionTimeline(
     }),
   );
   const files = projectSessionFiles(folded);
+  const glance = projectGlance(folded.glance);
+  if (offset < fileSize || folded.partialLine || folded.truncated) delete glance.activityHistogram;
   return {
     entry: {
+      ...glance,
+      ...(agent === 'claude' ? { subagents: readSessionSubagents(filePath, session.pidAlive === true, folded.glance.failedAgentCalls, nowMs) } : {}),
       timeline: projectTimeline(folded, session.activity),
       ...(folded.request ? { request: folded.request } : {}),
       ...(files ? { files } : {}),
@@ -370,7 +434,7 @@ export function runTimelinePassSync(
 
     const prior = readSessionTimelineEntry(id);
     // Cached against these exact bytes: nothing was appended, nothing to fold.
-    if (prior && prior.state.offset === stamp.fileSize) {
+    if (prior && prior.state.version === TIMELINE_EXTRACTOR_VERSION && prior.state.offset === stamp.fileSize) {
       result.reused++;
       continue;
     }

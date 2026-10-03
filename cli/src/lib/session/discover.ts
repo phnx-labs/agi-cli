@@ -30,6 +30,7 @@ import { SESSION_AGENTS } from './types.js';
 import { deriveShortId } from './short-id.js';
 import { buildClaudeAccountIndex, resolveClaudeAccount, type ClaudeAccountIndex } from './claude-accounts.js';
 import { cleanFirstUserMessage, extractSessionTopic, extractSlashCommandName, extractSlashCommandFromToolInput, cleanGeneratedSessionLabel } from './prompt.js';
+import { claudeSubagentFiles } from './glance-files.js';
 import { isBackgroundShellStart, isSkillInvocation, extractSkills, extractSlashCommands, isSubAgentTool } from './highlights.js';
 import { parseAntigravity, parseCursor, splitSessionFilePath } from './parse.js';
 import { extractPrUrl, detectWorktree, detectTicket, isPrCreateCommand, detectSpawnedTeam, isTicketCreateTool, extractCreatedTicket, extractRecentDirectoriesTouched, extractTodoProgressFromEvents } from './state.js';
@@ -3758,7 +3759,7 @@ export function applyClaudeLine(state: ClaudeParseState, parsed: any): void {
  * Build the {@link ClaudeSessionScan} return object from an accumulator. This is
  * the exact return-building {@link scanClaudeSession} used to run inline.
  */
-export function finalizeClaudeScan(state: ClaudeParseState): ClaudeSessionScan {
+export function finalizeClaudeScan(state: ClaudeParseState, sessionFile?: string): ClaudeSessionScan {
   const durationMs =
     state.firstTsMs !== undefined && state.lastTsMs !== undefined && state.lastTsMs > state.firstTsMs
       ? state.lastTsMs - state.firstTsMs
@@ -3808,7 +3809,7 @@ export function finalizeClaudeScan(state: ClaudeParseState): ClaudeSessionScan {
     recentDirectoriesTouched: state.recentDirectoriesTouched.length ? state.recentDirectoriesTouched : undefined,
     skillsUsed: state.skillEvents.length ? extractSkills(state.skillEvents) : undefined,
     slashCommandsUsed: state.slashCommandEvents.length ? extractSlashCommands(state.slashCommandEvents) : undefined,
-    subAgentCount: state.subAgents,
+    subAgentCount: (sessionFile ? claudeSubagentFiles(sessionFile)?.slice(0, 30).length : undefined) ?? state.subAgents,
     backgroundShellCount: state.backgroundShells,
   };
 }
@@ -3838,7 +3839,7 @@ export async function scanClaudeSession(filePath: string): Promise<ClaudeSession
     stream.destroy();
   }
 
-  return finalizeClaudeScan(state);
+  return finalizeClaudeScan(state, filePath);
 }
 
 /**
@@ -4095,7 +4096,7 @@ export async function scanClaudeSessionIncremental(
   if (append.skippedOversizedLine) state.toolCollector.recordIndexLimit();
 
   const newOffset = fromOffset + append.consumedBytes;
-  const scan = finalizeClaudeScan(state);
+  const scan = finalizeClaudeScan(state, filePath);
   const toolCalls = state.toolCollector.drainChanged();
   return {
     scan,

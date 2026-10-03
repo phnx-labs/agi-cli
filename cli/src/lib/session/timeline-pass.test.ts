@@ -285,3 +285,86 @@ describe('runTimelinePass — the daemon\'s incremental fold', () => {
     expect(db.readSessionTimelineEntry('peer-1')!.state.offset).toBe(0);
   });
 });
+
+describe('glance projection through the active/watch row path', () => {
+  it('publishes the full fold, materialized attachments, subagents and registered plans', async () => {
+    const fixture = path.join(TESTDATA, 'glance');
+    const file = path.join(tmpHome, 'glance-row.jsonl');
+    fs.copyFileSync(path.join(fixture, 'claude.jsonl'), file);
+    fs.appendFileSync(file, [
+      { type: 'assistant', timestamp: '2026-10-01T12:00:12Z', message: { content: [{ type: 'tool_use', id: 'agent-call-2', name: 'Agent', input: { description: 'Review' } }] } },
+      { type: 'user', timestamp: '2026-10-01T12:00:13Z', message: { content: [{ type: 'tool_result', tool_use_id: 'agent-call-2', is_error: true, content: 'Subagent failed' }] } },
+    ].map(record => JSON.stringify(record)).join('\n') + '\n');
+    fs.cpSync(path.join(fixture, 'claude/subagents'), path.join(tmpHome, 'glance-row/subagents'), { recursive: true });
+    const planDir = path.join(tmpHome, '.agents/artifacts/2026-10-01/registered');
+    fs.mkdirSync(planDir, { recursive: true });
+    fs.writeFileSync(path.join(planDir, 'registered.html'), '<h1>Registered plan</h1>');
+    fs.writeFileSync(path.join(planDir, '.artifact.json'), JSON.stringify({ session: 'glance-row', kind: 'plan', title: 'Registered plan' }));
+    const session = { ...row('glance-row', file), pidAlive: true };
+    expect(pass.runTimelinePassSync({ sessions: [session] }).computed).toBe(1);
+    const { mergeSessionTimeline } = await import('./session-cache.js');
+    const { enrichGlanceFiles } = await import('./glance-files.js');
+    const { toSessionWatchRow } = await import('./remote/watch.js');
+    mergeSessionTimeline(session);
+    enrichGlanceFiles([session]);
+    const watched = toSessionWatchRow('local', session);
+    expect(watched.activity).toBe('working');
+    expect(watched.activityHistogram?.buckets).toHaveLength(48);
+    expect(watched.model).toBe('claude-sonnet-5');
+    expect(watched.failures).toHaveLength(4);
+    expect(watched.userTurns).toHaveLength(2);
+    expect(watched.attachments![0].turnIndex).toBe(0);
+    expect(fs.existsSync(watched.attachments![0].path!)).toBe(true);
+    expect(watched.subagents).toHaveLength(2);
+    expect(watched.subAgentCount).toBe(2);
+    expect(watched.subagents![1].status).toBe('failed');
+    expect(watched.artifacts).toContainEqual({ path: path.join(planDir, 'registered.html'), basename: 'registered.html', bucket: 'plans', title: 'Registered plan' });
+    expect(watched.planFile).toBe(path.join(planDir, 'registered.html'));
+    // No append: the same transcript facts come from SQLite, with no second fold.
+    expect(pass.runTimelinePassSync({ sessions: [session] })).toMatchObject({ computed: 0, reused: 1 });
+    expect(mergeSessionTimeline(row('glance-row', file)).activityHistogram).toEqual(watched.activityHistogram);
+  });
+
+  it('completes a supported inline image whose record exceeds the ordinary chunk size', () => {
+    const file = path.join(tmpHome, 'large-image.jsonl');
+    const data = Buffer.alloc(4 * 1024 * 1024, 1).toString('base64');
+    fs.writeFileSync(file, JSON.stringify({ type: 'user', uuid: 'image-turn', timestamp: '2026-10-01T12:00:00Z', message: { content: [
+      { type: 'text', text: 'Inspect the image.' }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data } },
+    ] } }) + '\n');
+    expect(pass.runTimelinePassSync({ sessions: [row('large-image', file)] }).computed).toBe(1);
+    expect(db.readSessionTimelineAny('large-image')?.activityHistogram).toBeUndefined();
+    expect(pass.runTimelinePassSync({ sessions: [row('large-image', file)] }).computed).toBe(1);
+    const stored = db.readSessionTimelineAny('large-image')!;
+    expect(stored.userTurns).toEqual([{ atMs: Date.parse('2026-10-01T12:00:00Z'), text: 'Inspect the image.', images: 1 }]);
+    expect(fs.statSync(stored.attachments![0].path!).size).toBe(4 * 1024 * 1024);
+    expect(stored.activityHistogram?.buckets).toHaveLength(48);
+  });
+});
+
+describe('large image records continue across ticks', () => {
+  for (const [id, sizes] of [['oversized-image', [7]], ['two-images', [4, 4]]] as const) {
+    it(`finishes ${id} and folds the following failures without replaying calls`, () => {
+      const file = path.join(tmpHome, `${id}.jsonl`);
+      const images = sizes.map((size, i) => ({ type: 'image', source: { type: 'base64', media_type: 'image/png', data: Buffer.alloc(size * 1024 * 1024, i + 1).toString('base64') } }));
+      const records = [
+        { type: 'user', uuid: id, timestamp: '2026-10-01T12:00:00Z', message: { content: [{ type: 'text', text: 'Inspect these images.' }, ...images] } },
+        { type: 'assistant', timestamp: '2026-10-01T12:00:01Z', message: { model: 'claude-opus-5-5', content: [{ type: 'tool_use', id: 'build', name: 'Bash', input: { command: 'bun run build' } }] } },
+        { type: 'user', timestamp: '2026-10-01T12:00:02Z', message: { content: [{ type: 'tool_result', tool_use_id: 'build', is_error: true, content: 'Build failed' }] } },
+      ];
+      fs.writeFileSync(file, records.map(record => JSON.stringify(record)).join('\n') + '\n');
+      const session = row(id, file);
+      for (let tick = 0; tick < 4; tick++) pass.runTimelinePassSync({ sessions: [session] });
+      const stored = db.readSessionTimelineEntry(id)!;
+      expect(stored.state.offset).toBe(fs.statSync(file).size);
+      expect(stored.state.partialLine).toBeUndefined();
+      expect(stored.userTurns).toEqual([{ atMs: Date.parse('2026-10-01T12:00:00Z'), text: 'Inspect these images.', images: sizes.length }]);
+      expect(stored.model).toBe('claude-opus-5-5');
+      expect(stored.failures).toHaveLength(1);
+      expect(stored.failures![0]).toMatchObject({ tool: 'Bash', summary: 'bun run build', error: 'Build failed' });
+      expect(stored.activityHistogram!.buckets.reduce((n, bucket) => n + bucket.tools, 0)).toBe(1);
+      if (id === 'oversized-image') expect(stored.attachments![0].path).toBeUndefined();
+      else expect(stored.attachments!.map(attachment => fs.statSync(attachment.path!).size)).toEqual([4 * 1024 * 1024, 4 * 1024 * 1024]);
+      expect(pass.runTimelinePassSync({ sessions: [session] })).toMatchObject({ computed: 0, reused: 1 });
+    });
+  }
+});

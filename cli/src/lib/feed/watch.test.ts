@@ -21,6 +21,7 @@ describe('cross-version peer envelopes', () => {
     expect(() => new FeedSessionProjection().apply(normalized)).not.toThrow();
   });
 
+
   it('leaves an envelope that already carries tools untouched', () => {
     const state = new FeedWatchState('peer');
     const tool = { kind: 'browser', rowKey: 't1', scope: 'worker', device: 'worker', live: true, task: 'post', profile: 'work', linkStatus: 'unlinked', startedAtMs: 1, updatedAtMs: 2, captures: [], captureCounts: {} } as const;

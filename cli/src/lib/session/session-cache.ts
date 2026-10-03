@@ -30,6 +30,7 @@ import * as path from 'path';
 import { createMemoryCache } from '../memory-cache.js';
 import { getCacheDir } from '../state.js';
 import { backfillActiveRowsFromIndex, foldRecap, sessionProcessIsLocal, type ActiveSession } from './active.js';
+import { enrichGlanceFiles } from './glance-files.js';
 import { readSessionSummaryAny, readSessionTimelineAny } from './db.js';
 import { isSummarizerReady } from '../summarizer/config.js';
 
@@ -142,6 +143,7 @@ export const IMMUTABLE_FIELD_KEYS = [
 export const LIVE_STATUS_KEYS = [
   'status',
   'activity',
+  'activityHistogram',
   'preview',
   'tokPerSec',
   'awaitingReason',
@@ -573,6 +575,10 @@ export function mergeSessionTimeline(s: ActiveSession): ActiveSession {
   try {
     const stored = readSessionTimelineAny(s.sessionId);
     if (!stored) return s;
+    for (const key of ['model', 'failures', 'activityHistogram', 'userTurns', 'attachments', 'subagents'] as const) {
+      if (stored[key] !== undefined) Object.assign(s, { [key]: stored[key] });
+    }
+    if (s.subagents) s.subAgentCount = s.subagents.length;
     if (s.timeline === undefined) s.timeline = stored.timeline;
     if (s.files === undefined && stored.files !== undefined) s.files = stored.files;
     if (stored.request) {
@@ -677,6 +683,7 @@ export async function loadLocalActiveSessions(
   // label as one-shot `sessions --active` output.
   backfillActiveRowsFromIndex(sessions);
   for (const s of sessions) applyImmutableMemo(s);
+  enrichGlanceFiles(sessions);
   updateImmutableMemos(sessions, now);
   const snap = writeCache('local', sessions, { capturedAt: now });
   return { sessions, servedFromCache: false, capturedAt: snap.capturedAt };

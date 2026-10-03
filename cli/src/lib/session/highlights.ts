@@ -14,6 +14,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { getUserAgentsDir } from '../state.js';
 import type { SessionAgentId, SessionEvent } from './types.js';
 import { isNoisePath, type FileChange } from './digest.js';
 
@@ -226,6 +227,7 @@ export function extractLinks(events: SessionEvent[]): SessionLink[] {
 
 export type ArtifactBucket = 'artifacts' | 'plans' | 'reports' | 'docs';
 export interface ProducedArtifact {
+  title?: string;
   /** Absolute (or session-relative) path of the created file. */
   path: string;
   basename: string;
@@ -259,6 +261,55 @@ export function extractArtifacts(changes: FileChange[]): ProducedArtifact[] {
     if (out.length >= MAX_ARTIFACTS) break;
   }
   return out;
+}
+
+/** Merge by path, retaining a sidecar's title and kind for a tool-created duplicate. */
+export function mergeArtifacts(created: ProducedArtifact[], registered: ProducedArtifact[]): ProducedArtifact[] {
+  const entries = new Map(created.map(artifact => [artifact.path, artifact]));
+  for (const artifact of registered) entries.set(artifact.path, { ...entries.get(artifact.path), ...artifact });
+  return [...entries.values()];
+}
+
+const artifactSidecarCache = new Map<string, { stamp: string; meta: Record<string, unknown> }>();
+
+/** One bounded directory walk supplies every row in a scan. Unchanged sidecars are not re-read. */
+export function indexArtifactSidecars(root = path.join(getUserAgentsDir(), 'artifacts')): Map<string, ProducedArtifact[]> {
+  const index = new Map<string, ProducedArtifact[]>();
+  function walk(dir: string, depth: number): void {
+    let entries: fs.Dirent[];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    if (entries.some(entry => entry.isFile() && entry.name === '.artifact.json')) {
+      try {
+        const sidecar = path.join(dir, '.artifact.json');
+        const stat = fs.statSync(sidecar);
+        const stamp = `${stat.mtimeMs}:${stat.size}`;
+        let cached = artifactSidecarCache.get(sidecar);
+        if (!cached || cached.stamp !== stamp) {
+          cached = { stamp, meta: JSON.parse(fs.readFileSync(sidecar, 'utf8')) };
+          if (artifactSidecarCache.size >= 1024) artifactSidecarCache.clear();
+          artifactSidecarCache.set(sidecar, cached);
+        }
+        const meta = cached.meta;
+        const session = meta.session ?? meta.sessionId;
+        if (typeof session === 'string' && session) {
+          const names = entries.filter(entry => entry.isFile()).map(entry => entry.name).sort();
+          const slug = typeof meta.slug === 'string' ? meta.slug : path.basename(dir);
+          const name = names.find(name => name === `${slug}.html`) ?? names.find(name => name.endsWith('.html'))
+            ?? names.find(name => name === `${slug}.md`) ?? names.find(name => name.endsWith('.md'));
+          if (name) {
+            const artifact: ProducedArtifact = {
+              path: path.resolve(dir, name), basename: name, bucket: meta.kind === 'plan' ? 'plans' : 'artifacts',
+              ...(typeof meta.title === 'string' ? { title: meta.title } : {}),
+            };
+            index.set(session, [...(index.get(session) ?? []), artifact]);
+          }
+        }
+      } catch { /* Ignore incomplete sidecars while the renderer is writing them. */ }
+    }
+    if (depth < 3) for (const entry of entries) if (entry.isDirectory()) walk(path.join(dir, entry.name), depth + 1);
+  }
+  walk(root, 0);
+  return index;
 }
 
 // ── Repos ─────────────────────────────────────────────────────────────────────

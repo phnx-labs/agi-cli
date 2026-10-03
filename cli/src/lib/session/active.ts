@@ -481,6 +481,11 @@ export interface ActiveSession {
   importantMessage?: SessionImportantMessage;
   /** Inferred activity: working / waiting_input / idle (from the transcript tail). */
   activity?: SessionActivity;
+  activityHistogram?: import('./types.js').SessionActivityHistogram;
+  model?: string;
+  failures?: import('./types.js').SessionFailure[];
+  userTurns?: import('./types.js').SessionUserTurn[];
+  subagents?: import('./types.js').SessionSubagent[];
   /**
    * Output-token throughput (tokens/sec) over a rolling 60s window, from the
    * transcript tail. The number the Fleet shows next to a running agent;
@@ -1481,6 +1486,9 @@ function applyState(base: Omit<ActiveSession, 'status'>, state: SessionState | u
     pidAlive,
     status: life ?? statusFromActivity(state.activity),
     activity: state.activity,
+    model: state.model,
+    failures: state.failures,
+    userTurns: state.userTurns,
     awaitingReason: state.awaitingReason,
     question: state.question,
     lastEventMs: state.lastEventMs,
