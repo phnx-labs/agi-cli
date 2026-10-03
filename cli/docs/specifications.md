@@ -143,10 +143,10 @@ SSH access (§7); rendering sessions that no harness produced.
 ### 2. Terminology
 
 - **Harness** — an agent CLI whose transcripts we parse. The session-capable set
-  is `SESSION_AGENTS` (`lib/session/types.ts:14`), a **subset** of the broader
+  is `SESSION_AGENTS` (`sessions-cli/src/lib/session/types.ts:14`), a **subset** of the broader
   `AGENTS` capability registry.
 - **`SessionMeta`** — the durable indexed row, one per transcript
-  (`lib/session/types.ts:85-192`).
+  (`sessions-cli/src/lib/session/types.ts:85-192`).
 - **`ActiveSession`** — the live, in-process view of a currently-running agent
   (`lib/session/active.ts:75-207`).
 - **Preview** — the one-line "what this session is/was doing" string shown in a
@@ -164,19 +164,19 @@ SSH access (§7); rendering sessions that no harness produced.
 - **SES-1 (MUST).** The canonical session-capable harness set is
   `SESSION_AGENTS` — exactly these 12, in display order: `claude, codex,
   antigravity, opencode, openclaw, rush, hermes, grok, kimi, droid, cursor, muse`
-  (`lib/session/types.ts:17`). Adding harness discovery MUST extend this set (and
+  (`sessions-cli/src/lib/session/types.ts:17`). Adding harness discovery MUST extend this set (and
   its parser + `dispatchAgentScan` arm), not special-case a caller.
 - **SES-2 (MUST).** Each harness's transcript location + on-disk format is fixed
   and MUST be parsed from its native shape (JSONL / single-JSON / SQLite / CLI
   stdout) as tabled in [sessions.md](sessions.md#architecture) and
-  `lib/session/discover.ts` / `lib/session/parse.ts`. Roots MUST include the live
+  `lib/session/discover.ts` / `sessions-cli/src/lib/session/parse.ts`. Roots MUST include the live
   home, every version-home, and backup mirrors, deduped by realpath, **live root
   scanned first** (`lib/session/discover.ts:772-787,1092-1093`).
 - **SES-3 (MUST).** A malformed JSONL **line** MUST be skipped, never thrown —
-  for every harness (`lib/session/parse.ts:322-328,531-537,1004-1010,1151,1356-1362,1448-1454,1538-1544,1707-1713`).
+  for every harness (`sessions-cli/src/lib/session/parse.ts:322-328,531-537,1004-1010,1151,1356-1362,1448-1454,1538-1544,1707-1713`).
 - **SES-4 (MUST).** An unrecognized path MUST fail loudly
   (`Cannot detect agent type from path`), never be silently mis-indexed
-  (`lib/session/parse.ts:143-147`); an unknown agent id in the scanner is a no-op,
+  (`sessions-cli/src/lib/session/parse.ts:143-147`); an unknown agent id in the scanner is a no-op,
   not a crash (`lib/session/discover.ts:340`). A *recognized* harness that has no
   file (OpenClaw) MAY parse to `[]` — distinct from unknown.
 - **SES-5 (MUST).** Incremental re-scan of a grown transcript MUST produce an
@@ -215,7 +215,7 @@ SSH access (§7); rendering sessions that no harness produced.
 - **SES-9 (MUST).** The preview MUST be deterministic and non-LLM: live rows use
   the state-engine's latest-turn string; static rows use the persisted
   first-prompt `topic`; the picker uses pure regex/heuristic digests
-  (`lib/session/digest.ts:1-9`). No preview path may make a network/LLM call or
+  (`sessions-cli/src/lib/session/digest.ts:1-9`). No preview path may make a network/LLM call or
   block on async I/O.
 
 - **SES-9a (MUST).** `sessions preview <id-or-prefix>` MUST resolve ID-shaped
@@ -318,12 +318,12 @@ SSH access (§7); rendering sessions that no harness produced.
   (`lib/session/width.ts:61-74`).
 - **SES-11 (MUST).** `topic` extraction MUST fall through noise-only leading user
   messages to the first message that yields a real topic
-  (`lib/session/prompt.ts:72-86`; test `prompt.test.ts:23-28`).
+  (`sessions-cli/src/lib/session/prompt.ts:72-86`; test `prompt.test.ts:23-28`).
 
 #### 3.3 Metadata
 
 - **SES-12 (MUST).** `agents sessions <id> --json` and `--json` listing MUST emit
-  the `SessionMeta` shape (`lib/session/types.ts:85-192`). The field set, its
+  the `SessionMeta` shape (`sessions-cli/src/lib/session/types.ts:85-192`). The field set, its
   derivation, and whether each is always populated is the table in
   [sessions.md](sessions.md#sessionmeta-list-output) — that table is
   normative for field names.
@@ -345,7 +345,7 @@ SSH access (§7); rendering sessions that no harness produced.
   - `context` — the launch context (`terminal`|`teams`|`cloud`|`headless`)
     (`lib/session/active.ts:76`).
   - The adjacent `SessionMeta.origin` (`cli`|`routine`,
-    `lib/session/types.ts:90`) is *row provenance* (live scan vs archived routine
+    `sessions-cli/src/lib/session/types.ts:90`) is *row provenance* (live scan vs archived routine
     run), not launch location; `isTeamOrigin` (`:170`) flags a teams-spawned
     session.
   Published editor-terminal rows retain the shell PID and tab metadata, but use
@@ -379,7 +379,7 @@ SSH access (§7); rendering sessions that no harness produced.
   to `topic`); an empty incoming label MUST NOT clobber a stored non-empty one
   (`lib/session/db.ts:800-803,1098-1100`; test `db.names.test.ts:50-128`).
 - **SES-14a (MUST).** A harness-generated session title MUST pass through
-  `cleanGeneratedSessionLabel` (`lib/session/prompt.ts`) at the point the
+  `cleanGeneratedSessionLabel` (`sessions-cli/src/lib/session/prompt.ts`) at the point the
   scanner composes `SessionMeta.label`, so injected skill scaffolding
   (`Base directory for this skill: …`) collapses to `/<skill>`. Today that is
   Claude `ai-title` (`finalizeClaudeScan` in `lib/session/discover.ts`) and
@@ -389,12 +389,12 @@ SSH access (§7); rendering sessions that no harness produced.
 
   Given a Cursor `meta.json` whose `title` is the skill-basedir line, When
   `readCursorMeta` runs, Then `meta.label` is `/<skill>`.
-  Tests: `lib/session/prompt.test.ts`, `lib/session/__tests__/parse-cursor.test.ts`,
+  Tests: `sessions-cli/src/lib/session/prompt.test.ts`, `lib/session/__tests__/parse-cursor.test.ts`,
   `lib/session/__tests__/discover.test.ts`.
 - **SES-14b (MUST).** `SessionMeta.firstUserMessage` (PHNX-3621) MUST be the
   genuine, FULL first user turn — the verbatim text of the first user message
   that is NOT harness-injected scaffolding (`cleanFirstUserMessage` /
-  `firstUserMessageFromEvents`, `lib/session/prompt.ts`) — captured at scan
+  `firstUserMessageFromEvents`, `sessions-cli/src/lib/session/prompt.ts`) — captured at scan
   time. It MUST NOT be a one-line distillation (that is `topic`), an agent
   title (`label`), or the display-cleaned form (`ActiveSession.userPromptClean`).
   It is stored on the `sessions` table (`first_user_message`, `lib/session/db.ts`)
@@ -408,7 +408,7 @@ SSH access (§7); rendering sessions that no harness produced.
   / `feed watch --json` streams (backfilled from the index by
   `backfillActiveRowsFromMeta`, `lib/session/active.ts`), and is deliberately NOT
   part of the minimal `--resolve` safe-metadata set (SES-IF-2a).
-  Tests: `lib/session/prompt.test.ts`, `lib/session/discover.first-user-message.test.ts`,
+  Tests: `sessions-cli/src/lib/session/prompt.test.ts`, `lib/session/discover.first-user-message.test.ts`,
   `lib/session/__tests__/db.test.ts`, `lib/session/discover.test.ts`,
   `lib/session/remote/watch.test.ts`, `commands/sessions.serialize.test.ts`.
 - **SES-14c (MUST).** A session row's HEADLINE — `ActiveSession.title` on the
@@ -478,7 +478,7 @@ SSH access (§7); rendering sessions that no harness produced.
 - **SES-16 (SHOULD).** Cross-harness durable signals (todos/checklist, PR url,
   ticket id, created tickets) SHOULD be extracted by shared agent-agnostic
   extractors so a harness earns them by emitting the right event
-  (`lib/session/state.ts:164-317`).
+  (`sessions-cli/src/lib/session/state.ts:164-317`).
 
   Status: `[Intended]` — coverage is uneven today (the live path forces
   non-Codex→Claude, and no harness populates `costUsd`); the shortfall is
@@ -529,7 +529,7 @@ SSH access (§7); rendering sessions that no harness produced.
   signal and no file signal; modern local scanners pass a definite PID-liveness
   boolean, but `unknown` remains valid input from older remote peers. A structural
   `AskUserQuestion` / `ExitPlanMode` as last event MUST report `waiting_input` and
-  MUST NOT decay with the freshness window (`lib/session/state.ts`; test
+  MUST NOT decay with the freshness window (`sessions-cli/src/lib/session/state.ts`; test
   `state.test.ts`). A dead process whose OWNING HOST WINDOW also stopped
   republishing MUST report `crashed` rather than `closed` — see SES-18a, which
   narrows this clause.
@@ -946,7 +946,7 @@ SSH access (§7); rendering sessions that no harness produced.
   action only, and `feed answer` MUST refuse it. Time-based verdicts — the
   30-minute prose-question decay and the unverified age — MUST be recomputed
   against the current clock from cached parse output, never memoized with the
-  transcript's mtime (`lib/feed/attention.ts`; `lib/session/state.ts`;
+  transcript's mtime (`lib/feed/attention.ts`; `sessions-cli/src/lib/session/state.ts`;
   `lib/session/active.ts` `computeLiveSignals`; `lib/feed/feed.ts`
   `FEED_PUBLISH_HOOK_SCRIPT`; tests `lib/feed/attention.truth.test.ts`,
   `lib/feed/attention.test.ts`, `lib/session/active.livesignals.test.ts`).
@@ -979,8 +979,8 @@ SSH access (§7); rendering sessions that no harness produced.
   as such. `topic` and the row `title` MUST derive from the same raw turn, so
   harness scaffolding (`<local-command-stdout>`, a skill body, hook feedback)
   can never become a session's displayed name (PHNX-3939;
-  `lib/session/prompt.ts` `tidyRequest`, `lib/session/active.ts`
-  `deriveSessionRecap`; `lib/session/prompt.test.ts`,
+  `sessions-cli/src/lib/session/prompt.ts` `tidyRequest`, `lib/session/active.ts`
+  `deriveSessionRecap`; `sessions-cli/src/lib/session/prompt.test.ts`,
   `lib/session/active.test.ts`).
 - **SES-54 (MUST).** Each row MUST carry a **`timeline`**: narration-anchored
   steps, newest last, at most 8, plus an `earlier` counter for everything older
@@ -995,8 +995,8 @@ SSH access (§7); rendering sessions that no harness produced.
   `state: 'partial'` — never an empty `ready` timeline presented as "nothing
   happened". `now` — the label of the call RUNNING — MUST appear only on the
   `live` step; a finished step carrying one makes a consumer render a now-line on
-  completed work (PHNX-3939; `lib/session/timeline.ts`;
-  `lib/session/timeline.test.ts`).
+  completed work (PHNX-3939; `sessions-cli/src/lib/session/timeline.ts`;
+  `sessions-cli/src/lib/session/timeline.test.ts`).
 - **SES-54a (MUST).** Every projected string a row ships — a step's `text`, its
   `now`, its `marks` — MUST be scrubbed at the projection point, which is the
   single place folded transcript text leaves the fold. Secrets MUST be redacted
@@ -1008,9 +1008,9 @@ SSH access (§7); rendering sessions that no harness produced.
   the usage-sync SSH exchange — so a label built by falling back to raw command
   text (a Bash call with no `description`) must never carry a credential there. `sanitizeEvents` does NOT run on the fold's
   parse path, so no consumer may assume the events were pre-scrubbed
-  (PHNX-3939; `lib/session/timeline.ts` `projectTimeline`,
+  (PHNX-3939; `sessions-cli/src/lib/session/timeline.ts` `projectTimeline`,
   `commands/sessions-trace.ts` `renderSessionSteps`;
-  `lib/session/timeline.test.ts`, `commands/sessions-trace.test.ts`).
+  `sessions-cli/src/lib/session/timeline.test.ts`, `commands/sessions-trace.test.ts`).
 - **SES-55 (MUST).** The timeline MUST be computed ONLY by the daemon's
   reader-gated tick, bounded per tick, and cached in the stamp-validated
   `session_timelines` table; the display path MUST only read that cache. For a
@@ -1044,7 +1044,7 @@ SSH access (§7); rendering sessions that no harness produced.
   `source: 'tools'` means the whole projection was derived from tool arguments
   because the harness keeps no ledger at all. A `created` claim, once made,
   survives a later `modified` on the same path
-  (`lib/session/timeline.ts` `projectSessionFiles`).
+  (`sessions-cli/src/lib/session/timeline.ts` `projectSessionFiles`).
 - **SES-43 (MUST).** The default stream MUST hold one long-lived local subscription
   and one long-lived SSH subscription per dialable compute device. `--local` MUST
   suppress peer subscriptions. Neither path may poll transcript history or invoke
@@ -1161,7 +1161,7 @@ SSH access (§7); rendering sessions that no harness produced.
   leave an explicit terminal row when additional calls are omitted.
   `--no-redact` MUST NOT disable index redaction. Outcomes and exit/status/error
   codes MUST come from structured harness fields, never free-text inference
-  (`lib/session/tool-calls.ts:6-16,69-96,177-305,319-408,486-526`).
+  (`sessions-cli/src/lib/session/tool-calls.ts:6-16,69-96,177-305,319-408,486-526`).
 - **SES-32 (MUST).** A changed Claude/Codex transcript MUST derive tool calls in
   the same resumable reducer and preserve pending native call identity across an
   append. Adding accumulator state MUST bump the continuation version; a prior
@@ -1229,7 +1229,7 @@ SSH access (§7); rendering sessions that no harness produced.
   byte offset) plus the collector snapshot (`parser_state`), and a later scan of
   the same append-only stream MUST fold only events at or after that count and
   persist with `mode: 'append'` (`planEventToolResume` in `lib/session/tool-store.ts`,
-  `scanEventToolCalls` in `lib/session/tool-calls.ts`). The resume point MUST be
+  `scanEventToolCalls` in `sessions-cli/src/lib/session/tool-calls.ts`). The resume point MUST be
   refused — forcing one full replace from event 0 — when the extractor version
   differs, no resume point is recorded, the ledger's source path does not match,
   the tool source shrank below the recorded size, or more events were folded than
@@ -1238,7 +1238,7 @@ SSH access (§7); rendering sessions that no harness produced.
   warm-tick resume rides the content-scan ledger's byte offset (SES-42), so they
   record no event-count resume point here. This closes the O(session)-per-tick
   synchronous cost that blocked the daemon event loop and starved browser IPC
-  (PHNX-3411) (`lib/session/db.ts`; `lib/session/tool-store.ts`; `lib/session/tool-calls.ts`).
+  (PHNX-3411) (`lib/session/db.ts`; `lib/session/tool-store.ts`; `sessions-cli/src/lib/session/tool-calls.ts`).
 - **SES-35 (MUST).** Fleet tool search MUST cap each peer's stdout at 16 MiB,
   query at most six peers concurrently, and subtract the exact encoded local
   envelope plus 64 KiB of coordinator headroom from the 15 MiB aggregate receive
@@ -1285,7 +1285,7 @@ SSH access (§7); rendering sessions that no harness produced.
   `tool_program_occurrences` and MUST NOT open or reparse transcripts. The
   implementation MUST use relational SQLite rows and literal FTS5 only; it MUST
   NOT use embeddings, a vector database, semantic search, or model calls
-  (`lib/session/shell-programs.ts`; `lib/session/tool-store.ts`;
+  (`sessions-cli/src/lib/session/shell-programs.ts`; `lib/session/tool-store.ts`;
   `lib/session/tool-index.ts`; `commands/sessions.ts`).
 - **SES-38 (MUST).** `sessions focus` MUST use the session browser's canonical
   candidate/filter pipeline for selector-driven focus. A unique session id or
@@ -1468,7 +1468,7 @@ The command surface (bare `sessions [query]`, `preview`, `tail`, `resume`, `deta
   per-record `hash`/`size` are always over **plaintext** for byte-exact dedup;
   bundle files are written `0600` (`lib/session/bundle.ts:28-29,110-113,188-227`).
 - **SES-IF-4 (MUST).** `SessionEvent.type` is a **closed union** of the 9 documented
-  types (`lib/session/types.ts:17-41`); a parser MUST NOT introduce a tenth.
+  types (`sessions-cli/src/lib/session/types.ts:17-41`); a parser MUST NOT introduce a tenth.
 - **SES-IF-4a (MUST).** Broad `sessions --include tools --json` MUST emit the
   versioned tool-search envelope, while ordinary list JSON remains
   `SessionMeta[]` and exact-session JSON remains `{ session, events }`. Repeated
@@ -1513,7 +1513,7 @@ The command surface (bare `sessions [query]`, `preview`, `tail`, `resume`, `deta
   MUST include friction, corrections, automatable repeats, harness split, and ranked
   evidence-backed actions, and MUST NOT emit raw transcript text or full local paths.
   `--agent` MUST be repeatable. `--narrative` MAY call a coach only with aggregate
-  report data (`commands/insights.ts`; `lib/session/insights.ts`).
+  report data (`commands/insights.ts`; `sessions-cli/src/lib/session/insights.ts`).
 - **SES-IF-4d (MUST).** `sessions trace` and its top-level alias `trace` MUST invoke
   the same implementation (`commands/sessions-trace.ts` `configureTraceCommand`), and
   `--json` MUST emit its own versioned envelope
@@ -1533,12 +1533,12 @@ The command surface (bare `sessions [query]`, `preview`, `tail`, `resume`, `deta
   compact text otherwise; the HTML MUST be self-contained (no external asset) and
   redacted by default. One resolved selector renders the single-session trajectory;
   exactly two render a **compare** (`diffTrajectories()`,
-  `lib/session/trajectory-compare.ts`) — the two sessions' tool-step sequences
+  `sessions-cli/src/lib/session/trajectory-compare.ts`) — the two sessions' tool-step sequences
   aligned by tool name, the first divergence point, the steps each session ran with
   no counterpart in the other, and a per-session summary, in all three renderings.
   Three or more resolved selectors, or `--tree`, MUST fail loud, never silently trace
-  or compare a subset (`commands/sessions-trace.ts`; `lib/session/trajectory.ts`;
-  `lib/session/trajectory-compare.ts`). Lineage (a parent + its team, `--tree`) is not
+  or compare a subset (`commands/sessions-trace.ts`; `sessions-cli/src/lib/session/trajectory.ts`;
+  `sessions-cli/src/lib/session/trajectory-compare.ts`). Lineage (a parent + its team, `--tree`) is not
   yet implemented.
   Status: `[Intended]` for lineage — see SES-GAP-11.
 - **SES-IF-4e (MUST).** `sessions trace <id> --steps` MUST print the narration-anchored
@@ -1640,7 +1640,7 @@ normative — a change that widens/narrows a cell is a spec change.
   no live preview, no tag, and an empty `topic` renders a **blank** cell —
   untested. Directly contradicts "always show a preview" (SES-8).
 - **SES-GAP-2.** Metadata coverage is uneven. PR/ticket extractors are agent-agnostic
-  (`lib/session/state.ts` ~`:332-358`) but the live path forces non-Codex→Claude
+  (`sessions-cli/src/lib/session/state.ts` ~`:332-358`) but the live path forces non-Codex→Claude
   (`lib/session/active.ts` ~`:541-546`), so signals are effectively claude/codex
   only. And **`costUsd` is populated by no harness in the session pipeline** — it
   is an unset schema slot (`lib/session/db.ts` writes `meta.costUsd ?? null`;
@@ -1649,7 +1649,7 @@ normative — a change that widens/narrows a cell is a spec change.
   contract (SES-16), this is the break.
 - **SES-GAP-3.** No `model` and no `repo`/git-remote field is persisted on
   `SessionMeta` — only transient `SessionEvent.model` and `gitBranch`/`worktreeSlug`
-  (`lib/session/types.ts:32,105,135`). Surfacing either needs a schema addition.
+  (`sessions-cli/src/lib/session/types.ts:32,105,135`). Surfacing either needs a schema addition.
 - **SES-GAP-4.** `opencode` has a reserved `SYNC_AGENTS` slot but SQLite→JSONL export
   is **not implemented** (`lib/session/sync/agents.ts:130-138`) — opencode
   sessions are not included in `agents sessions export` today.
@@ -1665,7 +1665,7 @@ normative — a change that widens/narrows a cell is a spec change.
     transcript for a `[host/<peer>]` placeholder. The general seam is still open.
 - **SES-GAP-6.** Whole-**file** JSON parse failure is inconsistent: Gemini throws
   (and `parseSession` has no outer catch), while Hermes/Antigravity degrade to
-  `[]` (`lib/session/parse.ts:143-169,691-696`). Standardize on degrade-to-empty.
+  `[]` (`sessions-cli/src/lib/session/parse.ts:143-169,691-696`). Standardize on degrade-to-empty.
 - **SES-GAP-7 (resolved).** [sessions.md](sessions.md) once hardcoded schema
   version 13 while the code had moved on; it now cites the `SCHEMA_VERSION`
   constant directly ([sessions.md](sessions.md):1184), and
@@ -3884,7 +3884,7 @@ not the watchdog's.
   `lib/watchdog/read.ts:19-21`; the gate `classifyTerminal` in `lib/watchdog/watchdog.ts:84`).
   Idle age is derived from the transcript's last-write time.
 - **WD-5 (MUST).** A session whose inferred activity is `working` MUST NOT be nudged
-  (`lib/session/state.ts`).
+  (`sessions-cli/src/lib/session/state.ts`).
 - **WD-6 (MUST NOT).** The watchdog MUST NOT fight the feed: a session in `waiting_input`
   (asked a question / permission prompt) is the feed's to surface; the agent decider MUST
   judge it (drive-forward vs leave-for-human) from its task + tail — never blind-nudge it
