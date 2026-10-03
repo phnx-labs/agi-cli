@@ -654,7 +654,7 @@ Payoff: 27 single-verb groups become verbs on the noun that owns them, and `agen
 | `@phnx-labs/browser` | `lib/browser/` minus profiles, resolve-target, remote-control, caller-identity | `--device` routing, the profile registry, the consent gate, `type --secret`, session linkage, daemon service registration |
 | `artifacts-cli` (existing) | `lib/share/`, `commands/share.ts`, `artifacts-setup.ts` | `agents artifacts` becomes a thin shim or goes away; the `artifacts` CLI already has `share` |
 | `linear-cli` (existing) | `lib/project-*`, `lib/linear-*`, `commands/projects.ts` | `agents run` reads the ticket id from the environment, nothing else |
-| evals capture client | `lib/traces/`, `commands/traces.ts`, `lib/session/trajectory-html.ts` | the daemon runs the sync and upload; no top-level noun remains. `sessions trace` calls the renderer. This is the capture seam for evals and needs a home with its own tests |
+| evals capture client | `lib/traces/`, `commands/traces.ts`, `sessions-cli/src/lib/session/trajectory-html.ts` | the daemon runs the sync and upload; no top-level noun remains. `sessions trace` calls the renderer. This is the capture seam for evals and needs a home with its own tests |
 | terminal engine | `lib/tmux/`, `lib/terminal/`, `pty-server.ts`, `pty-client.ts` | `sessions inject` and `resume` import it; `pty` and `tmux` stop being top-level nouns |
 | `@phnx-labs/computer` | `lib/computer/` minus the model loop | `--device` tunnel, permissions groups, feed audit events; delete `computer run --task` and the DES/VNC client unless it gets a use |
 

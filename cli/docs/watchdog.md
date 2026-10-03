@@ -35,7 +35,7 @@ ages, cwd, latest preview, and decision reason. Healthy/non-actionable inspectio
 summarized; pass `--verbose` to render every row or `--json` for the complete tick object.
 
 1. **Detect idle.** Enumerate active sessions, classify each by transcript freshness and
-   inferred activity (`lib/watchdog/read.ts`, `lib/session/state.ts`). A candidate is a
+   inferred activity (`lib/watchdog/read.ts`, `sessions-cli/src/lib/session/state.ts`). A candidate is a
    session that is stalled (idle past `WATCHDOG_STALL_MS`, before `WATCHDOG_DORMANT_MS`,
    past its cooldown) — not `working`, not freshly `waiting` for the feed. Prioritize the
    ones active most recently: a warm session (last activity ~minutes ago) is the one worth
@@ -188,7 +188,7 @@ persisted result and never executes a pass.
 | `lib/watchdog/rotate.ts` | In-place rotate: limit detection, exit-sequence table, state machine, health gate. |
 | `lib/watchdog/log.ts`, `history.ts` | Persist, parse, and safely select the Watchdog audit history. |
 | `commands/watchdog.ts` | `agents watchdog` — timestamped attention view, `--verbose`, `on`/`off`/`status`/`history`/`policy`/`--nudge`/`--watch`. |
-| `lib/session/state.ts`, `active.ts` | Status inference (`working`/`waiting_input`/`idle`) the watchdog reads. |
+| `sessions-cli/src/lib/session/state.ts`, `lib/session/active.ts` | Status inference (`working`/`waiting_input`/`idle`) the watchdog reads. |
 | `lib/terminal/resolve.ts`, `inject.ts` | Resolve the exact split and deliver the nudge. |
 
 ## Roadmap

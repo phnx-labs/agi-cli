@@ -761,7 +761,7 @@ want isolated, repo-URL-driven runs.
 Streaming raw SSH stdout ties progress to the live pipe: drop the connection and
 you lose the run's visibility. Instead, lean on the fact that **every agent already
 writes a JSONL transcript to disk** (Claude/Codex/Gemini/Droid/…), and agents-cli
-**already parses those** (`src/lib/session/parse.ts`: `parseClaude`, `parseCodex`,
+**already parses those** (`sessions-cli/src/lib/session/parse.ts`: `parseClaude`, `parseCodex`,
 `parseGemini`, … → `SessionEvent[]`; locations via
 `session/discover.ts:getAgentSessionDirs`).
 
@@ -1007,7 +1007,7 @@ just relocates the storm):
 | SSH transport | `src/lib/browser/drivers/ssh.ts` (`shellQuote` exported; `runSSHCommand`/tunnels private — extract a shared ssh-exec helper) |
 | Host registry storage | `src/lib/state.ts` (`readMeta`/`updateMeta`, atomic+locked) + `Meta.hosts` (new field) |
 | Headless argv per harness | `src/lib/exec.ts` (`buildExecCommand`) + `agents run` (`src/commands/exec.ts`) |
-| Transcript parse → events | `src/lib/session/parse.ts` (`parseClaude`/`parseCodex`/…) |
+| Transcript parse → events | `sessions-cli/src/lib/session/parse.ts` (`parseClaude`/`parseCodex`/…) |
 | Incremental offset read | `src/lib/session/active.ts:200-248` |
 | Per-agent transcript dirs | `src/lib/session/discover.ts:getAgentSessionDirs` |
 | Cross-machine transcript transport | `src/commands/sessions-migrate.ts` (direct SSH, shipped) — the CRDT G-Set / R2 background-sync substrate this row originally named has been removed |

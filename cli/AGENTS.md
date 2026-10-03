@@ -284,7 +284,7 @@ optional fields the AGI EXT sidebar renders directly:
 
 - **`request`** — the session's operative ask: the **latest** genuine user turn,
   tidied but **never rewritten**. `tidyRequest`
-  ([`src/lib/session/prompt.ts`](src/lib/session/prompt.ts)) joins the user's
+  ([`sessions-cli/src/lib/session/prompt.ts`](https://github.com/phnx-labs/sessions-cli/blob/main/src/lib/session/prompt.ts)) joins the user's
   prose verbatim and pulls everything that is not a sentence out beside it —
   screenshot and `host:/path` clip references and `@dir` mentions into
   `attachments`, shell echo and dispatch banners into `pastedLines`, a
@@ -299,7 +299,7 @@ optional fields the AGI EXT sidebar renders directly:
   always the harness's own words; only a step where tools ran with nothing said
   is `derived`, and `now` — the label of the call RUNNING — rides only the `live`
   step. Pure fold in
-  [`src/lib/session/timeline.ts`](src/lib/session/timeline.ts) — **no model**.
+  [`sessions-cli/src/lib/session/timeline.ts`](https://github.com/phnx-labs/sessions-cli/blob/main/src/lib/session/timeline.ts) — **no model**.
 - **`files`** — what the session created / modified / deleted, from the harness's
   own ledger (Codex `FileChange`, OpenCode `patch`, Claude `file-history-delta`)
   where it keeps one, else from Edit/Write calls; `source` says which.
@@ -317,7 +317,7 @@ newline-terminated records are folded, so the 973,963-byte record one live
 transcript on this fleet carries can never be folded half-written. **Folding the
 appended tail onto the prior state equals folding the whole file** — pinned
 against the real transcripts in
-[`timeline.test.ts`](src/lib/session/timeline.test.ts).
+[`timeline.test.ts`](https://github.com/phnx-labs/sessions-cli/blob/main/src/lib/session/timeline.test.ts).
 
 **The tick's byte budget is debited by bytes READ, and a session that does not
 fit says so.** A non-resumable harness (everything but Claude and Codex) has no
@@ -580,7 +580,7 @@ only clusters `outcome === 'error'` tool calls, so a silent stall never reached
 `failurePatterns` — it was only a `needsAttention` friction input.
 `computeBehavioralPatterns` (`src/lib/traces/insights.ts`) promotes the
 per-session `silent stall: <bucket>` friction that `computeInsightFacets`
-(`src/lib/session/insights.ts`) already computes into cross-session
+(`sessions-cli/src/lib/session/insights.ts`) already computes into cross-session
 `FailurePattern`s with the `behavioral` cause (signature `tool: 'silent-stall'`,
 `key: <bucket>`), estimating `wastedMs` from the bucket midpoint bounded by the
 same 30-min `MAX_GAP_ATTRIBUTION_MS` cap. `buildIndexShard` passes them to
@@ -881,7 +881,7 @@ Source of truth: `buildExecEnv` / `emitResolvedSessionId` in
 [`src/lib/session/active.ts`](src/lib/session/active.ts),
 `archiveRoutineTranscripts` in [`src/lib/daemon/runner.ts`](src/lib/daemon/runner.ts), and
 `decorateRoutineSession` in [`src/lib/session/discover.ts`](src/lib/session/discover.ts).
-Enforced by [`src/lib/session/team-filter.test.ts`](src/lib/session/team-filter.test.ts)
+Enforced by [`sessions-cli/src/lib/session/team-filter.test.ts`](https://github.com/phnx-labs/sessions-cli/blob/main/src/lib/session/team-filter.test.ts)
 (`--teams includes team sessions with teamOrigin populated`),
 [`src/lib/daemon/runner.test.ts`](src/lib/daemon/runner.test.ts) (routine transcript archival), and
 [`src/commands/sessions.test.ts`](src/commands/sessions.test.ts) +

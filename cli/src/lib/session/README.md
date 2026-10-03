@@ -23,15 +23,22 @@ rework does not silently regress it.
 All file:line anchors below are against the tree this doc was committed with; treat
 them as starting points, not guarantees.
 
+The pure reader (`parse.ts`, `state.ts`, `render.ts`, `types.ts`, `prompt.ts`,
+`highlights.ts`, `digest.ts`, `tail.ts`, and the rest of the parse→render pipeline)
+is imported from `@phnx-labs/sessions-cli/reader` (PHNX-4118). Anchors into those
+files refer to `src/lib/session/` in the
+[sessions-cli](https://github.com/phnx-labs/sessions-cli) repo, where they live with
+their tests; every other file named here is in this directory.
+
 ## Pipeline
 
 ```
 discover.ts   scan Claude/Codex/Gemini/OpenCode/OpenClaw roots  ->  raw transcript files
-parse.ts      parse a transcript into SessionEvent[]            ->  normalized events
-state.ts      derive durable signals (activity, awaiting, todos) ->  SessionState
+parse.ts      parse a transcript into SessionEvent[]            ->  normalized events   (sessions-cli)
+state.ts      derive durable signals (activity, awaiting, todos) ->  SessionState        (sessions-cli)
 active.ts     probe live processes (ps / tmux / teams / cloud)  ->  ActiveSession[]
 db.ts         SQLite index + FTS over SessionMeta               ->  SessionRow
-render.ts     summary + stats for `agents sessions <id>`        ->  text
+render.ts     summary + stats for `agents sessions <id>`        ->  text                (sessions-cli)
 ```
 
 `types.ts` is the source of truth for the shapes every stage speaks. Cross-machine
