@@ -530,14 +530,18 @@ export async function markProjectPrReady(
   sha: string | undefined,
   gh: GhExec = ghExec,
 ): Promise<ProjectPrReadyResult> {
-  let head: { sha: string; draft: boolean; nodeId: string };
+  let head: { sha: string; draft: boolean; nodeId: string; state: string; merged: boolean };
   try {
     head = JSON.parse((await gh([
-      'api', `repos/${repo}/pulls/${number}`, '--jq', '{sha: .head.sha, draft: (.draft // false), nodeId: .node_id}',
-    ])).trim()) as { sha: string; draft: boolean; nodeId: string };
+      'api', `repos/${repo}/pulls/${number}`, '--jq',
+      '{sha: .head.sha, draft: (.draft // false), nodeId: .node_id, state: .state, merged: (.merged // false)}',
+    ])).trim()) as { sha: string; draft: boolean; nodeId: string; state: string; merged: boolean };
     if (sha) assertHeadIs(repo, number, head.sha, sha);
   } catch (err) {
     return { repo, number, ready: false, sha: null, message: ghFailure(err) };
+  }
+  if (head.state !== 'open') {
+    return { repo, number, ready: false, sha: head.sha, message: head.merged ? 'Already merged' : 'The pull request is closed' };
   }
   if (!head.draft) return { repo, number, ready: true, sha: head.sha, message: 'Already ready for review' };
   try {

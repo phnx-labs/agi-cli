@@ -144,7 +144,7 @@ const HEAD = 'abc1234def5678abc1234def5678abc1234def56';
 describe('markProjectPrReady', () => {
   it('marks a draft ready with one mutation on the node id the REST read returned', async () => {
     const { gh, asked } = recordedGh({
-      'repos/acme/mono/pulls/7': JSON.stringify({ sha: HEAD, draft: true, nodeId: 'PR_kw7' }),
+      'repos/acme/mono/pulls/7': JSON.stringify({ sha: HEAD, draft: true, nodeId: 'PR_kw7', state: 'open', merged: false }),
       graphql: 'false\n',
     });
     const calls: string[][] = [];
@@ -157,16 +157,25 @@ describe('markProjectPrReady', () => {
 
   it('a PR that is already ready succeeds without a write', async () => {
     const { gh, asked } = recordedGh({
-      'repos/acme/mono/pulls/7': JSON.stringify({ sha: HEAD, draft: false, nodeId: 'PR_kw7' }),
+      'repos/acme/mono/pulls/7': JSON.stringify({ sha: HEAD, draft: false, nodeId: 'PR_kw7', state: 'open', merged: false }),
     });
     const result = await markProjectPrReady('acme/mono', 7, undefined, gh);
     expect(result).toMatchObject({ ready: true, message: 'Already ready for review' });
     expect(asked).toEqual(['repos/acme/mono/pulls/7']);
   });
 
+  it('refuses a merged or closed PR instead of reporting it ready, without a write', async () => {
+    const { gh, asked } = recordedGh({
+      'repos/acme/mono/pulls/7': JSON.stringify({ sha: HEAD, draft: false, nodeId: 'PR_kw7', state: 'closed', merged: true }),
+    });
+    const result = await markProjectPrReady('acme/mono', 7, undefined, gh);
+    expect(result).toMatchObject({ ready: false, message: 'Already merged' });
+    expect(asked).toEqual(['repos/acme/mono/pulls/7']);
+  });
+
   it('refuses a head that moved since the caller looked, before any write', async () => {
     const { gh, asked } = recordedGh({
-      'repos/acme/mono/pulls/7': JSON.stringify({ sha: 'fff0000' + HEAD.slice(7), draft: true, nodeId: 'PR_kw7' }),
+      'repos/acme/mono/pulls/7': JSON.stringify({ sha: 'fff0000' + HEAD.slice(7), draft: true, nodeId: 'PR_kw7', state: 'open', merged: false }),
     });
     const result = await markProjectPrReady('acme/mono', 7, 'abc1234', gh);
     expect(result).toMatchObject({ ready: false, sha: null });

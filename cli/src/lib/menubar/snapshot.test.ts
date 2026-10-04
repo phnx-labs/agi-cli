@@ -43,7 +43,7 @@ describe('menubar snapshot', () => {
     expect(readLastWatchdogTick(dir)).toBeNull();
   });
 
-  it('menuPreferences carries the pin, tab, and milestone keys: defaults when unset, stored lists once set', async () => {
+  it('list preferences ride menuListPreferences; menuPreferences stays scalar so a shipped menu still decodes it', async () => {
     // state.ts captures HOME at import time, so the config read needs fresh modules.
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'menubar-prefs-home-'));
     dirs.push(home);
@@ -52,22 +52,26 @@ describe('menubar snapshot', () => {
     vi.resetModules();
     try {
       const { setConfigValue } = await import('../device-config.js');
-      const { buildMenuPreferences } = await import('./snapshot.js');
-      expect(buildMenuPreferences()).toMatchObject({
+      const { buildMenuPreferences, buildMenuListPreferences } = await import('./snapshot.js');
+      const scalarOnly = (prefs: Record<string, unknown>) =>
+        Object.values(prefs).every((v) => ['string', 'number', 'boolean'].includes(typeof v));
+      expect(scalarOnly(buildMenuPreferences())).toBe(true);
+      expect(buildMenuPreferences()).toMatchObject({ 'menubar.menu.groupTicketsByMilestone': false });
+      expect(buildMenuListPreferences()).toEqual({
         'menubar.menu.pinnedProjects': [],
         'menubar.menu.tabOrder': ['home', 'sessions', 'inbox', 'projects'],
         'menubar.menu.hiddenTabs': [],
-        'menubar.menu.groupTicketsByMilestone': false,
       });
       setConfigValue('menubar.menu.pinnedProjects', ['Rush']);
       setConfigValue('menubar.menu.tabOrder', ['home', 'projects', 'sessions', 'inbox']);
       setConfigValue('menubar.menu.hiddenTabs', ['inbox']);
       setConfigValue('menubar.menu.groupTicketsByMilestone', true);
-      expect(buildMenuPreferences()).toMatchObject({
+      expect(scalarOnly(buildMenuPreferences())).toBe(true);
+      expect(buildMenuPreferences()).toMatchObject({ 'menubar.menu.groupTicketsByMilestone': true });
+      expect(buildMenuListPreferences()).toEqual({
         'menubar.menu.pinnedProjects': ['Rush'],
         'menubar.menu.tabOrder': ['home', 'projects', 'sessions', 'inbox'],
         'menubar.menu.hiddenTabs': ['inbox'],
-        'menubar.menu.groupTicketsByMilestone': true,
       });
     } finally {
       if (prevHome === undefined) delete process.env.HOME;
