@@ -34,6 +34,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ghExec, canonicalizeRepo, projectRepoSlugs, type GhExec } from './pr-mergeable.js';
 import { isRateLimitError, prHead, rollupForSha, type RollupItem } from './rest.js';
+import { fetchViewerProfile } from './viewer.js';
 import { repoPathClaims, type ProjectDef } from '../projects.js';
 import { getCacheDir } from '../state.js';
 import { atomicWriteFileSync } from '../fs-atomic.js';
@@ -681,11 +682,7 @@ async function mapBounded<T, R>(items: readonly T[], limit: number, fn: (item: T
 
 /** The authenticated login, from a REST read gh caches for a day. */
 export async function fetchViewer(gh: GhExec = ghExec): Promise<string | null> {
-  try {
-    return (await gh(['api', 'user', '--cache', '24h', '--jq', '.login'])).trim() || null;
-  } catch {
-    return null;
-  }
+  return (await fetchViewerProfile(gh))?.login ?? null;
 }
 
 /**

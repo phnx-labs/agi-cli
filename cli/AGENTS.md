@@ -1407,6 +1407,17 @@ only, never overriding an already-set value, never the `.dev` bundle, and never
 re-run after the sentinel is written (so a later `unset` cannot resurrect a legacy
 value).
 
+The snapshot's top-level `me` names who is signed in on this machine, for the menu's
+avatar: `{name, email, github, avatarUrl, avatarSource}`, or `null` when nobody is
+known (`resolveMenubarMe`, `menubar/snapshot.ts`). `avatarUrl` is the Phoenix ID
+picture from the `agents auth login` session (https only), else the GitHub avatar,
+else `null` so the menu draws initials; `avatarSource` says which. GitHub facts come
+from `cachedViewer` ([`src/lib/github/viewer.ts`](src/lib/github/viewer.ts)), a
+`gh api user --cache 24h` read recorded at `~/.agents/.cache/github-viewer.json`: the
+snapshot refreshes it at most daily (hourly after a failure), capped at 5 s, so the
+common poll spawns no `gh` and a slow one stays inside the menu's 30 s deadline. The
+record holds no email; `email` exists only in the local snapshot JSON.
+
 `devices.<name>.formFactor` (stored as `formFactor`, shared device-scope) is a
 factual hardware fact — `laptop`/`desktop`/`server`/`unknown` — the menu bar renders
 as an icon. Set it explicitly per device (`agents devices config <name> formFactor
