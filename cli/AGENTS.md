@@ -697,8 +697,12 @@ account. It runs the RFC 8628 **device flow**: `startDeviceAuthorization()` →
 `POST /api/v1/auth/device/token` until approval (`src/lib/identity/index.ts`).
 
 On approval the CLI **stores the opaque Phoenix bearer verbatim** — there is no exchange
-step. `writeSession({ access_token, email, userId })` writes `phoenix-session.json` (mode
-`0600`) in the runtime state dir (`src/lib/identity/client.ts`). Every backend call reuses
+step. `writeSession({ access_token, email, userId, name?, avatarUrl? })` writes
+`phoenix-session.json` in the runtime state dir (`src/lib/identity/client.ts`) as a
+temp file renamed over the old one, then `chmod 0600`, so a crash never leaves a
+truncated bearer and a pre-existing looser file is tightened.
+`refreshSessionProfile` (run by `whoami`) merges `/auth/me`'s name and picture into
+the file only if it still holds the same token and user after the fetch. Every backend call reuses
 it as `Authorization: Bearer <access_token>` against Phoenix ID; `agents auth whoami`
 resolves it at `GET /api/v1/auth/me`; `agents auth logout` deletes the file (local-only —
 signs out nothing else).
@@ -1410,8 +1414,8 @@ value).
 The snapshot's top-level `me` names who is signed in on this machine, for the menu's
 avatar: `{name, email, github, avatarUrl, avatarSource}`, or `null` when nobody is
 known (`resolveMenubarMe`, `menubar/snapshot.ts`). It is one person, never a blend of
-two: with a Phoenix ID session the session supplies `name` (saved by `agents auth
-whoami` via `refreshSessionProfile`), `email` and the https picture, and the `gh`
+two: with a Phoenix ID session the session supplies `name` (saved at `agents auth
+login` and refreshed by `agents auth whoami`), `email` and the https picture, and the `gh`
 account contributes `github` (and a fallback name and picture) only when its public
 profile email equals the session email, so a shared box whose `gh` is someone else's
 lends no face. Without a session the `gh` account supplies everything but `email`.

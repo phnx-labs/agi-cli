@@ -18,6 +18,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
+import { atomicWriteFileSync } from '../fs-atomic.js';
 import { getRuntimeStateDir } from '../state.js';
 
 /**
@@ -62,10 +63,16 @@ export function readSession(): PhoenixSession | null {
   }
 }
 
+/**
+ * Replace the session file whole: a temp file renamed over it, so a crash
+ * mid-write never leaves a truncated bearer, and an explicit 0600 because
+ * `writeFile`'s `mode` only applies to a file it creates.
+ */
 export function writeSession(session: PhoenixSession): void {
   const file = sessionFilePath();
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(session, null, 2), { mode: 0o600 });
+  atomicWriteFileSync(file, JSON.stringify(session, null, 2), { encoding: 'utf-8', mode: 0o600 });
+  fs.chmodSync(file, 0o600);
 }
 
 export function clearSession(): void {
