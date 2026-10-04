@@ -332,13 +332,32 @@ describe('resolveSessionsBin', () => {
         _resetSessionsClientForTest();
       });
 
-      it('skips the shim and resolves the standalone further down PATH', () => {
+      it('uses the installed sessions-cli dependency and never the shim', () => {
+        process.env.PATH = shimsDir;
+        delete process.env.SESSIONS_BIN;
+        _resetSessionsClientForTest();
+        const bin = resolveSessionsBin();
+        expect(bin.includes(`${path.sep}@phnx-labs${path.sep}sessions-cli${path.sep}`)).toBe(true);
+        expect(fs.existsSync(bin)).toBe(true);
+        expect(bin.startsWith(fs.realpathSync(shimsDir))).toBe(false);
+      });
+
+      it('a non-empty SESSIONS_BIN wins over the dependency and the shim', () => {
+        process.env.SESSIONS_BIN = path.join(realDir, 'sessions');
+        process.env.PATH = shimsDir;
+        _resetSessionsClientForTest();
+        expect(resolveSessionsBin()).toBe(path.join(realDir, 'sessions'));
+      });
+
+      it('an empty SESSIONS_BIN skips the dependency, then skips the shim for a PATH standalone', () => {
+        process.env.SESSIONS_BIN = '';
         process.env.PATH = [shimsDir, realDir].join(path.delimiter);
         _resetSessionsClientForTest();
         expect(resolveSessionsBin()).toBe(fs.realpathSync(path.join(realDir, 'sessions')));
       });
 
-      it('reports SESSIONS_BIN_MISSING when the shim is the only sessions on PATH', () => {
+      it('reports SESSIONS_BIN_MISSING when SESSIONS_BIN is empty and the shim is the only sessions on PATH', () => {
+        process.env.SESSIONS_BIN = '';
         process.env.PATH = shimsDir;
         _resetSessionsClientForTest();
         try {

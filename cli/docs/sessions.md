@@ -109,16 +109,19 @@ running what, and the read follows it. A session that is readable locally never
 takes a needless hop, and an owner that cannot be reached is an error rather than an
 empty local card.
 
-When the standalone `sessions` CLI (`@phnx-labs/sessions-cli`) is installed, a
-read query — list, search, or id lookup — takes a fast path that execs it directly
-instead of loading the in-repo session module. Two flag families on that path are
-version-gated so an older standalone can never mis-read them as search tokens:
+A read query — list, search, or id lookup — execs the `sessions` binary from the
+`@phnx-labs/sessions-cli` dependency this CLI installs. No second global install
+is required. A non-empty `$SESSIONS_BIN` pins a different binary. An empty
+`$SESSIONS_BIN` ignores the dependency and uses a `sessions` on `PATH`. With
+none of those, the query stays on the in-repo engine. Two flag families on that
+path are version-gated so an older standalone can never mis-read them as search
+tokens:
 the 0.2.0 metadata filters/sort (`--project`/`--since`/`--until`/`--sort`, the
 `@version` suffix, the harness shorthands) forward only when the installed
 `sessions` is ≥ 0.2.0, and the point-to-one remote read `agents sessions <query>
 --host <target>` (SSH to ONE box, run `sessions … --local`, stream JSON back)
 forwards only when it is ≥ 0.2.1 — its own, higher floor. Below a floor, or with no
-standalone installed at all, that query stays on the in-repo engine (which
+standalone resolved at all, that query stays on the in-repo engine (which
 implements the same filters and resolves `--device` against the fleet); nothing
 mis-routes or crashes. `--host` targets one box directly.
 
@@ -138,7 +141,7 @@ fan-out** so it still succeeds — a capability gate keyed on that one signal, a
 migration bridge until the fleet is uniformly on 0.2.1, after which the in-repo read
 fan-out can be removed (a PHNX-4012 follow-up). Everything else (e.g. 255
 unreachable) is a real error and propagates. Below the 0.2.1 host floor, or with no
-standalone installed, a `--device` read stays on the in-repo engine exactly as
+standalone resolved, a `--device` read stays on the in-repo engine exactly as
 before. Only reads route this way: a lifecycle `--device` (resume / watch / inject /
 focus / …) keeps its in-repo / `runOnPeer` behavior, and an explicit `--host`
 always wins over `--device`.
