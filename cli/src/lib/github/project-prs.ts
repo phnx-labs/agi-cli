@@ -367,9 +367,25 @@ interface CachedRollup {
   readAt: number;
 }
 
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/** A cached changed-file list. */
+const isFileList = (v: unknown): v is string[] => Array.isArray(v) && v.every((f) => typeof f === 'string');
+
+/** A cached rollup: an item array of named checks, and a numeric read time. */
+const isCachedRollup = (v: unknown): v is CachedRollup =>
+  isRecord(v) && typeof v.readAt === 'number' && Array.isArray(v.items) &&
+  v.items.every((i) => isRecord(i) && typeof i.name === 'string');
+
+/** A cached merged-PR detail. */
+const isMergedDetail = (v: unknown): v is MergedDetail =>
+  isRecord(v) && (v.mergedBy === null || typeof v.mergedBy === 'string') &&
+  typeof v.additions === 'number' && typeof v.deletions === 'number';
+
 /**
  * A JSON map persisted under the cache dir, keyed `<slug><sep><id>`. A missing or
- * unreadable file only costs re-reads; it never fails a list.
+ * unreadable file, or an entry of the wrong shape, only costs re-reads: invalid
+ * entries are dropped on load, so nothing downstream can trip over one and fail a list.
  */
 class KeyedCache<T> {
   private readonly file: string;
@@ -377,14 +393,19 @@ class KeyedCache<T> {
   private entries: Record<string, T> = {};
   private dirty = false;
 
-  constructor(dir: string, name: string, sep: '@' | '#') {
+  constructor(dir: string, name: string, sep: '@' | '#', isValid: (v: unknown) => v is T) {
     this.file = path.join(dir, name);
     this.sep = sep;
+    let parsed: unknown;
     try {
-      const parsed: unknown = JSON.parse(fs.readFileSync(this.file, 'utf-8'));
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) this.entries = parsed as Record<string, T>;
+      parsed = JSON.parse(fs.readFileSync(this.file, 'utf-8'));
     } catch {
-      this.entries = {};
+      return;
+    }
+    if (!isRecord(parsed)) return;
+    for (const [key, value] of Object.entries(parsed)) {
+      if (isValid(value)) this.entries[key] = value;
+      else this.dirty = true;
     }
   }
 
@@ -457,7 +478,9 @@ function readCi(ci: CiReader, sha: string | null): Promise<CiSummary> {
 
 async function readCiUncached(ci: CiReader, sha: string): Promise<CiSummary> {
   const hit = ci.rollups.get(ci.slug, sha);
-  if (hit && ci.nowMs - hit.readAt < rollupTtlMs(hit.items)) return ciFromRollupItems(hit.items);
+  // A clock stepped backwards gives a negative age; that entry is not fresh either.
+  const age = hit ? ci.nowMs - hit.readAt : -1;
+  if (hit && age >= 0 && age < rollupTtlMs(hit.items)) return ciFromRollupItems(hit.items);
   try {
     const items = await rollupForSha(ci.slug, sha, ci.gh);
     if (isFinishedRollup(items)) ci.rollups.set(ci.slug, sha, { items, readAt: ci.nowMs });
@@ -628,7 +651,7 @@ export function scopeForFiles(files: readonly string[], own: readonly string[], 
  */
 class PrFilesCache extends KeyedCache<string[]> {
   constructor(dir: string) {
-    super(dir, 'project-pr-files.json', '@');
+    super(dir, 'project-pr-files.json', '@', isFileList);
   }
 
   async files(slug: string, pr: { number: number; headSha: string }, gh: GhExec): Promise<string[]> {
@@ -727,8 +750,8 @@ export async function buildProjectPrs(
   const [shared, ownClaims] = await Promise.all([repoPeers(def, peers, gh), canonicalClaims(def, gh)]);
   const cacheDir = ctx.cacheDir ?? getCacheDir();
   const filesCache = new PrFilesCache(cacheDir);
-  const rollups = new KeyedCache<CachedRollup>(cacheDir, 'project-pr-ci.json', '@');
-  const details = new KeyedCache<MergedDetail>(cacheDir, 'project-pr-merged.json', '#');
+  const rollups = new KeyedCache<CachedRollup>(cacheDir, 'project-pr-ci.json', '@', isCachedRollup);
+  const details = new KeyedCache<MergedDetail>(cacheDir, 'project-pr-merged.json', '#', isMergedDetail);
   const nowMs = ctx.nowMs ?? Date.now();
   const sinceMs = nowMs - MERGED_WINDOW_DAYS * 24 * 60 * 60 * 1000;
 

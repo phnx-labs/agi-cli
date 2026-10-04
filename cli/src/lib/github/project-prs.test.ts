@@ -229,6 +229,34 @@ describe('CI at a glance and recently merged PRs', () => {
     expect(repo.pullRequests[1]).toMatchObject({ number: 2, ciState: 'FAILURE', failingChecks: ['deploy-preview'] });
   });
 
+  it('does not trust a cached rollup from the future after the clock steps backwards', async () => {
+    const cacheDir = freshCache();
+    await buildProjectPrs(solo, {}, recordedGh(soloRoutes()).gh, [solo], { nowMs: NOW, cacheDir });
+    const back = recordedGh(soloRoutes());
+    await buildProjectPrs(solo, {}, back.gh, [solo], { nowMs: NOW - 1, cacheDir });
+    expect(back.asked).toContain('repos/acme/mono/commits/o2/check-runs');
+  });
+
+  it('drops a malformed cache entry on load: the repo still returns, and the commit is re-read', async () => {
+    const cacheDir = freshCache();
+    fs.writeFileSync(path.join(cacheDir, 'project-pr-ci.json'), JSON.stringify({
+      'acme/mono@o2': { items: 'not-an-array', readAt: NOW },
+      'acme/mono@d0d0d0d': { items: [{ name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS' }] },
+    }));
+    fs.writeFileSync(path.join(cacheDir, 'project-pr-merged.json'), JSON.stringify({ 'acme/mono#13': { mergedBy: 7 } }));
+    fs.writeFileSync(path.join(cacheDir, 'project-pr-files.json'), JSON.stringify({ 'acme/mono@o1': 'rush/app.ts' }));
+    const { gh, asked } = recordedGh(soloRoutes());
+    const [repo] = (await buildProjectPrs(solo, {}, gh, [solo], { nowMs: NOW, cacheDir })).repositories;
+    expect(repo.error).toBeNull();
+    expect(repo.ciError).toBeNull();
+    expect(asked).toEqual(expect.arrayContaining([
+      'repos/acme/mono/commits/o2/check-runs', 'repos/acme/mono/commits/d0d0d0d/check-runs', 'repos/acme/mono/pulls/13',
+    ]));
+    expect(repo.pullRequests[1]).toMatchObject({ number: 2, ciState: 'SUCCESS' });
+    expect(repo.defaultBranch).toMatchObject({ ciState: 'FAILURE' });
+    expect(repo.recentlyMerged[0]).toMatchObject({ number: 13, mergedBy: 'hubot' });
+  });
+
   it('reads at most three pages of closed PRs, and stops as soon as a page reaches past the window', async () => {
     const closedRow = (n: number, updatedAt: string) => JSON.stringify({
       number: n, title: `PR ${n}`, url: '', login: '', avatarUrl: '', headRefName: '', headSha: '', baseRefName: 'main',
