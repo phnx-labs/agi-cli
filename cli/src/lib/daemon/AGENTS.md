@@ -157,6 +157,19 @@ record of `null` for it.
   loop on a 6s host timeout — worse than the local `ps`), plus
   `reapTerminalRoutineProcesses` (also `execFileBounded`).
 
+  **Self-heal broke the rule through its callee, not its tick body.** Its tick
+  was async, but `runSelfHeal` → `heal` → `diffVersionResources` byte-compares
+  every synced resource in every version home with `readFileSync`. On an operator
+  box with 23 version homes that held the loop for over a minute, so
+  `attention-notify` breached its 10 s deadline, the supervisor exited (code 70),
+  and the restart ran self-heal again 30 s later: 1,843 restarts in under three
+  days with a core pinned. The static guard below cannot see a callee, so a
+  heavy synchronous pass belongs in a child: the tick now spawns
+  `agents __self-heal-run` ([`../self-heal/child.ts`](../self-heal/child.ts))
+  through `driveCooperativeChild`, the `__harness-update-run` pattern. It also
+  persists the attempt time (`self-heal-last-attempt` in the daemon dir) before
+  spawning and skips a tick inside the interval, so a restart cannot re-run it.
+
   **The worst tick-path halt was the event-log LOCK, and it is reached far more
   broadly than one service.** `emit()`/`emitRoutineEnd()` (`feed/events.ts`)
   acquire the log lock with `withFileLock` → `lockfile.lockSync` + `sleepSync`

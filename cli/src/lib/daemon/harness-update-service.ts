@@ -115,8 +115,17 @@ export function driveCooperativeChild(
   args: string[],
   signal: AbortSignal,
   graceMs: number,
-  spawnOpts: { env?: NodeJS.ProcessEnv; cwd?: string } = {},
+  spawnOpts: {
+    env?: NodeJS.ProcessEnv;
+    cwd?: string;
+    /** IPC message that asks the child to stop; defaults to the harness-update cancel. */
+    cancelMsg?: object;
+    /** Names the child in a failure message. */
+    label?: string;
+  } = {},
 ): Promise<CooperativeChildResult> {
+  const cancelMsg = spawnOpts.cancelMsg ?? cancelMessage();
+  const label = spawnOpts.label ?? 'harness-update';
   return new Promise((resolve, reject) => {
     let child: ChildProcess;
     try {
@@ -155,7 +164,7 @@ export function driveCooperativeChild(
       // signal — that would interrupt a swap (and is fatal on Windows, which has
       // no cooperative SIGTERM). If the channel is already gone the child's own
       // `disconnect` handler cancels it, so a failed send is not an error.
-      try { child.send(cancelMessage(), () => {}); } catch { /* channel closed; disconnect handles it */ }
+      try { child.send(cancelMsg, () => {}); } catch { /* channel closed; disconnect handles it */ }
       graceTimer = setTimeout(() => {
         if (settled) return;
         forceReaped = true;
@@ -186,7 +195,7 @@ export function driveCooperativeChild(
       cleanup();
       if (forceReaped || sigName) {
         reject(new Error(
-          `harness-update child did not exit cooperatively after cancel `
+          `${label} child did not exit cooperatively after cancel `
           + `(${forceReaped ? `force-reaped after ${graceMs}ms grace` : `died to ${sigName}`}). `
           + (stderr.slice(0, 500) || stdout.slice(0, 500) || 'no output'),
         ));
