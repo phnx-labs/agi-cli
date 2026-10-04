@@ -212,6 +212,20 @@ exit 1
   return path.join(activeHome, 'sergey');
 }
 
+/**
+ * The runner's PATH minus package-manager `node_modules/.bin` dirs. `bun run test`
+ * prepends them, and `@phnx-labs/sessions-cli` links a `sessions` bin there, so
+ * the PHNX-4012 fast path in `src/index.ts` would hand every read query to that
+ * standalone (which reads the index without scanning) instead of the in-repo
+ * engine these tests exercise. A real install never links a dependency's bin.
+ */
+function pathWithoutPackageBins(): string {
+  return (process.env.PATH || '')
+    .split(path.delimiter)
+    .filter((dir) => !(path.basename(dir) === '.bin' && path.basename(path.dirname(dir)) === 'node_modules'))
+    .join(path.delimiter);
+}
+
 export function runAgents(args: string[], cwd: string, home: string, envOverrides: Record<string, string> = {}) {
   return spawnSync('node', ['--import', tsxLoaderUrl, cliEntry, ...args], {
     cwd,
@@ -221,7 +235,7 @@ export function runAgents(args: string[], cwd: string, home: string, envOverride
       // os.homedir() (used via homeDir() in discovery) reads USERPROFILE on
       // Windows and ignores HOME, so set both to redirect the home to tempHome.
       USERPROFILE: home,
-      PATH: `${path.join(home, 'bin')}${path.delimiter}${process.env.PATH || ''}`,
+      PATH: `${path.join(home, 'bin')}${path.delimiter}${pathWithoutPackageBins()}`,
       // Some fixtures place files at $HOME/.agents/versions/<agent>/<ver>/ as
       // legacy / synthetic state. The bootstrap-time migration would otherwise
       // move those into ~/.agents-system/, breaking workspace-scoped lookups.
