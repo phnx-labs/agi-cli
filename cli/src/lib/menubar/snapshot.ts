@@ -102,9 +102,18 @@ interface MenubarSnapshot {
    * default. The native menu consumes this from the snapshot it already polls
    * rather than a second preference-read mechanism. `menubar.menu.defaultProject`
    * is omitted when unset (it has no default); every other key is always present.
-   * Writes stay one `agents config set/unset <key>` per setting.
+   * Writes stay one `agents config set/unset <key>` per setting. Scalar values
+   * only (string, number, boolean): every shipped menu decodes this map as
+   * scalars, and one array value would fail its whole snapshot decode.
    */
   menuPreferences: Record<string, unknown>;
+  /**
+   * The list-valued `menubar.menu.*` preferences (pinned projects, tab order,
+   * hidden tabs), same keying and default rule as `menuPreferences`. A separate
+   * field so a menu that predates list preferences ignores it instead of failing
+   * to decode the snapshot.
+   */
+  menuListPreferences: Record<string, string[]>;
   watchdog: {
     enabled: boolean;
     lastTick: Pick<WatchdogTickResult, 'didNudge' | 'counts'> | null;
@@ -118,12 +127,29 @@ interface MenubarSnapshot {
  */
 export function buildMenuPreferences(): Record<string, unknown> {
   const out: Record<string, unknown> = {};
+  for (const [name, value] of effectiveMenuPreferences()) {
+    if (!Array.isArray(value)) out[name] = value;
+  }
+  return out;
+}
+
+/** The list-valued AGI Menu preferences, effective values, for `menuListPreferences`. */
+export function buildMenuListPreferences(): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const [name, value] of effectiveMenuPreferences()) {
+    if (Array.isArray(value)) out[name] = value.map(String);
+  }
+  return out;
+}
+
+function effectiveMenuPreferences(): Array<[string, unknown]> {
+  const out: Array<[string, unknown]> = [];
   for (const prop of MENUBAR_MENU_PROPERTIES) {
     const name = `menubar.menu.${prop}`;
     const entry = getConfigValue(name);
     const value = entry.value !== undefined ? entry.value : entry.spec.defaultValue;
     if (value === undefined) continue; // unset defaultProject — no default to emit
-    out[name] = value;
+    out.push([name, value]);
   }
   return out;
 }
@@ -233,6 +259,7 @@ export async function computeMenubarSnapshot(): Promise<MenubarSnapshot> {
     activeSessions: serializeActiveSessionsForJson(activeSessions) as Record<string, unknown>[],
     devices,
     menuPreferences: buildMenuPreferences(),
+    menuListPreferences: buildMenuListPreferences(),
     watchdog: {
       enabled: getConfigValue('watchdog.enabled').value === true,
       lastTick: (() => {

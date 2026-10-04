@@ -1397,7 +1397,10 @@ the list so the menu falls back to its own baked-in default (the defaults in
 `agents menubar snapshot --json` also emits a `menuPreferences` map (each
 `menubar.menu.*` key → its effective value, i.e. the stored value or the registered
 default; `defaultProject` omitted when unset) so the menu consumes preferences from
-the snapshot it already polls rather than a second read path. On macOS, a one-shot
+the snapshot it already polls rather than a second read path. That map is scalar-only:
+the list keys (`pinnedProjects`, `tabOrder`, `hiddenTabs`) ride a separate
+`menuListPreferences` map, because a shipped menu decodes `menuPreferences` values as
+string/number/bool and a single array would fail its whole snapshot decode. On macOS, a one-shot
 sentinel-gated migration (`menubar/migrate-prefs.ts`, run from the snapshot compute)
 lifts legacy `com.phnx-labs.agents-menubar` UserDefaults into these keys — known keys
 only, never overriding an already-set value, never the `.dev` bundle, and never
