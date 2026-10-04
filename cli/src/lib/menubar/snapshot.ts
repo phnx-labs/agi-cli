@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import { httpsUrl } from '../actor.js';
-import { cachedViewer, type GithubViewer } from '../github/viewer.js';
+import { cachedViewer, emailDigest, type GithubViewer } from '../github/viewer.js';
 import { readSession, type PhoenixSession } from '../identity/client.js';
 import { buildRoutineListJson } from '../scheduling/routines.js';
 import { backfillActiveRowsFromIndex, isRunningLiveSession, serializeActiveSessionsForJson, serializeSessionsJson } from '../session/active.js';
@@ -101,15 +101,30 @@ export interface MenubarMe {
   avatarSource: 'phoenix' | 'github' | null;
 }
 
-/** Pure: fold the Phoenix session and the GitHub viewer into the snapshot's `me`. */
+/**
+ * Pure: fold the Phoenix session and the GitHub viewer into the snapshot's `me`.
+ *
+ * One person, never a blend of two. With a Phoenix session, that session IS the
+ * person: name, email and picture come from it, and the `gh` account contributes
+ * (`github`, plus a fallback name and picture) only when its public profile email
+ * is the session's email — a shared box whose `gh` is signed in as someone else
+ * must not lend that person's face. Without a session, the `gh` account is the
+ * only identity there is, so it supplies everything but `email`.
+ */
 export function resolveMenubarMe(session: PhoenixSession | null, viewer: GithubViewer | null): MenubarMe | null {
-  if (!session && !viewer) return null;
+  const sessionEmail = session?.email?.trim() || null;
+  const github = !session
+    ? viewer
+    : viewer?.emailSha256 && sessionEmail && viewer.emailSha256 === emailDigest(sessionEmail)
+      ? viewer
+      : null;
+  if (!session && !github) return null;
   const phoenixAvatar = httpsUrl(session?.avatarUrl) ?? null;
-  const githubAvatar = viewer?.avatarUrl ?? null;
+  const githubAvatar = github?.avatarUrl ?? null;
   return {
-    name: viewer?.name ?? null,
-    email: session?.email?.trim() || null,
-    github: viewer?.login ?? null,
+    name: session?.name?.trim() || github?.name || null,
+    email: sessionEmail,
+    github: github?.login ?? null,
     avatarUrl: phoenixAvatar ?? githubAvatar,
     avatarSource: phoenixAvatar ? 'phoenix' : githubAvatar ? 'github' : null,
   };

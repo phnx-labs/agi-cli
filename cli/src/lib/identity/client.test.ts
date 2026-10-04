@@ -145,15 +145,15 @@ describe('the identity seam', () => {
     expect(readSession()).toBeNull();
   });
 
-  it('refreshSessionAvatar merges a hosted avatar_url into the session and leaves everything else alone (PHNX-3547)', async () => {
-    const { writeSession, readSession, refreshSessionAvatar } = await identity();
+  it('refreshSessionProfile merges a hosted avatar_url into the session and leaves everything else alone (PHNX-3547)', async () => {
+    const { writeSession, readSession, refreshSessionProfile } = await identity();
     writeSession({ access_token: 'pid_alice', userId: 'alice-1', email: 'alice@example.com' });
     queue.push({
       status: 200,
       body: { userId: 'alice-1', email: 'alice@example.com', valid: true, avatar_url: 'https://cdn.id.example/a.png' },
     });
 
-    await refreshSessionAvatar();
+    await refreshSessionProfile();
 
     expect(readSession()).toEqual({
       access_token: 'pid_alice',
@@ -163,39 +163,43 @@ describe('the identity seam', () => {
     });
   });
 
-  it('refreshSessionAvatar(known) applies an already-fetched /auth/me without a network call, including a changed picture', async () => {
-    const { writeSession, readSession, refreshSessionAvatar } = await identity();
+  it('refreshSessionProfile(known) applies an already-fetched /auth/me without a network call, including a changed picture', async () => {
+    const { writeSession, readSession, refreshSessionProfile } = await identity();
     writeSession({ access_token: 'pid_alice', userId: 'alice-1', email: 'alice@example.com', avatarUrl: 'https://cdn.id.example/old.png' });
-    await refreshSessionAvatar({ userId: 'alice-1', email: 'alice@example.com', valid: true, avatar_url: 'https://cdn.id.example/new.png' });
+    await refreshSessionProfile({ userId: 'alice-1', email: 'alice@example.com', valid: true, avatar_url: 'https://cdn.id.example/new.png' });
     expect(received).toHaveLength(0);
     expect(readSession()?.avatarUrl).toBe('https://cdn.id.example/new.png');
     // An http or blank value never replaces a stored https picture.
-    await refreshSessionAvatar({ userId: 'alice-1', email: 'alice@example.com', valid: true, avatar_url: 'http://insecure/x.png' });
-    await refreshSessionAvatar({ userId: 'alice-1', email: 'alice@example.com', valid: true });
+    await refreshSessionProfile({ userId: 'alice-1', email: 'alice@example.com', valid: true, avatar_url: 'http://insecure/x.png' });
+    await refreshSessionProfile({ userId: 'alice-1', email: 'alice@example.com', valid: true });
     expect(readSession()?.avatarUrl).toBe('https://cdn.id.example/new.png');
+    // The display name rides the same write, and a blank one never erases it.
+    await refreshSessionProfile({ userId: 'alice-1', email: 'alice@example.com', valid: true, name: 'Alice Liddell' });
+    await refreshSessionProfile({ userId: 'alice-1', email: 'alice@example.com', valid: true, name: ' ' });
+    expect(readSession()).toMatchObject({ name: 'Alice Liddell', avatarUrl: 'https://cdn.id.example/new.png' });
   });
 
-  it('refreshSessionAvatar is a no-op when signed out, already carrying an avatar, or the server exposes none', async () => {
-    const { clearSession, writeSession, readSession, refreshSessionAvatar } = await identity();
+  it('refreshSessionProfile is a no-op when signed out, already carrying an avatar, or the server exposes none', async () => {
+    const { clearSession, writeSession, readSession, refreshSessionProfile } = await identity();
     // Signed out: nothing on the wire.
     clearSession();
-    await refreshSessionAvatar();
+    await refreshSessionProfile();
     expect(received).toHaveLength(0);
 
     // Already has an avatar: no /auth/me call at all.
     writeSession({ access_token: 'pid_alice', userId: 'alice-1', email: 'alice@example.com', avatarUrl: 'https://x/a.png' });
-    await refreshSessionAvatar();
+    await refreshSessionProfile();
     expect(received).toHaveLength(0);
 
     // Server exposes no avatar_url: session unchanged, no crash.
     writeSession({ access_token: 'pid_alice', userId: 'alice-1', email: 'alice@example.com' });
     queue.push({ status: 200, body: { userId: 'alice-1', email: 'alice@example.com', valid: true } });
-    await refreshSessionAvatar();
+    await refreshSessionProfile();
     expect(readSession()).toEqual({ access_token: 'pid_alice', userId: 'alice-1', email: 'alice@example.com' });
 
     // Server unreachable: failure swallowed, session intact.
     queue.push({ status: 500, body: { error: 'boom' } });
-    await refreshSessionAvatar();
+    await refreshSessionProfile();
     expect(readSession()).toEqual({ access_token: 'pid_alice', userId: 'alice-1', email: 'alice@example.com' });
   });
 });
