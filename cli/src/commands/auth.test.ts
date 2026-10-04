@@ -208,14 +208,14 @@ describe('agents auth login — the device poll loop', () => {
     queue.push(authorization());
     queue.push({ status: 428, body: { error: 'authorization_pending' } });
     queue.push({ status: 429, body: { error: 'slow_down' } });
-    queue.push({ status: 200, body: { status: 'authorized', access_token: 'pid_new', user: { email: 'new@test.local', id: 'u-9' } } });
+    queue.push({ status: 200, body: { status: 'authorized', access_token: 'pid_new', user: { email: 'new@test.local', id: 'u-9', name: 'New Person' } } });
 
     const r = await run('auth', 'login');
 
     expect(r.out).toMatch(/ABCD-2345/);
     expect(r.out).toMatch(/Signed in as new@test.local/);
     const { readSession } = await import('../lib/identity/index.js');
-    expect(readSession()?.access_token).toBe('pid_new');
+    expect(readSession()).toMatchObject({ access_token: 'pid_new', name: 'New Person' });
     // One authorization + three polls: it did not stop early or spin extra.
     expect(received).toHaveLength(4);
   }, 20_000);

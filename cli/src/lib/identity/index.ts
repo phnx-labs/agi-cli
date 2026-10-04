@@ -52,6 +52,8 @@ export type DevicePoll =
         avatar_url?: string;
         /** Google-style alias some providers use for the same field. */
         picture?: string;
+        /** Display name, when the provider exposed one to Phoenix ID. */
+        name?: string;
       };
     }
   | { status: 'pending' }
@@ -112,11 +114,17 @@ export async function refreshSessionProfile(known?: WhoAmI): Promise<void> {
   if (!known && session.avatarUrl) return;
   try {
     const me = known ?? (await fetchWhoAmI());
+    // The fetch is a network round trip: a logout or re-login may have replaced
+    // the file meanwhile. Merge into what is on disk now, and only when it is
+    // still the session `me` describes, so a stale profile never lands on (or
+    // resurrects) a different sign-in.
+    const current = readSession();
+    if (!current || current.access_token !== session.access_token || current.userId !== session.userId) return;
     const hosted = me.avatar_url?.trim();
-    const avatarUrl = hosted && /^https:\/\//i.test(hosted) ? hosted : session.avatarUrl;
-    const name = me.name?.trim() || session.name;
-    if (avatarUrl !== session.avatarUrl || name !== session.name) {
-      writeSession({ ...session, ...(avatarUrl ? { avatarUrl } : {}), ...(name ? { name } : {}) });
+    const avatarUrl = hosted && /^https:\/\//i.test(hosted) ? hosted : current.avatarUrl;
+    const name = me.name?.trim() || current.name;
+    if (avatarUrl !== current.avatarUrl || name !== current.name) {
+      writeSession({ ...current, ...(avatarUrl ? { avatarUrl } : {}), ...(name ? { name } : {}) });
     }
   } catch {
     // Offline or server without the field — the Gravatar fallback covers it.

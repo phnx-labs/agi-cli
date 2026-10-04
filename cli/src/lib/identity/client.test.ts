@@ -20,7 +20,7 @@ process.env.HOME = HOME;
 let server: http.Server;
 let base: string;
 /** Queue of canned responses the next requests will receive, in order. */
-let queue: Array<{ status: number; body: unknown }> = [];
+let queue: Array<{ status: number; body: unknown; onRequest?: () => void }> = [];
 let received: Array<{ method: string; url: string; auth: string | undefined; body: string }> = [];
 
 beforeAll(async () => {
@@ -30,6 +30,7 @@ beforeAll(async () => {
     req.on('end', () => {
       received.push({ method: req.method ?? '', url: req.url ?? '', auth: req.headers.authorization, body });
       const next = queue.shift() ?? { status: 200, body: { ok: true } };
+      next.onRequest?.();
       res.writeHead(next.status, { 'Content-Type': 'application/json' });
       res.end(next.body === undefined ? '' : JSON.stringify(next.body));
     });
@@ -201,5 +202,57 @@ describe('the identity seam', () => {
     queue.push({ status: 500, body: { error: 'boom' } });
     await refreshSessionProfile();
     expect(readSession()).toEqual({ access_token: 'pid_alice', userId: 'alice-1', email: 'alice@example.com' });
+  });
+
+  it('refreshSessionProfile never lands a profile on a session that changed during the fetch', async () => {
+    const { writeSession, clearSession, readSession, refreshSessionProfile } = await identity();
+    const alice = { userId: 'alice-1', email: 'alice@example.com', valid: true, name: 'Alice', avatar_url: 'https://cdn.id.example/a.png' };
+
+    // Re-login as someone else while /auth/me is in flight: Bob's session stays Bob's.
+    writeSession({ access_token: 'pid_alice', userId: 'alice-1', email: 'alice@example.com' });
+    const bob = { access_token: 'pid_bob', userId: 'bob-2', email: 'bob@example.com' };
+    queue.push({ status: 200, body: alice, onRequest: () => writeSession(bob) });
+    await refreshSessionProfile();
+    expect(readSession()).toEqual(bob);
+
+    // Logout while in flight: nothing is resurrected.
+    writeSession({ access_token: 'pid_alice', userId: 'alice-1', email: 'alice@example.com' });
+    queue.push({ status: 200, body: alice, onRequest: () => clearSession() });
+    await refreshSessionProfile();
+    expect(readSession()).toBeNull();
+
+    // Same sign-in, other fields written meanwhile: the merge keeps them.
+    writeSession({ access_token: 'pid_alice', userId: 'alice-1', email: 'alice@example.com' });
+    queue.push({
+      status: 200,
+      body: alice,
+      onRequest: () => writeSession({ access_token: 'pid_alice', userId: 'alice-1', email: 'alice@example.com', expires_at: 42 }),
+    });
+    await refreshSessionProfile();
+    expect(readSession()).toEqual({
+      access_token: 'pid_alice', userId: 'alice-1', email: 'alice@example.com', expires_at: 42,
+      name: 'Alice', avatarUrl: 'https://cdn.id.example/a.png',
+    });
+  });
+
+  it('writeSession replaces the file by rename and leaves it 0600, even over a 0644 file', async () => {
+    if (process.platform === 'win32') return;
+    const { writeSession, readSession, sessionFilePath } = await import('./client.js');
+    const file = sessionFilePath();
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, '{"access_token":"old"}', { mode: 0o644 });
+    fs.chmodSync(file, 0o644);
+    const before = fs.statSync(file).ino;
+
+    writeSession({ access_token: 'pid_new', email: 'n@example.com' });
+
+    const after = fs.statSync(file);
+    expect(after.mode & 0o777).toBe(0o600);
+    // A new inode means a temp file was renamed over the old one: an in-place
+    // truncate-and-write keeps the inode, and a crash mid-way would leave a
+    // truncated bearer behind. Rename is atomic, so a reader sees old or new.
+    expect(after.ino).not.toBe(before);
+    expect(fs.readdirSync(path.dirname(file)).filter((f) => f.includes('.tmp-'))).toEqual([]);
+    expect(readSession()?.access_token).toBe('pid_new');
   });
 });

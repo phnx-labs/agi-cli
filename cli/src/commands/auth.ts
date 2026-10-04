@@ -51,11 +51,13 @@ async function login(): Promise<void> {
     const poll = await pollDeviceToken(grant.device_code);
     if (poll.status === 'authorized') {
       const avatarUrl = poll.user.avatar_url ?? poll.user.picture;
+      const name = poll.user.name?.trim();
       writeSession({
         access_token: poll.access_token,
         email: poll.user.email,
         userId: poll.user.id,
         ...(avatarUrl ? { avatarUrl } : {}),
+        ...(name ? { name } : {}),
       });
       console.log(chalk.green(`\n  Signed in as ${poll.user.email}.`));
       return;

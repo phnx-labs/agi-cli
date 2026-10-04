@@ -9,5 +9,6 @@
   `~/.agents/.cache/github-viewer.json` (no email, only a SHA-256 of the public one).
   A snapshot spawns `gh` only when that record is stale: at most once a day, or once
   an hour after a failed read, which keeps the last good answer. Each spawn is capped
-  at 5 seconds. `agents auth whoami` now also saves your Phoenix ID display name.
+  at 5 seconds. `agents auth login` and `agents auth whoami` now save your Phoenix ID display name,
+  and the session file is rewritten atomically and kept at mode 0600.
   Source: `cli/src/lib/menubar/snapshot.ts`, `cli/src/lib/github/viewer.ts`.
