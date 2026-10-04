@@ -108,7 +108,9 @@ describe('runSelfHealTick', () => {
       .toEqual({ ran: false, reason: 'recent' });
     expect(calls.n).toBe(1);
 
-    clock.now += SIX_HOURS;
+    // The supervisor's next interval tick, landing a few seconds before the stamp's
+    // 6h mark (the stamp is written ms into a tick): it must run, not slip to 12h.
+    clock.now += SIX_HOURS - 77_000 - 5_000;
     expect((await runSelfHealTick(fakeCtx().ctx, new AbortController().signal, depsFor(fixture, clock, calls))).ran).toBe(true);
     expect(calls.n).toBe(2);
   }, 30_000);
@@ -127,6 +129,17 @@ describe('runSelfHealTick', () => {
     expect((await runSelfHealTick(ctx, new AbortController().signal, depsFor(crashing, clock, calls))).ran).toBe(false);
     expect(calls.n).toBe(1);
   }, 30_000);
+
+  it('does not run, and says why, when the attempt cannot be recorded', async () => {
+    const dir = process.env.AGENTS_DAEMON_DIR!;
+    fs.mkdirSync(path.join(dir, 'self-heal-last-attempt'));
+    const calls = { n: 0 };
+    const { ctx, logs } = fakeCtx();
+    expect(await runSelfHealTick(ctx, new AbortController().signal, depsFor(busyChild(0, {}), { now: Date.now() }, calls)))
+      .toEqual({ ran: false, reason: 'stamp-unwritable' });
+    expect(calls.n).toBe(0);
+    expect(logs.some((l) => l.level === 'ERROR' && l.message.includes('cannot record the attempt'))).toBe(true);
+  });
 
   it('skips without spawning when the daemon state dir is gone', async () => {
     process.env.AGENTS_DAEMON_DIR = path.join(tmp('agents-selfheal-gone-'), 'missing');

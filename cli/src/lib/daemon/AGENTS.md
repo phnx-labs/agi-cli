@@ -209,7 +209,7 @@ record of `null` for it.
   `ps` fingerprints (keychain-reap, a small pid subset); the browser pid-registry
   `readdirSync`/`readFileSync` (browser-task-reap, bounded by live-session count);
   the opt-in watchdog per-session `statSync`/`readFileSync`; catchup's
-  overdue-dispatch and self-heal's 6h repair sweep (both conditional); and
+  overdue-dispatch (conditional); and
   `session-index`'s synchronous better-sqlite3 (a different class, not a fs/exec
   primitive). Converting these is a separate change and does not block the
   loop the way the halts this PR removed did.
