@@ -1,0 +1,58 @@
+{
+  "_comment": "Recorded `gh api --jq` answers for acme/mono, keyed by endpoint. An array is printed as one JSON object per line, the way --jq streams it. The clock for these rows is 2026-10-04T12:00:00Z, so the merged window starts at 2026-09-27T12:00:00Z.",
+  "routes": {
+    "repos/acme/mono/branches/main": "d0d0d0d\n",
+
+    "repos/acme/mono/commits/o1/check-runs": [
+      { "name": "test", "status": "COMPLETED", "conclusion": "FAILURE", "link": "" },
+      { "name": "lint", "status": "COMPLETED", "conclusion": "SUCCESS", "link": "" },
+      { "name": "deploy", "status": "COMPLETED", "conclusion": "CANCELLED", "link": "" },
+      { "name": "e2e", "status": "IN_PROGRESS", "conclusion": "", "link": "" }
+    ],
+    "repos/acme/mono/commits/o1/status": [
+      { "name": "ci/external", "state": "ERROR", "link": "" },
+      { "name": "ci/coverage", "state": "SUCCESS", "link": "" }
+    ],
+    "repos/acme/mono/commits/o2/check-runs": [
+      { "name": "test", "status": "COMPLETED", "conclusion": "SUCCESS", "link": "" }
+    ],
+    "repos/acme/mono/commits/o2/status": [],
+    "repos/acme/mono/commits/o3/check-runs": [],
+    "repos/acme/mono/commits/o3/status": [],
+    "repos/acme/mono/commits/d0d0d0d/check-runs": [
+      { "name": "test", "status": "COMPLETED", "conclusion": "FAILURE", "link": "" },
+      { "name": "lint", "status": "COMPLETED", "conclusion": "SUCCESS", "link": "" }
+    ],
+    "repos/acme/mono/commits/d0d0d0d/status": [],
+    "repos/acme/mono/commits/c13/check-runs": [
+      { "name": "test", "status": "COMPLETED", "conclusion": "TIMED_OUT", "link": "" }
+    ],
+    "repos/acme/mono/commits/c13/status": [],
+    "repos/acme/mono/commits/c10/check-runs": [
+      { "name": "test", "status": "COMPLETED", "conclusion": "SUCCESS", "link": "" }
+    ],
+    "repos/acme/mono/commits/c10/status": [],
+    "repos/acme/mono/commits/c15/check-runs": [],
+    "repos/acme/mono/commits/c15/status": [
+      { "name": "ci/external", "state": "SUCCESS", "link": "" }
+    ],
+
+    "repos/acme/mono/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=1": [
+      { "number": 13, "title": "Docs touch-up", "url": "https://github.com/acme/mono/pull/13", "login": "octocat", "avatarUrl": "https://github.com/octocat.png",
+        "headRefName": "docs", "headSha": "m13", "baseRefName": "main", "mergedAt": "2026-10-04T08:00:00Z", "mergeCommitSha": "c13", "updatedAt": "2026-10-04T09:00:00Z" },
+      { "number": 14, "title": "Closed without merging", "url": "https://github.com/acme/mono/pull/14", "login": "octocat", "avatarUrl": "",
+        "headRefName": "abandoned", "headSha": "m14", "baseRefName": "main", "mergedAt": null, "mergeCommitSha": null, "updatedAt": "2026-10-03T12:00:00Z" },
+      { "number": 10, "title": "Rush CLI", "url": "https://github.com/acme/mono/pull/10", "login": "", "avatarUrl": "",
+        "headRefName": "rush-cli", "headSha": "m10", "baseRefName": "main", "mergedAt": "2026-10-03T00:00:00Z", "mergeCommitSha": "c10", "updatedAt": "2026-10-03T00:00:00Z" },
+      { "number": 16, "title": "Merged a millisecond too early", "url": "https://github.com/acme/mono/pull/16", "login": "octocat", "avatarUrl": "",
+        "headRefName": "early", "headSha": "m16", "baseRefName": "main", "mergedAt": "2026-09-27T11:59:59.999Z", "mergeCommitSha": "c16", "updatedAt": "2026-09-29T00:00:00Z" },
+      { "number": 15, "title": "Merged exactly at the cutoff", "url": "https://github.com/acme/mono/pull/15", "login": "octocat", "avatarUrl": "",
+        "headRefName": "cutoff", "headSha": "m15", "baseRefName": "main", "mergedAt": "2026-09-27T12:00:00Z", "mergeCommitSha": "c15", "updatedAt": "2026-09-28T00:00:00Z" },
+      { "number": 12, "title": "Older than the window", "url": "https://github.com/acme/mono/pull/12", "login": "octocat", "avatarUrl": "",
+        "headRefName": "old", "headSha": "m12", "baseRefName": "main", "mergedAt": "2026-09-20T00:00:00Z", "mergeCommitSha": "c12", "updatedAt": "2026-09-20T00:00:00Z" }
+    ],
+    "repos/acme/mono/pulls/13": "{\"mergedBy\":\"hubot\",\"additions\":4,\"deletions\":1}\n",
+    "repos/acme/mono/pulls/10": "{\"mergedBy\":null,\"additions\":12,\"deletions\":5}\n",
+    "repos/acme/mono/pulls/15": "{\"mergedBy\":\"hubot\",\"additions\":2,\"deletions\":2}\n"
+  }
+}

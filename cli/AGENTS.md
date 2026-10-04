@@ -518,11 +518,6 @@ are one REST call each, and `ready` is the single exception, one GraphQL
 `markPullRequestReadyForReview` mutation, because GitHub exposes no REST way to
 leave draft. `merge` and `review` pin to the head SHA the caller saw (`review`
 reads the live head, refuses a moved one, and sends that full SHA as `commit_id`).
-The list read stays REST for the PRs themselves; its at-a-glance CI (`ciState` /
-`failingChecks` per open PR), `recentlyMerged`, and `defaultBranch` come from ONE
-GraphQL query per repository per run (`fetchRepoCi`), because the REST equivalent is
-a check-runs read plus a status read per PR and per merge commit. A failed query
-degrades those fields to null/empty; it never marks the repository failed.
 
 `agents traces sync` publishes two redacted derived surfaces: a per-session
 `SessionDetail` at `sessions/<id>.json` (a `meta` summary —

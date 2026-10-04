@@ -18,12 +18,13 @@
  *   - `checks` / `reviewDecision` are null in the list; `--number N` enriches
  *     exactly that one PR against its live head SHA (checks via REST
  *     {@link rollupForSha}, reviewDecision via a single lazy `gh pr view`).
- *   - The at-a-glance CI verdict (`ciState` + `failingChecks`) on every open PR,
- *     the PRs merged in the last 7 days, and the default branch's own CI come
- *     from ONE GraphQL read per repository per run ({@link fetchRepoCi}). The
- *     REST equivalent is a check-runs read plus a status read PER PR and per
- *     merge commit, which costs far more than the one query it replaces. A failed
- *     query degrades those fields to null/empty; it never fails the repository.
+ *   - The at-a-glance CI verdict (`ciState` + `failingChecks`) on every listed
+ *     PR, the PRs merged in the last 7 days, and the default branch's CI are all
+ *     REST too: {@link rollupForSha} per head / merge commit / branch head, with a
+ *     rollup cached on disk once every check in it is terminal (a finished SHA's
+ *     checks do not change), so a warm run re-reads only what is still running.
+ *     A failed CI read empties the affected fields and names itself in
+ *     `ciError`; it never fails the repository and is never silent.
  *   - A per-repo fetch failure is reported as `repositories[].error` and flips
  *     `partial` — it is NEVER relabeled as "zero open PRs".
  */
@@ -31,7 +32,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { ghExec, canonicalizeRepo, projectRepoSlugs, type GhExec } from './pr-mergeable.js';
-import { prHead, rollupForSha, type RollupItem } from './rest.js';
+import { isRateLimitError, prHead, rollupForSha, type RollupItem } from './rest.js';
 import { repoPathClaims, type ProjectDef } from '../projects.js';
 import { getCacheDir } from '../state.js';
 import { atomicWriteFileSync } from '../fs-atomic.js';
@@ -121,8 +122,14 @@ export interface ProjectRepoPrs {
   pullRequests: ProjectPr[];
   /** PRs merged in the last 7 days, newest first, at most 20; [] with `--number`. */
   recentlyMerged: MergedPr[];
-  /** The default branch head and its CI; null with `--number` or when the CI read failed. */
+  /** The default branch head and its CI; null with `--number` or when its read failed. */
   defaultBranch: DefaultBranchCi | null;
+  /**
+   * Null when every CI and merged-PR read succeeded. Otherwise GitHub's message for
+   * the failure (a rate limit when one occurred, else the first), and the fields
+   * that read failed are null/empty rather than describing a repo with no checks.
+   */
+  ciError: string | null;
   /** Non-null when the fetch failed — the list is then NOT authoritative. */
   error: string | null;
 }
@@ -135,6 +142,12 @@ export interface ProjectPrsEnvelope {
   repositories: ProjectRepoPrs[];
   /** True when at least one repository fetch failed (its list is incomplete). */
   partial: boolean;
+}
+
+/** The clock a run's merged window is measured against, and where its caches live. */
+export interface ProjectPrsContext {
+  nowMs?: number;
+  cacheDir?: string;
 }
 
 /** Options for one `projects prs` run. `number` requires `repo`. */
@@ -255,11 +268,12 @@ export async function enrichPr(repo: string, pr: ProjectPr, gh: GhExec = ghExec)
 /** How far back `recentlyMerged` reaches, and how many rows it keeps after scoping. */
 export const MERGED_WINDOW_DAYS = 7;
 export const MERGED_LIMIT = 20;
+/** At most this many 100-row pages of closed PRs are read looking for the window's merges. */
+export const MERGED_PAGE_CAP = 3;
 
 /** Check-run conclusions and status-context states that count as a failing check. */
 const FAILING_CONCLUSIONS = new Set(['FAILURE', 'TIMED_OUT', 'CANCELLED', 'ACTION_REQUIRED', 'STARTUP_FAILURE']);
 const FAILING_STATES = new Set(['FAILURE', 'ERROR']);
-const CI_STATES = new Set<string>(['SUCCESS', 'FAILURE', 'PENDING', 'ERROR', 'EXPECTED']);
 
 /** What a menu row renders: the rollup state, plus the names to show when it is red. */
 export interface CiSummary {
@@ -269,34 +283,14 @@ export interface CiSummary {
 
 const NO_CI: CiSummary = { ciState: null, failingChecks: [] };
 
-interface GraphRollupNode {
-  __typename?: string;
-  name?: string;
-  conclusion?: string | null;
-  status?: string;
-  context?: string;
-  state?: string;
-}
-type GraphRollup = { state?: string; contexts?: { nodes?: Array<GraphRollupNode | null> } } | null | undefined;
-
-/** Summarize one GraphQL `statusCheckRollup`. A commit GitHub gives no rollup has no checks: null. */
-export function ciFromGraphRollup(rollup: GraphRollup): CiSummary {
-  if (!rollup?.state || !CI_STATES.has(rollup.state)) return NO_CI;
-  const failing: string[] = [];
-  for (const node of rollup.contexts?.nodes ?? []) {
-    if (!node) continue;
-    const isStatus = node.__typename === 'StatusContext';
-    const name = isStatus ? node.context : node.name;
-    const bad = isStatus ? FAILING_STATES.has(node.state ?? '') : FAILING_CONCLUSIONS.has(node.conclusion ?? '');
-    if (bad && name && !failing.includes(name)) failing.push(name);
-  }
-  return { ciState: rollup.state as CiState, failingChecks: failing };
-}
+/** A REST rollup item is a check run when it carries no legacy status `state`. */
+const isCheckRun = (item: RollupItem) => item.state === undefined;
 
 /**
- * Summarize the REST rollup the `--number` path already reads, with GitHub's own
- * precedence: any failing check makes it red even while others still run, and it
- * is `ERROR` only when errored statuses are the only red.
+ * The one CI classifier, over the REST rollup {@link rollupForSha} returns, with
+ * GitHub's own precedence: any failing check makes it red even while others still
+ * run, and it is `ERROR` only when errored statuses are the only red. A commit with
+ * no checks is null.
  */
 export function ciFromRollupItems(items: readonly RollupItem[]): CiSummary {
   if (items.length === 0) return NO_CI;
@@ -304,11 +298,11 @@ export function ciFromRollupItems(items: readonly RollupItem[]): CiSummary {
   let failed = false;
   let pending = false;
   for (const item of items) {
-    const isCheckRun = item.state === undefined;
-    if (isCheckRun ? FAILING_CONCLUSIONS.has(item.conclusion ?? '') : FAILING_STATES.has(item.state ?? '')) {
+    const run = isCheckRun(item);
+    if (run ? FAILING_CONCLUSIONS.has(item.conclusion ?? '') : FAILING_STATES.has(item.state ?? '')) {
       failing.push(item.name);
-      if (isCheckRun || item.state === 'FAILURE') failed = true;
-    } else if (isCheckRun ? item.status !== 'COMPLETED' : item.state === 'PENDING') {
+      if (run || item.state === 'FAILURE') failed = true;
+    } else if (run ? item.status !== 'COMPLETED' : item.state === 'PENDING') {
       pending = true;
     }
   }
@@ -316,98 +310,198 @@ export function ciFromRollupItems(items: readonly RollupItem[]): CiSummary {
   return { ciState: pending ? 'PENDING' : 'SUCCESS', failingChecks: [] };
 }
 
-const ROLLUP_FIELDS =
-  'statusCheckRollup { state contexts(first: 50) { nodes { __typename ' +
-  '... on CheckRun { name conclusion status } ... on StatusContext { context state } } } }';
-
-/** The one query behind every CI field and `recentlyMerged`. */
-const REPO_CI_QUERY =
-  'query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ' +
-  `defaultBranchRef { name target { ... on Commit { oid ${ROLLUP_FIELDS} } } } ` +
-  'open: pullRequests(states: OPEN, first: 100, orderBy: {field: UPDATED_AT, direction: DESC}) { ' +
-  `nodes { number commits(last: 1) { nodes { commit { ${ROLLUP_FIELDS} } } } } } ` +
-  'merged: pullRequests(states: MERGED, first: 30, orderBy: {field: UPDATED_AT, direction: DESC}) { ' +
-  'nodes { number title url author { login avatarUrl } headRefName baseRefName headRefOid ' +
-  `mergedAt mergedBy { login } additions deletions mergeCommit { oid ${ROLLUP_FIELDS} } } } } }`;
-
-interface GraphMergedNode {
-  number: number;
-  title?: string;
-  url?: string;
-  author?: { login?: string; avatarUrl?: string } | null;
-  headRefName?: string;
-  baseRefName?: string;
-  headRefOid?: string;
-  mergedAt?: string | null;
-  mergedBy?: { login?: string } | null;
-  additions?: number;
-  deletions?: number;
-  mergeCommit?: { oid?: string; statusCheckRollup?: GraphRollup } | null;
-}
-
-interface GraphRepository {
-  defaultBranchRef?: { name?: string; target?: { oid?: string; statusCheckRollup?: GraphRollup } | null } | null;
-  open?: { nodes?: Array<{ number: number; commits?: { nodes?: Array<{ commit?: { statusCheckRollup?: GraphRollup } } | null> } } | null> };
-  merged?: { nodes?: Array<GraphMergedNode | null> };
-}
-
-/** What {@link fetchRepoCi} reads for one repository. */
-export interface RepoCi {
-  /** Open PR number → its head commit's CI. */
-  openCi: Map<number, CiSummary>;
-  /** Merged PRs inside the window, newest `mergedAt` first, with the head SHA their file list is keyed by. */
-  merged: Array<{ pr: MergedPr; headSha: string }>;
-  defaultBranch: DefaultBranchCi | null;
+/**
+ * True when no check in the rollup can still change: every check run completed and
+ * no status is pending. An empty rollup is not terminal, since a just-pushed SHA has
+ * no checks registered yet.
+ */
+export function isTerminalRollup(items: readonly RollupItem[]): boolean {
+  return items.length > 0 && items.every((i) => (isCheckRun(i) ? i.status === 'COMPLETED' : i.state !== 'PENDING'));
 }
 
 /**
- * Read open-PR CI, recently merged PRs, and the default branch's CI for one
- * repository in ONE GraphQL request; throws on any failure so the caller can
- * degrade. Merged PRs arrive most-recently-updated first, are kept only when
- * `mergedAt` falls inside the last {@link MERGED_WINDOW_DAYS} days, and are then
- * ordered by `mergedAt`.
+ * A JSON map persisted under the cache dir, keyed `<slug><sep><id>`. A missing or
+ * unreadable file only costs re-reads; it never fails a list.
  */
-export async function fetchRepoCi(repo: string, nowMs: number, gh: GhExec = ghExec): Promise<RepoCi> {
-  const [owner, name] = repo.split('/');
-  const out = await gh(['api', 'graphql', '-f', `query=${REPO_CI_QUERY}`, '-f', `owner=${owner}`, '-f', `name=${name}`]);
-  const repository = (JSON.parse(out) as { data?: { repository?: GraphRepository | null } }).data?.repository;
-  if (!repository) throw new Error(`GitHub returned no repository for ${repo}`);
+class KeyedCache<T> {
+  private readonly file: string;
+  private readonly sep: '@' | '#';
+  private entries: Record<string, T> = {};
+  private dirty = false;
 
-  const openCi = new Map<number, CiSummary>();
-  for (const node of repository.open?.nodes ?? []) {
-    if (node) openCi.set(Number(node.number), ciFromGraphRollup(node.commits?.nodes?.[0]?.commit?.statusCheckRollup));
+  constructor(dir: string, name: string, sep: '@' | '#') {
+    this.file = path.join(dir, name);
+    this.sep = sep;
+    try {
+      const parsed: unknown = JSON.parse(fs.readFileSync(this.file, 'utf-8'));
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) this.entries = parsed as Record<string, T>;
+    } catch {
+      this.entries = {};
+    }
   }
 
-  const since = nowMs - MERGED_WINDOW_DAYS * 24 * 60 * 60 * 1000;
-  const merged: RepoCi['merged'] = [];
-  for (const node of repository.merged?.nodes ?? []) {
-    if (!node?.mergedAt || Date.parse(node.mergedAt) < since) continue;
-    merged.push({
-      headSha: String(node.headRefOid ?? ''),
+  get(slug: string, id: string | number): T | undefined {
+    return this.entries[`${slug}${this.sep}${id}`];
+  }
+
+  set(slug: string, id: string | number, value: T): void {
+    this.entries[`${slug}${this.sep}${id}`] = value;
+    this.dirty = true;
+  }
+
+  /** Drop this slug's entries whose id this run did not list. */
+  prune(slug: string, listed: ReadonlySet<string>): void {
+    for (const key of Object.keys(this.entries)) {
+      const at = key.lastIndexOf(this.sep);
+      if (key.slice(0, at) === slug && !listed.has(key.slice(at + 1))) {
+        delete this.entries[key];
+        this.dirty = true;
+      }
+    }
+  }
+
+  save(): void {
+    if (!this.dirty) return;
+    fs.mkdirSync(path.dirname(this.file), { recursive: true });
+    atomicWriteFileSync(this.file, JSON.stringify(this.entries));
+  }
+}
+
+/** The first CI failure of a repository's run, preferring a rate limit over anything else. */
+class CiErrors {
+  message: string | null = null;
+
+  record(err: unknown): void {
+    const msg = ghFailure(err);
+    if (this.message === null || (isRateLimited(msg) && !isRateLimited(this.message))) this.message = msg;
+  }
+}
+
+/** GitHub's GraphQL/secondary limit ({@link isRateLimitError}) or the REST core one. */
+function isRateLimited(message: string): boolean {
+  return isRateLimitError(message) || /API rate limit exceeded/i.test(message);
+}
+
+/** The CI of one commit: a terminal rollup from the cache, else a REST read (cached once terminal). */
+async function readCi(
+  slug: string,
+  sha: string | null,
+  gh: GhExec,
+  rollups: KeyedCache<RollupItem[]>,
+  errors: CiErrors,
+): Promise<CiSummary> {
+  if (!sha) return NO_CI;
+  const hit = rollups.get(slug, sha);
+  if (hit) return ciFromRollupItems(hit);
+  try {
+    const items = await rollupForSha(slug, sha, gh);
+    if (isTerminalRollup(items)) rollups.set(slug, sha, items);
+    return ciFromRollupItems(items);
+  } catch (err) {
+    errors.record(err);
+    return NO_CI;
+  }
+}
+
+/** The jq projection for one closed PR in the `recentlyMerged` scan. */
+const CLOSED_JQ =
+  '.[] | {number, title, url: .html_url, login: (.user.login // ""), avatarUrl: (.user.avatar_url // ""), ' +
+  'headRefName: (.head.ref // ""), headSha: (.head.sha // ""), baseRefName: (.base.ref // ""), ' +
+  'mergedAt: .merged_at, mergeCommitSha: .merge_commit_sha, updatedAt: .updated_at}';
+
+/** A merged PR in the window, before its immutable details and merge-commit CI are read. */
+interface MergedCandidate {
+  pr: MergedPr;
+  headSha: string;
+}
+
+/**
+ * PRs merged at or after `sinceMs`, newest `mergedAt` first. Closed PRs are read
+ * most-recently-updated first, and a merge updates its PR, so every merge in the
+ * window sits ahead of the first PR last updated before it: paging stops there, or
+ * at {@link MERGED_PAGE_CAP} pages.
+ */
+export async function listRecentlyMerged(repo: string, sinceMs: number, gh: GhExec = ghExec): Promise<MergedCandidate[]> {
+  const rows: Array<Record<string, unknown>> = [];
+  for (let page = 1; page <= MERGED_PAGE_CAP; page++) {
+    const pageRows = parseNdjson(await gh([
+      'api', `repos/${repo}/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=${page}`, '--jq', CLOSED_JQ,
+    ]));
+    rows.push(...pageRows);
+    const oldest = pageRows.at(-1)?.updatedAt;
+    if (pageRows.length < 100 || typeof oldest !== 'string' || Date.parse(oldest) < sinceMs) break;
+  }
+  return rows
+    .filter((r) => typeof r.mergedAt === 'string' && Date.parse(r.mergedAt) >= sinceMs)
+    .sort((a, b) => Date.parse(String(b.mergedAt)) - Date.parse(String(a.mergedAt)))
+    .map((r) => ({
+      headSha: String(r.headSha ?? ''),
       pr: {
-        number: Number(node.number),
-        title: String(node.title ?? ''),
-        url: String(node.url ?? ''),
-        author: { login: String(node.author?.login ?? ''), avatarUrl: String(node.author?.avatarUrl ?? '') },
-        headRefName: String(node.headRefName ?? ''),
-        baseRefName: String(node.baseRefName ?? ''),
-        mergedAt: node.mergedAt,
-        mergedBy: node.mergedBy?.login || null,
-        mergeCommitSha: node.mergeCommit?.oid || null,
-        ...ciFromGraphRollup(node.mergeCommit?.statusCheckRollup),
-        additions: Number(node.additions ?? 0),
-        deletions: Number(node.deletions ?? 0),
+        number: Number(r.number),
+        title: String(r.title ?? ''),
+        url: String(r.url ?? ''),
+        author: { login: String(r.login ?? ''), avatarUrl: String(r.avatarUrl ?? '') },
+        headRefName: String(r.headRefName ?? ''),
+        baseRefName: String(r.baseRefName ?? ''),
+        mergedAt: String(r.mergedAt),
+        mergedBy: null,
+        mergeCommitSha: typeof r.mergeCommitSha === 'string' && r.mergeCommitSha ? r.mergeCommitSha : null,
+        ciState: null,
+        failingChecks: [],
+        additions: 0,
+        deletions: 0,
         scope: null,
       },
-    });
-  }
-  merged.sort((a, b) => Date.parse(b.pr.mergedAt) - Date.parse(a.pr.mergedAt));
+    }));
+}
 
-  const ref = repository.defaultBranchRef;
-  const defaultBranch: DefaultBranchCi | null = ref?.name && ref.target?.oid
-    ? { name: ref.name, sha: ref.target.oid, ...ciFromGraphRollup(ref.target.statusCheckRollup) }
-    : null;
-  return { openCi, merged, defaultBranch };
+/** What a merged PR's own read adds; it cannot change once the PR is merged. */
+interface MergedDetail {
+  mergedBy: string | null;
+  additions: number;
+  deletions: number;
+}
+
+/** `GET pulls/{n}` for a merged PR, cached forever under `slug#n`. Null when the read failed. */
+async function readMergedDetail(
+  slug: string,
+  number: number,
+  gh: GhExec,
+  details: KeyedCache<MergedDetail>,
+  errors: CiErrors,
+): Promise<MergedDetail | null> {
+  const hit = details.get(slug, number);
+  if (hit) return hit;
+  try {
+    const row = JSON.parse((await gh([
+      'api', `repos/${slug}/pulls/${number}`, '--jq', '{mergedBy: .merged_by.login, additions, deletions}',
+    ])).trim()) as { mergedBy?: string | null; additions?: number; deletions?: number };
+    const detail = { mergedBy: row.mergedBy || null, additions: Number(row.additions ?? 0), deletions: Number(row.deletions ?? 0) };
+    details.set(slug, number, detail);
+    return detail;
+  } catch (err) {
+    errors.record(err);
+    return null;
+  }
+}
+
+/** The default branch (its name cached by gh for an hour), its head, and that head's CI. Null when unreadable. */
+async function readDefaultBranch(
+  slug: string,
+  gh: GhExec,
+  rollups: KeyedCache<RollupItem[]>,
+  errors: CiErrors,
+): Promise<DefaultBranchCi | null> {
+  try {
+    const name = (await gh(['api', `repos/${slug}`, '--cache', '1h', '--jq', '.default_branch'])).trim();
+    if (!name) throw new Error(`${slug} reports no default branch`);
+    const sha = (await gh(['api', `repos/${slug}/branches/${name}`, '--jq', '.commit.sha'])).trim();
+    if (!sha) throw new Error(`${slug}@${name} has no head commit`);
+    return { name, sha, ...await readCi(slug, sha, gh, rollups, errors) };
+  } catch (err) {
+    errors.record(err);
+    return null;
+  }
 }
 
 /**
@@ -463,47 +557,19 @@ export function scopeForFiles(files: readonly string[], own: readonly string[], 
  * pruning keeps every head the run listed, open or merged, so neither list evicts
  * the other's entries.
  */
-class PrFilesCache {
-  private readonly file = path.join(getCacheDir(), 'project-pr-files.json');
-  private entries: Record<string, string[]> = {};
-  private dirty = false;
-
-  constructor() {
-    // A missing or unreadable cache only costs re-reads; it never fails a list.
-    try {
-      const parsed: unknown = JSON.parse(fs.readFileSync(this.file, 'utf-8'));
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) this.entries = parsed as Record<string, string[]>;
-    } catch {
-      this.entries = {};
-    }
+class PrFilesCache extends KeyedCache<string[]> {
+  constructor(dir: string) {
+    super(dir, 'project-pr-files.json', '@');
   }
 
   async files(slug: string, pr: { number: number; headSha: string }, gh: GhExec): Promise<string[]> {
-    const key = `${slug}@${pr.headSha}`;
-    const hit = this.entries[key];
+    const hit = this.get(slug, pr.headSha);
     if (hit) return hit;
     // A rename counts on both sides: moving a file out of a project's path touches that project.
     const out = await gh(['api', `repos/${slug}/pulls/${pr.number}/files?per_page=100`, '--paginate', '--jq', '.[] | .filename, (.previous_filename // empty)']);
     const files = out.split('\n').map((l) => l.trim()).filter(Boolean);
-    this.entries[key] = files;
-    this.dirty = true;
+    this.set(slug, pr.headSha, files);
     return files;
-  }
-
-  prune(slug: string, listedHeads: ReadonlySet<string>): void {
-    for (const key of Object.keys(this.entries)) {
-      const at = key.lastIndexOf('@');
-      if (key.slice(0, at) === slug && !listedHeads.has(key.slice(at + 1))) {
-        delete this.entries[key];
-        this.dirty = true;
-      }
-    }
-  }
-
-  save(): void {
-    if (!this.dirty) return;
-    fs.mkdirSync(path.dirname(this.file), { recursive: true });
-    atomicWriteFileSync(this.file, JSON.stringify(this.entries));
   }
 }
 
@@ -575,21 +641,26 @@ async function repoPeers(
  * project is scoped: when this project claims part of it ({@link repoPathClaims}),
  * its open AND recently merged lists keep only PRs that touch those paths
  * (`scope: project`) or touch no sharing project's paths (`scope: repo-wide`).
- * `nowMs` anchors the merged window.
+ * `ctx.nowMs` anchors the merged window; `ctx.cacheDir` holds the file-list,
+ * rollup, and merged-PR caches (default: the agents cache dir).
  */
 export async function buildProjectPrs(
   def: ProjectDef,
   opts: ProjectPrsOptions = {},
   gh: GhExec = ghExec,
   peers: readonly ProjectDef[] = [],
-  nowMs: number = Date.now(),
+  ctx: ProjectPrsContext = {},
 ): Promise<ProjectPrsEnvelope> {
   const project = { name: def.name, linearProjectId: def.linear?.projectId ?? null };
   const slugs = await resolveTargetSlugs(def, opts.repo, gh);
   if (slugs.length === 0) return { project, viewer: null, repositories: [], partial: false };
   const viewerRead = fetchViewer(gh);
   const [shared, ownClaims] = await Promise.all([repoPeers(def, peers, gh), canonicalClaims(def, gh)]);
-  const filesCache = new PrFilesCache();
+  const cacheDir = ctx.cacheDir ?? getCacheDir();
+  const filesCache = new PrFilesCache(cacheDir);
+  const rollups = new KeyedCache<RollupItem[]>(cacheDir, 'project-pr-rollups.json', '@');
+  const details = new KeyedCache<MergedDetail>(cacheDir, 'project-pr-merged.json', '#');
+  const sinceMs = (ctx.nowMs ?? Date.now()) - MERGED_WINDOW_DAYS * 24 * 60 * 60 * 1000;
 
   // Fetch repos in PARALLEL so a native caller's overall deadline scales with the
   // slowest repo, not the sum — a serial multi-repo walk of 30s gh calls can blow
@@ -602,47 +673,74 @@ export async function buildProjectPrs(
       try {
         if (opts.number !== undefined) {
           const pr = await fetchOnePr(slug, opts.number, gh);
-          return { slug, sharedWith, pullRequests: [await enrichPr(slug, pr, gh)], recentlyMerged: [], defaultBranch: null, error: null };
+          return {
+            slug, sharedWith, pullRequests: [await enrichPr(slug, pr, gh)],
+            recentlyMerged: [], defaultBranch: null, ciError: null, error: null,
+          };
         }
-        const [listed, ci] = await Promise.all([
+        const errors = new CiErrors();
+        const [listed, mergedListed, defaultBranch] = await Promise.all([
           listOpenPrs(slug, gh),
-          // CI is a glance aid: a failed read empties those fields, it never fails the repository.
-          fetchRepoCi(slug, nowMs, gh).catch((): RepoCi => ({ openCi: new Map(), merged: [], defaultBranch: null })),
+          listRecentlyMerged(slug, sinceMs, gh).catch((err: unknown) => {
+            errors.record(err);
+            return null;
+          }),
+          readDefaultBranch(slug, gh, rollups, errors),
         ]);
-        let pullRequests: ProjectPr[] = listed.map((pr) => ({ ...pr, ...(ci.openCi.get(pr.number) ?? NO_CI) }));
-        let recentlyMerged = ci.merged.map((m) => m.pr);
+        let pullRequests: ProjectPr[] = listed;
+        let merged = mergedListed ?? [];
         const own = ownClaims.get(slug);
         if (peer && own) {
-          filesCache.prune(slug, new Set([...listed.map((pr) => pr.headSha), ...ci.merged.map((m) => m.headSha)]));
+          // A failed merged read must not evict the merged heads' file lists.
+          if (mergedListed) filesCache.prune(slug, new Set([...listed.map((pr) => pr.headSha), ...merged.map((m) => m.headSha)]));
           const scopeOf = async (pr: { number: number; headSha: string }) =>
             scopeForFiles(await filesCache.files(slug, pr, gh), own, peer.prefixes);
           const [openScopes, mergedScopes] = await Promise.all([
             mapBounded(pullRequests, 8, scopeOf),
-            mapBounded(ci.merged, 8, (m) => scopeOf({ number: m.pr.number, headSha: m.headSha })),
+            mapBounded(merged, 8, (m) => scopeOf({ number: m.pr.number, headSha: m.headSha })),
           ]);
           pullRequests = pullRequests
             .map((pr, i) => ({ ...pr, scope: openScopes[i] }))
             .filter((pr) => pr.scope !== null);
-          recentlyMerged = recentlyMerged
-            .map((pr, i) => ({ ...pr, scope: mergedScopes[i] }))
-            .filter((pr) => pr.scope !== null);
+          merged = merged
+            .map((m, i) => ({ ...m, pr: { ...m.pr, scope: mergedScopes[i] } }))
+            .filter((m) => m.pr.scope !== null);
         }
-        return {
-          slug, sharedWith, pullRequests,
-          recentlyMerged: recentlyMerged.slice(0, MERGED_LIMIT),
-          defaultBranch: ci.defaultBranch,
-          error: null,
-        };
+        merged = merged.slice(0, MERGED_LIMIT);
+        const [openCi, recentlyMerged] = await Promise.all([
+          mapBounded(pullRequests, 8, (pr) => readCi(slug, pr.headSha, gh, rollups, errors)),
+          mapBounded(merged, 8, async (m): Promise<MergedPr> => {
+            const [detail, ci] = await Promise.all([
+              readMergedDetail(slug, m.pr.number, gh, details, errors),
+              readCi(slug, m.pr.mergeCommitSha, gh, rollups, errors),
+            ]);
+            return { ...m.pr, ...(detail ?? {}), ...ci };
+          }),
+        ]);
+        pullRequests = pullRequests.map((pr, i) => ({ ...pr, ...openCi[i] }));
+        if (mergedListed) {
+          details.prune(slug, new Set(mergedListed.map((m) => String(m.pr.number))));
+          if (defaultBranch) {
+            rollups.prune(slug, new Set([
+              ...pullRequests.map((pr) => pr.headSha),
+              ...recentlyMerged.flatMap((pr) => (pr.mergeCommitSha ? [pr.mergeCommitSha] : [])),
+              defaultBranch.sha,
+            ]));
+          }
+        }
+        return { slug, sharedWith, pullRequests, recentlyMerged, defaultBranch, ciError: errors.message, error: null };
       } catch (err) {
         // A fetch failure is reported, never relabeled as zero open PRs.
         return {
-          slug, sharedWith, pullRequests: [], recentlyMerged: [], defaultBranch: null,
+          slug, sharedWith, pullRequests: [], recentlyMerged: [], defaultBranch: null, ciError: null,
           error: err instanceof Error ? err.message : String(err),
         };
       }
     }),
   );
   filesCache.save();
+  rollups.save();
+  details.save();
 
   const partial = repositories.some((r) => r.error !== null);
   return { project, viewer: await viewerRead, repositories, partial };
