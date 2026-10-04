@@ -2,16 +2,16 @@
 kind: report
 title: Component Health
 updated: 2026-10-04
-commit: 6143f3743a1076deed79822f96c808d4f1a8d787
+commit: 4b709a7e5c7026f4dcc56336235180386a992b03
 ---
 
 # cli — Component Health
 
 ## Summary
 
-`cli/src` holds **192,591 lines of production code** in 805 files, plus 74,183 comment
-lines and 21,634 blank lines. Tests are separate: **183,174 code lines** in 1,029 files.
-No size budget has been agreed, so this is a first baseline, not a pass/fail.
+`cli/src` holds **193,077 lines of production code** in 806 files, plus 74,358 comment
+lines and 21,688 blank lines. Tests are separate: **185,262 code lines** in 1,041 files.
+No size budget has been agreed, so this is a baseline, not a pass/fail.
 
 Removing duplication and dead code alone recovers about **2,300 production lines (~1.2%)**
 and **~3,200 test lines**, with no behavior decision required. The larger reductions are
@@ -19,8 +19,17 @@ owner decisions: retiring one-time migrations (~1,600 lines) and the PHNX-4227 r
 the `agents sessions` command group (~8,000+ lines). Shrinking this codebase meaningfully
 is a scope question, not a cleanup question.
 
+Revalidated against
+[`4b709a7e5`](https://github.com/phnx-labs/agents-cli/commit/4b709a7e5c7026f4dcc56336235180386a992b03)
+after the first baseline at
+[`6143f3743`](https://github.com/phnx-labs/agents-cli/commit/6143f3743a1076deed79822f96c808d4f1a8d787)
+(+486 production code lines). Intervening source: `projects prs` CI/merged work,
+`gen-command-index` extraction onto `@phnx-labs/cli-docs`, sessions-client preferring the
+installed `sessions` bin, menubar viewer identity, and atomic identity session writes.
+Cleanup findings below were spot-checked; none were invalidated.
+
 <div class="artifact-grid artifact-grid-3">
-<div class="artifact-stat"><div class="artifact-stat-value">192,591</div><div class="artifact-stat-label">production code lines (805 files)</div></div>
+<div class="artifact-stat"><div class="artifact-stat-value">193,077</div><div class="artifact-stat-label">production code lines (806 files)</div></div>
 <div class="artifact-stat"><div class="artifact-stat-value">~2,300</div><div class="artifact-stat-label">removable with no owner decision</div></div>
 <div class="artifact-stat"><div class="artifact-stat-value">~3,200</div><div class="artifact-stat-label">test lines covering an external package</div></div>
 <div class="artifact-stat"><div class="artifact-stat-value">~1,600</div><div class="artifact-stat-label">in one-time migrations an owner could retire</div></div>
@@ -172,23 +181,32 @@ Not the purpose of this report; listed so they are not lost.
 
 ## Evidence
 
-**Scope.** `cli/` at commit `6143f3743`, assessed in a clean worktree. Other packages,
-`scripts/`, and the companion repos were not assessed.
+**Scope.** `cli/` at commit `4b709a7e5`, assessed in a clean worktree
+(`.agents/worktrees/cli-health-refresh`). Other packages, most of `scripts/`, and the
+companion repos were not assessed. Uncommitted changes: none in the assessed tree before
+this report edit.
 
-**Counts.** `cloc 2.06`, TypeScript only, over `git ls-files`:
+**Counts.** `cloc 2.06` via `bunx cloc`, TypeScript only, over `git ls-files` list files:
 
 - production: `cli/src/**/*.ts{,x}` excluding `*.test.ts`, `*.bench.ts`, `__tests__/`,
-  `testdata/` → 805 files, 192,591 code / 74,183 comment / 21,634 blank.
-- tests: `cli/**/*.test.ts{,x}` and `__tests__/` → 1,029 files, 183,174 code
-  (`--timeout 0`; two large test files exceed cloc's default guard).
+  `testdata/` → 806 files, 193,077 code / 74,358 comment / 21,688 blank.
+- tests: `cli/**/*.test.ts{,x}` and `__tests__/` → 1,041 files, 185,262 code
+  (`--timeout 0`).
 
-**Scanners.** The code skills' `refactor/modules.ts` (depth 2), `refactor/patterns.ts`
+Delta vs first baseline (`6143f3743`): +1 production file, +486 code, +175 comment,
++54 blank; +12 test files, +2,088 test code. Largest physical files unchanged in rank:
+`commands/sessions.ts` (6,622), `lib/session/db.ts` (5,950), `lib/session/discover.ts`
+(5,690), `lib/accounting/usage.ts` (4,432), `commands/exec.ts` (4,060).
+
+**Scanners.** Prior assessment used `refactor/modules.ts` (depth 2), `refactor/patterns.ts`
 (825 files scanned, 77 unparsed, 95 discriminator families, 1,740 collapsible arms), and
-`review/signatures.ts` (38 candidate clusters, each read before use). Pattern families
-are keyed by variable name, so the 240 `agent` arms are a pointer for inspection, not a
-count of registry bypasses.
+`review/signatures.ts` (38 candidate clusters). This refresh re-ran modules + cloc and
+spot-checked findings with `rg`/direct reads. Pattern families are keyed by variable name,
+so the 240 `agent` arms are a pointer for inspection, not a count of registry bypasses
+(exact `agent === '…'` matches are fewer).
 
-**Area scans.** Five read-only scans, one area each, against this commit:
+**Area scans.** Five read-only scans from the first baseline (against `6143f3743`), reused
+after spot-check because intervening diffs are localized:
 
 | Area | Agent | Non-test lines |
 |---|---|---:|
@@ -198,16 +216,16 @@ count of registry bypasses.
 | Daemon + scheduling (daemon, feed, monitors, scheduling, triggers, watchdog, menubar) | claude | 35,128 |
 | Accounts, cloud, release plumbing + repo-wide utility sweep | claude | 28,967 |
 
-Codex, droid, kimi and the DeepSeek profile were tried and were unavailable on the
-reachable hosts (sandbox userns restriction, auth failure, lapsed subscription, missing
-account), hence three Claude scans. Headline claims were re-checked by direct reads or
-`grep` before inclusion: the shell-quote copies, `config-migration.ts` callers, the
-`activity.ts` export callers, croner `previousRuns`, the reader-only test files, the
-`percentile` and `resolve*Bin` copies, `stripJsonComments`, and the dead skill API.
+Re-checked on `4b709a7e5`: shellQuote still defined in ≥8 places (owner
+`lib/ssh-exec.ts:43`); `parseSince` still duplicated in `logs.ts`/`events.ts`; Cloudflare
+`authorizeRead`/`defaultVerifyPhoenixToken` still in both worker templates; `buildSshInvocation`
+still parallel to `ssh-exec`; reader-only `lib/session/__tests__/parse-*.test.ts` +
+`render.test.ts` still import `@phnx-labs/sessions-cli/reader`; `gen-command-index.ts` is
+now 35 lines (extraction landed — positive precedent, not a new cleanup item).
 
 **Not covered.** Internals of `lib/session/db.ts` and `discover.ts`; per-provider
 fetchers inside `accounting/usage.ts`; per-harness registrars in `hooks/install.ts`;
 `runner.ts` `executeJob*` variants; inline retry loops. The five standalone-CLI clients
-(`artifacts-`, `browser-`, `computer-`, `secrets-`, `sessions-client.ts`, 1,866 lines)
+(`artifacts-`, `browser-`, `computer-`, `secrets-`, `sessions-client.ts`)
 repeat the same resolve/`invocation`/error-class skeleton; PHNX-4227 changes most of them,
 so no estimate is given. No test suite was run; nothing here changes behavior.
