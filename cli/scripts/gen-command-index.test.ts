@@ -6,7 +6,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildFullCommandTree } from '../src/cli/command-registry.js';
 import {
-  argToken,
   auditReference,
   countCommands,
   invocation,
@@ -16,10 +15,11 @@ import {
   rootNode,
   walk,
   type CommandNode,
-} from './gen-command-index';
+} from '@phnx-labs/cli-docs';
+import { AGENTS_REFERENCE } from './gen-command-index';
 
 async function tree(): Promise<CommandNode[]> {
-  return walk(await buildFullCommandTree());
+  return walk(await buildFullCommandTree(), AGENTS_REFERENCE);
 }
 
 function find(nodes: CommandNode[], path: string): CommandNode | undefined {
@@ -33,15 +33,6 @@ function find(nodes: CommandNode[], path: string): CommandNode | undefined {
   }
   return node;
 }
-
-describe('argToken', () => {
-  it('renders required/optional/variadic usage tokens', () => {
-    expect(argToken({ name: 'id', required: true, variadic: false })).toBe('<id>');
-    expect(argToken({ name: 'query', required: false, variadic: false })).toBe('[query]');
-    expect(argToken({ name: 'specs', required: true, variadic: true })).toBe('<specs...>');
-    expect(argToken({ name: 'rest', required: false, variadic: true })).toBe('[rest...]');
-  });
-});
 
 describe('command index generation', () => {
   it('builds a non-trivial tree from the real command modules', async () => {
@@ -86,7 +77,7 @@ describe('command index generation', () => {
   });
 
   it('captures the root agents metadata and global options', async () => {
-    const root = rootNode(await buildFullCommandTree());
+    const root = rootNode(await buildFullCommandTree(), AGENTS_REFERENCE);
     expect(root.name).toBe('agents');
     expect(root.description).toContain('Install, configure, run, and dispatch AI coding agents');
     expect(root.options.map((option) => option.long)).toContain('--version');
@@ -96,7 +87,7 @@ describe('command index generation', () => {
 
   it('captures option flags in the JSON tree', async () => {
     const nodes = await tree();
-    const json = JSON.parse(renderJson(nodes)) as { tree: CommandNode[] };
+    const json = JSON.parse(renderJson(nodes, undefined, AGENTS_REFERENCE)) as { tree: CommandNode[] };
     const create = find(json.tree, 'teams create');
     expect(create).toBeDefined();
     // Every option is a {flags, description} pair, never a bare string.
@@ -125,8 +116,8 @@ describe('command index generation', () => {
 
   it('renders scannable Markdown with a fenced block per group', async () => {
     const nodes = await tree();
-    const md = renderMarkdown(nodes);
-    expect(md).toContain('# Command index');
+    const md = renderMarkdown(nodes, AGENTS_REFERENCE);
+    expect(md).toContain('# agents CLI command reference');
     expect(md).toContain('## teams');
     expect(md).toContain('agents teams create <team>');
     // Fenced code blocks are balanced (one open + close per group).
@@ -135,7 +126,7 @@ describe('command index generation', () => {
 
   it('renders a searchable standalone HTML reference for every command', async () => {
     const nodes = await tree();
-    const html = renderHtml(nodes);
+    const html = renderHtml(nodes, undefined, AGENTS_REFERENCE);
     expect(html).toContain('type="search"');
     expect(html).toContain('agents teams create &lt;team&gt;');
     expect((html.match(/<article /g) ?? []).length).toBe(countCommands(nodes));
@@ -144,7 +135,7 @@ describe('command index generation', () => {
 
   it('renders a navigable tree with one entry per command card', async () => {
     const nodes = await tree();
-    const html = renderHtml(nodes);
+    const html = renderHtml(nodes, undefined, AGENTS_REFERENCE);
     expect(html).toContain('<nav id="nav"');
     // Every card is reachable by browsing, not only by searching.
     expect((html.match(/<li data-nav=/g) ?? []).length).toBe(countCommands(nodes));
@@ -155,8 +146,8 @@ describe('command index generation', () => {
 
   it('anchors every nav link to a card that exists, including the root node', async () => {
     const program = await buildFullCommandTree();
-    const nodes = walk(program);
-    const html = renderHtml(nodes, rootNode(program));
+    const nodes = walk(program, AGENTS_REFERENCE);
+    const html = renderHtml(nodes, rootNode(program, AGENTS_REFERENCE), AGENTS_REFERENCE);
     const ids = new Set([...html.matchAll(/<article id="([^"]*)"/g)].map((m) => m[1]));
     const targets = [...html.matchAll(/<li data-nav="([^"]*)"/g)].map((m) => m[1]);
     expect(targets.length).toBeGreaterThan(0);
@@ -167,13 +158,13 @@ describe('command index generation', () => {
   });
 
   it('keeps the reserved root anchor free of collisions', async () => {
-    // nodeId() hands the root the reserved id `agents` because its path is
+    // The generator hands the root the reserved id `agents` because its path is
     // empty. That is only safe while no top-level group is named `agents` — a
     // group by that name would mean `agents agents` and silently steal the
     // root's anchor. Enforce the claim the comment makes instead of trusting it.
     const nodes = await tree();
     expect(nodes.map((node) => node.name)).not.toContain('agents');
-    const html = renderHtml(nodes, rootNode(await buildFullCommandTree()));
+    const html = renderHtml(nodes, rootNode(await buildFullCommandTree(), AGENTS_REFERENCE), AGENTS_REFERENCE);
     const ids = [...html.matchAll(/<article id="([^"]*)"/g)].map((m) => m[1]);
     expect(new Set(ids).size).toBe(ids.length);
   });
