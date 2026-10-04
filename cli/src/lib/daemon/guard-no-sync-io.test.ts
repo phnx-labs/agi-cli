@@ -35,8 +35,8 @@ import * as path from 'path';
  * (3) What is OUT of scope, by design: startup/lifecycle code in daemon.ts
  * (pid/lock, install-time launchctl/systemctl) — it runs before the loop serves
  * clients. And CONDITIONAL, rare-transition synchronous fs — the report
- * extraction / transcript archival inside `reconcileRunningRecord`, self-heal's
- * 6h repair sweep, catchup's overdue-dispatch — which runs only when a run
+ * extraction / transcript archival inside `reconcileRunningRecord`, catchup's
+ * overdue-dispatch — which runs only when a run
  * actually ends or a job is dispatched, not on the every-tick scan. Those, plus
  * a few small bounded per-tick reads (the pid registry, `captureProcessStartTime`
  * fingerprints, opt-in watchdog per-session stats), are named as accepted

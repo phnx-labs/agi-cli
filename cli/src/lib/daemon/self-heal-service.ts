@@ -40,10 +40,16 @@ const SELF_HEAL_TICK_MS = 6 * 60 * 60_000;
 const SELF_HEAL_DEADLINE_MS = 10 * 60_000;
 /** Matches the historical inline kickoff delay (daemon.ts SELF_HEAL_KICKOFF_MS). Staggers self-heal's first tick after shims/PATH settle, so launch itself isn't made busy. */
 const SELF_HEAL_KICKOFF_MS = 30_000;
-/** After a cancel (deadline or shutdown), how long the child gets before it is reaped. Each version heal is one synchronous unit, so the child can only honor a cancel between them. */
+/** On daemon shutdown, how long the child gets to honor the cancel before it is reaped. (A deadline breach exits the daemon at once; the attempt stamp keeps the restart from re-running the pass.) */
 const SELF_HEAL_CANCEL_GRACE_MS = 30_000;
 /** Records when the last pass was started, so a restart does not start another inside the interval. */
 const LAST_ATTEMPT_FILE = 'self-heal-last-attempt';
+/**
+ * The supervisor's setInterval fires the next tick one interval after the PREVIOUS
+ * tick started, but the stamp is written a few ms into that tick. Without slack the
+ * scheduled tick reads as "recent" and the pass slips a whole interval (6h → 12h).
+ */
+const SELF_HEAL_SKIP_SLACK_MS = 5 * 60_000;
 
 /** Async `existsSync` — never a synchronous stat on the daemon tick loop (PHNX-3695). */
 async function pathExists(p: string): Promise<boolean> {
@@ -93,7 +99,7 @@ function defaultSelfHealDeps(): SelfHealDeps {
 }
 
 export type SelfHealTickOutcome =
-  | { ran: false; reason: 'no-daemon-dir' | 'recent' }
+  | { ran: false; reason: 'no-daemon-dir' | 'recent' | 'stamp-unwritable' }
   | { ran: true; exitCode: number | null; cancelled: boolean; summary?: SelfHealChildSummary };
 
 /**
@@ -110,8 +116,14 @@ export async function runSelfHealTick(
   if (!(await pathExists(getDaemonDir()))) return { ran: false, reason: 'no-daemon-dir' };
   const now = deps.now();
   const last = await readLastSelfHealAttempt();
-  if (last !== null && now - last < SELF_HEAL_TICK_MS) return { ran: false, reason: 'recent' };
-  await recordSelfHealAttempt(now);
+  if (last !== null && now - last < SELF_HEAL_TICK_MS - SELF_HEAL_SKIP_SLACK_MS) return { ran: false, reason: 'recent' };
+  try {
+    await recordSelfHealAttempt(now);
+  } catch (err) {
+    // Without the stamp a crash mid-pass would re-run it on every restart, so do not run.
+    ctx.log('ERROR', `self-heal: cannot record the attempt in ${lastAttemptPath()}, skipping the pass: ${err instanceof Error ? err.message : String(err)}`);
+    return { ran: false, reason: 'stamp-unwritable' };
+  }
 
   let result: CooperativeChildResult;
   try {

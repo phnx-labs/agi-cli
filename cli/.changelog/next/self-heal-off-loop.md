@@ -5,5 +5,7 @@
   30 seconds later, pinning a CPU core and dropping the feed stream every ~77 seconds.
   Self-heal now runs in its own child process (`agents __self-heal-run`), a restart no
   longer re-runs it inside its 6-hour interval, and identical files are compared as raw
-  bytes instead of being decoded as text. If you disabled it as a stopgap, turn it back on
-  with `agents daemon services enable self-heal`.
+  bytes instead of being decoded as text. Because a restart no longer triggers a pass, a
+  daemon restart (including after `agents upgrade`) no longer heals 30 seconds after boot; the
+  pass runs once 6 hours have passed since the previous one. Run `agents sync` to heal immediately. If you disabled self-heal as
+  a stopgap, turn it back on with `agents daemon services enable self-heal`.
