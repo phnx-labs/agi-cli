@@ -8,6 +8,8 @@ import {
   ciFromRollupItems,
   isPassingRollup,
   PASSING_ROLLUP_TTL_MS,
+  FAILING_ROLLUP_TTL_MS,
+  isFinishedRollup,
   commentOnProjectPr,
   markProjectPrReady,
   mergeProjectPr,
@@ -171,14 +173,12 @@ describe('CI at a glance and recently merged PRs', () => {
     expect(repo.recentlyMerged[2]).toMatchObject({ mergedAt: '2026-09-27T12:00:00Z', ciState: 'SUCCESS' });
   });
 
-  it('caches only an all-passing rollup: a warm run re-reads the running, empty and red commits', async () => {
+  it('caches only a finished rollup: a warm run re-reads just the running and check-less commits', async () => {
     const cacheDir = freshCache();
     await buildProjectPrs(solo, {}, recordedGh(soloRoutes()).gh, [solo], { nowMs: NOW, cacheDir });
     const warm = recordedGh(soloRoutes());
     const [repo] = (await buildProjectPrs(solo, {}, warm.gh, [solo], { nowMs: NOW, cacheDir })).repositories;
     expect(warm.asked.filter((e) => e.endsWith('/check-runs')).sort()).toEqual([
-      'repos/acme/mono/commits/c13/check-runs',
-      'repos/acme/mono/commits/d0d0d0d/check-runs',
       'repos/acme/mono/commits/o1/check-runs',
       'repos/acme/mono/commits/o3/check-runs',
     ]);
@@ -189,18 +189,26 @@ describe('CI at a glance and recently merged PRs', () => {
     ]);
   });
 
-  it('a red SHA is re-read every run, so re-running the failed job on it turns the row green', async () => {
+  it('trusts a red SHA for five minutes, then re-reads it so a re-run that went green shows up', async () => {
     const cacheDir = freshCache();
     const red = JSON.stringify({ name: 'test', status: 'COMPLETED', conclusion: 'FAILURE', link: '' });
     const green = JSON.stringify({ name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS', link: '' });
-    const first = await buildProjectPrs(solo, {}, recordedGh({ ...soloRoutes(), 'repos/acme/mono/commits/o1/check-runs': red, 'repos/acme/mono/commits/o1/status': '' }).gh,
-      [solo], { nowMs: NOW, cacheDir });
+    const routesWith = (checkRuns: string): Routes => ({
+      ...soloRoutes(), 'repos/acme/mono/commits/o1/check-runs': checkRuns, 'repos/acme/mono/commits/o1/status': '',
+    });
+    const first = await buildProjectPrs(solo, {}, recordedGh(routesWith(red)).gh, [solo], { nowMs: NOW, cacheDir });
     expect(first.repositories[0].pullRequests[0]).toMatchObject({ number: 1, ciState: 'FAILURE', failingChecks: ['test'] });
 
-    const rerun = recordedGh({ ...soloRoutes(), 'repos/acme/mono/commits/o1/check-runs': green, 'repos/acme/mono/commits/o1/status': '' });
-    const second = await buildProjectPrs(solo, {}, rerun.gh, [solo], { nowMs: NOW + 60_000, cacheDir });
-    expect(rerun.asked).toContain('repos/acme/mono/commits/o1/check-runs');
-    expect(second.repositories[0].pullRequests[0]).toMatchObject({ number: 1, ciState: 'SUCCESS', failingChecks: [] });
+    // The job was re-run and passed, but within five minutes the cached red still stands.
+    const early = recordedGh(routesWith(green));
+    const stillRed = await buildProjectPrs(solo, {}, early.gh, [solo], { nowMs: NOW + FAILING_ROLLUP_TTL_MS - 1, cacheDir });
+    expect(early.asked).not.toContain('repos/acme/mono/commits/o1/check-runs');
+    expect(stillRed.repositories[0].pullRequests[0]).toMatchObject({ number: 1, ciState: 'FAILURE' });
+
+    const due = recordedGh(routesWith(green));
+    const nowGreen = await buildProjectPrs(solo, {}, due.gh, [solo], { nowMs: NOW + FAILING_ROLLUP_TTL_MS, cacheDir });
+    expect(due.asked).toContain('repos/acme/mono/commits/o1/check-runs');
+    expect(nowGreen.repositories[0].pullRequests[0]).toMatchObject({ number: 1, ciState: 'SUCCESS', failingChecks: [] });
   });
 
   it('trusts a green SHA for an hour, then re-reads it so a late workflow shows up', async () => {
@@ -324,7 +332,7 @@ describe('CI at a glance and recently merged PRs', () => {
     expect(repo).toMatchObject({ recentlyMerged: [], defaultBranch: null, ciError: null, truncated: false });
   });
 
-  it('reads the REST rollup with GitHub\'s precedence, and calls only a finished green rollup cacheable', () => {
+  it('reads the REST rollup with GitHub\'s precedence, and tells a finished rollup from a passing one', () => {
     expect(ciFromRollupItems([])).toEqual({ ciState: null, failingChecks: [] });
     expect(ciFromRollupItems([{ name: 'a', status: 'COMPLETED', conclusion: 'SKIPPED' }, { name: 'b', state: 'SUCCESS' }]))
       .toEqual({ ciState: 'SUCCESS', failingChecks: [] });
@@ -337,6 +345,9 @@ describe('CI at a glance and recently merged PRs', () => {
     expect(isPassingRollup([{ name: 'a', status: 'COMPLETED', conclusion: 'SUCCESS' }, { name: 'b', status: 'COMPLETED', conclusion: 'SKIPPED' }, { name: 'c', state: 'SUCCESS' }])).toBe(true);
     expect(isPassingRollup([{ name: 'a', status: 'COMPLETED', conclusion: 'FAILURE' }])).toBe(false);
     expect(isPassingRollup([{ name: 'a', status: 'COMPLETED', conclusion: 'SUCCESS' }, { name: 'b', state: 'PENDING' }])).toBe(false);
+    expect(isFinishedRollup([])).toBe(false);
+    expect(isFinishedRollup([{ name: 'a', status: 'COMPLETED', conclusion: 'FAILURE' }, { name: 'b', state: 'ERROR' }])).toBe(true);
+    expect(isFinishedRollup([{ name: 'a', status: 'IN_PROGRESS', conclusion: '' }])).toBe(false);
   });
 });
 
