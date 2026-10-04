@@ -7,7 +7,9 @@
   Source: `cli/src/lib/github/project-prs.ts`.
 - **AGI Menu preferences for pins, tabs, and milestone grouping (PHNX-3999).**
   `menubar.menu.pinnedProjects`, `menubar.menu.tabOrder`, `menubar.menu.hiddenTabs`,
-  and `menubar.menu.groupTicketsByMilestone` sync fleet-wide and ride
-  `agents menubar snapshot --json` `menuPreferences`. List keys take a JSON array or
+  and `menubar.menu.groupTicketsByMilestone` sync fleet-wide. In
+  `agents menubar snapshot --json`, the boolean rides `menuPreferences` and the three
+  lists ride a new `menuListPreferences` map, so menus that predate them keep decoding
+  the snapshot. List keys take a JSON array or
   comma-separated items and are validated when written. Source:
   `cli/src/lib/device-config.ts`.
