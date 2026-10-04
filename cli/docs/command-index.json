@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 65,
-  "commands": 469,
+  "commands": 472,
   "root": {
     "name": "agents",
     "path": "",
@@ -2437,8 +2437,8 @@
           "negate": false
         }
       ],
-      "examples": "agents config set run.claude@*.model best\n      agents config set run.claude@*.tier.best claude-opus-4-8\n      agents config set run.claude@2.1.45.model claude-opus-4-8\n      agents config set run.claude@*.mode auto\n      agents config set interactive.host zion\n      agents config set browser.profile work\n      agents config set project.root ~/src/github.com/<you>\n      agents config set devices.mac-mini.max-agents 4\n      agents config set updates.auto off\n      agents config set updates.claude.auto off\n      agents config get run.claude@*.model\n      agents config unset run.claude@*.tier.best\n      agents config list\n      agents config budget\n      agents config budget set per_day 50",
-      "notes": "Every agent/harness reference uses agent@version. Use * for all versions.\n      Tier overrides are part of the run namespace: run.<agent@version>.tier.<tier>.\n      Project root is auto-inferred from the current Git repository when unset.\n      Spend caps live under `agents config budget` (not a top-level command).",
+      "examples": "agents config set run.claude@*.model best\n      agents config set run.claude@*.tier.best claude-opus-4-8\n      agents config set run.claude@2.1.45.model claude-opus-4-8\n      agents config set run.claude@*.mode auto\n      agents config set interactive.host zion\n      agents config set browser.profile work\n      agents config set project.root ~/src/github.com/<you>\n      agents config set devices.mac-mini.max-agents 4\n      agents config set updates.auto off\n      agents config set updates.claude.auto off\n      agents config set menubar.menu.tabOrder home,projects,sessions,inbox\n      agents config set menubar.menu.pinnedProjects '[\"Rush\",\"AGI Menu\"]'\n      agents config get run.claude@*.model\n      agents config unset run.claude@*.tier.best\n      agents config list\n      agents config budget\n      agents config budget set per_day 50",
+      "notes": "Every agent/harness reference uses agent@version. Use * for all versions.\n      Tier overrides are part of the run namespace: run.<agent@version>.tier.<tier>.\n      Project root is auto-inferred from the current Git repository when unset.\n      A list key takes the whole list: comma-separated, or a JSON array for names with commas.\n      Spend caps live under `agents config budget` (not a top-level command).",
       "subcommands": [
         {
           "name": "budget",
@@ -10852,7 +10852,7 @@
           "name": "prs",
           "path": "projects prs",
           "aliases": [],
-          "description": "A project's open pull requests: list them (default), or merge one.",
+          "description": "A project's open pull requests: list them (default), or act on one: ready, review, comment, merge.",
           "args": [],
           "options": [
             {
@@ -10866,8 +10866,82 @@
               "negate": false
             }
           ],
-          "examples": "agents projects prs rush --json                       # every open PR across rush's repos (= prs list rush)\n      agents projects prs rush --json --repo phnx-labs/agi-cli --number 3646  # one PR, with checks + mergeability\n      agents projects prs merge rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>",
+          "examples": "agents projects prs rush --json                       # every open PR across rush's repos (= prs list rush)\n      agents projects prs rush --json --repo phnx-labs/agi-cli --number 3646  # one PR, with checks + mergeability\n      agents projects prs ready rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>\n      agents projects prs review rush --repo phnx-labs/agi-cli --number 3646 --approve --sha <headSha>\n      agents projects prs comment rush --repo phnx-labs/agi-cli --number 3646 --body-file -\n      agents projects prs merge rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>",
           "subcommands": [
+            {
+              "name": "comment",
+              "path": "projects prs comment",
+              "aliases": [],
+              "description": "Post a comment on one open PR of a project.",
+              "args": [
+                {
+                  "name": "name",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--repo <owner/repo>",
+                  "description": "One of the project's attached repos",
+                  "long": "--repo",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--number <n>",
+                  "description": "The PR number",
+                  "long": "--number",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--body <text>",
+                  "description": "The comment text",
+                  "long": "--body",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--body-file <path>",
+                  "description": "Read the comment from a file; - reads stdin",
+                  "long": "--body-file",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--json",
+                  "description": "Machine-readable result",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "examples": "agents projects prs comment rush --repo phnx-labs/agi-cli --number 3646 --body \"Looks good once CI is green\"\n      printf 'Two notes:\\n- one\\n- two\\n' | agents projects prs comment rush --repo phnx-labs/agi-cli --number 3646 --body-file - --json",
+              "notes": "One REST call (POST issues/{n}/comments), not the GraphQL-backed gh pr comment.\n      Pass exactly one of --body or --body-file; an empty comment is refused.",
+              "subcommands": []
+            },
             {
               "name": "list",
               "path": "projects prs list",
@@ -10996,6 +11070,154 @@
               ],
               "examples": "agents projects prs rush --json --repo phnx-labs/agi-cli --number 3646   # read headSha + mergeableState\n      agents projects prs merge rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>\n      agents projects prs merge rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha> --method squash --json",
               "notes": "The merge is a single REST call pinned to --sha: if anything was pushed after\n      you read the PR, GitHub refuses and nothing merges. Branch protection, required\n      checks and reviews stay GitHub's to enforce; a refusal exits 1 with GitHub's\n      message (merged: false in --json).",
+              "subcommands": []
+            },
+            {
+              "name": "ready",
+              "path": "projects prs ready",
+              "aliases": [],
+              "description": "Mark one draft PR of a project ready for review.",
+              "args": [
+                {
+                  "name": "name",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--repo <owner/repo>",
+                  "description": "One of the project's attached repos",
+                  "long": "--repo",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--number <n>",
+                  "description": "The PR number",
+                  "long": "--number",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--sha <head-sha>",
+                  "description": "The head SHA you looked at; refused if the branch moved since",
+                  "long": "--sha",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--json",
+                  "description": "Machine-readable result",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "examples": "agents projects prs rush --json --repo phnx-labs/agi-cli --number 3646   # read isDraft + headSha\n      agents projects prs ready rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>\n      agents projects prs ready rush --repo phnx-labs/agi-cli --number 3646 --json",
+              "notes": "GitHub has no REST endpoint for this, so it is one GraphQL mutation\n      (markPullRequestReadyForReview) after a REST read. A PR that is already ready\n      succeeds without a write. With --sha, a head that moved is refused before the\n      write; GitHub cannot pin the mutation itself, so that check is not atomic.",
+              "subcommands": []
+            },
+            {
+              "name": "review",
+              "path": "projects prs review",
+              "aliases": [],
+              "description": "Approve one open PR of a project, pinned to the head SHA you reviewed.",
+              "args": [
+                {
+                  "name": "name",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--repo <owner/repo>",
+                  "description": "One of the project's attached repos",
+                  "long": "--repo",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--number <n>",
+                  "description": "The PR number",
+                  "long": "--number",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--sha <head-sha>",
+                  "description": "The head SHA you reviewed; refused if the branch moved since",
+                  "long": "--sha",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--approve",
+                  "description": "Submit an approving review (the only review this command submits)",
+                  "long": "--approve",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--body <text>",
+                  "description": "Text to post with the approval",
+                  "long": "--body",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--json",
+                  "description": "Machine-readable result",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "examples": "agents projects prs rush --json --repo phnx-labs/agi-cli --number 3646   # read headSha\n      agents projects prs review rush --repo phnx-labs/agi-cli --number 3646 --approve --sha <headSha>\n      agents projects prs review rush --repo phnx-labs/agi-cli --number 3646 --approve --sha <headSha> --body \"Checked the migration\" --json",
+              "notes": "One REST call (POST pulls/{n}/reviews, event APPROVE). The live head is read\n      first and a moved head is refused; the review carries commit_id = that SHA, so\n      it is recorded against the code you saw. GitHub refuses approving your own PR\n      (exit 1, submitted: false in --json).",
               "subcommands": []
             }
           ]
