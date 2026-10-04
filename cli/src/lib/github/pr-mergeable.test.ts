@@ -162,6 +162,24 @@ describe('ghExec color env', () => {
   });
 });
 
+describe('ghExec timeoutMs', () => {
+  it('kills a gh that outlives the caller-supplied cap instead of the 30 s default', async () => {
+    const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-mergeable-slowgh-'));
+    const prevPath = process.env.PATH;
+    fs.writeFileSync(path.join(bin, 'gh'), '#!/bin/sh\nsleep 20\n', { mode: 0o755 });
+    process.env.PATH = `${bin}${path.delimiter}${prevPath}`;
+    try {
+      const { ghExec } = await import('./pr-mergeable.js');
+      const started = Date.now();
+      await expect(ghExec(['api', 'user'], { timeoutMs: 300 })).rejects.toMatchObject({ killed: true });
+      expect(Date.now() - started).toBeLessThan(5_000);
+    } finally {
+      process.env.PATH = prevPath;
+      fs.rmSync(bin, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('live gh --repo from a non-repo cwd (RUSH-2848 defect 1)', () => {
   it('returns JSON, not "fatal: not a git repository"', async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-mergeable-cwd-'));

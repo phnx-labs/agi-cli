@@ -88,7 +88,7 @@ describe('monorepo scoping', () => {
     const prix = { name: 'prix', repo: 'acme/mono', root: '/src/mono', defaultPath: '/src/mono/prix' } as ProjectDef;
     const routes: Record<string, string> = {
       'repos/acme/mono': 'acme/mono\n',
-      'user': '{"login":"octocat","avatar_url":"https://avatars.githubusercontent.com/u/583231?v=4","name":"The Octocat"}\n',
+      'user': '{"login":"octocat","avatar_url":"https://avatars.githubusercontent.com/u/583231?v=4","name":"The Octocat","email":null}\n',
       'repos/acme/mono/pulls?state=open&per_page=100': [prLine(1, 'a1'), prLine(2, 'b2'), prLine(3, 'c3')].join('\n'),
       'repos/acme/mono/pulls/1/files?per_page=100': 'prix/api.ts\n',
       'repos/acme/mono/pulls/2/files?per_page=100': 'rush/cli/main.ts\nprix/api.ts\n',
@@ -110,7 +110,7 @@ describe('monorepo scoping', () => {
     const solo = { name: 'solo', repo: 'acme/mono', root: '/src/mono', defaultPath: '/src/mono/rush' } as ProjectDef;
     const { gh, asked } = recordedGh({
       'repos/acme/mono': 'acme/mono\n',
-      'user': '{"login":"octocat","avatar_url":"https://avatars.githubusercontent.com/u/583231?v=4","name":"The Octocat"}\n',
+      'user': '{"login":"octocat","avatar_url":"https://avatars.githubusercontent.com/u/583231?v=4","name":"The Octocat","email":null}\n',
       'repos/acme/mono/pulls?state=open&per_page=100': prLine(9, 'd4'),
     });
     const envelope = await buildProjectPrs(solo, {}, gh, [solo]);
@@ -141,7 +141,7 @@ describe('CI at a glance and recently merged PRs', () => {
   const soloRoutes = (): Routes => ({
     ...REST,
     'repos/acme/mono': repoRead,
-    'user': '{"login":"octocat","avatar_url":"https://avatars.githubusercontent.com/u/583231?v=4","name":"The Octocat"}\n',
+    'user': '{"login":"octocat","avatar_url":"https://avatars.githubusercontent.com/u/583231?v=4","name":"The Octocat","email":null}\n',
     'repos/acme/mono/pulls?state=open&per_page=100': [prLine(1, 'o1'), prLine(2, 'o2'), prLine(3, 'o3')].join('\n'),
   });
 
@@ -347,7 +347,7 @@ describe('CI at a glance and recently merged PRs', () => {
   it('--number carries the same verdict from the REST rollup and no merged list', async () => {
     const { gh } = recordedGh({
       'repos/acme/mono': repoRead,
-      'user': '{"login":"octocat","avatar_url":"https://avatars.githubusercontent.com/u/583231?v=4","name":"The Octocat"}\n',
+      'user': '{"login":"octocat","avatar_url":"https://avatars.githubusercontent.com/u/583231?v=4","name":"The Octocat","email":null}\n',
       'repos/acme/mono/pulls/1': prLine(1, 'o1'),
       'pr view 1 --repo acme/mono --json reviewDecision,headRefOid': JSON.stringify({ reviewDecision: 'APPROVED', headRefOid: 'o1' }),
       'repos/acme/mono/commits/o1/check-runs': REST['repos/acme/mono/commits/o1/check-runs'],

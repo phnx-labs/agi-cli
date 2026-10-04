@@ -6,6 +6,7 @@ import * as path from 'path';
 import type { ActiveSession } from '../session/active.js';
 import { setActiveSessionsSnapshotPathForTest, setImmutableMemoPathForTest, writeActiveSessionsCache } from '../session/session-cache.js';
 import { closeDB } from '../session/db.js';
+import { emailDigest } from '../github/viewer.js';
 import { computeMenubarSnapshot, readLastWatchdogTick } from './snapshot.js';
 
 // The snapshot's device list reads the central device-config block, whose
@@ -380,7 +381,7 @@ describe('computeMenubarSnapshot — active-session selector (RUSH-2336)', () =>
  */
 describe('computeMenubarSnapshot — me', () => {
   const PHOENIX_PIC = 'https://lh3.googleusercontent.com/a/example=s96-c';
-  const OCTOCAT = { login: 'octocat', name: 'The Octocat', avatarUrl: 'https://avatars.githubusercontent.com/u/583231?v=4' };
+  const OCTOCAT = { login: 'octocat', name: 'The Octocat', avatarUrl: 'https://avatars.githubusercontent.com/u/583231?v=4', emailSha256: emailDigest('octocat@github.com') };
 
   async function snapshotMe(files: { session?: object; viewer: object | null }) {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'menubar-me-home-'));
@@ -395,7 +396,7 @@ describe('computeMenubarSnapshot — me', () => {
     fs.mkdirSync(path.join(home, '.agents', '.cache'), { recursive: true });
     fs.writeFileSync(
       path.join(home, '.agents', '.cache', 'github-viewer.json'),
-      JSON.stringify({ fetchedAt: Date.now(), viewer: files.viewer }),
+      JSON.stringify({ checkedAt: Date.now(), ok: true, viewer: files.viewer }),
     );
     closeDB();
     vi.resetModules();
@@ -413,19 +414,33 @@ describe('computeMenubarSnapshot — me', () => {
     }
   }
 
-  it('prefers the Phoenix ID picture and still names the GitHub login', async () => {
-    const me = await snapshotMe({ session: { access_token: 't', email: 'me@example.com', avatarUrl: PHOENIX_PIC }, viewer: OCTOCAT });
-    expect(me).toEqual({ name: 'The Octocat', email: 'me@example.com', github: 'octocat', avatarUrl: PHOENIX_PIC, avatarSource: 'phoenix' });
+  it('a Phoenix session is the person: its name and picture win, and the same-email gh account adds the login', async () => {
+    const session = { access_token: 't', email: 'OctoCat@GitHub.com ', name: 'Mona Lisa Octocat', avatarUrl: PHOENIX_PIC };
+    expect(await snapshotMe({ session, viewer: OCTOCAT })).toEqual({
+      name: 'Mona Lisa Octocat', email: 'OctoCat@GitHub.com', github: 'octocat', avatarUrl: PHOENIX_PIC, avatarSource: 'phoenix',
+    });
   });
 
-  it('falls back to the GitHub avatar when the session has no https picture', async () => {
-    const me = await snapshotMe({ session: { access_token: 't', email: 'me@example.com', avatarUrl: 'http://insecure/x.png' }, viewer: OCTOCAT });
-    expect(me).toMatchObject({ avatarUrl: OCTOCAT.avatarUrl, avatarSource: 'github', email: 'me@example.com' });
+  it('the same-email gh account fills a missing session name and picture', async () => {
+    const session = { access_token: 't', email: 'octocat@github.com', avatarUrl: 'http://insecure/x.png' };
+    expect(await snapshotMe({ session, viewer: OCTOCAT })).toEqual({
+      name: 'The Octocat', email: 'octocat@github.com', github: 'octocat', avatarUrl: OCTOCAT.avatarUrl, avatarSource: 'github',
+    });
   });
 
-  it('carries no picture for an avatar-less session alone, and is null when nobody is known', async () => {
-    expect(await snapshotMe({ session: { access_token: 't', email: 'me@example.com' }, viewer: null }))
+  it('a gh account signed in as someone else lends nothing to the Phoenix person', async () => {
+    const session = { access_token: 't', email: 'me@example.com' };
+    expect(await snapshotMe({ session, viewer: OCTOCAT }))
       .toEqual({ name: null, email: 'me@example.com', github: null, avatarUrl: null, avatarSource: null });
+    // gh with no public email cannot be matched either.
+    expect(await snapshotMe({ session, viewer: { ...OCTOCAT, emailSha256: null } }))
+      .toMatchObject({ github: null, avatarUrl: null });
+  });
+
+  it('without a Phoenix session the gh account is the person; with neither, me is null', async () => {
+    expect(await snapshotMe({ viewer: OCTOCAT })).toEqual({
+      name: 'The Octocat', email: null, github: 'octocat', avatarUrl: OCTOCAT.avatarUrl, avatarSource: 'github',
+    });
     expect(await snapshotMe({ viewer: null })).toBeNull();
   });
 });

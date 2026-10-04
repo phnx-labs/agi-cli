@@ -1,9 +1,13 @@
 - **`agents menubar snapshot --json` names who is signed in, with a profile picture.**
   The snapshot gains a top-level `me` object (`name`, `email`, `github`, `avatarUrl`,
-  `avatarSource`) so AGI Menu can show the person instead of initials. The picture is
-  the Phoenix ID one from `agents auth login` when the session carries an https URL,
-  else the GitHub avatar from `gh api user`, else null. Both come from local files: the
-  session, and a `github-viewer.json` record under `~/.agents/.cache/` that the snapshot
-  refreshes through `gh` at most once a day (hourly after a failure), capped at 5 seconds.
-  `me` is null when neither source knows anyone. Source: `cli/src/lib/menubar/snapshot.ts`,
-  `cli/src/lib/github/viewer.ts`.
+  `avatarSource`) so AGI Menu can show the person instead of initials. When you are
+  signed in with `agents auth login`, that session is the person: its name, email and
+  picture are used, and your `gh` account adds its login (and fills a missing name or
+  picture) only when its public profile email matches the session email. Without a
+  Phoenix ID session, the `gh` account supplies everything except the email. `me` is
+  null when neither is available. GitHub facts come from `gh api user`, recorded in
+  `~/.agents/.cache/github-viewer.json` (no email, only a SHA-256 of the public one).
+  A snapshot spawns `gh` only when that record is stale: at most once a day, or once
+  an hour after a failed read, which keeps the last good answer. Each spawn is capped
+  at 5 seconds. `agents auth whoami` now also saves your Phoenix ID display name.
+  Source: `cli/src/lib/menubar/snapshot.ts`, `cli/src/lib/github/viewer.ts`.

@@ -1409,14 +1409,20 @@ value).
 
 The snapshot's top-level `me` names who is signed in on this machine, for the menu's
 avatar: `{name, email, github, avatarUrl, avatarSource}`, or `null` when nobody is
-known (`resolveMenubarMe`, `menubar/snapshot.ts`). `avatarUrl` is the Phoenix ID
-picture from the `agents auth login` session (https only), else the GitHub avatar,
-else `null` so the menu draws initials; `avatarSource` says which. GitHub facts come
-from `cachedViewer` ([`src/lib/github/viewer.ts`](src/lib/github/viewer.ts)), a
-`gh api user --cache 24h` read recorded at `~/.agents/.cache/github-viewer.json`: the
-snapshot refreshes it at most daily (hourly after a failure), capped at 5 s, so the
-common poll spawns no `gh` and a slow one stays inside the menu's 30 s deadline. The
-record holds no email; `email` exists only in the local snapshot JSON.
+known (`resolveMenubarMe`, `menubar/snapshot.ts`). It is one person, never a blend of
+two: with a Phoenix ID session the session supplies `name` (saved by `agents auth
+whoami` via `refreshSessionProfile`), `email` and the https picture, and the `gh`
+account contributes `github` (and a fallback name and picture) only when its public
+profile email equals the session email, so a shared box whose `gh` is someone else's
+lends no face. Without a session the `gh` account supplies everything but `email`.
+No picture means `avatarUrl: null` and the menu draws initials; `avatarSource` says
+which source won. GitHub facts come from `cachedViewer`
+([`src/lib/github/viewer.ts`](src/lib/github/viewer.ts)), a `gh api user --cache 24h`
+read recorded at `~/.agents/.cache/github-viewer.json`: a snapshot spawns `gh` only
+when the record is stale (a day after a success, an hour after a failure, which keeps
+the last good viewer), capped at 5 s, so the common poll spawns nothing and a slow one
+stays inside the menu's 30 s deadline. The record holds no email, only a SHA-256 of
+the public one; `email` exists only in the local snapshot JSON.
 
 `devices.<name>.formFactor` (stored as `formFactor`, shared device-scope) is a
 factual hardware fact — `laptop`/`desktop`/`server`/`unknown` — the menu bar renders

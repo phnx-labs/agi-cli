@@ -46,6 +46,8 @@ export interface PhoenixSession {
    * a missing value just means the Gravatar/initials fallback.
    */
   avatarUrl?: string;
+  /** Display name from `/api/v1/auth/me`, persisted by `refreshSessionProfile`. */
+  name?: string;
   /** Unix ms; absent means the server did not scope the token's lifetime. */
   expires_at?: number;
 }
