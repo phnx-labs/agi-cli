@@ -193,7 +193,7 @@ function inheritedActor(env: NodeJS.ProcessEnv): ResolvedActor | undefined {
 }
 
 /** An avatar is only ever an https URL; anything else is not an avatar. */
-function httpsUrl(value: string | undefined): string | undefined {
+export function httpsUrl(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed && /^https:\/\/\S+$/i.test(trimmed) ? trimmed : undefined;
 }

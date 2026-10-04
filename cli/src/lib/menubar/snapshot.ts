@@ -1,6 +1,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
+import { httpsUrl } from '../actor.js';
+import { cachedViewer, type GithubViewer } from '../github/viewer.js';
+import { readSession, type PhoenixSession } from '../identity/client.js';
 import { buildRoutineListJson } from '../scheduling/routines.js';
 import { backfillActiveRowsFromIndex, isRunningLiveSession, serializeActiveSessionsForJson, serializeSessionsJson } from '../session/active.js';
 import { getConfigValue, listConfiguredDeviceRoles, loadAutoLaunchPreferences } from '../device-config.js';
@@ -82,6 +85,36 @@ interface MenubarDeviceStats {
   specsObservedAt: string | null;
 }
 
+/**
+ * The person signed in on this machine, for the menu's avatar. Every field comes
+ * from a local read: the Phoenix ID session file (`agents auth login`) and the
+ * cached `gh api user` record (`github/viewer.ts`). `avatarUrl` is the Phoenix
+ * profile picture when the session carries one, else the GitHub avatar, else
+ * null (the menu draws initials). `avatarSource` names which one it is.
+ * The whole field is null when neither source knows anyone.
+ */
+export interface MenubarMe {
+  name: string | null;
+  email: string | null;
+  github: string | null;
+  avatarUrl: string | null;
+  avatarSource: 'phoenix' | 'github' | null;
+}
+
+/** Pure: fold the Phoenix session and the GitHub viewer into the snapshot's `me`. */
+export function resolveMenubarMe(session: PhoenixSession | null, viewer: GithubViewer | null): MenubarMe | null {
+  if (!session && !viewer) return null;
+  const phoenixAvatar = httpsUrl(session?.avatarUrl) ?? null;
+  const githubAvatar = viewer?.avatarUrl ?? null;
+  return {
+    name: viewer?.name ?? null,
+    email: session?.email?.trim() || null,
+    github: viewer?.login ?? null,
+    avatarUrl: phoenixAvatar ?? githubAvatar,
+    avatarSource: phoenixAvatar ? 'phoenix' : githubAvatar ? 'github' : null,
+  };
+}
+
 interface MenubarSnapshot {
   version: 1;
   capturedAt: string;
@@ -96,6 +129,8 @@ interface MenubarSnapshot {
   recentSessions: Record<string, unknown>[];
   activeSessions: Record<string, unknown>[];
   devices: MenubarDevice[];
+  /** Who is signed in on this machine; see {@link MenubarMe}. */
+  me: MenubarMe | null;
   /**
    * AGI Menu preferences (PHNX-3999), keyed by the full `menubar.menu.*` config
    * name, carrying the EFFECTIVE value — the stored value, else the registered
@@ -232,10 +267,14 @@ export async function computeMenubarSnapshot(): Promise<MenubarSnapshot> {
   // config before we read them. After the first run it is a cheap existsSync
   // no-op; it never throws into the snapshot.
   migrateMenubarPreferencesFromUserDefaults();
-  const [routines, recent, devices] = await Promise.all([
+  // Started first so a due `gh` refresh (at most daily, capped at 5 s) overlaps
+  // the synchronous reads below instead of following them.
+  const viewerRead = cachedViewer();
+  const [routines, recent, devices, viewer] = await Promise.all([
     Promise.resolve(buildRoutineListJson()),
     Promise.resolve(querySessions({ limit: 40, skipExistenceCheck: true })),
     buildMenubarDevices(),
+    viewerRead,
   ]);
   const active = readActiveSessionsCache('local');
   const rawSessions = active?.sessions ?? [];
@@ -258,6 +297,7 @@ export async function computeMenubarSnapshot(): Promise<MenubarSnapshot> {
     recentSessions: JSON.parse(serializeSessionsJson(recent)) as Record<string, unknown>[],
     activeSessions: serializeActiveSessionsForJson(activeSessions) as Record<string, unknown>[],
     devices,
+    me: resolveMenubarMe(readSession(), viewer),
     menuPreferences: buildMenuPreferences(),
     menuListPreferences: buildMenuListPreferences(),
     watchdog: {

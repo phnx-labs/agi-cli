@@ -53,10 +53,10 @@ function ghEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
-/** Default runner: `gh` with a 30s timeout. Non-zero exit throws. */
-export async function ghExec(args: string[]): Promise<string> {
+/** Default runner: `gh` with a 30s timeout (or `timeoutMs`). Non-zero exit throws. */
+export async function ghExec(args: string[], opts: { timeoutMs?: number } = {}): Promise<string> {
   const { stdout } = await execFileAsync('gh', args, {
-    timeout: 30_000,
+    timeout: opts.timeoutMs ?? 30_000,
     maxBuffer: 8 * 1024 * 1024,
     encoding: 'utf-8',
     env: ghEnv(),

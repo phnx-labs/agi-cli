@@ -372,3 +372,60 @@ describe('computeMenubarSnapshot — active-session selector (RUSH-2336)', () =>
     expect(snap.activeSessions).toEqual([]);
   });
 });
+
+/**
+ * The menu's avatar: `me` comes from the Phoenix session file and the cached
+ * `gh api user` record only (no gh spawn while the record is fresh), and the
+ * Phoenix picture wins over the GitHub one.
+ */
+describe('computeMenubarSnapshot — me', () => {
+  const PHOENIX_PIC = 'https://lh3.googleusercontent.com/a/example=s96-c';
+  const OCTOCAT = { login: 'octocat', name: 'The Octocat', avatarUrl: 'https://avatars.githubusercontent.com/u/583231?v=4' };
+
+  async function snapshotMe(files: { session?: object; viewer: object | null }) {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'menubar-me-home-'));
+    dirs.push(home);
+    const saved = { HOME: process.env.HOME, AGENTS_STATE_DIR: process.env.AGENTS_STATE_DIR, AGENTS_SESSIONS_DB: process.env.AGENTS_SESSIONS_DB };
+    const stateDir = path.join(home, 'state');
+    process.env.HOME = home;
+    process.env.AGENTS_STATE_DIR = stateDir;
+    process.env.AGENTS_SESSIONS_DB = path.join(home, 'sessions.db');
+    fs.mkdirSync(stateDir, { recursive: true });
+    if (files.session) fs.writeFileSync(path.join(stateDir, 'phoenix-session.json'), JSON.stringify(files.session));
+    fs.mkdirSync(path.join(home, '.agents', '.cache'), { recursive: true });
+    fs.writeFileSync(
+      path.join(home, '.agents', '.cache', 'github-viewer.json'),
+      JSON.stringify({ fetchedAt: Date.now(), viewer: files.viewer }),
+    );
+    closeDB();
+    vi.resetModules();
+    try {
+      const { computeMenubarSnapshot: compute } = await import('./snapshot.js');
+      return (await compute()).me;
+    } finally {
+      const { closeDB: closeFresh } = await import('../session/db.js');
+      closeFresh();
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+      vi.resetModules();
+    }
+  }
+
+  it('prefers the Phoenix ID picture and still names the GitHub login', async () => {
+    const me = await snapshotMe({ session: { access_token: 't', email: 'me@example.com', avatarUrl: PHOENIX_PIC }, viewer: OCTOCAT });
+    expect(me).toEqual({ name: 'The Octocat', email: 'me@example.com', github: 'octocat', avatarUrl: PHOENIX_PIC, avatarSource: 'phoenix' });
+  });
+
+  it('falls back to the GitHub avatar when the session has no https picture', async () => {
+    const me = await snapshotMe({ session: { access_token: 't', email: 'me@example.com', avatarUrl: 'http://insecure/x.png' }, viewer: OCTOCAT });
+    expect(me).toMatchObject({ avatarUrl: OCTOCAT.avatarUrl, avatarSource: 'github', email: 'me@example.com' });
+  });
+
+  it('carries no picture for an avatar-less session alone, and is null when nobody is known', async () => {
+    expect(await snapshotMe({ session: { access_token: 't', email: 'me@example.com' }, viewer: null }))
+      .toEqual({ name: null, email: 'me@example.com', github: null, avatarUrl: null, avatarSource: null });
+    expect(await snapshotMe({ viewer: null })).toBeNull();
+  });
+});
