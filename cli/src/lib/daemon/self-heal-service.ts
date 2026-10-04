@@ -7,18 +7,43 @@
  * longer exists — that is the state-dir self-check's signal to shut down;
  * background maintenance must not recreate the tree while it is mid-exit.
  *
- * The pre-migration inline timer also delayed its first fire by
- * `SELF_HEAL_KICKOFF_MS` (30s) so shims/PATH could settle shortly after daemon
- * start, without making launch itself busy. `startupDelayMs` below reproduces
- * that stagger through the supervisor's generic per-service contract
- * (`service.ts`) — every other tick still fires on the normal `intervalMs`
- * cadence; only self-heal's boot-time tick is deliberately staggered.
+ * The pass runs in a child process (`agents __self-heal-run`, see
+ * `self-heal/child.ts`), never on this event loop. `runSelfHeal` byte-compares
+ * every synced resource in every version home with synchronous reads; inline,
+ * one pass on a box with many version homes held the loop for over a minute,
+ * every other service breached its tick deadline, the supervisor exited for an
+ * OS restart, and the restarted daemon ran self-heal again 30 s later. That
+ * loop pinned a core indefinitely.
+ *
+ * The attempt time is persisted BEFORE the child is spawned, and a tick inside
+ * the interval since the last attempt is skipped. A daemon restart therefore
+ * does not re-run the pass early, even if the previous attempt died with the
+ * daemon.
+ *
+ * The first tick is still staggered by `SELF_HEAL_KICKOFF_MS` (30 s) so
+ * shims/PATH settle after daemon start, through the supervisor's generic
+ * `startupDelayMs` contract (`service.ts`).
  */
 
+import * as fsp from 'fs/promises';
+import * as path from 'path';
 import { BasePeriodicService, type DaemonContext } from './service.js';
 import type { DaemonServiceId } from '../daemon-services.js';
 import { getDaemonDir } from '../state.js';
-import * as fsp from 'fs/promises';
+import { getCliLaunch, getAgentsBinPath } from '../cli-entry.js';
+import { driveCooperativeChild, type CooperativeChildResult } from './harness-update-service.js';
+import { SELF_HEAL_CHILD_CMD, selfHealCancelMessage, type SelfHealChildSummary } from '../self-heal/child.js';
+
+/** Matches the historical inline interval (daemon.ts SELF_HEAL_TICK_MS). Runs ~every 6h. */
+const SELF_HEAL_TICK_MS = 6 * 60 * 60_000;
+/** Hard cap per tick — a full resource repair sweep across every version home, short enough a hang never freezes the service for long relative to its 6h cadence. */
+const SELF_HEAL_DEADLINE_MS = 10 * 60_000;
+/** Matches the historical inline kickoff delay (daemon.ts SELF_HEAL_KICKOFF_MS). Staggers self-heal's first tick after shims/PATH settle, so launch itself isn't made busy. */
+const SELF_HEAL_KICKOFF_MS = 30_000;
+/** After a cancel (deadline or shutdown), how long the child gets before it is reaped. Each version heal is one synchronous unit, so the child can only honor a cancel between them. */
+const SELF_HEAL_CANCEL_GRACE_MS = 30_000;
+/** Records when the last pass was started, so a restart does not start another inside the interval. */
+const LAST_ATTEMPT_FILE = 'self-heal-last-attempt';
 
 /** Async `existsSync` — never a synchronous stat on the daemon tick loop (PHNX-3695). */
 async function pathExists(p: string): Promise<boolean> {
@@ -30,12 +55,89 @@ async function pathExists(p: string): Promise<boolean> {
   }
 }
 
-/** Matches the historical inline interval (daemon.ts SELF_HEAL_TICK_MS). Runs ~every 6h. */
-const SELF_HEAL_TICK_MS = 6 * 60 * 60_000;
-/** Hard cap per tick — a full resource repair sweep across every version home, short enough a hang never freezes the service for long relative to its 6h cadence. */
-const SELF_HEAL_DEADLINE_MS = 10 * 60_000;
-/** Matches the historical inline kickoff delay (daemon.ts SELF_HEAL_KICKOFF_MS). Staggers self-heal's first tick after shims/PATH settle, so launch itself isn't made busy. */
-const SELF_HEAL_KICKOFF_MS = 30_000;
+function lastAttemptPath(): string {
+  return path.join(getDaemonDir(), LAST_ATTEMPT_FILE);
+}
+
+/** Epoch ms of the last recorded attempt, or null when none is recorded or the record is unreadable. */
+export async function readLastSelfHealAttempt(): Promise<number | null> {
+  try {
+    const ms = Number((await fsp.readFile(lastAttemptPath(), 'utf-8')).trim());
+    return Number.isFinite(ms) && ms > 0 ? ms : null;
+  } catch {
+    return null;
+  }
+}
+
+async function recordSelfHealAttempt(nowMs: number): Promise<void> {
+  await fsp.writeFile(lastAttemptPath(), String(nowMs), 'utf-8');
+}
+
+/** Dependency seam so tests can drive the tick against a fixture child. Production uses {@link defaultSelfHealDeps}. */
+export interface SelfHealDeps {
+  runChild(signal: AbortSignal): Promise<CooperativeChildResult>;
+  now(): number;
+}
+
+function defaultSelfHealDeps(): SelfHealDeps {
+  return {
+    runChild(signal) {
+      const { command, args } = getCliLaunch([SELF_HEAL_CHILD_CMD], getAgentsBinPath());
+      return driveCooperativeChild(command, args, signal, SELF_HEAL_CANCEL_GRACE_MS, {
+        cancelMsg: selfHealCancelMessage(),
+        label: 'self-heal',
+      });
+    },
+    now: () => Date.now(),
+  };
+}
+
+export type SelfHealTickOutcome =
+  | { ran: false; reason: 'no-daemon-dir' | 'recent' }
+  | { ran: true; exitCode: number | null; cancelled: boolean; summary?: SelfHealChildSummary };
+
+/**
+ * One tick: skip when the state dir is gone or the last attempt is inside the
+ * interval; otherwise record the attempt, run the child, and log what it changed.
+ * A child that fails to run or exits non-zero is logged and returned, never
+ * thrown, so it is not mistaken for a hung tick.
+ */
+export async function runSelfHealTick(
+  ctx: DaemonContext,
+  signal: AbortSignal,
+  deps: SelfHealDeps = defaultSelfHealDeps(),
+): Promise<SelfHealTickOutcome> {
+  if (!(await pathExists(getDaemonDir()))) return { ran: false, reason: 'no-daemon-dir' };
+  const now = deps.now();
+  const last = await readLastSelfHealAttempt();
+  if (last !== null && now - last < SELF_HEAL_TICK_MS) return { ran: false, reason: 'recent' };
+  await recordSelfHealAttempt(now);
+
+  let result: CooperativeChildResult;
+  try {
+    result = await deps.runChild(signal);
+  } catch (err) {
+    ctx.log('ERROR', `self-heal: pass failed to run: ${err instanceof Error ? err.message : String(err)}`);
+    return { ran: true, exitCode: null, cancelled: signal.aborted };
+  }
+  if (result.cancelled) {
+    ctx.log('INFO', 'self-heal: pass cancelled (deadline or daemon shutdown)');
+    return { ran: true, exitCode: result.exitCode, cancelled: true };
+  }
+  if (result.exitCode !== 0) {
+    ctx.log('WARN', `self-heal: pass exited ${result.exitCode}: ${result.stdout.slice(0, 2000)}`);
+    return { ran: true, exitCode: result.exitCode, cancelled: false };
+  }
+  let summary: SelfHealChildSummary;
+  try {
+    summary = JSON.parse(result.stdout) as SelfHealChildSummary;
+  } catch {
+    ctx.log('WARN', `self-heal: pass printed no summary: ${result.stdout.slice(0, 500)}`);
+    return { ran: true, exitCode: 0, cancelled: false };
+  }
+  if (summary.changed || summary.needsAttention) ctx.log('INFO', `self-heal: ${summary.summary}`);
+  return { ran: true, exitCode: 0, cancelled: false, summary };
+}
 
 export class SelfHealService extends BasePeriodicService {
   readonly id: DaemonServiceId = 'self-heal';
@@ -44,21 +146,15 @@ export class SelfHealService extends BasePeriodicService {
   readonly startupDelayMs = SELF_HEAL_KICKOFF_MS;
 
   protected async onStart(_ctx: DaemonContext): Promise<void> {
-    // No connections/handles to open — each tick re-checks the state dir itself.
+    // No connections/handles to open — each tick spawns its own bounded child.
   }
 
   protected async onStop(): Promise<void> {
-    // Nothing to release — the supervisor's timer teardown is the only cleanup needed.
+    // The supervisor aborts the in-flight tick's signal; driveCooperativeChild
+    // turns that into an IPC cancel and reaps the child past the grace window.
   }
 
-  protected async onTick(ctx: DaemonContext): Promise<void> {
-    if (!(await pathExists(getDaemonDir()))) return;
-    const { runSelfHeal, selfHealChangedAnything, selfHealNeedsAttention, summarizeSelfHeal } =
-      await import('../self-heal/registry.js');
-    if (!(await pathExists(getDaemonDir()))) return;
-    const report = await runSelfHeal({ mode: 'safe' });
-    if (selfHealChangedAnything(report) || selfHealNeedsAttention(report)) {
-      ctx.log('INFO', `self-heal: ${summarizeSelfHeal(report)}`);
-    }
+  protected async onTick(ctx: DaemonContext, signal: AbortSignal): Promise<void> {
+    await runSelfHealTick(ctx, signal);
   }
 }

@@ -16,6 +16,7 @@
  *   - `__claude-statusline`
  *   - `__usage-ingest` / `__usage-export`
  *   - `__harness-update-run`
+ *   - `__self-heal-run`
  *   - `__daemon-run`
  *   - `sessions` (read queries only — PHNX-4012)
  *
@@ -118,6 +119,15 @@ if (process.argv[2] === '__usage-export') {
 if (process.argv[2] === '__harness-update-run') {
   const { runHarnessUpdateChild } = await import('./lib/installations/update-runtime.js');
   process.exit(await runHarnessUpdateChild());
+}
+
+// Self-heal child: the daemon's self-heal tick spawns `agents __self-heal-run`
+// so the synchronous resource byte-compare runs on this process's thread, never
+// the daemon's (see lib/self-heal/child.ts). Above bootstrap for the same reason
+// as __harness-update-run: no self-update check, clean JSON on stdout.
+if (process.argv[2] === '__self-heal-run') {
+  const { runSelfHealChild } = await import('./lib/self-heal/child.js');
+  process.exit(await runSelfHealChild());
 }
 
 if (process.argv[2] === '__daemon-run') {

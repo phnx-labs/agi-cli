@@ -39,7 +39,8 @@ export function skillDirsMatch(src: string, dest: string): boolean {
         return false;
       }
       if (srcStat.size !== destStat.size) return false;
-      if (fs.readFileSync(srcPath, 'utf-8') !== fs.readFileSync(destPath, 'utf-8')) return false;
+      // Raw bytes: decoding a binary asset (an image, a dataset) to a string costs far more than comparing it.
+      if (!fs.readFileSync(srcPath).equals(fs.readFileSync(destPath))) return false;
     }
   }
   return true;

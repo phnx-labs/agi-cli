@@ -34,9 +34,9 @@ export function normalizeResourceContent(content: string): string {
   return content.replace(/\r\n/g, '\n').trim();
 }
 
-function readSafe(file: string): string | null {
+function readSafe(file: string): Buffer | null {
   try {
-    return fs.readFileSync(file, 'utf-8');
+    return fs.readFileSync(file);
   } catch {
     return null;
   }
@@ -45,12 +45,15 @@ function readSafe(file: string): string | null {
 /**
  * True when two files exist and their normalized content is identical. A missing
  * or unreadable file on either side is a mismatch (never a silent match).
+ * Identical bytes match without decoding, so a binary asset (an image, a
+ * dataset) is never turned into a string and run through the normalizer.
  */
 export function filesContentMatch(a: string, b: string): boolean {
-  const ac = readSafe(a);
-  const bc = readSafe(b);
-  if (ac == null || bc == null) return false;
-  return normalizeResourceContent(ac) === normalizeResourceContent(bc);
+  const ab = readSafe(a);
+  const bb = readSafe(b);
+  if (ab == null || bb == null) return false;
+  if (ab.equals(bb)) return true;
+  return normalizeResourceContent(ab.toString('utf-8')) === normalizeResourceContent(bb.toString('utf-8'));
 }
 
 /**
