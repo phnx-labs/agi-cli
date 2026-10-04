@@ -20,9 +20,10 @@
  *     {@link rollupForSha}, reviewDecision via a single lazy `gh pr view`).
  *   - The at-a-glance CI verdict (`ciState` + `failingChecks`) on every listed
  *     PR, the PRs merged in the last 7 days, and the default branch's CI are all
- *     REST too: {@link rollupForSha} per head / merge commit / branch head, with a
- *     rollup cached on disk once every check in it is terminal (a finished SHA's
- *     checks do not change), so a warm run re-reads only what is still running.
+ *     REST too: {@link rollupForSha} per head / merge commit / branch head. Only an
+ *     all-passing finished rollup is cached, and only for an hour: a red one can go
+ *     green when a failed job is re-run on the same SHA, and a green one can gain a
+ *     slower workflow that registers late, so neither is treated as permanent.
  *     A failed CI read empties the affected fields and names itself in
  *     `ciError`; it never fails the repository and is never silent.
  *   - A per-repo fetch failure is reported as `repositories[].error` and flips
@@ -130,6 +131,12 @@ export interface ProjectRepoPrs {
    * that read failed are null/empty rather than describing a repo with no checks.
    */
   ciError: string | null;
+  /**
+   * True when `recentlyMerged` may be missing merges: more closed PRs were updated
+   * inside the window than the {@link MERGED_PAGE_CAP} pages read. False otherwise,
+   * including with `--number`.
+   */
+  truncated: boolean;
   /** Non-null when the fetch failed — the list is then NOT authoritative. */
   error: string | null;
 }
@@ -213,6 +220,7 @@ export async function listOpenPrs(repo: string, gh: GhExec = ghExec): Promise<Pr
     'api',
     `repos/${repo}/pulls?state=open&per_page=100`,
     '--paginate',
+    '--cache', '60s',
     '--jq',
     `.[] | ${PR_JQ}`,
   ]);
@@ -310,13 +318,32 @@ export function ciFromRollupItems(items: readonly RollupItem[]): CiSummary {
   return { ciState: pending ? 'PENDING' : 'SUCCESS', failingChecks: [] };
 }
 
+/** Check-run conclusions that pass. */
+const PASSING_CONCLUSIONS = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);
+
 /**
- * True when no check in the rollup can still change: every check run completed and
- * no status is pending. An empty rollup is not terminal, since a just-pushed SHA has
- * no checks registered yet.
+ * True when every check finished and passed: each check run COMPLETED as SUCCESS,
+ * NEUTRAL or SKIPPED, each status SUCCESS. Only such a rollup is cached. A red one
+ * is always re-read, because re-running the failed job turns the same SHA green; an
+ * empty one is re-read because a just-pushed SHA has no checks registered yet.
  */
-export function isTerminalRollup(items: readonly RollupItem[]): boolean {
-  return items.length > 0 && items.every((i) => (isCheckRun(i) ? i.status === 'COMPLETED' : i.state !== 'PENDING'));
+export function isPassingRollup(items: readonly RollupItem[]): boolean {
+  return items.length > 0 && items.every((i) => (isCheckRun(i)
+    ? i.status === 'COMPLETED' && PASSING_CONCLUSIONS.has(i.conclusion ?? '')
+    : i.state === 'SUCCESS'));
+}
+
+/**
+ * How long a passing rollup is trusted. A workflow that starts late (a chained
+ * `workflow_run`, a slow external status) can add a check to a SHA that already
+ * looked green; after this long the SHA is read again and the new check shows up.
+ */
+export const PASSING_ROLLUP_TTL_MS = 60 * 60 * 1000;
+
+/** A cached passing rollup and when it was read. */
+interface CachedRollup {
+  items: RollupItem[];
+  readAt: number;
 }
 
 /**
@@ -382,23 +409,40 @@ function isRateLimited(message: string): boolean {
   return isRateLimitError(message) || /API rate limit exceeded/i.test(message);
 }
 
-/** The CI of one commit: a terminal rollup from the cache, else a REST read (cached once terminal). */
-async function readCi(
-  slug: string,
-  sha: string | null,
-  gh: GhExec,
-  rollups: KeyedCache<RollupItem[]>,
-  errors: CiErrors,
-): Promise<CiSummary> {
-  if (!sha) return NO_CI;
-  const hit = rollups.get(slug, sha);
-  if (hit) return ciFromRollupItems(hit);
+/** One repository's CI reads within a run: the gh runner, the rollup cache, the error sink, the clock. */
+interface CiReader {
+  slug: string;
+  gh: GhExec;
+  rollups: KeyedCache<CachedRollup>;
+  errors: CiErrors;
+  nowMs: number;
+  /** One read per SHA per run: the default branch head is usually also the newest merge commit. */
+  reads: Map<string, Promise<CiSummary>>;
+}
+
+/**
+ * The CI of one commit: a passing rollup read within {@link PASSING_ROLLUP_TTL_MS}
+ * comes from the cache; anything else is a REST read, cached only if it passes.
+ */
+function readCi(ci: CiReader, sha: string | null): Promise<CiSummary> {
+  if (!sha) return Promise.resolve(NO_CI);
+  let read = ci.reads.get(sha);
+  if (!read) {
+    read = readCiUncached(ci, sha);
+    ci.reads.set(sha, read);
+  }
+  return read;
+}
+
+async function readCiUncached(ci: CiReader, sha: string): Promise<CiSummary> {
+  const hit = ci.rollups.get(ci.slug, sha);
+  if (hit && ci.nowMs - hit.readAt < PASSING_ROLLUP_TTL_MS) return ciFromRollupItems(hit.items);
   try {
-    const items = await rollupForSha(slug, sha, gh);
-    if (isTerminalRollup(items)) rollups.set(slug, sha, items);
+    const items = await rollupForSha(ci.slug, sha, ci.gh);
+    if (isPassingRollup(items)) ci.rollups.set(ci.slug, sha, { items, readAt: ci.nowMs });
     return ciFromRollupItems(items);
   } catch (err) {
-    errors.record(err);
+    ci.errors.record(err);
     return NO_CI;
   }
 }
@@ -418,20 +462,28 @@ interface MergedCandidate {
 /**
  * PRs merged at or after `sinceMs`, newest `mergedAt` first. Closed PRs are read
  * most-recently-updated first, and a merge updates its PR, so every merge in the
- * window sits ahead of the first PR last updated before it: paging stops there, or
- * at {@link MERGED_PAGE_CAP} pages.
+ * window sits ahead of the first PR last updated before it: paging stops there.
+ * Reaching {@link MERGED_PAGE_CAP} pages with the window still open stops too, and
+ * reports `truncated` so the short list is not mistaken for every merge.
  */
-export async function listRecentlyMerged(repo: string, sinceMs: number, gh: GhExec = ghExec): Promise<MergedCandidate[]> {
+export async function listRecentlyMerged(
+  repo: string,
+  sinceMs: number,
+  gh: GhExec = ghExec,
+): Promise<{ merged: MergedCandidate[]; truncated: boolean }> {
   const rows: Array<Record<string, unknown>> = [];
+  let truncated = false;
   for (let page = 1; page <= MERGED_PAGE_CAP; page++) {
     const pageRows = parseNdjson(await gh([
-      'api', `repos/${repo}/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=${page}`, '--jq', CLOSED_JQ,
+      'api', `repos/${repo}/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=${page}`,
+      '--cache', '60s', '--jq', CLOSED_JQ,
     ]));
     rows.push(...pageRows);
     const oldest = pageRows.at(-1)?.updatedAt;
     if (pageRows.length < 100 || typeof oldest !== 'string' || Date.parse(oldest) < sinceMs) break;
+    truncated = page === MERGED_PAGE_CAP;
   }
-  return rows
+  const merged = rows
     .filter((r) => typeof r.mergedAt === 'string' && Date.parse(r.mergedAt) >= sinceMs)
     .sort((a, b) => Date.parse(String(b.mergedAt)) - Date.parse(String(a.mergedAt)))
     .map((r) => ({
@@ -453,6 +505,7 @@ export async function listRecentlyMerged(repo: string, sinceMs: number, gh: GhEx
         scope: null,
       },
     }));
+  return { merged, truncated };
 }
 
 /** What a merged PR's own read adds; it cannot change once the PR is merged. */
@@ -486,20 +539,15 @@ async function readMergedDetail(
 }
 
 /** The default branch (its name cached by gh for an hour), its head, and that head's CI. Null when unreadable. */
-async function readDefaultBranch(
-  slug: string,
-  gh: GhExec,
-  rollups: KeyedCache<RollupItem[]>,
-  errors: CiErrors,
-): Promise<DefaultBranchCi | null> {
+async function readDefaultBranch(ci: CiReader): Promise<DefaultBranchCi | null> {
   try {
-    const name = (await gh(['api', `repos/${slug}`, '--cache', '1h', '--jq', '.default_branch'])).trim();
-    if (!name) throw new Error(`${slug} reports no default branch`);
-    const sha = (await gh(['api', `repos/${slug}/branches/${name}`, '--jq', '.commit.sha'])).trim();
-    if (!sha) throw new Error(`${slug}@${name} has no head commit`);
-    return { name, sha, ...await readCi(slug, sha, gh, rollups, errors) };
+    const name = (await ci.gh(['api', `repos/${ci.slug}`, '--cache', '1h', '--jq', '.default_branch'])).trim();
+    if (!name) throw new Error(`${ci.slug} reports no default branch`);
+    const sha = (await ci.gh(['api', `repos/${ci.slug}/branches/${name}`, '--jq', '.commit.sha'])).trim();
+    if (!sha) throw new Error(`${ci.slug}@${name} has no head commit`);
+    return { name, sha, ...await readCi(ci, sha) };
   } catch (err) {
-    errors.record(err);
+    ci.errors.record(err);
     return null;
   }
 }
@@ -658,9 +706,10 @@ export async function buildProjectPrs(
   const [shared, ownClaims] = await Promise.all([repoPeers(def, peers, gh), canonicalClaims(def, gh)]);
   const cacheDir = ctx.cacheDir ?? getCacheDir();
   const filesCache = new PrFilesCache(cacheDir);
-  const rollups = new KeyedCache<RollupItem[]>(cacheDir, 'project-pr-rollups.json', '@');
+  const rollups = new KeyedCache<CachedRollup>(cacheDir, 'project-pr-ci.json', '@');
   const details = new KeyedCache<MergedDetail>(cacheDir, 'project-pr-merged.json', '#');
-  const sinceMs = (ctx.nowMs ?? Date.now()) - MERGED_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+  const nowMs = ctx.nowMs ?? Date.now();
+  const sinceMs = nowMs - MERGED_WINDOW_DAYS * 24 * 60 * 60 * 1000;
 
   // Fetch repos in PARALLEL so a native caller's overall deadline scales with the
   // slowest repo, not the sum — a serial multi-repo walk of 30s gh calls can blow
@@ -675,18 +724,20 @@ export async function buildProjectPrs(
           const pr = await fetchOnePr(slug, opts.number, gh);
           return {
             slug, sharedWith, pullRequests: [await enrichPr(slug, pr, gh)],
-            recentlyMerged: [], defaultBranch: null, ciError: null, error: null,
+            recentlyMerged: [], defaultBranch: null, ciError: null, truncated: false, error: null,
           };
         }
         const errors = new CiErrors();
-        const [listed, mergedListed, defaultBranch] = await Promise.all([
+        const ci: CiReader = { slug, gh, rollups, errors, nowMs, reads: new Map() };
+        const [listed, mergedRead, defaultBranch] = await Promise.all([
           listOpenPrs(slug, gh),
           listRecentlyMerged(slug, sinceMs, gh).catch((err: unknown) => {
             errors.record(err);
             return null;
           }),
-          readDefaultBranch(slug, gh, rollups, errors),
+          readDefaultBranch(ci),
         ]);
+        const mergedListed = mergedRead?.merged ?? null;
         let pullRequests: ProjectPr[] = listed;
         let merged = mergedListed ?? [];
         const own = ownClaims.get(slug);
@@ -708,31 +759,35 @@ export async function buildProjectPrs(
         }
         merged = merged.slice(0, MERGED_LIMIT);
         const [openCi, recentlyMerged] = await Promise.all([
-          mapBounded(pullRequests, 8, (pr) => readCi(slug, pr.headSha, gh, rollups, errors)),
+          mapBounded(pullRequests, 8, (pr) => readCi(ci, pr.headSha)),
           mapBounded(merged, 8, async (m): Promise<MergedPr> => {
-            const [detail, ci] = await Promise.all([
+            const [detail, mergeCi] = await Promise.all([
               readMergedDetail(slug, m.pr.number, gh, details, errors),
-              readCi(slug, m.pr.mergeCommitSha, gh, rollups, errors),
+              readCi(ci, m.pr.mergeCommitSha),
             ]);
-            return { ...m.pr, ...(detail ?? {}), ...ci };
+            return { ...m.pr, ...(detail ?? {}), ...mergeCi };
           }),
         ]);
         pullRequests = pullRequests.map((pr, i) => ({ ...pr, ...openCi[i] }));
         if (mergedListed) {
           details.prune(slug, new Set(mergedListed.map((m) => String(m.pr.number))));
+          // Pre-scope SHAs: every project sharing this repo keeps the same cache entries.
           if (defaultBranch) {
             rollups.prune(slug, new Set([
-              ...pullRequests.map((pr) => pr.headSha),
-              ...recentlyMerged.flatMap((pr) => (pr.mergeCommitSha ? [pr.mergeCommitSha] : [])),
+              ...listed.map((pr) => pr.headSha),
+              ...mergedListed.flatMap((m) => (m.pr.mergeCommitSha ? [m.pr.mergeCommitSha] : [])),
               defaultBranch.sha,
             ]));
           }
         }
-        return { slug, sharedWith, pullRequests, recentlyMerged, defaultBranch, ciError: errors.message, error: null };
+        return {
+          slug, sharedWith, pullRequests, recentlyMerged, defaultBranch,
+          ciError: errors.message, truncated: mergedRead?.truncated ?? false, error: null,
+        };
       } catch (err) {
         // A fetch failure is reported, never relabeled as zero open PRs.
         return {
-          slug, sharedWith, pullRequests: [], recentlyMerged: [], defaultBranch: null, ciError: null,
+          slug, sharedWith, pullRequests: [], recentlyMerged: [], defaultBranch: null, ciError: null, truncated: false,
           error: err instanceof Error ? err.message : String(err),
         };
       }

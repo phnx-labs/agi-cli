@@ -6,7 +6,8 @@ import {
   approveProjectPr,
   buildProjectPrs,
   ciFromRollupItems,
-  isTerminalRollup,
+  isPassingRollup,
+  PASSING_ROLLUP_TTL_MS,
   commentOnProjectPr,
   markProjectPrReady,
   mergeProjectPr,
@@ -147,6 +148,7 @@ describe('CI at a glance and recently merged PRs', () => {
     const [repo] = (await buildProjectPrs(solo, {}, gh, [solo], { nowMs: NOW, cacheDir: freshCache() })).repositories;
     expect(repo.error).toBeNull();
     expect(repo.ciError).toBeNull();
+    expect(repo.truncated).toBe(false);
     expect(repo.pullRequests.map((pr) => [pr.number, pr.ciState, pr.failingChecks])).toEqual([
       [1, 'FAILURE', ['ci/external', 'test', 'deploy']],
       [2, 'SUCCESS', []],
@@ -169,12 +171,14 @@ describe('CI at a glance and recently merged PRs', () => {
     expect(repo.recentlyMerged[2]).toMatchObject({ mergedAt: '2026-09-27T12:00:00Z', ciState: 'SUCCESS' });
   });
 
-  it('caches a rollup only once every check finished: a warm run re-reads just the running and empty heads', async () => {
+  it('caches only an all-passing rollup: a warm run re-reads the running, empty and red commits', async () => {
     const cacheDir = freshCache();
     await buildProjectPrs(solo, {}, recordedGh(soloRoutes()).gh, [solo], { nowMs: NOW, cacheDir });
     const warm = recordedGh(soloRoutes());
     const [repo] = (await buildProjectPrs(solo, {}, warm.gh, [solo], { nowMs: NOW, cacheDir })).repositories;
-    expect(warm.asked.filter((e) => e.endsWith('/check-runs'))).toEqual([
+    expect(warm.asked.filter((e) => e.endsWith('/check-runs')).sort()).toEqual([
+      'repos/acme/mono/commits/c13/check-runs',
+      'repos/acme/mono/commits/d0d0d0d/check-runs',
       'repos/acme/mono/commits/o1/check-runs',
       'repos/acme/mono/commits/o3/check-runs',
     ]);
@@ -183,6 +187,38 @@ describe('CI at a glance and recently merged PRs', () => {
     expect(repo.recentlyMerged.map((pr) => [pr.number, pr.mergedBy, pr.ciState])).toEqual([
       [13, 'hubot', 'FAILURE'], [10, null, 'SUCCESS'], [15, 'hubot', 'SUCCESS'],
     ]);
+  });
+
+  it('a red SHA is re-read every run, so re-running the failed job on it turns the row green', async () => {
+    const cacheDir = freshCache();
+    const red = JSON.stringify({ name: 'test', status: 'COMPLETED', conclusion: 'FAILURE', link: '' });
+    const green = JSON.stringify({ name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS', link: '' });
+    const first = await buildProjectPrs(solo, {}, recordedGh({ ...soloRoutes(), 'repos/acme/mono/commits/o1/check-runs': red, 'repos/acme/mono/commits/o1/status': '' }).gh,
+      [solo], { nowMs: NOW, cacheDir });
+    expect(first.repositories[0].pullRequests[0]).toMatchObject({ number: 1, ciState: 'FAILURE', failingChecks: ['test'] });
+
+    const rerun = recordedGh({ ...soloRoutes(), 'repos/acme/mono/commits/o1/check-runs': green, 'repos/acme/mono/commits/o1/status': '' });
+    const second = await buildProjectPrs(solo, {}, rerun.gh, [solo], { nowMs: NOW + 60_000, cacheDir });
+    expect(rerun.asked).toContain('repos/acme/mono/commits/o1/check-runs');
+    expect(second.repositories[0].pullRequests[0]).toMatchObject({ number: 1, ciState: 'SUCCESS', failingChecks: [] });
+  });
+
+  it('trusts a green SHA for an hour, then re-reads it so a late workflow shows up', async () => {
+    const cacheDir = freshCache();
+    await buildProjectPrs(solo, {}, recordedGh(soloRoutes()).gh, [solo], { nowMs: NOW, cacheDir });
+
+    const withinHour = recordedGh(soloRoutes());
+    await buildProjectPrs(solo, {}, withinHour.gh, [solo], { nowMs: NOW + PASSING_ROLLUP_TTL_MS - 1, cacheDir });
+    expect(withinHour.asked).not.toContain('repos/acme/mono/commits/o2/check-runs');
+
+    const late = [
+      JSON.stringify({ name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS', link: '' }),
+      JSON.stringify({ name: 'deploy-preview', status: 'COMPLETED', conclusion: 'FAILURE', link: '' }),
+    ].join('\n');
+    const afterHour = recordedGh({ ...soloRoutes(), 'repos/acme/mono/commits/o2/check-runs': late });
+    const [repo] = (await buildProjectPrs(solo, {}, afterHour.gh, [solo], { nowMs: NOW + PASSING_ROLLUP_TTL_MS, cacheDir })).repositories;
+    expect(afterHour.asked).toContain('repos/acme/mono/commits/o2/check-runs');
+    expect(repo.pullRequests[1]).toMatchObject({ number: 2, ciState: 'FAILURE', failingChecks: ['deploy-preview'] });
   });
 
   it('reads at most three pages of closed PRs, and stops as soon as a page reaches past the window', async () => {
@@ -196,12 +232,14 @@ describe('CI at a glance and recently merged PRs', () => {
     const capped = recordedGh({
       ...soloRoutes(), [CLOSED_PAGE(1)]: fullPage(100), [CLOSED_PAGE(2)]: fullPage(200), [CLOSED_PAGE(3)]: fullPage(300), [CLOSED_PAGE(4)]: fullPage(400),
     });
-    await buildProjectPrs(solo, {}, capped.gh, [solo], { nowMs: NOW, cacheDir: freshCache() });
+    const [cappedRepo] = (await buildProjectPrs(solo, {}, capped.gh, [solo], { nowMs: NOW, cacheDir: freshCache() })).repositories;
     expect(capped.asked.filter((e) => e.includes('state=closed'))).toEqual([CLOSED_PAGE(1), CLOSED_PAGE(2), CLOSED_PAGE(3)]);
+    expect(cappedRepo.truncated).toBe(true);
 
     const stopped = recordedGh({ ...soloRoutes(), [CLOSED_PAGE(1)]: fullPage(100, '2026-09-26T00:00:00Z'), [CLOSED_PAGE(2)]: fullPage(200) });
-    await buildProjectPrs(solo, {}, stopped.gh, [solo], { nowMs: NOW, cacheDir: freshCache() });
+    const [stoppedRepo] = (await buildProjectPrs(solo, {}, stopped.gh, [solo], { nowMs: NOW, cacheDir: freshCache() })).repositories;
     expect(stopped.asked.filter((e) => e.includes('state=closed'))).toEqual([CLOSED_PAGE(1)]);
+    expect(stoppedRepo.truncated).toBe(false);
   });
 
   it('a failed read names itself in ciError, keeps what succeeded, and never fails the repository', async () => {
@@ -248,6 +286,28 @@ describe('CI at a glance and recently merged PRs', () => {
     expect(second.asked.filter((e) => e.includes('/files'))).toEqual([]);
   });
 
+  it('one project\'s run in a shared repo keeps the rollups another project cached', async () => {
+    const rush = { name: 'rush', repo: 'acme/mono', root: '/src/mono', defaultPath: '/src/mono/rush' } as ProjectDef;
+    const prix = { name: 'prix', repo: 'acme/mono', root: '/src/mono', defaultPath: '/src/mono/prix' } as ProjectDef;
+    const routes: Routes = {
+      ...soloRoutes(),
+      'repos/acme/mono/pulls?state=open&per_page=100': [prLine(1, 'o1'), prLine(2, 'o2')].join('\n'),
+      'repos/acme/mono/pulls/1/files?per_page=100': 'rush/app.ts\n',
+      'repos/acme/mono/pulls/2/files?per_page=100': 'prix/api.ts\n',
+      'repos/acme/mono/pulls/13/files?per_page=100': 'AGENTS.md\n',
+      'repos/acme/mono/pulls/10/files?per_page=100': 'rush/cli/main.ts\n',
+      'repos/acme/mono/pulls/15/files?per_page=100': 'prix/api.ts\n',
+    };
+    const cacheDir = freshCache();
+    await buildProjectPrs(prix, {}, recordedGh(routes).gh, [rush, prix], { nowMs: NOW, cacheDir });
+    // rush never reads PR 2 (prix-only), and must not evict prix's cached green rollup for it.
+    await buildProjectPrs(rush, {}, recordedGh(routes).gh, [rush, prix], { nowMs: NOW, cacheDir });
+    const again = recordedGh(routes);
+    const [repo] = (await buildProjectPrs(prix, {}, again.gh, [rush, prix], { nowMs: NOW, cacheDir })).repositories;
+    expect(again.asked).not.toContain('repos/acme/mono/commits/o2/check-runs');
+    expect(repo.pullRequests.map((pr) => [pr.number, pr.ciState])).toEqual([[2, 'SUCCESS']]);
+  });
+
   it('--number carries the same verdict from the REST rollup and no merged list', async () => {
     const { gh } = recordedGh({
       'repos/acme/mono': repoRead,
@@ -261,10 +321,10 @@ describe('CI at a glance and recently merged PRs', () => {
     expect(repo.pullRequests[0]).toMatchObject({
       ciState: 'FAILURE', failingChecks: ['ci/external', 'test', 'deploy'], reviewDecision: 'APPROVED',
     });
-    expect(repo).toMatchObject({ recentlyMerged: [], defaultBranch: null, ciError: null });
+    expect(repo).toMatchObject({ recentlyMerged: [], defaultBranch: null, ciError: null, truncated: false });
   });
 
-  it('reads the REST rollup with GitHub\'s precedence, and calls only a finished rollup terminal', () => {
+  it('reads the REST rollup with GitHub\'s precedence, and calls only a finished green rollup cacheable', () => {
     expect(ciFromRollupItems([])).toEqual({ ciState: null, failingChecks: [] });
     expect(ciFromRollupItems([{ name: 'a', status: 'COMPLETED', conclusion: 'SKIPPED' }, { name: 'b', state: 'SUCCESS' }]))
       .toEqual({ ciState: 'SUCCESS', failingChecks: [] });
@@ -273,9 +333,10 @@ describe('CI at a glance and recently merged PRs', () => {
       .toEqual({ ciState: 'ERROR', failingChecks: ['a'] });
     expect(ciFromRollupItems([{ name: 'a', state: 'ERROR' }, { name: 'b', status: 'COMPLETED', conclusion: 'ACTION_REQUIRED' }]))
       .toEqual({ ciState: 'FAILURE', failingChecks: ['a', 'b'] });
-    expect(isTerminalRollup([])).toBe(false);
-    expect(isTerminalRollup([{ name: 'a', status: 'COMPLETED', conclusion: 'FAILURE' }, { name: 'b', state: 'ERROR' }])).toBe(true);
-    expect(isTerminalRollup([{ name: 'a', status: 'COMPLETED', conclusion: 'SUCCESS' }, { name: 'b', state: 'PENDING' }])).toBe(false);
+    expect(isPassingRollup([])).toBe(false);
+    expect(isPassingRollup([{ name: 'a', status: 'COMPLETED', conclusion: 'SUCCESS' }, { name: 'b', status: 'COMPLETED', conclusion: 'SKIPPED' }, { name: 'c', state: 'SUCCESS' }])).toBe(true);
+    expect(isPassingRollup([{ name: 'a', status: 'COMPLETED', conclusion: 'FAILURE' }])).toBe(false);
+    expect(isPassingRollup([{ name: 'a', status: 'COMPLETED', conclusion: 'SUCCESS' }, { name: 'b', state: 'PENDING' }])).toBe(false);
   });
 });
 
