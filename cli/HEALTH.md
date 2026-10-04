@@ -13,7 +13,7 @@ commit: 4b709a7e5c7026f4dcc56336235180386a992b03
 lines and 21,688 blank lines. Tests are separate: **185,262 code lines** in 1,041 files.
 No size budget has been agreed, so this is a baseline, not a pass/fail.
 
-Removing duplication and dead code alone recovers about **2,300 production lines (~1.2%)**
+Removing duplication and dead code alone recovers about **2,100 production lines (~1.1%)**
 and **~3,200 test lines**, with no behavior decision required. The larger reductions are
 owner decisions: retiring one-time migrations (~1,600 lines) and the PHNX-4227 removal of
 the `agents sessions` command group (~8,000+ lines). Shrinking this codebase meaningfully
@@ -26,15 +26,17 @@ after the first baseline at
 (+486 production code lines). Intervening source: `projects prs` CI/merged work,
 `gen-command-index` extraction onto `@phnx-labs/cli-docs`, sessions-client preferring the
 installed `sessions` bin, menubar viewer identity, and atomic identity session writes.
-Cleanup findings below were spot-checked; none were invalidated.
+A later spot-check narrowed four estimates (shell quoting, duration parsing, Cloudflare
+provisioning, daemon empty overrides) and corrected the harness-branch count from 240 to
+206 exact `agent === '…'` matches. The other findings still hold.
 
 <div class="artifact-grid artifact-grid-3">
 <div class="artifact-stat"><div class="artifact-stat-value">193,077</div><div class="artifact-stat-label">production code lines (806 files)</div></div>
-<div class="artifact-stat"><div class="artifact-stat-value">~2,300</div><div class="artifact-stat-label">removable with no owner decision</div></div>
+<div class="artifact-stat"><div class="artifact-stat-value">~2,100</div><div class="artifact-stat-label">removable with no owner decision</div></div>
 <div class="artifact-stat"><div class="artifact-stat-value">~3,200</div><div class="artifact-stat-label">test lines covering an external package</div></div>
 <div class="artifact-stat"><div class="artifact-stat-value">~1,600</div><div class="artifact-stat-label">in one-time migrations an owner could retire</div></div>
 <div class="artifact-stat"><div class="artifact-stat-value">~8,000+</div><div class="artifact-stat-label">leaves with PHNX-4227 (sessions group)</div></div>
-<div class="artifact-stat"><div class="artifact-stat-value">240</div><div class="artifact-stat-label">harness-name branches outside registries</div></div>
+<div class="artifact-stat"><div class="artifact-stat-value">206</div><div class="artifact-stat-label">exact agent === branches (74 files)</div></div>
 </div>
 
 <figure class="artifact-figure">
@@ -54,15 +56,15 @@ Cleanup findings below were spot-checked; none were invalidated.
 <text x="242" y="145.4" text-anchor="end" font-size="13" fill="currentColor">Two SSH transport stacks</text>
 <rect x="250" y="130" width="144" height="22" rx="3" fill="#a3e635"/>
 <text x="400" y="145.4" font-size="13" fill="currentColor">~180</text>
-<text x="242" y="175.4" text-anchor="end" font-size="13" fill="currentColor">Cloudflare provisioning x2</text>
-<rect x="250" y="160" width="136" height="22" rx="3" fill="#a3e635"/>
-<text x="392" y="175.4" font-size="13" fill="currentColor">~170</text>
-<text x="242" y="205.4" text-anchor="end" font-size="13" fill="currentColor">Shell quoting x16</text>
-<rect x="250" y="190" width="100" height="22" rx="3" fill="#a3e635"/>
-<text x="356" y="205.4" font-size="13" fill="currentColor">~125</text>
-<text x="242" y="235.4" text-anchor="end" font-size="13" fill="currentColor">Daemon service boilerplate</text>
-<rect x="250" y="220" width="88" height="22" rx="3" fill="#a3e635"/>
-<text x="344" y="235.4" font-size="13" fill="currentColor">~110</text>
+<text x="242" y="175.4" text-anchor="end" font-size="13" fill="currentColor">Cloudflare worker templates</text>
+<rect x="250" y="160" width="80" height="22" rx="3" fill="#a3e635"/>
+<text x="336" y="175.4" font-size="13" fill="currentColor">~100</text>
+<text x="242" y="205.4" text-anchor="end" font-size="13" fill="currentColor">Shell quoting x6</text>
+<rect x="250" y="190" width="56" height="22" rx="3" fill="#a3e635"/>
+<text x="312" y="205.4" font-size="13" fill="currentColor">~70</text>
+<text x="242" y="235.4" text-anchor="end" font-size="13" fill="currentColor">Daemon empty overrides</text>
+<rect x="250" y="220" width="32" height="22" rx="3" fill="#a3e635"/>
+<text x="288" y="235.4" font-size="13" fill="currentColor">~40</text>
 <text x="242" y="265.4" text-anchor="end" font-size="13" fill="currentColor">Staleness checker template</text>
 <rect x="250" y="250" width="88" height="22" rx="3" fill="#a3e635"/>
 <text x="344" y="265.4" font-size="13" fill="currentColor">~110</text>
@@ -75,9 +77,9 @@ Cleanup findings below were spot-checked; none were invalidated.
 <text x="242" y="355.4" text-anchor="end" font-size="13" fill="currentColor">npm upgrade pipeline x2</text>
 <rect x="250" y="340" width="56" height="22" rx="3" fill="#a3e635"/>
 <text x="312" y="355.4" font-size="13" fill="currentColor">~70</text>
-<text x="242" y="385.4" text-anchor="end" font-size="13" fill="currentColor">Duration parsing x6</text>
-<rect x="250" y="370" width="48" height="22" rx="3" fill="#a3e635"/>
-<text x="304" y="385.4" font-size="13" fill="currentColor">~60</text>
+<text x="242" y="385.4" text-anchor="end" font-size="13" fill="currentColor">parseSince x2</text>
+<rect x="250" y="370" width="20" height="22" rx="3" fill="#a3e635"/>
+<text x="276" y="385.4" font-size="13" fill="currentColor">~25</text>
 <text x="242" y="415.4" text-anchor="end" font-size="13" fill="currentColor">Atomic-write bypasses</text>
 <rect x="250" y="400" width="36" height="22" rx="3" fill="#a3e635"/>
 <text x="292" y="415.4" font-size="13" fill="currentColor">~45</text>
@@ -97,13 +99,15 @@ What makes a typical change expensive for a human:
   `lib/session/db.ts` (5,951), `lib/session/discover.ts` (5,690), `lib/accounting/usage.ts`
   (4,432), `commands/exec.ts` (4,060, where `registerRunCommand` alone is ~3,240 lines from
   `commands/exec.ts:819`).
-- **Harness branching outside the registries.** The pattern scan finds 240
-  `agent === '…'` style arms; the densest are `lib/exec.ts` (26), `lib/models.ts` (24),
-  `lib/plugins/plugins.ts` (20), `lib/session/discover.ts` (19). The repo's chosen pattern
-  is a registry entry gated by `capableAgents(...)` (AGENTS.md §Code review conventions).
-- **The same helper re-written per file.** Shell quoting exists 13 times (POSIX) plus 3
-  (PowerShell); duration parsing 6 times; tmp-file-then-rename JSON writes about 25 times
-  beside `lib/fs-atomic.ts`.
+- **Harness branching outside the registries.** Exact `agent === '…'` matches: 206 across
+  74 files. Densest remaining: `lib/models.ts` (24), `lib/exec.ts` (23). The repo's chosen
+  pattern is a registry entry gated by `capableAgents(...)` (AGENTS.md §Code review conventions).
+- **The same helper re-written per file.** Six POSIX `shellQuote` definitions remain
+  (`ssh-exec.ts`, `session/remote/remote.ts`, `installations/shims.ts`, `hooks/install.ts`,
+  `watchdog/rotate.ts`, `cloud/factory.ts`); PowerShell quoting is split across
+  `pwsh.ts`, `devices/connect.ts`, and `platform/exec.ts`. Byte-identical `parseSince`
+  remains in `commands/logs.ts` and `commands/events.ts` only. Tmp-file-then-rename JSON
+  writes still sit beside `lib/fs-atomic.ts`.
 - **Comment density.** Comment lines are 38% of code lines. Many are load-bearing
   incident rationale; the ratio says where to look, not what to delete.
 
@@ -120,14 +124,14 @@ end to end.
 | 1 | `lib/session/__tests__/render.test.ts` + `parse-*.test.ts` (~3,200 lines) only exercise `@phnx-labs/sessions-cli/reader`; that package now owns the parsers. Keep one version-pin contract test here, move the rest to sessions-cli | dead (tests) | ~3,200 test | confirmed |
 | 2 | Dead exports: `plugins/skills.ts` install/compare API (`installSkillToVersion`, `skillContentMatches`, …), `versions.ts` `getInstalledVersion` + local `skillDirsMatch`/`copyDir`, 9 unused `state.ts` path aliases, `permissions.ts` `*ToCanonical` (test-only), `device-config.ts:1182-1286` auto-launch helpers, `git.ts` `initRepo` (and test-only `getTrackedFiles`), `crabbox/runtimes.ts` `pickRuntimes`, `remote-list.ts` `parseRemoteList`, and others | dead | ~480 | confirmed |
 | 3 | `lib/feed/activity.ts`: 14 of 26 exports have no production caller outside the file; they are leftovers of the `agents activity` command removed in c3e792dd0 | dead | ~220 | confirmed |
-| 4 | Cloudflare provisioning twice: `session/sync/worker-template.ts:813` and `traces/worker-template.ts:279` share `defaultVerifyPhoenixToken`/`json()`/`authorizeRead`; `session/sync/provision.ts:52` "mirrors" `traces/provision.ts:45` | duplicate | ~170 | confirmed |
-| 5 | Two SSH transport stacks: `devices/connect.ts:397` `buildSshInvocation` spawned by hand at 4 sites vs `ssh-exec.ts` `sshExec*`; `-i … IdentitiesOnly=yes` hand-built at 19 sites | duplicate | ~180 | confirmed |
-| 6 | Shell quoting: 13 POSIX copies (e.g. `teams/agents.ts:258`, `daemon/runner.ts:951`, `installations/shims.ts:295`) and 3 PowerShell copies (`pwsh.ts:17`, `hosts/remote-cmd.ts:273`, `devices/connect.ts:146`); `-EncodedCommand` wrapper inline 17 times. Owners: `ssh-exec.ts` (add always-quote variant) and `pwsh.ts` | duplicate | ~125 | confirmed |
-| 7 | Daemon services: both base classes in `daemon/service.ts:108,149` declare `onStart`/`onStop` abstract, forcing 34 empty overrides, and copy the same lifecycle code | duplicate | ~110 | confirmed |
+| 4 | Cloudflare worker templates still duplicate `defaultVerifyPhoenixToken` / `authorizeRead` / `json` (`session/sync/worker-template.ts:727,813,838` and `traces/worker-template.ts:254,279,304`). Provision orchestration is already shared via `cloudflare/provision.js` | duplicate | ~100 | confirmed |
+| 5 | Two SSH transport stacks: `devices/connect.ts:397` `buildSshInvocation` vs `ssh-exec.ts` `sshExec*`; hand-built `IdentitiesOnly=yes` at 21 non-test sites | duplicate | ~180 | confirmed |
+| 6 | Shell quoting: 6 local POSIX quoters (`ssh-exec.ts:43`, `session/remote/remote.ts:44`, `installations/shims.ts:295`, `hooks/install.ts:865`, `watchdog/rotate.ts:203`, `cloud/factory.ts:145`) plus PowerShell `pwshLiteral` / `pwshQuote` / `quoteWin32ExecArg`. Owner: `ssh-exec.ts` | duplicate | ~70 | confirmed |
+| 7 | Daemon services: abstract `onStart`/`onStop` at `daemon/service.ts:108,149`; 10 truly empty `{}` overrides (not 34). Comment-only no-ops are not counted | duplicate | ~40 | confirmed |
 | 8 | Four staleness directory checkers (`staleness/checkers/{skills,subagents,workflows,plugins}.ts`) are one template differing by marker file | duplicate | ~110 | candidate |
 | 9 | MCP config written by two paths (`agent-spec/agents.ts:2906-2976` and `mcp.ts:619` `writeMcpConfig`); `stripJsonComments` defined twice (`agents.ts:3009`, `permissions-registry.ts:155`) | duplicate | ~105 | candidate / confirmed |
 | 10 | npm upgrade pipeline twice: `bootstrap.ts:351,382` vs `daemon/self-update-service.ts:125,163`; move both into `lib/self-update.ts` | duplicate | ~70 | confirmed |
-| 11 | Duration / `--since` parsing in 6 places (`commands/logs.ts:192`, `commands/events.ts:72`, `commands/mailboxes.ts:120`, `monitors/config.ts:232`, `scheduling/routines.ts:1928`, `hooks/cache.ts:56`); the three `parseSince` copies are byte-identical | duplicate | ~45-70 | confirmed |
+| 11 | Byte-identical `parseSince` in `commands/logs.ts:192` and `commands/events.ts:72`; `commands/mailboxes.ts:120` uses a separate `parseSinceArg`. The `monitors/config.ts` and `scheduling/routines.ts` copies are gone. Shared owner is `hooks/cache.ts` `parseDuration` | duplicate | ~25 | confirmed |
 | 12 | ~25 hand-rolled tmp+rename writes bypass `lib/fs-atomic.ts` (e.g. `monitors/state.ts:101`, `mailbox.ts:207`) | duplicate | ~45 | confirmed |
 | 13 | Six YAML frontmatter fence splitters (`plugins/skills.ts:120`, `subagents.ts:43`, `workflows.ts:167,1018,1094`, `commands.ts:165`) | duplicate | ~40 | candidate |
 | 14 | GitHub helpers: owner/repo parsing 4x and origin-URL reads 7x (owner: `git.ts`); hardened `gh` env twice (`github/pr-mergeable.ts:44`, `gh-overload.ts:121`) with 9 raw `gh` call sites skipping it; `parseNdjson` twice | duplicate | ~75 | confirmed |
@@ -202,8 +206,8 @@ Delta vs first baseline (`6143f3743`): +1 production file, +486 code, +175 comme
 (825 files scanned, 77 unparsed, 95 discriminator families, 1,740 collapsible arms), and
 `review/signatures.ts` (38 candidate clusters). This refresh re-ran modules + cloc and
 spot-checked findings with `rg`/direct reads. Pattern families are keyed by variable name,
-so the 240 `agent` arms are a pointer for inspection, not a count of registry bypasses
-(exact `agent === '…'` matches are fewer).
+so family size is a pointer for inspection, not a count of registry bypasses. Exact
+`agent === '…'` matches at this commit: 206 across 74 files.
 
 **Area scans.** Five read-only scans from the first baseline (against `6143f3743`), reused
 after spot-check because intervening diffs are localized:
@@ -216,12 +220,13 @@ after spot-check because intervening diffs are localized:
 | Daemon + scheduling (daemon, feed, monitors, scheduling, triggers, watchdog, menubar) | claude | 35,128 |
 | Accounts, cloud, release plumbing + repo-wide utility sweep | claude | 28,967 |
 
-Re-checked on `4b709a7e5`: shellQuote still defined in ≥8 places (owner
-`lib/ssh-exec.ts:43`); `parseSince` still duplicated in `logs.ts`/`events.ts`; Cloudflare
-`authorizeRead`/`defaultVerifyPhoenixToken` still in both worker templates; `buildSshInvocation`
-still parallel to `ssh-exec`; reader-only `lib/session/__tests__/parse-*.test.ts` +
-`render.test.ts` still import `@phnx-labs/sessions-cli/reader`; `gen-command-index.ts` is
-now 35 lines (extraction landed — positive precedent, not a new cleanup item).
+Re-checked on `4b709a7e5`: 6 POSIX `shellQuote` defs (owner `lib/ssh-exec.ts:43`);
+byte-identical `parseSince` only in `logs.ts` and `events.ts`; Cloudflare worker-template
+helpers still duplicated, but `provision.ts` already imports `cloudflare/provision.js`;
+`buildSshInvocation` still parallel to `ssh-exec` (21 `IdentitiesOnly=yes` sites); 18
+reader tests under `lib/session/__tests__/` still import `@phnx-labs/sessions-cli/reader`;
+10 empty daemon `onStart`/`onStop` bodies; `project-prs.ts` is 1,063 lines and
+`gen-command-index.ts` is 35 (extraction landed).
 
 **Not covered.** Internals of `lib/session/db.ts` and `discover.ts`; per-provider
 fetchers inside `accounting/usage.ts`; per-harness registrars in `hooks/install.ts`;
