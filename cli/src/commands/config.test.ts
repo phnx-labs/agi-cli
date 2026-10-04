@@ -158,6 +158,21 @@ describe('config command', () => {
     expect(after.find((r) => r.key === 'menubar.menu.workingRowsShown')).toBeUndefined();
   });
 
+  it('sets AGI Menu list preferences from comma or JSON input and lists them as arrays', () => {
+    runAgents(home, ['config', 'set', 'menubar.menu.tabOrder', 'home, projects,sessions,inbox']);
+    runAgents(home, ['config', 'set', 'menubar.menu.pinnedProjects', '["Rush","Ops, west"]']);
+    runAgents(home, ['config', 'set', 'menubar.menu.groupTicketsByMilestone', 'on']);
+    const rows = JSON.parse(runAgents(home, ['config', 'list', '--json'])) as Array<{ key: string; value: unknown }>;
+    const value = (key: string) => rows.find((r) => r.key === key)?.value;
+    expect(value('menubar.menu.tabOrder')).toEqual(['home', 'projects', 'sessions', 'inbox']);
+    expect(value('menubar.menu.pinnedProjects')).toEqual(['Rush', 'Ops, west']);
+    expect(value('menubar.menu.groupTicketsByMilestone')).toBe(true);
+
+    expect(() => runAgents(home, ['config', 'set', 'menubar.menu.hiddenTabs', 'settings'])).toThrow(/not one of/);
+    expect(() => runAgents(home, ['config', 'set', 'menubar.menu.pinnedProjects', '["Rush", 3]'])).toThrow(/JSON array of strings/);
+    expect(() => runAgents(home, ['config', 'set', 'menubar.menu.tabOrder', 'home,projects'])).toThrow(/exactly once/);
+  });
+
   it('rejects an out-of-set AGI Menu enum value', () => {
     expect(() =>
       runAgents(home, ['config', 'set', 'menubar.menu.groupBy', 'sideways']),

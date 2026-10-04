@@ -511,6 +511,14 @@ budget are fast-follow. POSIX-only in v1. `reviewDecision` is deliberately never
 REST-derived (it is a GraphQL-computed branch-protection/CODEOWNERS decision;
 approximating it could let the merge loop bypass review).
 
+The `agents projects prs` write verbs follow the same budget rule
+([`src/lib/github/project-prs.ts`](src/lib/github/project-prs.ts), documented in
+[`docs/projects.md`](docs/projects.md)): `merge`, `review --approve` and `comment`
+are one REST call each, and `ready` is the single exception, one GraphQL
+`markPullRequestReadyForReview` mutation, because GitHub exposes no REST way to
+leave draft. `merge` and `review` pin to the head SHA the caller saw (`review`
+reads the live head, refuses a moved one, and sends that full SHA as `commit_id`).
+
 `agents traces sync` publishes two redacted derived surfaces: a per-session
 `SessionDetail` at `sessions/<id>.json` (a `meta` summary —
 spanMs/**activeMs**/turns/tools/errorCount/tokens/cost/outcome/repo — plus a plain-language
@@ -1372,7 +1380,16 @@ Home session-updates section), `deviceSort` (name/role/load/memory/disk), and th
 registered agent id, validated at write time, unset = the menu's own default and no
 `--fallback`) plus `headlessPlacement` (`auto` | `local` | `interactive` | a device
 name; `auto` is `agents run --device auto`, which already refuses a `personal` or
-`desktop` box). They are registered
+`desktop` box). Four keys shape the Projects tab and the tab bar:
+`pinnedProjects` (project names pinned to the top, in pin order; default `[]`),
+`tabOrder` (every one of `home`, `sessions`, `inbox`, `projects` exactly once; default
+in that order), `hiddenTabs` (any of those four but not all; default `[]`), and
+`groupTicketsByMilestone` (default `false`, a flat ticket list). Settings is never in
+either tab list: it is always shown. The three list keys are `string-list` keys stored
+as YAML lists and emitted as JSON arrays; `agents config set` replaces the whole list
+from a JSON array (`'["Rush","Ops, west"]'`, what the menu writes) or comma-separated
+items (what a person types), and the order, membership, and duplicate rules are
+validated at write time. They are registered
 `agents config` keys, so the native menu reads them via `agents config list --json`
 (`{key,value,hint}` rows) and writes one per action; an **unset** key is omitted from
 the list so the menu falls back to its own baked-in default (the defaults in

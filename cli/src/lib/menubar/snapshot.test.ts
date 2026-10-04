@@ -43,6 +43,39 @@ describe('menubar snapshot', () => {
     expect(readLastWatchdogTick(dir)).toBeNull();
   });
 
+  it('menuPreferences carries the pin, tab, and milestone keys: defaults when unset, stored lists once set', async () => {
+    // state.ts captures HOME at import time, so the config read needs fresh modules.
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'menubar-prefs-home-'));
+    dirs.push(home);
+    const prevHome = process.env.HOME;
+    process.env.HOME = home;
+    vi.resetModules();
+    try {
+      const { setConfigValue } = await import('../device-config.js');
+      const { buildMenuPreferences } = await import('./snapshot.js');
+      expect(buildMenuPreferences()).toMatchObject({
+        'menubar.menu.pinnedProjects': [],
+        'menubar.menu.tabOrder': ['home', 'sessions', 'inbox', 'projects'],
+        'menubar.menu.hiddenTabs': [],
+        'menubar.menu.groupTicketsByMilestone': false,
+      });
+      setConfigValue('menubar.menu.pinnedProjects', ['Rush']);
+      setConfigValue('menubar.menu.tabOrder', ['home', 'projects', 'sessions', 'inbox']);
+      setConfigValue('menubar.menu.hiddenTabs', ['inbox']);
+      setConfigValue('menubar.menu.groupTicketsByMilestone', true);
+      expect(buildMenuPreferences()).toMatchObject({
+        'menubar.menu.pinnedProjects': ['Rush'],
+        'menubar.menu.tabOrder': ['home', 'projects', 'sessions', 'inbox'],
+        'menubar.menu.hiddenTabs': ['inbox'],
+        'menubar.menu.groupTicketsByMilestone': true,
+      });
+    } finally {
+      if (prevHome === undefined) delete process.env.HOME;
+      else process.env.HOME = prevHome;
+      vi.resetModules();
+    }
+  });
+
   it('emits preferred state layered from the device doc over the fleet default', async () => {
     // Auto-launch flags live in the tracked per-device doc
     // (devices/<name>/agents.yaml config:) — so this test needs a redirected

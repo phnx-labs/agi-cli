@@ -83,7 +83,16 @@ import {
   type ImportPlan,
   type RawImportFlags,
 } from '../lib/project-import.js';
-import { buildProjectPrs, mergeProjectPr, resolveTargetSlugs, MERGE_METHODS, type MergeMethod } from '../lib/github/project-prs.js';
+import {
+  approveProjectPr,
+  buildProjectPrs,
+  commentOnProjectPr,
+  markProjectPrReady,
+  mergeProjectPr,
+  resolveTargetSlugs,
+  MERGE_METHODS,
+  type MergeMethod,
+} from '../lib/github/project-prs.js';
 import { ghExec } from '../lib/github/pr-mergeable.js';
 
 /** Recursion guard: a peer answering a probe fan-out never re-fans-out itself. */
@@ -624,6 +633,56 @@ function printProjectDefinition(def: ProjectDef, name: string): void {
   console.log(chalk.gray(`  ${projectDefPath(name)}`));
 }
 
+// The single-PR verbs (`prs ready/review/comment/merge`) share these flag rules.
+// Every one runs before the repo is resolved, so a bad flag never reaches GitHub.
+
+function prFail(message: string): never {
+  console.error(chalk.red(message));
+  process.exit(1);
+}
+
+function prProjectOrExit(name: string): ProjectDef {
+  return loadProjectDef(name) ?? prFail(`No project named "${name}". List them: agents projects list`);
+}
+
+/** The whole token must be digits: parseInt would read "12junk" as PR 12. */
+function prNumberOrExit(raw: string): number {
+  const t = raw.trim();
+  const number = /^\d+$/.test(t) ? Number.parseInt(t, 10) : NaN;
+  if (!Number.isSafeInteger(number) || number <= 0) prFail(`--number expects a positive integer, got "${raw}".`);
+  return number;
+}
+
+function prShaOrExit(raw: string): string {
+  const sha = raw.trim();
+  if (!/^[0-9a-f]{7,40}$/i.test(sha)) prFail(`--sha expects a commit SHA, got "${raw}".`);
+  return sha;
+}
+
+/** Exactly one of --body / --body-file (`-` = stdin), and never an empty comment. */
+function prCommentBodyOrExit(body: string | undefined, bodyFile: string | undefined): string {
+  if ((body === undefined) === (bodyFile === undefined)) prFail('Pass exactly one of --body <text> or --body-file <path|->.');
+  let text = body;
+  if (bodyFile !== undefined) {
+    try {
+      text = fs.readFileSync(bodyFile === '-' ? 0 : bodyFile, 'utf-8');
+    } catch (e) {
+      prFail(`Could not read --body-file ${bodyFile}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  if (!text || !text.trim()) prFail('The comment is empty.');
+  return text.trimEnd();
+}
+
+async function prRepoOrExit(def: ProjectDef, repo: string): Promise<string> {
+  try {
+    const [resolved] = await resolveTargetSlugs(def, repo, ghExec);
+    return resolved;
+  } catch (e) {
+    return prFail(e instanceof Error ? e.message : String(e));
+  }
+}
+
 export function registerProjectsCommands(program: Command): void {
   const projects = program
     .command('projects')
@@ -967,7 +1026,7 @@ async function runProjectCard(
   // no options of its own is what lets `prs merge` own --repo/--number/--json.
   const prsCmd = projects
     .command('prs')
-    .description('A project\'s open pull requests: list them (default), or merge one.');
+    .description('A project\'s open pull requests: list them (default), or act on one: ready, review, comment, merge.');
   const prsListCmd = prsCmd
     .command('list <name>', { isDefault: true })
     .description('Every OPEN pull request across a project\'s attached repos (drafts included, no author filter), scoped to this project\'s paths in a shared repo.')
@@ -1042,33 +1101,14 @@ async function runProjectCard(
     .option('--method <method>', `${MERGE_METHODS.join(' | ')} (default: the first the repo allows, in that order)`)
     .option('--json', 'Machine-readable result')
     .action(async (name: string, opts: { repo: string; number: string; sha: string; method?: string; json?: boolean }) => {
-      const def = loadProjectDef(name);
-      if (!def) {
-        console.error(chalk.red(`No project named "${name}". List them: agents projects list`));
-        process.exit(1);
-      }
-      const raw = opts.number.trim();
-      const number = /^\d+$/.test(raw) ? Number.parseInt(raw, 10) : NaN;
-      if (!Number.isSafeInteger(number) || number <= 0) {
-        console.error(chalk.red(`--number expects a positive integer, got "${opts.number}".`));
-        process.exit(1);
-      }
-      if (!/^[0-9a-f]{7,40}$/i.test(opts.sha.trim())) {
-        console.error(chalk.red(`--sha expects a commit SHA, got "${opts.sha}".`));
-        process.exit(1);
-      }
+      const def = prProjectOrExit(name);
+      const number = prNumberOrExit(opts.number);
+      const sha = prShaOrExit(opts.sha);
       if (opts.method !== undefined && !(MERGE_METHODS as readonly string[]).includes(opts.method)) {
-        console.error(chalk.red(`--method expects one of ${MERGE_METHODS.join(', ')}, got "${opts.method}".`));
-        process.exit(1);
+        prFail(`--method expects one of ${MERGE_METHODS.join(', ')}, got "${opts.method}".`);
       }
-      let repo: string;
-      try {
-        [repo] = await resolveTargetSlugs(def, opts.repo, ghExec);
-      } catch (e) {
-        console.error(chalk.red(e instanceof Error ? e.message : String(e)));
-        process.exit(1);
-      }
-      const result = await mergeProjectPr(repo, number, opts.sha.trim(), opts.method as MergeMethod | undefined);
+      const repo = await prRepoOrExit(def, opts.repo);
+      const result = await mergeProjectPr(repo, number, sha, opts.method as MergeMethod | undefined);
       if (opts.json) {
         console.log(JSON.stringify(result, null, 2));
       } else if (result.merged) {
@@ -1093,10 +1133,113 @@ async function runProjectCard(
     `,
   });
 
+  const readyCmd = prsCmd
+    .command('ready <name>')
+    .description('Mark one draft PR of a project ready for review.')
+    .requiredOption('--repo <owner/repo>', 'One of the project\'s attached repos')
+    .requiredOption('--number <n>', 'The PR number')
+    .option('--sha <head-sha>', 'The head SHA you looked at; refused if the branch moved since')
+    .option('--json', 'Machine-readable result')
+    .action(async (name: string, opts: { repo: string; number: string; sha?: string; json?: boolean }) => {
+      const def = prProjectOrExit(name);
+      const number = prNumberOrExit(opts.number);
+      const sha = opts.sha === undefined ? undefined : prShaOrExit(opts.sha);
+      const repo = await prRepoOrExit(def, opts.repo);
+      const result = await markProjectPrReady(repo, number, sha);
+      if (opts.json) console.log(JSON.stringify(result, null, 2));
+      else if (result.ready) console.log(`${chalk.green(result.message)}: ${repo}#${number}`);
+      else console.error(chalk.red(`Not marked ready: ${repo}#${number}: ${result.message}`));
+      if (!result.ready) process.exit(1);
+    });
+
+  setHelpSections(readyCmd, {
+    examples: `
+      agents projects prs rush --json --repo phnx-labs/agi-cli --number 3646   # read isDraft + headSha
+      agents projects prs ready rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>
+      agents projects prs ready rush --repo phnx-labs/agi-cli --number 3646 --json
+    `,
+    notes: `
+      GitHub has no REST endpoint for this, so it is one GraphQL mutation
+      (markPullRequestReadyForReview) after a REST read. A PR that is already ready
+      succeeds without a write. With --sha, a head that moved is refused before the
+      write; GitHub cannot pin the mutation itself, so that check is not atomic.
+    `,
+  });
+
+  const reviewCmd = prsCmd
+    .command('review <name>')
+    .description('Approve one open PR of a project, pinned to the head SHA you reviewed.')
+    .requiredOption('--repo <owner/repo>', 'One of the project\'s attached repos')
+    .requiredOption('--number <n>', 'The PR number')
+    .requiredOption('--sha <head-sha>', 'The head SHA you reviewed; refused if the branch moved since')
+    .option('--approve', 'Submit an approving review (the only review this command submits)')
+    .option('--body <text>', 'Text to post with the approval')
+    .option('--json', 'Machine-readable result')
+    .action(async (name: string, opts: { repo: string; number: string; sha: string; approve?: boolean; body?: string; json?: boolean }) => {
+      const def = prProjectOrExit(name);
+      const number = prNumberOrExit(opts.number);
+      const sha = prShaOrExit(opts.sha);
+      if (!opts.approve) prFail('Pass --approve: approving is the only review this command submits.');
+      const repo = await prRepoOrExit(def, opts.repo);
+      const result = await approveProjectPr(repo, number, sha, opts.body);
+      if (opts.json) console.log(JSON.stringify(result, null, 2));
+      else if (result.submitted) console.log(`${chalk.green('Approved')} ${repo}#${number} at ${chalk.gray((result.sha ?? '').slice(0, 7))}`);
+      else console.error(chalk.red(`Not approved: ${repo}#${number}: ${result.message}`));
+      if (!result.submitted) process.exit(1);
+    });
+
+  setHelpSections(reviewCmd, {
+    examples: `
+      agents projects prs rush --json --repo phnx-labs/agi-cli --number 3646   # read headSha
+      agents projects prs review rush --repo phnx-labs/agi-cli --number 3646 --approve --sha <headSha>
+      agents projects prs review rush --repo phnx-labs/agi-cli --number 3646 --approve --sha <headSha> --body "Checked the migration" --json
+    `,
+    notes: `
+      One REST call (POST pulls/{n}/reviews, event APPROVE). The live head is read
+      first and a moved head is refused; the review carries commit_id = that SHA, so
+      it is recorded against the code you saw. GitHub refuses approving your own PR
+      (exit 1, submitted: false in --json).
+    `,
+  });
+
+  const commentCmd = prsCmd
+    .command('comment <name>')
+    .description('Post a comment on one open PR of a project.')
+    .requiredOption('--repo <owner/repo>', 'One of the project\'s attached repos')
+    .requiredOption('--number <n>', 'The PR number')
+    .option('--body <text>', 'The comment text')
+    .option('--body-file <path>', 'Read the comment from a file; - reads stdin')
+    .option('--json', 'Machine-readable result')
+    .action(async (name: string, opts: { repo: string; number: string; body?: string; bodyFile?: string; json?: boolean }) => {
+      const def = prProjectOrExit(name);
+      const number = prNumberOrExit(opts.number);
+      const body = prCommentBodyOrExit(opts.body, opts.bodyFile);
+      const repo = await prRepoOrExit(def, opts.repo);
+      const result = await commentOnProjectPr(repo, number, body);
+      if (opts.json) console.log(JSON.stringify(result, null, 2));
+      else if (result.commented) console.log(`${chalk.green('Commented')} on ${repo}#${number} ${chalk.gray(result.url ?? '')}`);
+      else console.error(chalk.red(`Not commented: ${repo}#${number}: ${result.message}`));
+      if (!result.commented) process.exit(1);
+    });
+
+  setHelpSections(commentCmd, {
+    examples: `
+      agents projects prs comment rush --repo phnx-labs/agi-cli --number 3646 --body "Looks good once CI is green"
+      printf 'Two notes:\\n- one\\n- two\\n' | agents projects prs comment rush --repo phnx-labs/agi-cli --number 3646 --body-file - --json
+    `,
+    notes: `
+      One REST call (POST issues/{n}/comments), not the GraphQL-backed gh pr comment.
+      Pass exactly one of --body or --body-file; an empty comment is refused.
+    `,
+  });
+
   setHelpSections(prsCmd, {
     examples: `
       agents projects prs rush --json                       # every open PR across rush's repos (= prs list rush)
       agents projects prs rush --json --repo phnx-labs/agi-cli --number 3646  # one PR, with checks + mergeability
+      agents projects prs ready rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>
+      agents projects prs review rush --repo phnx-labs/agi-cli --number 3646 --approve --sha <headSha>
+      agents projects prs comment rush --repo phnx-labs/agi-cli --number 3646 --body-file -
       agents projects prs merge rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>
     `,
   });

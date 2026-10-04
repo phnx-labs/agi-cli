@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { buildProjectPrs, mergeProjectPr, rowToProjectPr, scopeForFiles } from './project-prs.js';
+import {
+  approveProjectPr,
+  buildProjectPrs,
+  commentOnProjectPr,
+  markProjectPrReady,
+  mergeProjectPr,
+  rowToProjectPr,
+  scopeForFiles,
+} from './project-prs.js';
 import { repoPathClaims } from '../projects.js';
 import type { ProjectDef } from '../projects.js';
 
@@ -128,5 +136,100 @@ describe('mergeProjectPr', () => {
     const { gh } = recordedGh({ 'repos/acme/mono': Object.assign(new Error('x'), { stderr: 'gh: Not Found (HTTP 404)\n' }) });
     const result = await mergeProjectPr('acme/mono', 7, 'abc1234', undefined, gh);
     expect(result).toMatchObject({ merged: false, message: 'Not Found (HTTP 404)' });
+  });
+});
+
+const HEAD = 'abc1234def5678abc1234def5678abc1234def56';
+
+describe('markProjectPrReady', () => {
+  it('marks a draft ready with one mutation on the node id the REST read returned', async () => {
+    const { gh, asked } = recordedGh({
+      'repos/acme/mono/pulls/7': JSON.stringify({ sha: HEAD, draft: true, nodeId: 'PR_kw7' }),
+      graphql: 'false\n',
+    });
+    const calls: string[][] = [];
+    const result = await markProjectPrReady('acme/mono', 7, 'abc1234', async (args) => { calls.push(args); return gh(args); });
+    expect(result).toEqual({ repo: 'acme/mono', number: 7, ready: true, sha: HEAD, message: 'Marked ready for review' });
+    expect(asked).toEqual(['repos/acme/mono/pulls/7', 'graphql']);
+    expect(calls.at(-1)).toContain('id=PR_kw7');
+    expect(calls.at(-1)!.join(' ')).toContain('markPullRequestReadyForReview');
+  });
+
+  it('a PR that is already ready succeeds without a write', async () => {
+    const { gh, asked } = recordedGh({
+      'repos/acme/mono/pulls/7': JSON.stringify({ sha: HEAD, draft: false, nodeId: 'PR_kw7' }),
+    });
+    const result = await markProjectPrReady('acme/mono', 7, undefined, gh);
+    expect(result).toMatchObject({ ready: true, message: 'Already ready for review' });
+    expect(asked).toEqual(['repos/acme/mono/pulls/7']);
+  });
+
+  it('refuses a head that moved since the caller looked, before any write', async () => {
+    const { gh, asked } = recordedGh({
+      'repos/acme/mono/pulls/7': JSON.stringify({ sha: 'fff0000' + HEAD.slice(7), draft: true, nodeId: 'PR_kw7' }),
+    });
+    const result = await markProjectPrReady('acme/mono', 7, 'abc1234', gh);
+    expect(result).toMatchObject({ ready: false, sha: null });
+    expect(result.message).toContain('moved to fff0000');
+    expect(asked).not.toContain('graphql');
+  });
+});
+
+describe('approveProjectPr', () => {
+  it('records the approval against the full live SHA the short --sha names', async () => {
+    const { gh, asked } = recordedGh({
+      'repos/acme/mono/pulls/7': `${HEAD}\n`,
+      'POST repos/acme/mono/pulls/7/reviews': JSON.stringify({ id: 99, url: 'https://github.com/acme/mono/pull/7#pullrequestreview-99' }),
+    });
+    const calls: string[][] = [];
+    const result = await approveProjectPr('acme/mono', 7, 'ABC1234', 'Checked it', async (args) => { calls.push(args); return gh(args); });
+    expect(result).toEqual({
+      repo: 'acme/mono', number: 7, event: 'APPROVE', submitted: true, sha: HEAD, id: 99,
+      url: 'https://github.com/acme/mono/pull/7#pullrequestreview-99', message: 'Approved',
+    });
+    expect(asked).toContain('POST repos/acme/mono/pulls/7/reviews');
+    expect(calls.at(-1)).toEqual(expect.arrayContaining(['event=APPROVE', `commit_id=${HEAD}`, 'body=Checked it']));
+  });
+
+  it('refuses a moved head without posting a review', async () => {
+    const { gh, asked } = recordedGh({ 'repos/acme/mono/pulls/7': `fff0000${HEAD.slice(7)}\n` });
+    const result = await approveProjectPr('acme/mono', 7, 'abc1234', undefined, gh);
+    expect(result).toMatchObject({ submitted: false, sha: null, id: null });
+    expect(asked.some((e) => e.startsWith('POST'))).toBe(false);
+  });
+
+  it('reports GitHub\'s refusal to approve your own PR', async () => {
+    const own = Object.assign(new Error('Command failed: gh api'), {
+      stderr: 'gh: Unprocessable Entity (HTTP 422)\n',
+    });
+    const { gh } = recordedGh({
+      'repos/acme/mono/pulls/7': `${HEAD}\n`,
+      'POST repos/acme/mono/pulls/7/reviews': own,
+    });
+    const result = await approveProjectPr('acme/mono', 7, HEAD, undefined, gh);
+    expect(result).toMatchObject({ submitted: false, sha: HEAD, message: 'Unprocessable Entity (HTTP 422)' });
+  });
+});
+
+describe('commentOnProjectPr', () => {
+  it('posts the body verbatim to the issue comments endpoint', async () => {
+    const { gh } = recordedGh({
+      'POST repos/acme/mono/issues/7/comments': JSON.stringify({ id: 5, url: 'https://github.com/acme/mono/pull/7#issuecomment-5' }),
+    });
+    const calls: string[][] = [];
+    const body = '@octocat two notes:\n- one\n- two';
+    const result = await commentOnProjectPr('acme/mono', 7, body, async (args) => { calls.push(args); return gh(args); });
+    expect(result).toEqual({
+      repo: 'acme/mono', number: 7, commented: true, id: 5, url: 'https://github.com/acme/mono/pull/7#issuecomment-5', message: 'Commented',
+    });
+    // -f keeps a leading @ literal; -F would read it as a file name.
+    expect(calls[0]).toEqual(expect.arrayContaining(['-f', `body=${body}`]));
+  });
+
+  it('reports a refusal as not commented', async () => {
+    const { gh } = recordedGh({
+      'POST repos/acme/mono/issues/7/comments': Object.assign(new Error('x'), { stderr: 'gh: Not Found (HTTP 404)\n' }),
+    });
+    expect(await commentOnProjectPr('acme/mono', 7, 'hi', gh)).toMatchObject({ commented: false, message: 'Not Found (HTTP 404)' });
   });
 });

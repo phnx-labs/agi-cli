@@ -117,6 +117,12 @@ const AUTO_POOL_MODES = ['workers', 'all'] as const;
  */
 const DEVICE_FORM_FACTORS = ['laptop', 'desktop', 'server', 'unknown'] as const;
 
+/**
+ * The AGI Menu tabs `menubar.menu.tabOrder` orders and `menubar.menu.hiddenTabs`
+ * hides, in the menu's built-in order. Settings is always shown, so it is not one.
+ */
+export const MENUBAR_TABS = ['home', 'sessions', 'inbox', 'projects'] as const;
+
 /** A validate() that accepts only one of `allowed` — the enum-string keys reuse it. */
 function oneOf(name: string, allowed: readonly string[]): (v: unknown) => string | null {
   return (v) => (allowed.includes(v as string) ? null : `${name} must be one of ${allowed.join(' | ')}.`);
@@ -656,6 +662,65 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
         return 'menubar.menu.headlessPlacement must be auto | local | interactive | a device name.';
       }
     },
+  },
+  {
+    name: 'menubar.menu.pinnedProjects',
+    yamlKey: 'menubarMenuPinnedProjects',
+    scope: 'user',
+    type: 'string-list',
+    defaultValue: [],
+    description:
+      'AGI Menu: project names pinned to the top of the Projects tab, in pin order. Set the whole list ' +
+      'each time (`a,b` or a JSON array); unset = nothing pinned.',
+    validate: (v) => {
+      const names = v as string[];
+      if (names.some((n) => n.trim() === '' || n !== n.trim())) {
+        return 'menubar.menu.pinnedProjects names must be non-empty with no surrounding spaces.';
+      }
+      const dup = names.find((n, i) => names.indexOf(n) !== i);
+      return dup === undefined ? null : `menubar.menu.pinnedProjects lists "${dup}" twice.`;
+    },
+  },
+  {
+    name: 'menubar.menu.tabOrder',
+    yamlKey: 'menubarMenuTabOrder',
+    scope: 'user',
+    type: 'string-list',
+    defaultValue: [...MENUBAR_TABS],
+    description:
+      `AGI Menu: the order of the tab bar — every one of ${MENUBAR_TABS.join(', ')} exactly once. ` +
+      'Settings is always last and is not listed. Hiding a tab is menubar.menu.hiddenTabs, not this key.',
+    validate: (v) => {
+      const tabs = v as string[];
+      const ok = tabs.length === MENUBAR_TABS.length && MENUBAR_TABS.every((t) => tabs.includes(t));
+      return ok ? null : `menubar.menu.tabOrder must list each of ${MENUBAR_TABS.join(', ')} exactly once.`;
+    },
+  },
+  {
+    name: 'menubar.menu.hiddenTabs',
+    yamlKey: 'menubarMenuHiddenTabs',
+    scope: 'user',
+    type: 'string-list',
+    defaultValue: [],
+    description:
+      `AGI Menu: tabs hidden from the tab bar — any of ${MENUBAR_TABS.join(', ')}, but not all of them. ` +
+      'Settings cannot be hidden. Hiding Inbox loses nothing: its requests still show on Home.',
+    validate: (v) => {
+      const tabs = v as string[];
+      const bad = tabs.find((t) => !(MENUBAR_TABS as readonly string[]).includes(t));
+      if (bad !== undefined) return `menubar.menu.hiddenTabs: "${bad}" is not one of ${MENUBAR_TABS.join(', ')}.`;
+      if (new Set(tabs).size !== tabs.length) return 'menubar.menu.hiddenTabs lists a tab twice.';
+      if (tabs.length === MENUBAR_TABS.length) return 'menubar.menu.hiddenTabs cannot hide every tab.';
+      return null;
+    },
+  },
+  {
+    name: 'menubar.menu.groupTicketsByMilestone',
+    yamlKey: 'menubarMenuGroupTicketsByMilestone',
+    scope: 'user',
+    type: 'bool',
+    defaultValue: false,
+    description: 'AGI Menu: group a project\'s tickets under milestone headers. Off = one flat list ordered by ticketSort.',
   },
 ];
 

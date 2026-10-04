@@ -332,6 +332,34 @@ describe('validation', () => {
     expect(() => setConfigValue('interactive.host', 'has spaces')).toThrow(/Invalid value/);
   });
 
+  it('stores the AGI Menu pin, tab, and milestone preferences as YAML lists and refuses malformed ones', async () => {
+    const { setConfigValue, getConfigValue } = await freshModules();
+    expect(getConfigValue('menubar.menu.tabOrder').spec.defaultValue).toEqual(['home', 'sessions', 'inbox', 'projects']);
+    expect(getConfigValue('menubar.menu.groupTicketsByMilestone').spec.defaultValue).toBe(false);
+
+    setConfigValue('menubar.menu.pinnedProjects', ['Rush', 'AGI Menu, legacy']);
+    setConfigValue('menubar.menu.tabOrder', ['home', 'projects', 'sessions', 'inbox']);
+    setConfigValue('menubar.menu.hiddenTabs', ['inbox']);
+    setConfigValue('menubar.menu.groupTicketsByMilestone', true);
+    expect(readCentral()).toMatch(/menubarMenuPinnedProjects:\n\s+- Rush\n/);
+    expect(getConfigValue('menubar.menu.pinnedProjects').value).toEqual(['Rush', 'AGI Menu, legacy']);
+    expect(getConfigValue('menubar.menu.tabOrder').value).toEqual(['home', 'projects', 'sessions', 'inbox']);
+    expect(getConfigValue('menubar.menu.hiddenTabs').value).toEqual(['inbox']);
+    expect(getConfigValue('menubar.menu.groupTicketsByMilestone').value).toBe(true);
+    setConfigValue('menubar.menu.pinnedProjects', []);
+    expect(getConfigValue('menubar.menu.pinnedProjects').value).toEqual([]);
+
+    expect(() => setConfigValue('menubar.menu.pinnedProjects', ['Rush', 'Rush'])).toThrow(/"Rush" twice/);
+    expect(() => setConfigValue('menubar.menu.pinnedProjects', [' Rush'])).toThrow(/non-empty/);
+    expect(() => setConfigValue('menubar.menu.tabOrder', ['home', 'projects'])).toThrow(/exactly once/);
+    expect(() => setConfigValue('menubar.menu.tabOrder', ['home', 'home', 'sessions', 'inbox'])).toThrow(/exactly once/);
+    expect(() => setConfigValue('menubar.menu.tabOrder', ['home', 'sessions', 'inbox', 'projects', 'settings'])).toThrow(/exactly once/);
+    expect(() => setConfigValue('menubar.menu.hiddenTabs', ['settings'])).toThrow(/"settings" is not one of/);
+    expect(() => setConfigValue('menubar.menu.hiddenTabs', ['inbox', 'inbox'])).toThrow(/twice/);
+    expect(() => setConfigValue('menubar.menu.hiddenTabs', ['home', 'sessions', 'inbox', 'projects'])).toThrow(/every tab/);
+    expect(() => setConfigValue('menubar.menu.groupTicketsByMilestone', 'on')).toThrow(/expects a boolean/);
+  });
+
   it('validates the AGI Menu Headless-runs preferences against real agent ids and device names (PHNX-3999)', async () => {
     const { setConfigValue, getConfigValue } = await freshModules();
     // A harness the fleet actually has, and a typo that must never be stored:
@@ -396,17 +424,21 @@ describe('listConfig', () => {
       'menubar.menu.defaultProject',
       'menubar.menu.deviceSort',
       'menubar.menu.groupBy',
+      'menubar.menu.groupTicketsByMilestone',
       'menubar.menu.headlessAgent',
       'menubar.menu.headlessFallbackAgent',
       'menubar.menu.headlessPlacement',
+      'menubar.menu.hiddenTabs',
       'menubar.menu.hideCompletedMilestones',
       'menubar.menu.includeOtherDeviceRequests',
+      'menubar.menu.pinnedProjects',
       'menubar.menu.projectPriorityFilter',
       'menubar.menu.projectScope',
       'menubar.menu.projectSort',
       'menubar.menu.sessionUpdates',
       'menubar.menu.showPreviews',
       'menubar.menu.showPullRequests',
+      'menubar.menu.tabOrder',
       'menubar.menu.thenBy',
       'menubar.menu.ticketSort',
       'menubar.menu.workingRowsShown',

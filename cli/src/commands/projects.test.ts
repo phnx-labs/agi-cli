@@ -610,4 +610,27 @@ describe('projects prs — list is the default, merge owns its flags', () => {
     const method = await run(['prs', 'merge', 'merge', '--repo', 'acme/mono', '--number', '7', '--sha', 'abc1234', '--method', 'fast']);
     expect(method.err).toContain('--method expects one of rebase, squash, merge');
   });
+
+  it('`prs ready/review/comment` refuse bad flags before touching GitHub', async () => {
+    const ready = await run(['prs', 'ready', 'merge', '--repo', 'acme/mono', '--number', '7junk']);
+    expect(ready.exit).toBe(1);
+    expect(ready.err).toContain('--number expects a positive integer, got "7junk"');
+
+    const noApprove = await run(['prs', 'review', 'merge', '--repo', 'acme/mono', '--number', '7', '--sha', 'abc1234']);
+    expect(noApprove.exit).toBe(1);
+    expect(noApprove.err).toContain('Pass --approve');
+
+    const both = await run(['prs', 'comment', 'merge', '--repo', 'acme/mono', '--number', '7', '--body', 'x', '--body-file', '-']);
+    expect(both.err).toContain('Pass exactly one of --body <text> or --body-file <path|->');
+    const neither = await run(['prs', 'comment', 'merge', '--repo', 'acme/mono', '--number', '7']);
+    expect(neither.err).toContain('Pass exactly one of --body');
+
+    const blank = path.join(projectsDir, 'blank.md');
+    fs.writeFileSync(blank, '  \n\n');
+    const empty = await run(['prs', 'comment', 'merge', '--repo', 'acme/mono', '--number', '7', '--body-file', blank]);
+    expect(empty.exit).toBe(1);
+    expect(empty.err).toContain('The comment is empty.');
+    const missing = await run(['prs', 'comment', 'merge', '--repo', 'acme/mono', '--number', '7', '--body-file', path.join(projectsDir, 'nope.md')]);
+    expect(missing.err).toContain('Could not read --body-file');
+  });
 });
