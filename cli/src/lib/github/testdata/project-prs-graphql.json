@@ -1,0 +1,91 @@
+{
+  "data": {
+    "repository": {
+      "defaultBranchRef": {
+        "name": "main",
+        "target": {
+          "oid": "d0d0d0d",
+          "statusCheckRollup": {
+            "state": "FAILURE",
+            "contexts": {
+              "nodes": [
+                { "__typename": "CheckRun", "name": "test", "conclusion": "FAILURE", "status": "COMPLETED" },
+                { "__typename": "CheckRun", "name": "lint", "conclusion": "SUCCESS", "status": "COMPLETED" }
+              ]
+            }
+          }
+        }
+      },
+      "open": {
+        "nodes": [
+          {
+            "number": 1,
+            "commits": { "nodes": [ { "commit": { "statusCheckRollup": {
+              "state": "FAILURE",
+              "contexts": { "nodes": [
+                { "__typename": "CheckRun", "name": "test", "conclusion": "FAILURE", "status": "COMPLETED" },
+                { "__typename": "CheckRun", "name": "lint", "conclusion": "SUCCESS", "status": "COMPLETED" },
+                { "__typename": "CheckRun", "name": "deploy", "conclusion": "CANCELLED", "status": "COMPLETED" },
+                { "__typename": "CheckRun", "name": "e2e", "conclusion": null, "status": "IN_PROGRESS" },
+                { "__typename": "StatusContext", "context": "ci/external", "state": "ERROR" },
+                { "__typename": "StatusContext", "context": "ci/coverage", "state": "SUCCESS" }
+              ] }
+            } } } ] }
+          },
+          {
+            "number": 2,
+            "commits": { "nodes": [ { "commit": { "statusCheckRollup": {
+              "state": "PENDING",
+              "contexts": { "nodes": [
+                { "__typename": "CheckRun", "name": "test", "conclusion": null, "status": "QUEUED" }
+              ] }
+            } } } ] }
+          },
+          {
+            "number": 3,
+            "commits": { "nodes": [ { "commit": { "statusCheckRollup": null } } ] }
+          }
+        ]
+      },
+      "merged": {
+        "nodes": [
+          {
+            "number": 13, "title": "Docs touch-up", "url": "https://github.com/acme/mono/pull/13",
+            "author": { "login": "octocat", "avatarUrl": "https://github.com/octocat.png" },
+            "headRefName": "docs", "baseRefName": "main", "headRefOid": "m13",
+            "mergedAt": "2026-10-04T08:00:00Z", "mergedBy": { "login": "hubot" },
+            "additions": 4, "deletions": 1,
+            "mergeCommit": { "oid": "c13", "statusCheckRollup": {
+              "state": "FAILURE",
+              "contexts": { "nodes": [ { "__typename": "CheckRun", "name": "test", "conclusion": "TIMED_OUT", "status": "COMPLETED" } ] }
+            } }
+          },
+          {
+            "number": 12, "title": "Older than the window", "url": "https://github.com/acme/mono/pull/12",
+            "author": { "login": "octocat", "avatarUrl": "" },
+            "headRefName": "old", "baseRefName": "main", "headRefOid": "m12",
+            "mergedAt": "2026-09-20T00:00:00Z", "mergedBy": { "login": "hubot" },
+            "additions": 1, "deletions": 1,
+            "mergeCommit": { "oid": "c12", "statusCheckRollup": null }
+          },
+          {
+            "number": 11, "title": "Prix API", "url": "https://github.com/acme/mono/pull/11",
+            "author": { "login": "octocat", "avatarUrl": "" },
+            "headRefName": "prix-api", "baseRefName": "main", "headRefOid": "m11",
+            "mergedAt": "2026-10-02T00:00:00Z", "mergedBy": { "login": "hubot" },
+            "additions": 30, "deletions": 2,
+            "mergeCommit": { "oid": "c11", "statusCheckRollup": { "state": "SUCCESS", "contexts": { "nodes": [] } } }
+          },
+          {
+            "number": 10, "title": "Rush CLI", "url": "https://github.com/acme/mono/pull/10",
+            "author": null,
+            "headRefName": "rush-cli", "baseRefName": "main", "headRefOid": "m10",
+            "mergedAt": "2026-10-03T00:00:00Z", "mergedBy": null,
+            "additions": 12, "deletions": 5,
+            "mergeCommit": { "oid": "c10", "statusCheckRollup": { "state": "SUCCESS", "contexts": { "nodes": [] } } }
+          }
+        ]
+      }
+    }
+  }
+}

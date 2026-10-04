@@ -1,7 +1,9 @@
+import * as fs from 'fs';
 import { describe, expect, it } from 'vitest';
 import {
   approveProjectPr,
   buildProjectPrs,
+  ciFromRollupItems,
   commentOnProjectPr,
   markProjectPrReady,
   mergeProjectPr,
@@ -106,6 +108,111 @@ describe('monorepo scoping', () => {
     const envelope = await buildProjectPrs(solo, {}, gh, [solo]);
     expect(envelope.repositories[0].pullRequests.map((pr) => [pr.number, pr.scope])).toEqual([[9, null]]);
     expect(asked.some((e) => e.includes('/files'))).toBe(false);
+  });
+});
+
+/** A recorded `gh api graphql` answer for acme/mono: open-PR CI, merged PRs, and the default branch. */
+const GRAPHQL = fs.readFileSync(new URL('./testdata/project-prs-graphql.json', import.meta.url), 'utf-8');
+const NOW = Date.parse('2026-10-04T12:00:00Z');
+
+describe('CI at a glance and recently merged PRs', () => {
+  const solo = { name: 'solo', repo: 'acme/mono' } as ProjectDef;
+  const soloRoutes = (graphql: string | Error) => ({
+    'repos/acme/mono': 'acme/mono\n',
+    'user': 'octocat\n',
+    'repos/acme/mono/pulls?state=open&per_page=100': [prLine(1, 'o1'), prLine(2, 'o2'), prLine(3, 'o3'), prLine(4, 'o4')].join('\n'),
+    graphql,
+  });
+
+  it('joins each open PR to its head rollup and names the failing checks', async () => {
+    const { gh } = recordedGh(soloRoutes(GRAPHQL));
+    const [repo] = (await buildProjectPrs(solo, {}, gh, [solo], NOW)).repositories;
+    expect(repo.error).toBeNull();
+    expect(repo.pullRequests.map((pr) => [pr.number, pr.ciState, pr.failingChecks])).toEqual([
+      [1, 'FAILURE', ['test', 'deploy', 'ci/external']],
+      [2, 'PENDING', []],
+      // No rollup on the head commit, and a PR past the GraphQL page: no checks to report.
+      [3, null, []],
+      [4, null, []],
+    ]);
+    expect(repo.defaultBranch).toEqual({ name: 'main', sha: 'd0d0d0d', ciState: 'FAILURE', failingChecks: ['test'] });
+  });
+
+  it('lists PRs merged in the last 7 days, newest first, with CI on the merge commit', async () => {
+    const { gh } = recordedGh(soloRoutes(GRAPHQL));
+    const [repo] = (await buildProjectPrs(solo, {}, gh, [solo], NOW)).repositories;
+    expect(repo.recentlyMerged.map((pr) => pr.number)).toEqual([13, 10, 11]);
+    expect(repo.recentlyMerged[0]).toEqual({
+      number: 13, title: 'Docs touch-up', url: 'https://github.com/acme/mono/pull/13',
+      author: { login: 'octocat', avatarUrl: 'https://github.com/octocat.png' },
+      headRefName: 'docs', baseRefName: 'main', mergedAt: '2026-10-04T08:00:00Z', mergedBy: 'hubot',
+      mergeCommitSha: 'c13', ciState: 'FAILURE', failingChecks: ['test'], additions: 4, deletions: 1, scope: null,
+    });
+    expect(repo.recentlyMerged[1]).toMatchObject({ author: { login: '', avatarUrl: '' }, mergedBy: null, ciState: 'SUCCESS' });
+  });
+
+  it('a failed GraphQL read empties the CI fields without failing the repository', async () => {
+    const { gh } = recordedGh(soloRoutes(Object.assign(new Error('x'), { stderr: 'gh: API rate limit already exceeded\n' })));
+    const envelope = await buildProjectPrs(solo, {}, gh, [solo], NOW);
+    const [repo] = envelope.repositories;
+    expect(envelope.partial).toBe(false);
+    expect(repo.error).toBeNull();
+    expect(repo.pullRequests).toHaveLength(4);
+    expect(repo.pullRequests.every((pr) => pr.ciState === null && pr.failingChecks.length === 0)).toBe(true);
+    expect(repo.recentlyMerged).toEqual([]);
+    expect(repo.defaultBranch).toBeNull();
+  });
+
+  it('scopes merged PRs in a shared repo like open ones, and keeps both in the files cache', async () => {
+    const rush = { name: 'rush', repo: 'acme/mono', root: '/src/mono', defaultPath: '/src/mono/rush' } as ProjectDef;
+    const prix = { name: 'prix', repo: 'acme/mono', root: '/src/mono', defaultPath: '/src/mono/prix' } as ProjectDef;
+    const routes: Record<string, string> = {
+      'repos/acme/mono': 'acme/mono\n',
+      'user': 'octocat\n',
+      'repos/acme/mono/pulls?state=open&per_page=100': prLine(1, 'o1'),
+      graphql: GRAPHQL,
+      'repos/acme/mono/pulls/1/files?per_page=100': 'rush/app.ts\n',
+      'repos/acme/mono/pulls/13/files?per_page=100': 'AGENTS.md\n',
+      'repos/acme/mono/pulls/11/files?per_page=100': 'prix/api.ts\n',
+      'repos/acme/mono/pulls/10/files?per_page=100': 'rush/cli/main.ts\n',
+    };
+    const first = recordedGh(routes);
+    const [repo] = (await buildProjectPrs(rush, {}, first.gh, [rush, prix], NOW)).repositories;
+    expect(repo.pullRequests.map((pr) => [pr.number, pr.scope, pr.ciState])).toEqual([[1, 'project', 'FAILURE']]);
+    expect(repo.recentlyMerged.map((pr) => [pr.number, pr.scope])).toEqual([[13, 'repo-wide'], [10, 'project']]);
+
+    const second = recordedGh(routes);
+    await buildProjectPrs(rush, {}, second.gh, [rush, prix], NOW);
+    expect(second.asked.filter((e) => e.includes('/files'))).toEqual([]);
+  });
+
+  it('--number carries the same verdict from the REST rollup and no merged list', async () => {
+    const { gh } = recordedGh({
+      'repos/acme/mono': 'acme/mono\n',
+      'user': 'octocat\n',
+      'repos/acme/mono/pulls/1': prLine(1, 'o1'),
+      'pr view 1 --repo acme/mono --json reviewDecision,headRefOid': JSON.stringify({ reviewDecision: 'APPROVED', headRefOid: 'o1' }),
+      'repos/acme/mono/commits/o1/check-runs': [
+        JSON.stringify({ name: 'test', status: 'COMPLETED', conclusion: 'FAILURE', link: '' }),
+        JSON.stringify({ name: 'e2e', status: 'IN_PROGRESS', conclusion: '', link: '' }),
+      ].join('\n'),
+      'repos/acme/mono/commits/o1/status': JSON.stringify({ name: 'ci/external', state: 'SUCCESS', link: '' }),
+    });
+    const [repo] = (await buildProjectPrs(solo, { repo: 'acme/mono', number: 1 }, gh, [solo], NOW)).repositories;
+    expect(repo.pullRequests[0]).toMatchObject({ ciState: 'FAILURE', failingChecks: ['test'], reviewDecision: 'APPROVED' });
+    expect(repo.recentlyMerged).toEqual([]);
+    expect(repo.defaultBranch).toBeNull();
+  });
+
+  it('reads the REST rollup with GitHub\'s precedence', () => {
+    expect(ciFromRollupItems([])).toEqual({ ciState: null, failingChecks: [] });
+    expect(ciFromRollupItems([{ name: 'a', status: 'COMPLETED', conclusion: 'SKIPPED' }, { name: 'b', state: 'SUCCESS' }]))
+      .toEqual({ ciState: 'SUCCESS', failingChecks: [] });
+    expect(ciFromRollupItems([{ name: 'a', status: 'QUEUED', conclusion: '' }])).toEqual({ ciState: 'PENDING', failingChecks: [] });
+    expect(ciFromRollupItems([{ name: 'a', state: 'ERROR' }, { name: 'b', state: 'PENDING' }]))
+      .toEqual({ ciState: 'ERROR', failingChecks: ['a'] });
+    expect(ciFromRollupItems([{ name: 'a', state: 'ERROR' }, { name: 'b', status: 'COMPLETED', conclusion: 'ACTION_REQUIRED' }]))
+      .toEqual({ ciState: 'FAILURE', failingChecks: ['a', 'b'] });
   });
 });
 
