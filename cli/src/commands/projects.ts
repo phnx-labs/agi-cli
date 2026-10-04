@@ -1094,6 +1094,7 @@ async function runProjectCard(
             const wide = pr.scope === 'repo-wide' ? chalk.gray(' [repo-wide]') : '';
             console.log(`  ${ciMark(pr.ciState)} #${pr.number}${draft}${wide}  ${pr.title}  ${chalk.gray(`@${pr.author.login} · ${pr.headRefName}`)}`);
           }
+          if (r.ciError) console.log(chalk.yellow(`  CI and merged PRs are incomplete: ${r.ciError}`));
           if (r.recentlyMerged.length > 0) {
             console.log(chalk.dim(`  merged in the last ${MERGED_WINDOW_DAYS} days:`));
             for (const pr of r.recentlyMerged) {

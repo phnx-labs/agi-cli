@@ -1,9 +1,12 @@
 import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { describe, expect, it } from 'vitest';
 import {
   approveProjectPr,
   buildProjectPrs,
   ciFromRollupItems,
+  isTerminalRollup,
   commentOnProjectPr,
   markProjectPrReady,
   mergeProjectPr,
@@ -40,7 +43,9 @@ describe('project PR projection', () => {
  * A gh runner that answers from recorded REST payloads keyed by endpoint, and
  * records which endpoints were asked — the same JSON lines `gh api --jq` prints.
  */
-function recordedGh(routes: Record<string, string | Error>) {
+type Routes = Record<string, string | Error | ((args: string[]) => string)>;
+
+function recordedGh(routes: Routes) {
   const asked: string[] = [];
   const gh = async (args: string[]) => {
     const endpoint = args[0] === 'api' ? (args[1] === '-X' ? `${args[2]} ${args[3]}` : args[1]) : args.join(' ');
@@ -48,7 +53,7 @@ function recordedGh(routes: Record<string, string | Error>) {
     const hit = routes[endpoint];
     if (hit === undefined) throw new Error(`unexpected gh ${args.join(' ')}`);
     if (hit instanceof Error) throw hit;
-    return hit;
+    return typeof hit === 'function' ? hit(args) : hit;
   };
   return { gh, asked };
 }
@@ -111,100 +116,155 @@ describe('monorepo scoping', () => {
   });
 });
 
-/** A recorded `gh api graphql` answer for acme/mono: open-PR CI, merged PRs, and the default branch. */
-const GRAPHQL = fs.readFileSync(new URL('./testdata/project-prs-graphql.json', import.meta.url), 'utf-8');
+/** Recorded REST answers for acme/mono (open-PR, merge-commit and default-branch CI, the closed-PR list). */
+const REST = (() => {
+  const raw = JSON.parse(fs.readFileSync(new URL('./testdata/project-prs-rest.json', import.meta.url), 'utf-8')) as {
+    routes: Record<string, string | Array<Record<string, unknown>>>;
+  };
+  const routes: Record<string, string> = {};
+  for (const [endpoint, body] of Object.entries(raw.routes)) {
+    routes[endpoint] = typeof body === 'string' ? body : body.map((row) => JSON.stringify(row)).join('\n');
+  }
+  return routes;
+})();
 const NOW = Date.parse('2026-10-04T12:00:00Z');
+const CLOSED_PAGE = (n: number) => `repos/acme/mono/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=${n}`;
+/** `repos/{r}` answers canonicalization (`.full_name`) and the default branch (`.default_branch`). */
+const repoRead = (args: string[]) => (args.includes('.default_branch') ? 'main\n' : 'acme/mono\n');
+const freshCache = () => fs.mkdtempSync(path.join(os.tmpdir(), 'project-prs-'));
 
 describe('CI at a glance and recently merged PRs', () => {
   const solo = { name: 'solo', repo: 'acme/mono' } as ProjectDef;
-  const soloRoutes = (graphql: string | Error) => ({
-    'repos/acme/mono': 'acme/mono\n',
+  const soloRoutes = (): Routes => ({
+    ...REST,
+    'repos/acme/mono': repoRead,
     'user': 'octocat\n',
-    'repos/acme/mono/pulls?state=open&per_page=100': [prLine(1, 'o1'), prLine(2, 'o2'), prLine(3, 'o3'), prLine(4, 'o4')].join('\n'),
-    graphql,
+    'repos/acme/mono/pulls?state=open&per_page=100': [prLine(1, 'o1'), prLine(2, 'o2'), prLine(3, 'o3')].join('\n'),
   });
 
-  it('joins each open PR to its head rollup and names the failing checks', async () => {
-    const { gh } = recordedGh(soloRoutes(GRAPHQL));
-    const [repo] = (await buildProjectPrs(solo, {}, gh, [solo], NOW)).repositories;
+  it('classifies each open head\'s REST rollup and names the failing checks', async () => {
+    const { gh } = recordedGh(soloRoutes());
+    const [repo] = (await buildProjectPrs(solo, {}, gh, [solo], { nowMs: NOW, cacheDir: freshCache() })).repositories;
     expect(repo.error).toBeNull();
+    expect(repo.ciError).toBeNull();
     expect(repo.pullRequests.map((pr) => [pr.number, pr.ciState, pr.failingChecks])).toEqual([
-      [1, 'FAILURE', ['test', 'deploy', 'ci/external']],
-      [2, 'PENDING', []],
-      // No rollup on the head commit, and a PR past the GraphQL page: no checks to report.
+      [1, 'FAILURE', ['ci/external', 'test', 'deploy']],
+      [2, 'SUCCESS', []],
       [3, null, []],
-      [4, null, []],
     ]);
     expect(repo.defaultBranch).toEqual({ name: 'main', sha: 'd0d0d0d', ciState: 'FAILURE', failingChecks: ['test'] });
   });
 
-  it('lists PRs merged in the last 7 days, newest first, with CI on the merge commit', async () => {
-    const { gh } = recordedGh(soloRoutes(GRAPHQL));
-    const [repo] = (await buildProjectPrs(solo, {}, gh, [solo], NOW)).repositories;
-    expect(repo.recentlyMerged.map((pr) => pr.number)).toEqual([13, 10, 11]);
+  it('lists merges in the last 7 days, newest first, keeping one at the cutoff and dropping one a millisecond earlier', async () => {
+    const { gh } = recordedGh(soloRoutes());
+    const [repo] = (await buildProjectPrs(solo, {}, gh, [solo], { nowMs: NOW, cacheDir: freshCache() })).repositories;
+    expect(repo.recentlyMerged.map((pr) => pr.number)).toEqual([13, 10, 15]);
     expect(repo.recentlyMerged[0]).toEqual({
       number: 13, title: 'Docs touch-up', url: 'https://github.com/acme/mono/pull/13',
       author: { login: 'octocat', avatarUrl: 'https://github.com/octocat.png' },
       headRefName: 'docs', baseRefName: 'main', mergedAt: '2026-10-04T08:00:00Z', mergedBy: 'hubot',
       mergeCommitSha: 'c13', ciState: 'FAILURE', failingChecks: ['test'], additions: 4, deletions: 1, scope: null,
     });
-    expect(repo.recentlyMerged[1]).toMatchObject({ author: { login: '', avatarUrl: '' }, mergedBy: null, ciState: 'SUCCESS' });
+    expect(repo.recentlyMerged[1]).toMatchObject({ author: { login: '' }, mergedBy: null, additions: 12, ciState: 'SUCCESS' });
+    expect(repo.recentlyMerged[2]).toMatchObject({ mergedAt: '2026-09-27T12:00:00Z', ciState: 'SUCCESS' });
   });
 
-  it('a failed GraphQL read empties the CI fields without failing the repository', async () => {
-    const { gh } = recordedGh(soloRoutes(Object.assign(new Error('x'), { stderr: 'gh: API rate limit already exceeded\n' })));
-    const envelope = await buildProjectPrs(solo, {}, gh, [solo], NOW);
+  it('caches a rollup only once every check finished: a warm run re-reads just the running and empty heads', async () => {
+    const cacheDir = freshCache();
+    await buildProjectPrs(solo, {}, recordedGh(soloRoutes()).gh, [solo], { nowMs: NOW, cacheDir });
+    const warm = recordedGh(soloRoutes());
+    const [repo] = (await buildProjectPrs(solo, {}, warm.gh, [solo], { nowMs: NOW, cacheDir })).repositories;
+    expect(warm.asked.filter((e) => e.endsWith('/check-runs'))).toEqual([
+      'repos/acme/mono/commits/o1/check-runs',
+      'repos/acme/mono/commits/o3/check-runs',
+    ]);
+    expect(warm.asked.filter((e) => /pulls\/\d+$/.test(e))).toEqual([]);
+    expect(repo.pullRequests.map((pr) => pr.ciState)).toEqual(['FAILURE', 'SUCCESS', null]);
+    expect(repo.recentlyMerged.map((pr) => [pr.number, pr.mergedBy, pr.ciState])).toEqual([
+      [13, 'hubot', 'FAILURE'], [10, null, 'SUCCESS'], [15, 'hubot', 'SUCCESS'],
+    ]);
+  });
+
+  it('reads at most three pages of closed PRs, and stops as soon as a page reaches past the window', async () => {
+    const closedRow = (n: number, updatedAt: string) => JSON.stringify({
+      number: n, title: `PR ${n}`, url: '', login: '', avatarUrl: '', headRefName: '', headSha: '', baseRefName: 'main',
+      mergedAt: null, mergeCommitSha: null, updatedAt,
+    });
+    const fullPage = (from: number, lastUpdatedAt = '2026-10-01T00:00:00Z') =>
+      Array.from({ length: 100 }, (_, i) => closedRow(from + i, i === 99 ? lastUpdatedAt : '2026-10-02T00:00:00Z')).join('\n');
+
+    const capped = recordedGh({
+      ...soloRoutes(), [CLOSED_PAGE(1)]: fullPage(100), [CLOSED_PAGE(2)]: fullPage(200), [CLOSED_PAGE(3)]: fullPage(300), [CLOSED_PAGE(4)]: fullPage(400),
+    });
+    await buildProjectPrs(solo, {}, capped.gh, [solo], { nowMs: NOW, cacheDir: freshCache() });
+    expect(capped.asked.filter((e) => e.includes('state=closed'))).toEqual([CLOSED_PAGE(1), CLOSED_PAGE(2), CLOSED_PAGE(3)]);
+
+    const stopped = recordedGh({ ...soloRoutes(), [CLOSED_PAGE(1)]: fullPage(100, '2026-09-26T00:00:00Z'), [CLOSED_PAGE(2)]: fullPage(200) });
+    await buildProjectPrs(solo, {}, stopped.gh, [solo], { nowMs: NOW, cacheDir: freshCache() });
+    expect(stopped.asked.filter((e) => e.includes('state=closed'))).toEqual([CLOSED_PAGE(1)]);
+  });
+
+  it('a failed read names itself in ciError, keeps what succeeded, and never fails the repository', async () => {
+    const rateLimited = Object.assign(new Error('Command failed: gh api'), {
+      stderr: 'gh: API rate limit exceeded for user ID 1. (HTTP 403)\n',
+    });
+    const serverError = Object.assign(new Error('Command failed: gh api'), { stderr: 'gh: Server Error (HTTP 500)\n' });
+    const { gh } = recordedGh({
+      ...soloRoutes(),
+      [CLOSED_PAGE(1)]: serverError,
+      'repos/acme/mono/commits/o1/check-runs': rateLimited,
+    });
+    const envelope = await buildProjectPrs(solo, {}, gh, [solo], { nowMs: NOW, cacheDir: freshCache() });
     const [repo] = envelope.repositories;
     expect(envelope.partial).toBe(false);
     expect(repo.error).toBeNull();
-    expect(repo.pullRequests).toHaveLength(4);
-    expect(repo.pullRequests.every((pr) => pr.ciState === null && pr.failingChecks.length === 0)).toBe(true);
+    expect(repo.ciError).toBe('API rate limit exceeded for user ID 1. (HTTP 403)');
+    expect(repo.pullRequests.map((pr) => [pr.number, pr.ciState])).toEqual([[1, null], [2, 'SUCCESS'], [3, null]]);
     expect(repo.recentlyMerged).toEqual([]);
-    expect(repo.defaultBranch).toBeNull();
+    expect(repo.defaultBranch).toMatchObject({ name: 'main', ciState: 'FAILURE' });
   });
 
   it('scopes merged PRs in a shared repo like open ones, and keeps both in the files cache', async () => {
     const rush = { name: 'rush', repo: 'acme/mono', root: '/src/mono', defaultPath: '/src/mono/rush' } as ProjectDef;
     const prix = { name: 'prix', repo: 'acme/mono', root: '/src/mono', defaultPath: '/src/mono/prix' } as ProjectDef;
-    const routes: Record<string, string> = {
-      'repos/acme/mono': 'acme/mono\n',
-      'user': 'octocat\n',
+    const routes: Routes = {
+      ...soloRoutes(),
       'repos/acme/mono/pulls?state=open&per_page=100': prLine(1, 'o1'),
-      graphql: GRAPHQL,
       'repos/acme/mono/pulls/1/files?per_page=100': 'rush/app.ts\n',
       'repos/acme/mono/pulls/13/files?per_page=100': 'AGENTS.md\n',
-      'repos/acme/mono/pulls/11/files?per_page=100': 'prix/api.ts\n',
       'repos/acme/mono/pulls/10/files?per_page=100': 'rush/cli/main.ts\n',
+      'repos/acme/mono/pulls/15/files?per_page=100': 'prix/api.ts\n',
     };
+    const cacheDir = freshCache();
     const first = recordedGh(routes);
-    const [repo] = (await buildProjectPrs(rush, {}, first.gh, [rush, prix], NOW)).repositories;
+    const [repo] = (await buildProjectPrs(rush, {}, first.gh, [rush, prix], { nowMs: NOW, cacheDir })).repositories;
     expect(repo.pullRequests.map((pr) => [pr.number, pr.scope, pr.ciState])).toEqual([[1, 'project', 'FAILURE']]);
     expect(repo.recentlyMerged.map((pr) => [pr.number, pr.scope])).toEqual([[13, 'repo-wide'], [10, 'project']]);
+    // A merged PR scoped out is never read further.
+    expect(first.asked).not.toContain('repos/acme/mono/pulls/15');
 
     const second = recordedGh(routes);
-    await buildProjectPrs(rush, {}, second.gh, [rush, prix], NOW);
+    await buildProjectPrs(rush, {}, second.gh, [rush, prix], { nowMs: NOW, cacheDir });
     expect(second.asked.filter((e) => e.includes('/files'))).toEqual([]);
   });
 
   it('--number carries the same verdict from the REST rollup and no merged list', async () => {
     const { gh } = recordedGh({
-      'repos/acme/mono': 'acme/mono\n',
+      'repos/acme/mono': repoRead,
       'user': 'octocat\n',
       'repos/acme/mono/pulls/1': prLine(1, 'o1'),
       'pr view 1 --repo acme/mono --json reviewDecision,headRefOid': JSON.stringify({ reviewDecision: 'APPROVED', headRefOid: 'o1' }),
-      'repos/acme/mono/commits/o1/check-runs': [
-        JSON.stringify({ name: 'test', status: 'COMPLETED', conclusion: 'FAILURE', link: '' }),
-        JSON.stringify({ name: 'e2e', status: 'IN_PROGRESS', conclusion: '', link: '' }),
-      ].join('\n'),
-      'repos/acme/mono/commits/o1/status': JSON.stringify({ name: 'ci/external', state: 'SUCCESS', link: '' }),
+      'repos/acme/mono/commits/o1/check-runs': REST['repos/acme/mono/commits/o1/check-runs'],
+      'repos/acme/mono/commits/o1/status': REST['repos/acme/mono/commits/o1/status'],
     });
-    const [repo] = (await buildProjectPrs(solo, { repo: 'acme/mono', number: 1 }, gh, [solo], NOW)).repositories;
-    expect(repo.pullRequests[0]).toMatchObject({ ciState: 'FAILURE', failingChecks: ['test'], reviewDecision: 'APPROVED' });
-    expect(repo.recentlyMerged).toEqual([]);
-    expect(repo.defaultBranch).toBeNull();
+    const [repo] = (await buildProjectPrs(solo, { repo: 'acme/mono', number: 1 }, gh, [solo], { nowMs: NOW, cacheDir: freshCache() })).repositories;
+    expect(repo.pullRequests[0]).toMatchObject({
+      ciState: 'FAILURE', failingChecks: ['ci/external', 'test', 'deploy'], reviewDecision: 'APPROVED',
+    });
+    expect(repo).toMatchObject({ recentlyMerged: [], defaultBranch: null, ciError: null });
   });
 
-  it('reads the REST rollup with GitHub\'s precedence', () => {
+  it('reads the REST rollup with GitHub\'s precedence, and calls only a finished rollup terminal', () => {
     expect(ciFromRollupItems([])).toEqual({ ciState: null, failingChecks: [] });
     expect(ciFromRollupItems([{ name: 'a', status: 'COMPLETED', conclusion: 'SKIPPED' }, { name: 'b', state: 'SUCCESS' }]))
       .toEqual({ ciState: 'SUCCESS', failingChecks: [] });
@@ -213,6 +273,9 @@ describe('CI at a glance and recently merged PRs', () => {
       .toEqual({ ciState: 'ERROR', failingChecks: ['a'] });
     expect(ciFromRollupItems([{ name: 'a', state: 'ERROR' }, { name: 'b', status: 'COMPLETED', conclusion: 'ACTION_REQUIRED' }]))
       .toEqual({ ciState: 'FAILURE', failingChecks: ['a', 'b'] });
+    expect(isTerminalRollup([])).toBe(false);
+    expect(isTerminalRollup([{ name: 'a', status: 'COMPLETED', conclusion: 'FAILURE' }, { name: 'b', state: 'ERROR' }])).toBe(true);
+    expect(isTerminalRollup([{ name: 'a', status: 'COMPLETED', conclusion: 'SUCCESS' }, { name: 'b', state: 'PENDING' }])).toBe(false);
   });
 });
 
