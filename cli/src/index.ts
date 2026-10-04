@@ -177,8 +177,8 @@ if (process.argv[2] === 'sessions') {
     SessionsClientError,
     SESSIONS_INSTALL_HINT,
   } = await import('./lib/sessions-client.js');
-  // Resolve the bin up front (a cheap PATH lookup): its presence decides whether
-  // we can route at all, and its VERSION decides whether the 0.2.0 filter flags
+  // Resolve the bin up front (the sessions-cli dependency, else PATH): its
+  // presence decides whether we can route at all, and its VERSION decides whether the 0.2.0 filter flags
   // (`--project`/`--since`/`--until`/`--sort`, `@version`, the shorthands) and the
   // 0.2.1 `--host <target>` point-to-one remote read flag are recognized — an
   // older `sessions` would mis-read them as FTS tokens, so those queries stay on
@@ -190,9 +190,9 @@ if (process.argv[2] === 'sessions') {
     bin = resolveSessionsBin();
   } catch (err) {
     // No standalone on this box: fall through to the in-repo engine below rather
-    // than refusing the query. The fast path is an optimization for a box that
-    // has `sessions` installed (skips bootstrap and the sessions module); a box
-    // without it must still answer `agents sessions --json` exactly as before.
+    // than refusing the query. The fast path runs the `@phnx-labs/sessions-cli`
+    // dependency (or `$SESSIONS_BIN` / PATH) and skips bootstrap; a box with
+    // none of those must still answer `agents sessions --json`.
     if (!(err instanceof SessionsClientError && err.code === 'SESSIONS_BIN_MISSING')) throw err;
   }
   const filters = bin !== null && usesFilterFlags(forwarded) ? sessionsBinSupportsFilters(bin) : false;

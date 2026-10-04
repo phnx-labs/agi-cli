@@ -94,10 +94,8 @@ describe('index.ts sessions read fast-path (PHNX-4012)', () => {
   });
 
   it('falls through to the in-repo engine when no standalone sessions binary is installed', () => {
-    // Every fleet worker and CI runner is a box without @phnx-labs/sessions-cli
-    // (it is not published yet). A read query there must answer as it did
-    // before PHNX-4012, not refuse with "not installed": main's attestation
-    // suite went red on exactly that (sessions.cli-list / sessions.fleet-json).
+    // An empty SESSIONS_BIN skips the dependency bin, and PATH has no `sessions`.
+    // That box must still answer, not refuse with "not installed".
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-fallback-'));
     try {
       writeUpdateCache(home);

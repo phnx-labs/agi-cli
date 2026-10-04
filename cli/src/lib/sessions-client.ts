@@ -3,16 +3,20 @@
  * `sessions` CLI (PHNX-4012). This client never falls back itself: a missing
  * binary throws `SESSIONS_BIN_MISSING` (loud, DIST-1). The caller decides what
  * that means — the read fast-path in `index.ts` falls through to the in-repo
- * `lib/session` engine when the standalone is not installed (every worker and
- * CI runner, until @phnx-labs/sessions-cli is published), and takes the fast
- * path when it is.
+ * `lib/session` engine when no standalone can be resolved, and takes the fast
+ * path when one can.
  *
- * Bin resolution uses `findInPath`, which skips `~/.agents/.cache/shims`.
- * That skip is load-bearing: the leftover `sessions` alias shim execs
- * `agents sessions`, and resolving it would recurse (the 1.22.85 secrets
- * fork bomb with the names swapped — agi-cli#3532).
+ * Resolution order: a non-empty `$SESSIONS_BIN`, else the `sessions` bin of the
+ * installed `@phnx-labs/sessions-cli` dependency, else `findInPath`. An empty
+ * `$SESSIONS_BIN` skips the dependency and uses PATH only. `findInPath` skips
+ * `~/.agents/.cache/shims`. That skip is load-bearing: the leftover `sessions`
+ * alias shim execs `agents sessions`, and resolving it would recurse (the
+ * 1.22.85 secrets fork bomb with the names swapped — agi-cli#3532).
  */
 import { spawnSync } from 'node:child_process';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import path from 'node:path';
 import { findInPath } from './agent-spec/agents.js';
 import { compareVersions } from './agent-spec/primitives.js';
 import { stripRoutingFlags } from './hosts/remote-cmd.js';
@@ -50,10 +54,50 @@ export class SessionsClientError extends Error {
 
 let cachedBin: string | undefined;
 
+/**
+ * The `sessions` executable shipped in the `@phnx-labs/sessions-cli` dependency.
+ * That package's `exports` map publishes only `./reader`, so `require.resolve` of
+ * the package name, its bin, or `package.json` throws `ERR_PACKAGE_PATH_NOT_EXPORTED`.
+ * Walk Node's own lookup paths and read the bin field off disk.
+ */
+function dependencySessionsBin(): string | null {
+  const dirs = createRequire(import.meta.url).resolve.paths('@phnx-labs/sessions-cli');
+  if (!dirs) return null;
+  let pkgJsonPath: string | undefined;
+  for (const dir of dirs) {
+    const candidate = path.join(dir, '@phnx-labs', 'sessions-cli', 'package.json');
+    if (existsSync(candidate)) {
+      pkgJsonPath = candidate;
+      break;
+    }
+  }
+  if (!pkgJsonPath) return null;
+  const pkg = JSON.parse(readFileSync(pkgJsonPath, 'utf8')) as {
+    bin?: string | Record<string, string>;
+  };
+  const rel = typeof pkg.bin === 'string' ? pkg.bin : pkg.bin?.sessions;
+  const abs = rel ? path.resolve(path.dirname(pkgJsonPath), rel) : '';
+  if (!rel || !existsSync(abs)) {
+    throw new SessionsClientError(
+      'SESSIONS_BIN_MISSING',
+      `@phnx-labs/sessions-cli is installed beside agents-cli but its sessions bin is missing` +
+        `${rel ? ` (${rel})` : ''}.`,
+    );
+  }
+  return realpathSync(abs);
+}
+
 export function resolveSessionsBin(): string {
   if (cachedBin) return cachedBin;
-  const explicit = process.env.SESSIONS_BIN?.trim();
-  const resolved = explicit && explicit.length > 0 ? explicit : findInPath('sessions');
+  const raw = process.env.SESSIONS_BIN;
+  const explicit = raw?.trim();
+  if (explicit) {
+    cachedBin = explicit;
+    return cachedBin;
+  }
+  // Unset: the dependency this CLI ships, then PATH. Empty: PATH only, so a
+  // harness can keep a read on the in-repo engine without a global `sessions`.
+  const resolved = (raw === undefined ? dependencySessionsBin() : null) ?? findInPath('sessions');
   if (!resolved) {
     throw new SessionsClientError(
       'SESSIONS_BIN_MISSING',

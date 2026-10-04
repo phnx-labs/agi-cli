@@ -214,10 +214,11 @@ exit 1
 
 /**
  * The runner's PATH minus package-manager `node_modules/.bin` dirs. `bun run test`
- * prepends them, and `@phnx-labs/sessions-cli` links a `sessions` bin there, so
- * the PHNX-4012 fast path in `src/index.ts` would hand every read query to that
- * standalone (which reads the index without scanning) instead of the in-repo
- * engine these tests exercise. A real install never links a dependency's bin.
+ * prepends them, and `@phnx-labs/sessions-cli` links a `sessions` bin there.
+ * `runAgents` also sets `SESSIONS_BIN` empty so `resolveSessionsBin` does not
+ * pick the dependency's own bin: these tests exercise the in-repo engine, which
+ * scans, rather than the standalone, which reads the index. A caller passes a
+ * real `SESSIONS_BIN` in `envOverrides` when it wants the fast path.
  */
 function pathWithoutPackageBins(): string {
   return (process.env.PATH || '')
@@ -235,6 +236,8 @@ export function runAgents(args: string[], cwd: string, home: string, envOverride
       // os.homedir() (used via homeDir() in discovery) reads USERPROFILE on
       // Windows and ignores HOME, so set both to redirect the home to tempHome.
       USERPROFILE: home,
+      // Empty skips the dependency bin. envOverrides may pin a stub afterward.
+      SESSIONS_BIN: '',
       PATH: `${path.join(home, 'bin')}${path.delimiter}${pathWithoutPackageBins()}`,
       // Some fixtures place files at $HOME/.agents/versions/<agent>/<ver>/ as
       // legacy / synthetic state. The bootstrap-time migration would otherwise
