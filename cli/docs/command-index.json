@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
   "command": "agents",
+  "description": "Install, configure, run, and dispatch AI coding agents (Claude, Codex, Cursor, OpenCode, Grok, Droid and more) from one CLI: version homes, synced resources, sessions, teams, browser and desktop tools, secrets, and the device fleet.",
   "groups": 65,
   "commands": 472,
   "root": {

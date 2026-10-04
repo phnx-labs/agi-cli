@@ -32,6 +32,7 @@
       },
       "devDependencies": {
         "@homebridge/node-pty-prebuilt-multiarch": "0.14.1",
+        "@phnx-labs/cli-docs": "0.1.0",
         "@types/diff": "8.0.0",
         "@types/marked-terminal": "6.1.1",
         "@types/node": "26.1.0",
@@ -226,6 +227,8 @@
     "@napi-rs/wasm-runtime": ["@napi-rs/wasm-runtime@1.1.4", "", { "dependencies": { "@tybys/wasm-util": "^0.10.1" }, "peerDependencies": { "@emnapi/core": "^1.7.1", "@emnapi/runtime": "^1.7.1" } }, "sha512-3NQNNgA1YSlJb/kMH1ildASP9HW7/7kYnRI2szWJaofaS1hWmbGI4H+d3+22aGzXXN9IJ+n+GiFVcGipJP18ow=="],
 
     "@oxc-project/types": ["@oxc-project/types@0.132.0", "", {}, "sha512-FESMOxil5Se014ui/Eq8fT5uHJo6nIRwH0PfJrZJXs6Gek3ZVFOrpUv3YIZT20m+extU98Hg1Ym72U58rlsxUQ=="],
+
+    "@phnx-labs/cli-docs": ["@phnx-labs/cli-docs@0.1.0", "", { "peerDependencies": { "commander": ">=12" } }, "sha512-5SIcT01F7corWMVvg6y/nJXHl7CiyUG4GVVulV/Di4zXXCqA5190sd3f67np9H9Lu/8EH/81meLoY7r7+ZsXfQ=="],
 
     "@phnx-labs/sessions-cli": ["@phnx-labs/sessions-cli@0.3.0", "", { "dependencies": { "acorn": "8.18.0", "chalk": "5.6.2", "commander": "15.0.0", "diff": "9.0.0", "marked": "15.0.12", "marked-terminal": "7.3.0", "shlex": "3.0.0", "unbash": "4.0.5" }, "bin": { "sessions": "dist/index.js" } }, "sha512-A+uX/rB2n2NwJRkW/7+dZ4xDE0gbuNCR6Zlj4PclyKCQ3I1vSB8NN10UUw5x8cpdDHrBJCdosSioKHbxOeF8yw=="],
 

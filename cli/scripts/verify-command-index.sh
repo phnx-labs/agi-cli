@@ -1,33 +1,11 @@
 #!/usr/bin/env bash
-# Fail if docs/command-index.{md,json} are stale versus the CLI's own command
-# tree — i.e. a command was added/renamed/re-described but `npm run gen:index`
-# was not re-run and the result committed. Regenerates into a temp dir and diffs.
+# Fail if docs/command-index.{md,json} or docs/command-reference.html are stale
+# versus the CLI's own command tree: a command was added, renamed or re-described
+# without `npm run gen:index` being re-run and committed. The shared generator's
+# --check mode regenerates in memory and names each stale file.
 #
 # Requires bun + node_modules (the generator loads every command module). Run
-# from a CI job that has the toolchain and fires on CLI *source* changes
-# (cli-preflight) so it catches the real drift case, plus the docs job for a
-# hand-edit of the committed artifacts. Run from cli/.
+# from cli/.
 set -euo pipefail
-
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$ROOT_DIR"
-
-TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
-
-GEN_COMMAND_INDEX_OUT_DIR="$TMP" bun scripts/gen-command-index.ts >/dev/null
-
-rc=0
-for f in command-index.md command-index.json command-reference.html; do
-  if ! diff -q "docs/$f" "$TMP/$f" >/dev/null 2>&1; then
-    printf '✗ docs/%s is stale — run `npm run gen:index` and commit the result\n' "$f" >&2
-    # Show the first lines of the drift so the failure is diagnosable in CI logs.
-    diff -u "docs/$f" "$TMP/$f" 2>/dev/null | head -30 >&2 || true
-    rc=1
-  fi
-done
-
-if [[ $rc -eq 0 ]]; then
-  echo "✓ command reference (docs/command-index.{md,json} + command-reference.html) is up to date"
-fi
-exit $rc
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+bun scripts/gen-command-index.ts --check
