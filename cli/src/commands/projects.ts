@@ -91,9 +91,19 @@ import {
   mergeProjectPr,
   resolveTargetSlugs,
   MERGE_METHODS,
+  MERGED_WINDOW_DAYS,
+  type CiState,
   type MergeMethod,
 } from '../lib/github/project-prs.js';
 import { ghExec } from '../lib/github/pr-mergeable.js';
+
+/** One glyph for a CI verdict in the human `prs` list; blank when there are no checks. */
+function ciMark(state: CiState | null): string {
+  if (state === 'SUCCESS') return chalk.green('✓');
+  if (state === 'FAILURE' || state === 'ERROR') return chalk.red('✗');
+  if (state === 'PENDING' || state === 'EXPECTED') return chalk.yellow('●');
+  return ' ';
+}
 
 /** Recursion guard: a peer answering a probe fan-out never re-fans-out itself. */
 const PROJECTS_NO_FANOUT_ENV = 'AGENTS_PROJECTS_LOCAL';
@@ -1077,11 +1087,18 @@ async function runProjectCard(
             console.log(`${chalk.bold(r.slug)}  ${chalk.red(`— fetch failed: ${r.error}`)}`);
             continue;
           }
-          console.log(`${chalk.bold(r.slug)}  ${chalk.dim(`${r.pullRequests.length} open`)}`);
+          const branch = r.defaultBranch ? `  ${r.defaultBranch.name} ${ciMark(r.defaultBranch.ciState)}` : '';
+          console.log(`${chalk.bold(r.slug)}  ${chalk.dim(`${r.pullRequests.length} open`)}${branch}`);
           for (const pr of r.pullRequests) {
             const draft = pr.isDraft ? chalk.gray(' [draft]') : '';
             const wide = pr.scope === 'repo-wide' ? chalk.gray(' [repo-wide]') : '';
-            console.log(`  #${pr.number}${draft}${wide}  ${pr.title}  ${chalk.gray(`@${pr.author.login} · ${pr.headRefName}`)}`);
+            console.log(`  ${ciMark(pr.ciState)} #${pr.number}${draft}${wide}  ${pr.title}  ${chalk.gray(`@${pr.author.login} · ${pr.headRefName}`)}`);
+          }
+          if (r.recentlyMerged.length > 0) {
+            console.log(chalk.dim(`  merged in the last ${MERGED_WINDOW_DAYS} days:`));
+            for (const pr of r.recentlyMerged) {
+              console.log(`  ${ciMark(pr.ciState)} #${pr.number}  ${pr.title}  ${chalk.gray(`@${pr.author.login} · ${pr.mergedAt.slice(0, 10)}`)}`);
+            }
           }
         }
         if (envelope.partial) {

@@ -18,6 +18,12 @@
  *   - `checks` / `reviewDecision` are null in the list; `--number N` enriches
  *     exactly that one PR against its live head SHA (checks via REST
  *     {@link rollupForSha}, reviewDecision via a single lazy `gh pr view`).
+ *   - The at-a-glance CI verdict (`ciState` + `failingChecks`) on every open PR,
+ *     the PRs merged in the last 7 days, and the default branch's own CI come
+ *     from ONE GraphQL read per repository per run ({@link fetchRepoCi}). The
+ *     REST equivalent is a check-runs read plus a status read PER PR and per
+ *     merge commit, which costs far more than the one query it replaces. A failed
+ *     query degrades those fields to null/empty; it never fails the repository.
  *   - A per-repo fetch failure is reported as `repositories[].error` and flips
  *     `partial` — it is NEVER relabeled as "zero open PRs".
  */
@@ -46,6 +52,9 @@ export interface ProjectPrAuthor {
  */
 export type ProjectPrScope = 'project' | 'repo-wide';
 
+/** GitHub's `StatusState` for a commit's combined check rollup. */
+export type CiState = 'SUCCESS' | 'FAILURE' | 'PENDING' | 'ERROR' | 'EXPECTED';
+
 /** One open PR row. `checks`/`reviewDecision`/merge state are null unless the PR was enriched. */
 export interface ProjectPr {
   number: number;
@@ -70,6 +79,38 @@ export interface ProjectPr {
   checks: RollupItem[] | null;
   /** Populated only for the `--number` PR: GitHub's computed review decision. */
   reviewDecision: string | null;
+  /** The head commit's combined CI verdict; null when it has no checks or the CI read failed. */
+  ciState: CiState | null;
+  /** Names of the head commit's failing, errored, timed-out, cancelled or action-required checks. */
+  failingChecks: string[];
+}
+
+/** One PR merged into the repository in the last {@link MERGED_WINDOW_DAYS} days. */
+export interface MergedPr {
+  number: number;
+  title: string;
+  url: string;
+  author: ProjectPrAuthor;
+  headRefName: string;
+  baseRefName: string;
+  mergedAt: string;
+  /** Login of whoever merged it; null when GitHub does not say (a deleted account). */
+  mergedBy: string | null;
+  mergeCommitSha: string | null;
+  /** CI on the MERGE commit: the base branch right after this PR landed. */
+  ciState: CiState | null;
+  failingChecks: string[];
+  additions: number;
+  deletions: number;
+  scope: ProjectPrScope | null;
+}
+
+/** The repository's default branch head and its CI. */
+export interface DefaultBranchCi {
+  name: string;
+  sha: string;
+  ciState: CiState | null;
+  failingChecks: string[];
 }
 
 /** One repository's open PRs, or the error that stopped its fetch. */
@@ -78,6 +119,10 @@ export interface ProjectRepoPrs {
   /** Other project definitions attached to this same repository. */
   sharedWith: string[];
   pullRequests: ProjectPr[];
+  /** PRs merged in the last 7 days, newest first, at most 20; [] with `--number`. */
+  recentlyMerged: MergedPr[];
+  /** The default branch head and its CI; null with `--number` or when the CI read failed. */
+  defaultBranch: DefaultBranchCi | null;
   /** Non-null when the fetch failed — the list is then NOT authoritative. */
   error: string | null;
 }
@@ -140,6 +185,8 @@ export function rowToProjectPr(row: Record<string, unknown>): ProjectPr {
     mergeableState: typeof row.mergeableState === 'string' ? row.mergeableState : null,
     checks: null,
     reviewDecision: null,
+    ciState: null,
+    failingChecks: [],
   };
 }
 
@@ -202,7 +249,165 @@ export async function enrichPr(repo: string, pr: ProjectPr, gh: GhExec = ghExec)
   const { reviewDecision, headRefOid } = await fetchReviewAndHead(repo, pr.number, gh);
   const head = headRefOid || pr.headSha;
   const checks = await rollupForSha(repo, head, gh);
-  return { ...pr, headSha: head, checks, reviewDecision };
+  return { ...pr, headSha: head, checks, reviewDecision, ...ciFromRollupItems(checks) };
+}
+
+/** How far back `recentlyMerged` reaches, and how many rows it keeps after scoping. */
+export const MERGED_WINDOW_DAYS = 7;
+export const MERGED_LIMIT = 20;
+
+/** Check-run conclusions and status-context states that count as a failing check. */
+const FAILING_CONCLUSIONS = new Set(['FAILURE', 'TIMED_OUT', 'CANCELLED', 'ACTION_REQUIRED', 'STARTUP_FAILURE']);
+const FAILING_STATES = new Set(['FAILURE', 'ERROR']);
+const CI_STATES = new Set<string>(['SUCCESS', 'FAILURE', 'PENDING', 'ERROR', 'EXPECTED']);
+
+/** What a menu row renders: the rollup state, plus the names to show when it is red. */
+export interface CiSummary {
+  ciState: CiState | null;
+  failingChecks: string[];
+}
+
+const NO_CI: CiSummary = { ciState: null, failingChecks: [] };
+
+interface GraphRollupNode {
+  __typename?: string;
+  name?: string;
+  conclusion?: string | null;
+  status?: string;
+  context?: string;
+  state?: string;
+}
+type GraphRollup = { state?: string; contexts?: { nodes?: Array<GraphRollupNode | null> } } | null | undefined;
+
+/** Summarize one GraphQL `statusCheckRollup`. A commit GitHub gives no rollup has no checks: null. */
+export function ciFromGraphRollup(rollup: GraphRollup): CiSummary {
+  if (!rollup?.state || !CI_STATES.has(rollup.state)) return NO_CI;
+  const failing: string[] = [];
+  for (const node of rollup.contexts?.nodes ?? []) {
+    if (!node) continue;
+    const isStatus = node.__typename === 'StatusContext';
+    const name = isStatus ? node.context : node.name;
+    const bad = isStatus ? FAILING_STATES.has(node.state ?? '') : FAILING_CONCLUSIONS.has(node.conclusion ?? '');
+    if (bad && name && !failing.includes(name)) failing.push(name);
+  }
+  return { ciState: rollup.state as CiState, failingChecks: failing };
+}
+
+/**
+ * Summarize the REST rollup the `--number` path already reads, with GitHub's own
+ * precedence: any failing check makes it red even while others still run, and it
+ * is `ERROR` only when errored statuses are the only red.
+ */
+export function ciFromRollupItems(items: readonly RollupItem[]): CiSummary {
+  if (items.length === 0) return NO_CI;
+  const failing: string[] = [];
+  let failed = false;
+  let pending = false;
+  for (const item of items) {
+    const isCheckRun = item.state === undefined;
+    if (isCheckRun ? FAILING_CONCLUSIONS.has(item.conclusion ?? '') : FAILING_STATES.has(item.state ?? '')) {
+      failing.push(item.name);
+      if (isCheckRun || item.state === 'FAILURE') failed = true;
+    } else if (isCheckRun ? item.status !== 'COMPLETED' : item.state === 'PENDING') {
+      pending = true;
+    }
+  }
+  if (failing.length > 0) return { ciState: failed ? 'FAILURE' : 'ERROR', failingChecks: failing };
+  return { ciState: pending ? 'PENDING' : 'SUCCESS', failingChecks: [] };
+}
+
+const ROLLUP_FIELDS =
+  'statusCheckRollup { state contexts(first: 50) { nodes { __typename ' +
+  '... on CheckRun { name conclusion status } ... on StatusContext { context state } } } }';
+
+/** The one query behind every CI field and `recentlyMerged`. */
+const REPO_CI_QUERY =
+  'query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ' +
+  `defaultBranchRef { name target { ... on Commit { oid ${ROLLUP_FIELDS} } } } ` +
+  'open: pullRequests(states: OPEN, first: 100, orderBy: {field: UPDATED_AT, direction: DESC}) { ' +
+  `nodes { number commits(last: 1) { nodes { commit { ${ROLLUP_FIELDS} } } } } } ` +
+  'merged: pullRequests(states: MERGED, first: 30, orderBy: {field: UPDATED_AT, direction: DESC}) { ' +
+  'nodes { number title url author { login avatarUrl } headRefName baseRefName headRefOid ' +
+  `mergedAt mergedBy { login } additions deletions mergeCommit { oid ${ROLLUP_FIELDS} } } } } }`;
+
+interface GraphMergedNode {
+  number: number;
+  title?: string;
+  url?: string;
+  author?: { login?: string; avatarUrl?: string } | null;
+  headRefName?: string;
+  baseRefName?: string;
+  headRefOid?: string;
+  mergedAt?: string | null;
+  mergedBy?: { login?: string } | null;
+  additions?: number;
+  deletions?: number;
+  mergeCommit?: { oid?: string; statusCheckRollup?: GraphRollup } | null;
+}
+
+interface GraphRepository {
+  defaultBranchRef?: { name?: string; target?: { oid?: string; statusCheckRollup?: GraphRollup } | null } | null;
+  open?: { nodes?: Array<{ number: number; commits?: { nodes?: Array<{ commit?: { statusCheckRollup?: GraphRollup } } | null> } } | null> };
+  merged?: { nodes?: Array<GraphMergedNode | null> };
+}
+
+/** What {@link fetchRepoCi} reads for one repository. */
+export interface RepoCi {
+  /** Open PR number → its head commit's CI. */
+  openCi: Map<number, CiSummary>;
+  /** Merged PRs inside the window, newest `mergedAt` first, with the head SHA their file list is keyed by. */
+  merged: Array<{ pr: MergedPr; headSha: string }>;
+  defaultBranch: DefaultBranchCi | null;
+}
+
+/**
+ * Read open-PR CI, recently merged PRs, and the default branch's CI for one
+ * repository in ONE GraphQL request; throws on any failure so the caller can
+ * degrade. Merged PRs arrive most-recently-updated first, are kept only when
+ * `mergedAt` falls inside the last {@link MERGED_WINDOW_DAYS} days, and are then
+ * ordered by `mergedAt`.
+ */
+export async function fetchRepoCi(repo: string, nowMs: number, gh: GhExec = ghExec): Promise<RepoCi> {
+  const [owner, name] = repo.split('/');
+  const out = await gh(['api', 'graphql', '-f', `query=${REPO_CI_QUERY}`, '-f', `owner=${owner}`, '-f', `name=${name}`]);
+  const repository = (JSON.parse(out) as { data?: { repository?: GraphRepository | null } }).data?.repository;
+  if (!repository) throw new Error(`GitHub returned no repository for ${repo}`);
+
+  const openCi = new Map<number, CiSummary>();
+  for (const node of repository.open?.nodes ?? []) {
+    if (node) openCi.set(Number(node.number), ciFromGraphRollup(node.commits?.nodes?.[0]?.commit?.statusCheckRollup));
+  }
+
+  const since = nowMs - MERGED_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+  const merged: RepoCi['merged'] = [];
+  for (const node of repository.merged?.nodes ?? []) {
+    if (!node?.mergedAt || Date.parse(node.mergedAt) < since) continue;
+    merged.push({
+      headSha: String(node.headRefOid ?? ''),
+      pr: {
+        number: Number(node.number),
+        title: String(node.title ?? ''),
+        url: String(node.url ?? ''),
+        author: { login: String(node.author?.login ?? ''), avatarUrl: String(node.author?.avatarUrl ?? '') },
+        headRefName: String(node.headRefName ?? ''),
+        baseRefName: String(node.baseRefName ?? ''),
+        mergedAt: node.mergedAt,
+        mergedBy: node.mergedBy?.login || null,
+        mergeCommitSha: node.mergeCommit?.oid || null,
+        ...ciFromGraphRollup(node.mergeCommit?.statusCheckRollup),
+        additions: Number(node.additions ?? 0),
+        deletions: Number(node.deletions ?? 0),
+        scope: null,
+      },
+    });
+  }
+  merged.sort((a, b) => Date.parse(b.pr.mergedAt) - Date.parse(a.pr.mergedAt));
+
+  const ref = repository.defaultBranchRef;
+  const defaultBranch: DefaultBranchCi | null = ref?.name && ref.target?.oid
+    ? { name: ref.name, sha: ref.target.oid, ...ciFromGraphRollup(ref.target.statusCheckRollup) }
+    : null;
+  return { openCi, merged, defaultBranch };
 }
 
 /**
@@ -253,8 +458,10 @@ export function scopeForFiles(files: readonly string[], own: readonly string[], 
 
 /**
  * The files a PR changes, keyed by its head SHA. The list for a given head is
- * immutable, so a cached entry never goes stale; a push mints a new key. Entries
- * for heads that are no longer open in that repo are pruned on write.
+ * immutable, so a cached entry never goes stale; a push mints a new key. Open and
+ * recently merged PRs share one key space (a PR that merges keeps its entry), and
+ * pruning keeps every head the run listed, open or merged, so neither list evicts
+ * the other's entries.
  */
 class PrFilesCache {
   private readonly file = path.join(getCacheDir(), 'project-pr-files.json');
@@ -271,7 +478,7 @@ class PrFilesCache {
     }
   }
 
-  async files(slug: string, pr: ProjectPr, gh: GhExec): Promise<string[]> {
+  async files(slug: string, pr: { number: number; headSha: string }, gh: GhExec): Promise<string[]> {
     const key = `${slug}@${pr.headSha}`;
     const hit = this.entries[key];
     if (hit) return hit;
@@ -283,10 +490,10 @@ class PrFilesCache {
     return files;
   }
 
-  prune(slug: string, openHeads: ReadonlySet<string>): void {
+  prune(slug: string, listedHeads: ReadonlySet<string>): void {
     for (const key of Object.keys(this.entries)) {
       const at = key.lastIndexOf('@');
-      if (key.slice(0, at) === slug && !openHeads.has(key.slice(at + 1))) {
+      if (key.slice(0, at) === slug && !listedHeads.has(key.slice(at + 1))) {
         delete this.entries[key];
         this.dirty = true;
       }
@@ -366,14 +573,16 @@ async function repoPeers(
  *
  * `peers` are every project definition. A repository attached to more than one
  * project is scoped: when this project claims part of it ({@link repoPathClaims}),
- * its list keeps only PRs that touch those paths (`scope: project`) or touch no
- * sharing project's paths (`scope: repo-wide`).
+ * its open AND recently merged lists keep only PRs that touch those paths
+ * (`scope: project`) or touch no sharing project's paths (`scope: repo-wide`).
+ * `nowMs` anchors the merged window.
  */
 export async function buildProjectPrs(
   def: ProjectDef,
   opts: ProjectPrsOptions = {},
   gh: GhExec = ghExec,
   peers: readonly ProjectDef[] = [],
+  nowMs: number = Date.now(),
 ): Promise<ProjectPrsEnvelope> {
   const project = { name: def.name, linearProjectId: def.linear?.projectId ?? null };
   const slugs = await resolveTargetSlugs(def, opts.repo, gh);
@@ -391,26 +600,45 @@ export async function buildProjectPrs(
       const peer = shared.get(slug);
       const sharedWith = peer?.names ?? [];
       try {
-        let pullRequests: ProjectPr[];
         if (opts.number !== undefined) {
           const pr = await fetchOnePr(slug, opts.number, gh);
-          pullRequests = [await enrichPr(slug, pr, gh)];
-        } else {
-          pullRequests = await listOpenPrs(slug, gh);
-          const own = ownClaims.get(slug);
-          if (peer && own) {
-            filesCache.prune(slug, new Set(pullRequests.map((pr) => pr.headSha)));
-            const scopes = await mapBounded(pullRequests, 8, async (pr) =>
-              scopeForFiles(await filesCache.files(slug, pr, gh), own, peer.prefixes));
-            pullRequests = pullRequests
-              .map((pr, i) => ({ ...pr, scope: scopes[i] }))
-              .filter((pr) => pr.scope !== null);
-          }
+          return { slug, sharedWith, pullRequests: [await enrichPr(slug, pr, gh)], recentlyMerged: [], defaultBranch: null, error: null };
         }
-        return { slug, sharedWith, pullRequests, error: null };
+        const [listed, ci] = await Promise.all([
+          listOpenPrs(slug, gh),
+          // CI is a glance aid: a failed read empties those fields, it never fails the repository.
+          fetchRepoCi(slug, nowMs, gh).catch((): RepoCi => ({ openCi: new Map(), merged: [], defaultBranch: null })),
+        ]);
+        let pullRequests: ProjectPr[] = listed.map((pr) => ({ ...pr, ...(ci.openCi.get(pr.number) ?? NO_CI) }));
+        let recentlyMerged = ci.merged.map((m) => m.pr);
+        const own = ownClaims.get(slug);
+        if (peer && own) {
+          filesCache.prune(slug, new Set([...listed.map((pr) => pr.headSha), ...ci.merged.map((m) => m.headSha)]));
+          const scopeOf = async (pr: { number: number; headSha: string }) =>
+            scopeForFiles(await filesCache.files(slug, pr, gh), own, peer.prefixes);
+          const [openScopes, mergedScopes] = await Promise.all([
+            mapBounded(pullRequests, 8, scopeOf),
+            mapBounded(ci.merged, 8, (m) => scopeOf({ number: m.pr.number, headSha: m.headSha })),
+          ]);
+          pullRequests = pullRequests
+            .map((pr, i) => ({ ...pr, scope: openScopes[i] }))
+            .filter((pr) => pr.scope !== null);
+          recentlyMerged = recentlyMerged
+            .map((pr, i) => ({ ...pr, scope: mergedScopes[i] }))
+            .filter((pr) => pr.scope !== null);
+        }
+        return {
+          slug, sharedWith, pullRequests,
+          recentlyMerged: recentlyMerged.slice(0, MERGED_LIMIT),
+          defaultBranch: ci.defaultBranch,
+          error: null,
+        };
       } catch (err) {
         // A fetch failure is reported, never relabeled as zero open PRs.
-        return { slug, sharedWith, pullRequests: [], error: err instanceof Error ? err.message : String(err) };
+        return {
+          slug, sharedWith, pullRequests: [], recentlyMerged: [], defaultBranch: null,
+          error: err instanceof Error ? err.message : String(err),
+        };
       }
     }),
   );
