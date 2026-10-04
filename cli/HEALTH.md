@@ -109,7 +109,7 @@ end to end.
 | # | Opportunity | Kind | Est. lines | Status |
 |---|---|---|---:|---|
 | 1 | `lib/session/__tests__/render.test.ts` + `parse-*.test.ts` (~3,200 lines) only exercise `@phnx-labs/sessions-cli/reader`; that package now owns the parsers. Keep one version-pin contract test here, move the rest to sessions-cli | dead (tests) | ~3,200 test | confirmed |
-| 2 | Dead exports: `plugins/skills.ts` install/compare API (`installSkillToVersion`, `skillContentMatches`, …), `versions.ts` `getInstalledVersion` + local `skillDirsMatch`/`copyDir`, 9 unused `state.ts` path aliases, `permissions.ts` `*ToCanonical` (test-only), `device-config.ts:1182-1286` auto-launch helpers, `git.ts` `initRepo`/`getTrackedFiles`, `crabbox/runtimes.ts` `pickRuntimes`, `remote-list.ts` `parseRemoteList`, and others | dead | ~480 | confirmed |
+| 2 | Dead exports: `plugins/skills.ts` install/compare API (`installSkillToVersion`, `skillContentMatches`, …), `versions.ts` `getInstalledVersion` + local `skillDirsMatch`/`copyDir`, 9 unused `state.ts` path aliases, `permissions.ts` `*ToCanonical` (test-only), `device-config.ts:1182-1286` auto-launch helpers, `git.ts` `initRepo` (and test-only `getTrackedFiles`), `crabbox/runtimes.ts` `pickRuntimes`, `remote-list.ts` `parseRemoteList`, and others | dead | ~480 | confirmed |
 | 3 | `lib/feed/activity.ts`: 14 of 26 exports have no production caller outside the file; they are leftovers of the `agents activity` command removed in c3e792dd0 | dead | ~220 | confirmed |
 | 4 | Cloudflare provisioning twice: `session/sync/worker-template.ts:813` and `traces/worker-template.ts:279` share `defaultVerifyPhoenixToken`/`json()`/`authorizeRead`; `session/sync/provision.ts:52` "mirrors" `traces/provision.ts:45` | duplicate | ~170 | confirmed |
 | 5 | Two SSH transport stacks: `devices/connect.ts:397` `buildSshInvocation` spawned by hand at 4 sites vs `ssh-exec.ts` `sshExec*`; `-i … IdentitiesOnly=yes` hand-built at 19 sites | duplicate | ~180 | confirmed |
@@ -119,7 +119,7 @@ end to end.
 | 9 | MCP config written by two paths (`agent-spec/agents.ts:2906-2976` and `mcp.ts:619` `writeMcpConfig`); `stripJsonComments` defined twice (`agents.ts:3009`, `permissions-registry.ts:155`) | duplicate | ~105 | candidate / confirmed |
 | 10 | npm upgrade pipeline twice: `bootstrap.ts:351,382` vs `daemon/self-update-service.ts:125,163`; move both into `lib/self-update.ts` | duplicate | ~70 | confirmed |
 | 11 | Duration / `--since` parsing in 6 places (`commands/logs.ts:192`, `commands/events.ts:72`, `commands/mailboxes.ts:120`, `monitors/config.ts:232`, `scheduling/routines.ts:1928`, `hooks/cache.ts:56`); the three `parseSince` copies are byte-identical | duplicate | ~45-70 | confirmed |
-| 12 | ~25 hand-rolled tmp+rename writes bypass `lib/fs-atomic.ts` (e.g. `monitors/state.ts:101`, `mailbox.ts:159`) | duplicate | ~45 | confirmed |
+| 12 | ~25 hand-rolled tmp+rename writes bypass `lib/fs-atomic.ts` (e.g. `monitors/state.ts:101`, `mailbox.ts:207`) | duplicate | ~45 | confirmed |
 | 13 | Six YAML frontmatter fence splitters (`plugins/skills.ts:120`, `subagents.ts:43`, `workflows.ts:167,1018,1094`, `commands.ts:165`) | duplicate | ~40 | candidate |
 | 14 | GitHub helpers: owner/repo parsing 4x and origin-URL reads 7x (owner: `git.ts`); hardened `gh` env twice (`github/pr-mergeable.ts:44`, `gh-overload.ts:121`) with 9 raw `gh` call sites skipping it; `parseNdjson` twice | duplicate | ~75 | confirmed |
 | 15 | Small helpers re-defined: `percentile` (`analytics/recipes.ts:38` copies `lib/percentile.ts`; `traces/sync.ts:544` = `traces/segments.ts:400`), Levenshtein 3x (owner `lib/fuzzy.ts`), `compareVersions` 3x (owner `agent-spec/primitives.ts:42`), `mapBounded` 3x (owner `lib/concurrency.ts:24`), `skillDirsMatch` 2x, run-mode parsing 5x, `getGitRoot`/`hasUncommittedChanges` re-implemented in `teams/worktree.ts` | duplicate | ~200 | confirmed |
@@ -166,7 +166,7 @@ Not the purpose of this report; listed so they are not lost.
   promise pending forever (confirmed by reading).
 - Raw `gh` call sites `JSON.parse` output that `FORCE_COLOR` can paint, the failure mode
   documented at `github/pr-mergeable.ts:38`.
-- `mailbox.ts:159` writes to `${dest}.tmp`, which is not unique per process.
+- `mailbox.ts:207` writes to `${dest}.tmp`, which is not unique per process.
 - The daemon start lock and the feed answer-release token share a create-exclusive +
   stale-reclaim pattern that may let two reclaimers both win. Not reproduced.
 
