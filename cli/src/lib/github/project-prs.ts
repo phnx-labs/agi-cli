@@ -20,10 +20,10 @@
  *     {@link rollupForSha}, reviewDecision via a single lazy `gh pr view`).
  *   - The at-a-glance CI verdict (`ciState` + `failingChecks`) on every listed
  *     PR, the PRs merged in the last 7 days, and the default branch's CI are all
- *     REST too: {@link rollupForSha} per head / merge commit / branch head. Only an
- *     all-passing finished rollup is cached, and only for an hour: a red one can go
- *     green when a failed job is re-run on the same SHA, and a green one can gain a
- *     slower workflow that registers late, so neither is treated as permanent.
+ *     REST too: {@link rollupForSha} per head / merge commit / branch head. A
+ *     finished rollup is cached, never permanently: a green one for an hour (a slower
+ *     workflow can still register late), a red one for five minutes (re-running the
+ *     failed job turns the same SHA green). Running and check-less SHAs are re-read.
  *     A failed CI read empties the affected fields and names itself in
  *     `ciError`; it never fails the repository and is never silent.
  *   - A per-repo fetch failure is reported as `repositories[].error` and flips
@@ -323,9 +323,8 @@ const PASSING_CONCLUSIONS = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);
 
 /**
  * True when every check finished and passed: each check run COMPLETED as SUCCESS,
- * NEUTRAL or SKIPPED, each status SUCCESS. Only such a rollup is cached. A red one
- * is always re-read, because re-running the failed job turns the same SHA green; an
- * empty one is re-read because a just-pushed SHA has no checks registered yet.
+ * NEUTRAL or SKIPPED, each status SUCCESS. Such a rollup is trusted for
+ * {@link PASSING_ROLLUP_TTL_MS}; a finished red one for {@link FAILING_ROLLUP_TTL_MS}.
  */
 export function isPassingRollup(items: readonly RollupItem[]): boolean {
   return items.length > 0 && items.every((i) => (isCheckRun(i)
@@ -340,7 +339,29 @@ export function isPassingRollup(items: readonly RollupItem[]): boolean {
  */
 export const PASSING_ROLLUP_TTL_MS = 60 * 60 * 1000;
 
-/** A cached passing rollup and when it was read. */
+/**
+ * How long a finished red rollup is trusted. Re-running a failed job turns the same
+ * SHA green, so a red verdict is re-read after this long; caching it at all is what
+ * keeps a persistently red default branch from costing two requests per commit on
+ * every refresh.
+ */
+export const FAILING_ROLLUP_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * True when no check can still change on its own: the rollup is non-empty, every
+ * check run COMPLETED, and no status is pending. Only such a rollup is cached; an
+ * empty one is not, because a just-pushed SHA has no checks registered yet.
+ */
+export function isFinishedRollup(items: readonly RollupItem[]): boolean {
+  return items.length > 0 && items.every((i) => (isCheckRun(i) ? i.status === 'COMPLETED' : i.state !== 'PENDING'));
+}
+
+/** How long a cached rollup is trusted: green for an hour, red for five minutes. */
+function rollupTtlMs(items: readonly RollupItem[]): number {
+  return isPassingRollup(items) ? PASSING_ROLLUP_TTL_MS : FAILING_ROLLUP_TTL_MS;
+}
+
+/** A cached finished rollup and when it was read. */
 interface CachedRollup {
   items: RollupItem[];
   readAt: number;
@@ -421,8 +442,8 @@ interface CiReader {
 }
 
 /**
- * The CI of one commit: a passing rollup read within {@link PASSING_ROLLUP_TTL_MS}
- * comes from the cache; anything else is a REST read, cached only if it passes.
+ * The CI of one commit: a finished rollup still within its TTL ({@link rollupTtlMs})
+ * comes from the cache; anything else is a REST read, cached only once finished.
  */
 function readCi(ci: CiReader, sha: string | null): Promise<CiSummary> {
   if (!sha) return Promise.resolve(NO_CI);
@@ -436,10 +457,10 @@ function readCi(ci: CiReader, sha: string | null): Promise<CiSummary> {
 
 async function readCiUncached(ci: CiReader, sha: string): Promise<CiSummary> {
   const hit = ci.rollups.get(ci.slug, sha);
-  if (hit && ci.nowMs - hit.readAt < PASSING_ROLLUP_TTL_MS) return ciFromRollupItems(hit.items);
+  if (hit && ci.nowMs - hit.readAt < rollupTtlMs(hit.items)) return ciFromRollupItems(hit.items);
   try {
     const items = await rollupForSha(ci.slug, sha, ci.gh);
-    if (isPassingRollup(items)) ci.rollups.set(ci.slug, sha, { items, readAt: ci.nowMs });
+    if (isFinishedRollup(items)) ci.rollups.set(ci.slug, sha, { items, readAt: ci.nowMs });
     return ciFromRollupItems(items);
   } catch (err) {
     ci.errors.record(err);
