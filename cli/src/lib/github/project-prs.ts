@@ -25,7 +25,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { ghExec, canonicalizeRepo, projectRepoSlugs, type GhExec } from './pr-mergeable.js';
-import { rollupForSha, type RollupItem } from './rest.js';
+import { prHead, rollupForSha, type RollupItem } from './rest.js';
 import { repoPathClaims, type ProjectDef } from '../projects.js';
 import { getCacheDir } from '../state.js';
 import { atomicWriteFileSync } from '../fs-atomic.js';
@@ -490,4 +490,145 @@ export async function mergeProjectPr(
   }
   // GitHub answers this endpoint 200 only once the PR is merged; anything else made gh exit non-zero.
   return { repo, number, method: chosen, merged: true, sha: out.trim() || null, message: 'Merged' };
+}
+
+/**
+ * Refuse when the PR's live head is not the SHA the caller reviewed. `seen` may
+ * be short (the menu shows 7 characters); the full live SHA is returned so the
+ * write can pin to it exactly.
+ */
+function assertHeadIs(repo: string, number: number, live: string, seen: string): string {
+  if (!live.toLowerCase().startsWith(seen.toLowerCase())) {
+    throw new Error(`${repo}#${number} moved to ${live.slice(0, 7)} since you looked at ${seen.slice(0, 7)}; reload it and try again.`);
+  }
+  return live;
+}
+
+/** The result of one `projects prs ready`. */
+export interface ProjectPrReadyResult {
+  repo: string;
+  number: number;
+  /** True when the PR is ready for review afterwards, including when it already was. */
+  ready: boolean;
+  /** The full head SHA the PR had when it was marked ready; null when the read failed. */
+  sha: string | null;
+  message: string;
+}
+
+/**
+ * Mark a draft PR ready for review. GitHub has no REST endpoint for this (a REST
+ * `PATCH pulls/{n}` ignores `draft`), so the write is ONE GraphQL mutation,
+ * `markPullRequestReadyForReview`, after a REST read for the node id and draft
+ * flag. A single mutation does not drain the shared GraphQL budget the way a poll
+ * loop does (root AGENTS.md, the Mutations note). With `sha`, a PR whose head
+ * moved since the caller looked is refused; the mutation itself takes no SHA, so
+ * that check is read-then-write, not atomic.
+ */
+export async function markProjectPrReady(
+  repo: string,
+  number: number,
+  sha: string | undefined,
+  gh: GhExec = ghExec,
+): Promise<ProjectPrReadyResult> {
+  let head: { sha: string; draft: boolean; nodeId: string };
+  try {
+    head = JSON.parse((await gh([
+      'api', `repos/${repo}/pulls/${number}`, '--jq', '{sha: .head.sha, draft: (.draft // false), nodeId: .node_id}',
+    ])).trim()) as { sha: string; draft: boolean; nodeId: string };
+    if (sha) assertHeadIs(repo, number, head.sha, sha);
+  } catch (err) {
+    return { repo, number, ready: false, sha: null, message: ghFailure(err) };
+  }
+  if (!head.draft) return { repo, number, ready: true, sha: head.sha, message: 'Already ready for review' };
+  try {
+    await gh([
+      'api', 'graphql',
+      '-f', 'query=mutation($id: ID!) { markPullRequestReadyForReview(input: {pullRequestId: $id}) { pullRequest { isDraft } } }',
+      '-f', `id=${head.nodeId}`,
+      '--jq', '.data.markPullRequestReadyForReview.pullRequest.isDraft',
+    ]);
+  } catch (err) {
+    return { repo, number, ready: false, sha: head.sha, message: ghFailure(err) };
+  }
+  return { repo, number, ready: true, sha: head.sha, message: 'Marked ready for review' };
+}
+
+/** The result of one `projects prs review --approve`. */
+export interface ProjectPrReviewResult {
+  repo: string;
+  number: number;
+  event: 'APPROVE';
+  submitted: boolean;
+  /** The full head SHA the review is recorded against; null when the read failed. */
+  sha: string | null;
+  /** GitHub's review id and page, when submitted. */
+  id: number | null;
+  url: string | null;
+  message: string;
+}
+
+/**
+ * Approve a PR over REST (`POST pulls/{n}/reviews`, `event=APPROVE`). GitHub
+ * accepts a review on an older commit instead of refusing it, so the live head is
+ * read first and a moved head is refused; the review then carries `commit_id` set
+ * to that full SHA, so a push racing the call cannot turn this into an approval
+ * of code the caller never saw. Approving your own PR is GitHub's to refuse
+ * (HTTP 422), reported as `submitted: false`.
+ */
+export async function approveProjectPr(
+  repo: string,
+  number: number,
+  sha: string,
+  body: string | undefined,
+  gh: GhExec = ghExec,
+): Promise<ProjectPrReviewResult> {
+  const base = { repo, number, event: 'APPROVE' as const };
+  let commitId: string;
+  try {
+    commitId = assertHeadIs(repo, number, (await prHead(repo, number, gh)).sha, sha);
+  } catch (err) {
+    return { ...base, submitted: false, sha: null, id: null, url: null, message: ghFailure(err) };
+  }
+  const args = ['api', '-X', 'POST', `repos/${repo}/pulls/${number}/reviews`, '-f', 'event=APPROVE', '-f', `commit_id=${commitId}`];
+  if (body) args.push('-f', `body=${body}`);
+  let posted: { id?: number; url?: string };
+  try {
+    posted = JSON.parse((await gh([...args, '--jq', '{id, url: .html_url}'])).trim()) as { id?: number; url?: string };
+  } catch (err) {
+    return { ...base, submitted: false, sha: commitId, id: null, url: null, message: ghFailure(err) };
+  }
+  return { ...base, submitted: true, sha: commitId, id: posted.id ?? null, url: posted.url || null, message: 'Approved' };
+}
+
+/** The result of one `projects prs comment`. */
+export interface ProjectPrCommentResult {
+  repo: string;
+  number: number;
+  commented: boolean;
+  /** GitHub's comment id and page, when posted. */
+  id: number | null;
+  url: string | null;
+  message: string;
+}
+
+/**
+ * Post a conversation comment on a PR over REST (`POST issues/{n}/comments`, the
+ * endpoint root AGENTS.md names instead of the GraphQL-backed `gh pr comment`).
+ * A comment changes no code, so it is not pinned to a head SHA.
+ */
+export async function commentOnProjectPr(
+  repo: string,
+  number: number,
+  body: string,
+  gh: GhExec = ghExec,
+): Promise<ProjectPrCommentResult> {
+  let posted: { id?: number; url?: string };
+  try {
+    posted = JSON.parse((await gh([
+      'api', '-X', 'POST', `repos/${repo}/issues/${number}/comments`, '-f', `body=${body}`, '--jq', '{id, url: .html_url}',
+    ])).trim()) as { id?: number; url?: string };
+  } catch (err) {
+    return { repo, number, commented: false, id: null, url: null, message: ghFailure(err) };
+  }
+  return { repo, number, commented: true, id: posted.id ?? null, url: posted.url || null, message: 'Commented' };
 }

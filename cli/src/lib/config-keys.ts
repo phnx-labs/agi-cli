@@ -40,6 +40,10 @@ export const MENUBAR_MENU_PROPERTIES = [
   'headlessAgent',
   'headlessFallbackAgent',
   'headlessPlacement',
+  'pinnedProjects',
+  'tabOrder',
+  'hiddenTabs',
+  'groupTicketsByMilestone',
 ] as const;
 
 /** A run-time default key: model, mode, effort, or tier override. */

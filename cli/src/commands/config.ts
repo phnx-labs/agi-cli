@@ -75,6 +75,25 @@ function parseBool(value: string, key: string): boolean {
   throw new Error(`Config key '${key}' expects a boolean ('on' or 'off'), got '${value}'.`);
 }
 
+/**
+ * A list value replaces the whole list: a JSON array of strings (what a program
+ * writes, safe for any name) or comma-separated items (what a person types).
+ */
+function parseStringList(raw: string, key: string): string[] {
+  const text = raw.trim();
+  if (!text.startsWith('[')) return text.split(',').map((item) => item.trim());
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error(`Config key '${key}' expects a JSON array of strings or comma-separated items, got '${raw}'.`);
+  }
+  if (!Array.isArray(parsed) || parsed.some((item) => typeof item !== 'string')) {
+    throw new Error(`Config key '${key}' expects a JSON array of strings, got '${raw}'.`);
+  }
+  return parsed as string[];
+}
+
 /** Parse the value for a given key, enforcing type rules. */
 function parseValue(key: string, parsed: ParsedConfigKey, raw: string): unknown {
   switch (parsed.scope) {
@@ -103,6 +122,7 @@ function parseValue(key: string, parsed: ParsedConfigKey, raw: string): unknown 
         }
         return Number.parseInt(raw.trim(), 10);
       }
+      if (spec.type === 'string-list') return parseStringList(raw, key);
       return raw.trim();
     }
     case 'device': {
@@ -512,6 +532,8 @@ export function registerConfigCommand(program: Command): void {
       agents config set devices.mac-mini.max-agents 4
       agents config set updates.auto off
       agents config set updates.claude.auto off
+      agents config set menubar.menu.tabOrder home,projects,sessions,inbox
+      agents config set menubar.menu.pinnedProjects '["Rush","AGI Menu"]'
       agents config get run.claude@*.model
       agents config unset run.claude@*.tier.best
       agents config list
@@ -522,6 +544,7 @@ export function registerConfigCommand(program: Command): void {
       Every agent/harness reference uses agent@version. Use * for all versions.
       Tier overrides are part of the run namespace: run.<agent@version>.tier.<tier>.
       Project root is auto-inferred from the current Git repository when unset.
+      A list key takes the whole list: comma-separated, or a JSON array for names with commas.
       Spend caps live under \`agents config budget\` (not a top-level command).
     `,
   });
