@@ -1,3 +1,4 @@
+import { spawnSync } from 'child_process';
 import { describe, expect, it } from 'vitest';
 import { evaluate } from './command.js';
 
@@ -42,5 +43,15 @@ describe('command source evaluate', () => {
 
   it('returns null when no command is set', async () => {
     expect(await evaluate({ type: 'command' })).toBeNull();
+  });
+
+  it.runIf(process.platform !== 'win32')('kills every process of a timed-out pipeline', async () => {
+    // `execFile` signalled only the shell, so the pipeline's `sleep` outlived the poll.
+    const sleep = `sleep 30.${process.pid}`;
+    const obs = await evaluate({ type: 'command', command: `${sleep} | cat` }, 500);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(spawnSync('pgrep', ['-f', sleep]).status).toBe(1);
+    expect(obs!.failed).toBe(true);
+    expect(obs!.failureReason).toBe('timed out after 0.5s');
   });
 });

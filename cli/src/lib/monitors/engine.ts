@@ -24,6 +24,8 @@ import { readRunMeta } from '../scheduling/routines.js';
 
 export const MONITOR_ENGINE_TICK_MS = 5_000;
 const DEFAULT_INTERVAL_MS = 60_000;
+// Slow polls overlap instead of queueing behind each other.
+const MAX_CONCURRENT_POLLS = 4;
 const DROUGHT_THRESHOLD = 5;
 export const POLL_SOURCE_TYPES = new Set(['command', 'poll', 'poll-http', 'file', 'device']);
 
@@ -167,16 +169,22 @@ export class MonitorEngine {
     return now - last >= this.intervalMs(monitor);
   }
 
-  async tick(): Promise<void> {
+  async tick(launchWindowMs = Infinity): Promise<void> {
     if (!this.running || this.ticking) return;
     this.ticking = true;
     try {
-      const now = Date.now();
-      for (const monitor of this.monitors) {
-        if (!this.isDue(monitor, now)) continue;
-        this.lastEval.set(monitor.name, now);
-        await this.runMonitor(monitor);
-      }
+      const startedAt = Date.now();
+      const due = this.monitors
+        .filter((monitor) => this.isDue(monitor, startedAt))
+        .sort((a, b) => (this.lastEval.get(a.name) ?? 0) - (this.lastEval.get(b.name) ?? 0));
+      const worker = async (): Promise<void> => {
+        while (this.running && due.length > 0 && Date.now() - startedAt < launchWindowMs) {
+          const monitor = due.shift()!;
+          this.lastEval.set(monitor.name, Date.now());
+          await this.runMonitor(monitor);
+        }
+      };
+      await Promise.all(Array.from({ length: MAX_CONCURRENT_POLLS }, worker));
     } finally {
       this.ticking = false;
     }

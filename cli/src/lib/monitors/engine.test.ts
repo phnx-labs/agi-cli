@@ -295,6 +295,50 @@ describe('MonitorEngine.tick — a stopped engine dispatches nothing (PHNX-3608)
   });
 });
 
+describe('MonitorEngine.tick — slow monitors cannot hold a tick past its deadline', () => {
+  // 26 polls run one after another, several taking ~30s, kept the daemon's
+  // monitors tick past its 2-minute deadline on every boot, so the supervisor
+  // exited the daemon every two minutes (PHNX-4225 follow-up).
+  function writeSlow(count: number): string[] {
+    const created = Array.from({ length: count }, () => uniq('slow'));
+    for (const name of created) {
+      writeMonitor(monitor({ name, source: { type: 'command', command: 'sleep 1; echo x' }, condition: { mode: 'every' } }));
+    }
+    return created;
+  }
+  const checked = (created: string[]): number => created.filter((name) => readLiveness(name) !== null).length;
+
+  it('runs due polls concurrently instead of one after another', async () => {
+    const created = writeSlow(8);
+    try {
+      const engine = new MonitorEngine();
+      engine.start({ externalScheduler: true });
+      const start = Date.now();
+      await engine.tick();
+      expect(Date.now() - start).toBeLessThan(4_000); // serial would be 8s
+      expect(checked(created)).toBe(8);
+    } finally {
+      for (const name of created) deleteMonitor(name);
+    }
+  });
+
+  it('launches nothing past the window and picks the skipped monitors up next tick', async () => {
+    const created = writeSlow(8);
+    try {
+      const engine = new MonitorEngine();
+      engine.start({ externalScheduler: true });
+      const start = Date.now();
+      await engine.tick(500);
+      expect(Date.now() - start).toBeLessThan(2_500); // one round of four, no second launch
+      expect(checked(created)).toBe(4);
+      await engine.tick(500);
+      expect(checked(created)).toBe(8);
+    } finally {
+      for (const name of created) deleteMonitor(name);
+    }
+  });
+});
+
 describe('shouldEscalateDrought', () => {
   it('escalates once a run of failed checks crosses the threshold', () => {
     expect(shouldEscalateDrought({ consecutiveErrors: 4 })).toBe(false);

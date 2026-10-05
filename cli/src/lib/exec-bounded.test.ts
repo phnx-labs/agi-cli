@@ -60,4 +60,13 @@ describe('execFileBounded', () => {
     const res = await execPromise;
     expect(res.code).toBe(0);
   });
+
+  it('kills a child whose output passes maxBuffer and truncates what it kept', async () => {
+    const start = Date.now();
+    const res = await execFileBounded('node', ['-e', 'process.stdout.write("x".repeat(1e6));setTimeout(()=>{}, 60_000)'], { timeoutMs: 30_000, maxBuffer: 1_000 });
+    expect(Date.now() - start).toBeLessThan(10_000);
+    expect(res.timedOut).toBe(false);
+    expect(res.code).toBeNull();
+    expect(res.stdout.length).toBe(1_000);
+  });
 });
