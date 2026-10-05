@@ -3,7 +3,7 @@
   "command": "agents",
   "description": "Install, configure, run, and dispatch AI coding agents (Claude, Codex, Cursor, OpenCode, Grok, Droid and more) from one CLI: version homes, synced resources, sessions, teams, browser and desktop tools, secrets, and the device fleet.",
   "groups": 65,
-  "commands": 474,
+  "commands": 479,
   "root": {
     "name": "agents",
     "path": "",
@@ -11642,6 +11642,180 @@
             }
           ],
           "subcommands": []
+        },
+        {
+          "name": "todo",
+          "path": "projects todo",
+          "aliases": [],
+          "description": "Quick to-dos in Linear: add one from a line of text, list yours, mark one done, undo.",
+          "args": [],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "agents projects todo add \"Renew npm token #AGI tomorrow !!\" --json\n      agents projects todo list --json\n      agents projects todo done PHNX-4230 --json\n      agents projects todo undo PHNX-4230 --json",
+          "subcommands": [
+            {
+              "name": "add",
+              "path": "projects todo add",
+              "aliases": [],
+              "description": "Create a to-do in Linear from one line: #project, today/tomorrow/mon..sun, ! (high) or !! (urgent).",
+              "args": [
+                {
+                  "name": "text",
+                  "required": true,
+                  "variadic": true,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--project <name>",
+                  "description": "Project when the text names none: an agents project or a Linear project name",
+                  "long": "--project",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--json",
+                  "description": "Machine-readable result",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "examples": "agents projects todo add \"Renew npm token #AGI tomorrow !!\"\n      agents projects todo add \"Draft the Q4 note fri\" --project atlas --json\n      agents projects todo add --json -- \"-v flag is ignored by run\"    # text starting with \"-\"",
+              "notes": "Runs linear create: assigned to the Linear API key's owner, in the active\n      cycle, status Todo, no milestone, priority none unless ! or !! is typed.\n      #name is an agents project (its Linear project) or a Linear project name.\n      A day word or ! / !! counts only at the end of the line (so \"Fix the today\n      view\" keeps its words); #name counts anywhere. A day word is the next such\n      day, today included. The description carries\n      \"Created from AGI Menu\", which is how todo list finds it.",
+              "subcommands": []
+            },
+            {
+              "name": "done",
+              "path": "projects todo done",
+              "aliases": [],
+              "description": "Mark one issue Done in Linear.",
+              "args": [
+                {
+                  "name": "id",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--json",
+                  "description": "Machine-readable result",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "list",
+              "path": "projects todo list",
+              "aliases": [],
+              "description": "Your open quick to-dos and anything assigned to you due today or overdue (at most 6).",
+              "args": [],
+              "options": [
+                {
+                  "flags": "--json",
+                  "description": "Machine-readable result",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "examples": "agents projects todo list\n      agents projects todo list --json",
+              "notes": "One linear tasks read of your open issues. Due ones come first (earliest due),\n      then the newest quick to-dos. --json: { todos: [{ identifier, url, title,\n      project, due, priority, state, createdAt, quick }], total, error }.",
+              "subcommands": []
+            },
+            {
+              "name": "undo",
+              "path": "projects todo undo",
+              "aliases": [],
+              "description": "Undo the last to-do action: reopen a Done issue, or cancel a quick to-do created moments ago.",
+              "args": [
+                {
+                  "name": "id",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--json",
+                  "description": "Machine-readable result",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "examples": "agents projects todo done PHNX-4230\n      agents projects todo undo PHNX-4230     # back to Todo",
+              "notes": "A Done issue goes back to Todo. A quick to-do still open and created in the\n      last 30 seconds is moved to the team's canceled state (linear has no issue\n      archive verb). Anything else is refused rather than silently ignored.",
+              "subcommands": []
+            }
+          ]
         }
       ]
     },

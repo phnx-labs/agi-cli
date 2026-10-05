@@ -97,6 +97,7 @@ import {
 } from '../lib/github/project-prs.js';
 import { ghExec } from '../lib/github/pr-mergeable.js';
 import { readCiFailure, rerunFailedJobs } from '../lib/github/ci-failure.js';
+import { registerProjectTodoCommands } from './projects-todo.js';
 
 /** One glyph for a CI verdict in the human `prs` list; blank when there are no checks. */
 function ciMark(state: CiState | null): string {
@@ -1375,6 +1376,8 @@ async function runProjectCard(
       partial (JSON reports errors per repository; text mode exits non-zero).
     `,
   });
+
+  registerProjectTodoCommands(projects);
 
   // ---- edit ----
   projects

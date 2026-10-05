@@ -1,0 +1,55 @@
+{
+  "id": "00000000-0000-4000-8000-000000000001",
+  "identifier": "PHNX-4234",
+  "title": "Verify AGI Menu quick to-do end to end",
+  "description": "Created from AGI Menu",
+  "url": "https://linear.app/example-team/issue/PHNX-4234/verify-agi-menu-quick-to-do-end-to-end",
+  "state": {
+    "name": "Done"
+  },
+  "priority": 1,
+  "dueDate": "2026-10-04",
+  "labels": {
+    "nodes": []
+  },
+  "assignee": {
+    "id": "00000000-0000-4000-8000-000000000004",
+    "name": "Test Owner",
+    "avatarUrl": "https://example.com/avatar.png",
+    "app": false
+  },
+  "delegate": null,
+  "project": {
+    "name": "AGI"
+  },
+  "projectMilestone": null,
+  "cycle": {
+    "number": 31,
+    "name": "Cycle 31"
+  },
+  "parent": null,
+  "createdAt": "2026-10-05T00:32:57.219Z",
+  "updatedAt": "2026-10-05T00:34:23.368Z",
+  "relations": {
+    "nodes": []
+  },
+  "inverseRelations": {
+    "nodes": []
+  },
+  "comments": {
+    "nodes": [
+      {
+        "id": "00000000-0000-4000-8000-000000000014",
+        "body": "**Proof:** Checked off in AGI Menu",
+        "createdAt": "2026-10-05T00:34:23.151Z",
+        "url": "https://linear.app/example-team/issue/PHNX-4234/verify-agi-menu-quick-to-do-end-to-end#comment-7efbc5e8",
+        "user": {
+          "id": "00000000-0000-4000-8000-000000000004",
+          "name": "Test Owner",
+          "avatarUrl": "https://example.com/avatar.png",
+          "app": false
+        }
+      }
+    ]
+  }
+}

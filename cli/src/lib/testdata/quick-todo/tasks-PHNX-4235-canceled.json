@@ -1,0 +1,42 @@
+{
+  "id": "00000000-0000-4000-8000-000000000003",
+  "identifier": "PHNX-4235",
+  "title": "Scratch to-do for the undo check",
+  "description": "Created from AGI Menu",
+  "url": "https://linear.app/example-team/issue/PHNX-4235/scratch-to-do-for-the-undo-check",
+  "state": {
+    "name": "Canceled"
+  },
+  "priority": 2,
+  "dueDate": "2026-10-09",
+  "labels": {
+    "nodes": []
+  },
+  "assignee": {
+    "id": "00000000-0000-4000-8000-000000000004",
+    "name": "Test Owner",
+    "avatarUrl": "https://example.com/avatar.png",
+    "app": false
+  },
+  "delegate": null,
+  "project": {
+    "name": "AGI"
+  },
+  "projectMilestone": null,
+  "cycle": {
+    "number": 31,
+    "name": "Cycle 31"
+  },
+  "parent": null,
+  "createdAt": "2026-10-05T00:33:53.809Z",
+  "updatedAt": "2026-10-05T00:33:55.416Z",
+  "relations": {
+    "nodes": []
+  },
+  "inverseRelations": {
+    "nodes": []
+  },
+  "comments": {
+    "nodes": []
+  }
+}
