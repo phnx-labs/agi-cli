@@ -111,7 +111,7 @@
   },
   "devDependencies": {
     "@homebridge/node-pty-prebuilt-multiarch": "0.14.1",
-    "@phnx-labs/cli-docs": "0.1.0",
+    "@phnx-labs/cli-docs": "0.1.1",
     "@types/diff": "8.0.0",
     "@types/marked-terminal": "6.1.1",
     "@types/node": "26.1.0",
