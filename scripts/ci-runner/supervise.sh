@@ -23,8 +23,6 @@ mkdir -p "$LOG_DIR"
 log() { echo "[$(date -u +%FT%TZ)] $*" | tee -a "$LOG"; }
 fail=0
 
-# accept-new: the tailnet already authenticates the peer, so the first dial by
-# name records its host key instead of failing on hosts that only knew the IP.
 box() { ssh -i "$BOX_KEY" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 "root@$BOX" "$@" 2>/dev/null; }
 
 hcloud_token() {
