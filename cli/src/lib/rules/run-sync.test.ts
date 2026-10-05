@@ -3,8 +3,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Isolate HOME before any module that captures path constants at import time
-// (state.ts reads `process.env.HOME` into a module-level const).
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-rules-run-sync-'));
 process.env.HOME = TEST_HOME;
 
@@ -27,11 +25,9 @@ function destFile(version: string): string {
   return path.join(getVersionHomePath(AGENT, version), agentConfigDirName(AGENT), cap.file);
 }
 
-/** Sleep in wall-clock time (not fake timers) so a real rewrite would move the
- *  mtime forward — matches the skip-fast test in project-launch.test.ts. */
 function sleepPastMtimeGranularity(): void {
   const target = Date.now() + 25;
-  while (Date.now() < target) { /* spin */ }
+  while (Date.now() < target) {  }
 }
 
 afterAll(() => {
@@ -74,9 +70,6 @@ describe('applyActiveRulesPresetAtRun', () => {
   it('re-applies WITHOUT an explicit `rules switch` when the active preset changes', () => {
     const versionHome = getVersionHomePath(AGENT, VERSION);
 
-    // Simulate a preset change that bypasses `agents rules switch` (which
-    // would itself call syncResourcesToVersion) — exactly the gap this
-    // module closes: something set the active preset directly.
     setActiveRulesPreset(AGENT, VERSION, 'alt');
 
     const applied = applyActiveRulesPresetAtRun(AGENT, VERSION, versionHome);

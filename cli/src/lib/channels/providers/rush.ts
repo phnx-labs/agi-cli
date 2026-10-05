@@ -11,13 +11,11 @@ const execFileAsync = promisify(execFile);
 export type RushChannel = 'telegram' | 'imessage' | 'slack' | 'discord';
 export const RUSH_CHANNELS: RushChannel[] = ['telegram', 'imessage', 'slack', 'discord'];
 
-// ── iMessage via osascript ──────────────────────────────────────────────
 
 function escapeAppleScript(s: string): string {
   return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
 
-/** Build the osascript argv for sending an iMessage. */
 export function buildImessageOsascriptArgs(text: string, phone: string): string[] {
   const escapedText = escapeAppleScript(text);
   const escapedPhone = escapeAppleScript(phone);
@@ -48,19 +46,13 @@ async function sendImessage(text: string, opts: SendOptions): Promise<SendResult
   }
 }
 
-// ── Slack via Web API ───────────────────────────────────────────────────
 
 export function resolveSlackToken(): string | undefined {
-  // 1. Environment variable (set by `secrets exec` or the daemon).
   if (process.env.SLACK_BOT_TOKEN) {
     return process.env.SLACK_BOT_TOKEN;
   }
 
-  // 2. Secrets bundle — the webhook receiver bundle carries SLACK_BOT_TOKEN
-  //    when a Slack app is configured for this fleet.
   try {
-    // Dynamic import to avoid a hard dependency on the secrets subsystem in
-    // contexts where it is unavailable (CI, containers without a secrets store).
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { readAndResolveBundleEnvSync } = require('../../secrets-client.js') as {
       readAndResolveBundleEnvSync: (name: string, opts?: Record<string, unknown>) => { env: Record<string, string> };
@@ -70,12 +62,10 @@ export function resolveSlackToken(): string | undefined {
       return env.SLACK_BOT_TOKEN;
     }
   } catch {
-    // Bundle missing, store locked, or secrets CLI not available — not fatal.
   }
   return undefined;
 }
 
-/** Build the Slack chat.postMessage payload (exported for tests). */
 export function buildSlackPayload(channel: string, text: string, thread?: string): Record<string, string> {
   const payload: Record<string, string> = { channel, text };
   if (thread) payload.thread_ts = thread;
@@ -116,7 +106,6 @@ async function sendSlack(text: string, opts: SendOptions): Promise<SendResult> {
   }
 }
 
-// ── Unsupported (daemon-era only) ───────────────────────────────────────
 
 function unsupportedProvider(name: RushChannel): ChannelProvider {
   return {
@@ -133,7 +122,6 @@ function unsupportedProvider(name: RushChannel): ChannelProvider {
   };
 }
 
-// ── Provider registry ───────────────────────────────────────────────────
 
 const PROVIDERS: Record<RushChannel, ChannelProvider> = {
   imessage: { name: 'imessage', send: sendImessage },

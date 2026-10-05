@@ -20,9 +20,6 @@ import { safeJoin } from './paths.js';
 import { AGENTS, agentConfigDirName } from './agents.js';
 import { supports } from './capabilities.js';
 import { updateGeminiSettings } from './gemini-settings.js';
-// The canonical<->native tool vocabularies live in the registry, which also owns
-// the reverse projections — so the serializers below and the readers there can
-// never disagree about what `fs_read` or `developer__shell` means.
 import {
   ANTIGRAVITY_ACTION_BY_TOOL,
   CANONICAL_TO_OPENCLAW_TOOL,
@@ -112,7 +109,6 @@ export function convertDenyToCodexRules(deny: string[]): string | null {
     const parsed = parseCanonicalPattern(perm);
     if (!parsed || parsed.tool !== 'bash') continue;
 
-    // Pattern format: "command arg1 arg2:*" or "command:*"
     const command = parsed.pattern.replace(/:?\*$/, '').trim();
     if (!command) continue;
 
@@ -142,9 +138,6 @@ function syncCodexDenyRules(configDir: string, deny: string[] | undefined): void
   }
 }
 
-/**
- * Ensure central permissions directory exists.
- */
 function ensurePermissionsDir(): void {
   const groupsDir = path.join(getUserPermissionsDir(), 'groups');
   if (!fs.existsSync(groupsDir)) {
@@ -152,9 +145,6 @@ function ensurePermissionsDir(): void {
   }
 }
 
-/**
- * Parse a permission set from a YAML file.
- */
 export function parsePermissionSet(filePath: string): PermissionSet | null {
   if (!fs.existsSync(filePath)) {
     return null;
@@ -180,13 +170,9 @@ export function parsePermissionSet(filePath: string): PermissionSet | null {
   }
 }
 
-/**
- * Discover permission sets from a repository.
- */
 export function discoverPermissionsFromRepo(repoPath: string): Array<{ name: string; path: string; set: PermissionSet }> {
   const results: Array<{ name: string; path: string; set: PermissionSet }> = [];
 
-  // Look for permissions in common locations
   const searchPaths = [
     path.join(repoPath, 'permissions'),
     path.join(repoPath, 'agent-permissions'),
@@ -213,20 +199,16 @@ export function discoverPermissionsFromRepo(repoPath: string): Array<{ name: str
         }
       }
     } catch {
-      // Skip inaccessible directories
     }
   }
 
   return results;
 }
 
-/**
- * Permission group info with rule count.
- */
 interface PermissionGroupInfo {
-  name: string;        // e.g., "02-node"
-  ruleCount: number;   // number of allow rules in this group
-  path: string;        // full path to the group file
+  name: string;
+  ruleCount: number;
+  path: string;
 }
 
 /** Discovers permission groups from ~/.agents/permissions/groups/ with their rule counts. */
@@ -234,7 +216,6 @@ export function discoverPermissionGroups(): PermissionGroupInfo[] {
   const seen = new Set<string>();
   const groups: PermissionGroupInfo[] = [];
 
-  // Search user dir first, then system (user wins on name collision)
   for (const baseDir of [getUserPermissionsDir(), getPermissionsDir()]) {
     const groupsDir = path.join(baseDir, 'groups');
     if (!fs.existsSync(groupsDir)) continue;
@@ -255,19 +236,16 @@ export function discoverPermissionGroups(): PermissionGroupInfo[] {
           const content = fs.readFileSync(filePath, 'utf-8');
           const matches = content.match(/^\s*-\s*"/gm);
           ruleCount = matches ? matches.length : 0;
-        } catch { /* Skip files we can't read */ }
+        } catch {  }
 
         groups.push({ name, ruleCount, path: filePath });
       }
-    } catch { /* Skip inaccessible directory */ }
+    } catch {  }
   }
 
   return groups.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/**
- * Get total rule count across all permission groups.
- */
 export function getTotalPermissionRuleCount(): number {
   const groups = discoverPermissionGroups();
   return groups.reduce((sum, g) => sum + g.ruleCount, 0);
@@ -281,7 +259,6 @@ interface PermissionPresetRecipe {
   includes: string[];
 }
 
-/** Env var that selects which set recipe to apply at sync time. */
 export const PERMISSION_PRESET_ENV_VAR = 'AGENTS_PERMISSION_PRESET';
 
 /** Reads a permission preset recipe by name from ~/.agents/permissions/presets/; null if missing or
@@ -323,7 +300,6 @@ export function buildPermissionsFromGroups(groupNames: string[]): PermissionSet 
   const allDeny: string[] = [];
 
   for (const groupName of groupNames) {
-    // Search user dir first, then system dir
     let filePath: string | null = null;
     for (const baseDir of [getUserPermissionsDir(), getPermissionsDir()]) {
       const groupsDir = path.join(baseDir, 'groups');
@@ -350,13 +326,9 @@ export function buildPermissionsFromGroups(groupNames: string[]): PermissionSet 
           continue;
         }
 
-        // Match: optional whitespace, dash, whitespace, quote, content, quote
-        // Use greedy match to capture everything between first and last quote
         const match = line.match(/^\s*-\s*"(.+)"$/);
         if (match) {
           const rule = match[1];
-          // 99-deny group rules go to deny, others follow their YAML section.
-          // Legacy group files used bare lists with no section; keep those as allow.
           if (section === 'deny' || groupName === '99-deny' || groupName.includes('-deny')) {
             allDeny.push(rule);
           } else {
@@ -365,7 +337,6 @@ export function buildPermissionsFromGroups(groupNames: string[]): PermissionSet 
         }
       }
     } catch {
-      // Skip files we can't read
     }
   }
 
@@ -401,16 +372,12 @@ export function listInstalledPermissions(): InstalledPermission[] {
         results.push({ name: set.name, path: filePath, set });
       }
     } catch {
-      // Skip inaccessible directory
     }
   }
 
   return results;
 }
 
-/**
- * Get a specific permission set by name. Searches user groups/ dir first, then system groups/.
- */
 function getPermissionSet(name: string): InstalledPermission | null {
   for (const baseDir of [getUserPermissionsDir(), getPermissionsDir()]) {
     const dir = path.join(baseDir, 'groups');
@@ -428,9 +395,6 @@ function getPermissionSet(name: string): InstalledPermission | null {
   return null;
 }
 
-/**
- * Install a permission set to user-level central storage.
- */
 export function installPermissionSet(
   sourcePath: string,
   name: string
@@ -472,9 +436,6 @@ export function removePermissionSet(name: string): { success: boolean; error?: s
   return { success: false, error: `Permission set '${name}' not found` };
 }
 
-// ============================================================================
-// Agent-specific converters
-// ============================================================================
 
 /** Maps a canonical rule to Claude settings.json syntax. Claude only matches Edit(path) rules (an
  * Edit rule covers Write/Edit/NotebookEdit) and warns at startup about unmatched Write(path), so
@@ -505,11 +466,9 @@ function canonicalToCursorRule(perm: string): string {
   if (perm === 'Bash' || perm.startsWith('Bash(')) {
     return perm.replace(/^Bash/, 'Shell');
   }
-  // Canonical WebSearch maps to WebFetch family for network allow.
   if (perm.startsWith('WebSearch(')) {
     return perm.replace(/^WebSearch/, 'WebFetch');
   }
-  // Cursor has no Edit prefix — file writes use Write(...).
   if (perm === 'Edit' || perm.startsWith('Edit(')) {
     return perm.replace(/^Edit/, 'Write');
   }
@@ -547,7 +506,6 @@ function parseCanonicalPattern(permission: string): { tool: string; pattern: str
   return { tool: match[1].toLowerCase(), pattern: match[2] };
 }
 
-/** Blanket-Bash canonical forms that mean "allow any bash command". */
 const BLANKET_BASH_FORMS = new Set(['Bash', 'Bash(*)', 'Bash(**)']);
 
 /** Strips Claude's `:*` subcommand-wildcard suffix into a space-glob form ("mq:*" gives "mq *", "*"
@@ -637,7 +595,6 @@ export function convertToCopilotFormat(set: PermissionSet, location: string): Co
   };
 }
 
-/** Convert canonical Bash rules into Droid's command arrays. */
 export function convertToDroidFormat(set: PermissionSet): {
   commandAllowlist: string[];
   commandDenylist: string[];
@@ -668,8 +625,6 @@ export function convertToOpenClawFormat(set: PermissionSet): { alsoAllow: string
   const map = (permissions: string[]): string[] => {
     const tools = new Set<string>();
     for (const perm of permissions) {
-      // Bare tool name with no parens (e.g. "Bash", "Read") is a blanket grant;
-      // parseCanonicalPattern requires parens, so handle it first.
       const bare = perm.match(/^(\w+)$/);
       if (bare) {
         const id = CANONICAL_TO_OPENCLAW_TOOL[bare[1].toLowerCase()];
@@ -802,10 +757,10 @@ function parseCanonicalPreserveCase(perm: string): { tool: string; pattern: stri
 function kimiBashPatterns(pattern: string): string[] {
   if (pattern === '*' || pattern === '**') return ['*'];
   if (pattern.endsWith(':*')) {
+    // Kimi globstar does not match zero separators, so emit both flat and slash-crossing forms.
     const prefix = pattern.slice(0, -2);
     return [`${prefix}*`, `${prefix}*/**`];
   }
-  // Exact command (no `:*`, e.g. `env`, `pwd`, `true`) — no path args expected.
   return [pattern];
 }
 
@@ -814,8 +769,6 @@ function canonicalToKimiRules(perm: string, decision: 'allow' | 'deny'): KimiRul
     return [{ decision, pattern: 'Bash' }];
   }
   const { tool, pattern } = parseCanonicalPreserveCase(perm);
-  // Bare tool name (no parens) — name-only match. Covers `Read`, `Grep`, and
-  // MCP tool ids, which Kimi can only match by name anyway.
   if (pattern === null) {
     return [{ decision, pattern: tool }];
   }
@@ -825,9 +778,6 @@ function canonicalToKimiRules(perm: string, decision: 'allow' | 'deny'): KimiRul
       pattern: p === '*' ? 'Bash' : `Bash(${p})`,
     }));
   }
-  // Non-Bash built-ins (Read/Write/Edit/Grep/Glob/WebFetch...) share Kimi's
-  // capitalized tool vocabulary, so pass the tool+pattern through. A `**`/`*`
-  // glob means "any" — collapse to a name-only rule.
   if (pattern === '*' || pattern === '**') {
     return [{ decision, pattern: tool }];
   }
@@ -855,11 +805,8 @@ export function convertToKimiFormat(set: PermissionSet): { permission: { rules: 
 export function convertToOpenCodeFormat(set: PermissionSet): OpenCodePermissions {
   const bashPermissions: Record<string, 'allow' | 'deny' | 'ask'> = {};
 
-  // Process allow list
   for (const perm of set.allow) {
     if (BLANKET_BASH_FORMS.has(perm)) {
-      // Bare "Bash" has no parens so parseCanonicalPattern returns null;
-      // normalize all three blanket forms to "*".
       bashPermissions['*'] = 'allow';
       continue;
     }
@@ -869,7 +816,6 @@ export function convertToOpenCodeFormat(set: PermissionSet): OpenCodePermissions
     }
   }
 
-  // Process deny list
   if (set.deny) {
     for (const perm of set.deny) {
       const parsed = parseCanonicalPattern(perm);
@@ -893,12 +839,12 @@ export function codexDefaultWritableRoots(
   home: string = HOME,
   platform: NodeJS.Platform = process.platform,
 ): string[] {
+  // Include regenerable tool caches only; credential/config directories stay outside the sandbox.
   const shared = ['.cargo', '.rustup', '.npm', '.bun', 'go', '.deno', '.gradle', '.m2', '.gem'];
   const roots = shared.map((d) => path.join(home, d));
   if (platform === 'darwin') {
     roots.push(path.join(home, 'Library', 'Caches'), path.join(home, 'Library', 'pnpm'));
   } else {
-    // Linux/XDG: ~/.cache covers pip, uv, go-build, ms-playwright, etc.
     roots.push(path.join(home, '.cache'), path.join(home, '.local', 'share'), path.join(home, '.local', 'state'));
   }
   return roots;
@@ -911,6 +857,7 @@ function mergeCodexSandboxWrite(
   existing: Record<string, unknown> | undefined,
   incoming: NonNullable<CodexPermissions['sandbox_workspace_write']>,
 ): Record<string, unknown> {
+  // Managed defaults extend, rather than replace, user-authored writable roots.
   const existingRoots = Array.isArray(existing?.writable_roots)
     ? (existing!.writable_roots as string[])
     : [];
@@ -944,7 +891,6 @@ export function convertToCodexFormat(set: PermissionSet, cwd?: string): CodexPer
     result.sandbox_mode = 'workspace-write';
   }
 
-  // Check for network/web permissions
   const hasNetwork = set.allow.some((p) => {
     const parsed = parseCanonicalPattern(p);
     return parsed && (parsed.tool === 'websearch' || parsed.tool === 'webfetch');
@@ -967,14 +913,8 @@ export function convertToCodexFormat(set: PermissionSet, cwd?: string): CodexPer
   return result;
 }
 
-// ============================================================================
-// Read agent permissions from native configs
-// ============================================================================
 
 
-/**
- * Read Claude's current permissions from settings.json.
- */
 function readClaudePermissions(
   scope: 'user' | 'project' = 'user',
   cwd?: string,
@@ -1006,9 +946,6 @@ function readClaudePermissions(
   }
 }
 
-/**
- * Read OpenCode's current permissions from opencode.jsonc.
- */
 function readOpenCodePermissions(
   scope: 'user' | 'project' = 'user',
   cwd?: string,
@@ -1037,9 +974,6 @@ function readOpenCodePermissions(
   }
 }
 
-/**
- * Read Codex's current permissions from config.toml.
- */
 function readCodexPermissions(
   scope: 'user' | 'project' = 'user',
   cwd?: string,
@@ -1101,13 +1035,7 @@ export function readAgentPermissions(
   }
 }
 
-// ============================================================================
-// Apply permissions to agents
-// ============================================================================
 
-/**
- * Apply a permission set to Claude's settings.json.
- */
 export function applyClaudePermissions(
   set: PermissionSet,
   scope: 'user' | 'project' = 'user',
@@ -1120,12 +1048,10 @@ export function applyClaudePermissions(
   const configPath = path.join(configDir, 'settings.json');
 
   try {
-    // Ensure directory exists
     if (!fs.existsSync(configDir)) {
       fs.mkdirSync(configDir, { recursive: true });
     }
 
-    // Read existing config
     let config: Record<string, unknown> = {};
     if (fs.existsSync(configPath)) {
       config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
@@ -1135,7 +1061,6 @@ export function applyClaudePermissions(
 
     if (merge && config.permissions) {
       const existing = config.permissions as { allow?: string[]; deny?: string[] };
-      // Rewrite stale Write(path) rules already installed in settings.json too.
       const mergedAllow = new Set([...(existing.allow || []).map(canonicalToClaudeRule), ...newPermissions.permissions.allow]);
       const mergedDeny = new Set([...(existing.deny || []).map(canonicalToClaudeRule), ...newPermissions.permissions.deny]);
       config.permissions = {
@@ -1173,9 +1098,6 @@ export function openCodeConfigPath(scope: 'user' | 'project', cwd?: string, home
   return path.join(globalDir, 'opencode.jsonc');
 }
 
-/**
- * Apply a permission set to OpenCode's opencode.jsonc.
- */
 function applyOpenCodePermissions(
   set: PermissionSet,
   scope: 'user' | 'project' = 'user',
@@ -1186,12 +1108,10 @@ function applyOpenCodePermissions(
   const configDir = path.dirname(configPath);
 
   try {
-    // Ensure directory exists
     if (!fs.existsSync(configDir)) {
       fs.mkdirSync(configDir, { recursive: true });
     }
 
-    // Read existing config
     let config: Record<string, unknown> = {};
     if (fs.existsSync(configPath)) {
       const content = stripJsonComments(fs.readFileSync(configPath, 'utf-8'));
@@ -1213,7 +1133,6 @@ function applyOpenCodePermissions(
       config.permission = newPermissions.permission;
     }
 
-    // Write without comments (they'll be lost)
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
     return { success: true };
   } catch (err) {
@@ -1221,9 +1140,6 @@ function applyOpenCodePermissions(
   }
 }
 
-/**
- * Apply a permission set to Codex's config.toml.
- */
 function applyCodexPermissions(
   set: PermissionSet,
   scope: 'user' | 'project' = 'user',
@@ -1236,12 +1152,10 @@ function applyCodexPermissions(
   const configPath = path.join(configDir, 'config.toml');
 
   try {
-    // Ensure directory exists
     if (!fs.existsSync(configDir)) {
       fs.mkdirSync(configDir, { recursive: true });
     }
 
-    // Read existing config
     let config: Record<string, unknown> = {};
     if (fs.existsSync(configPath)) {
       const content = fs.readFileSync(configPath, 'utf-8');
@@ -1250,7 +1164,6 @@ function applyCodexPermissions(
 
     const newPermissions = convertToCodexFormat(set, cwd);
 
-    // Merge or replace
     if (newPermissions.approval_policy) {
       config.approval_policy = newPermissions.approval_policy;
     }
@@ -1259,8 +1172,6 @@ function applyCodexPermissions(
     }
     if (newPermissions.sandbox_workspace_write) {
       const existing = config.sandbox_workspace_write as Record<string, unknown> | undefined;
-      // merge=false is a deliberate full replace (drops any user-custom roots);
-      // production sync always passes merge=true, taking the union path.
       config.sandbox_workspace_write = merge
         ? mergeCodexSandboxWrite(existing, newPermissions.sandbox_workspace_write)
         : newPermissions.sandbox_workspace_write;
@@ -1276,9 +1187,6 @@ function applyCodexPermissions(
   }
 }
 
-/**
- * Apply a permission set to an agent (global config).
- */
 function applyPermissionsToAgent(
   agentId: AgentId,
   set: PermissionSet,
@@ -1327,7 +1235,6 @@ export function applyPermissionsToVersion(
 
       if (merge && config.permissions) {
         const existing = config.permissions as { allow?: string[]; deny?: string[]; additionalDirectories?: string[] };
-        // Rewrite stale Write(path) rules already installed in settings.json too.
         const mergedAllow = new Set([...(existing.allow || []).map(canonicalToClaudeRule), ...newPermissions.permissions.allow]);
         const mergedDeny = new Set([...(existing.deny || []).map(canonicalToClaudeRule), ...newPermissions.permissions.deny]);
         const mergedDirs = new Set([...(existing.additionalDirectories || []), ...(newPermissions.permissions.additionalDirectories || [])]);
@@ -1348,8 +1255,6 @@ export function applyPermissionsToVersion(
     }
 
     if (agentId === 'opencode') {
-      // OpenCode loads ~/.config/opencode/opencode.jsonc under the version home
-      // (HOME isolation), not ~/.opencode/opencode.jsonc.
       const configPath = openCodeConfigPath('user', undefined, versionHome);
       fs.mkdirSync(path.dirname(configPath), { recursive: true });
       let config: Record<string, unknown> = {};
@@ -1395,8 +1300,6 @@ export function applyPermissionsToVersion(
       }
       if (newPermissions.sandbox_workspace_write) {
         const existing = config.sandbox_workspace_write as Record<string, unknown> | undefined;
-        // merge=false is a deliberate full replace (drops any user-custom roots);
-        // production sync always passes merge=true, taking the union path.
         config.sandbox_workspace_write = merge
           ? mergeCodexSandboxWrite(existing, newPermissions.sandbox_workspace_write)
           : newPermissions.sandbox_workspace_write;
@@ -1499,13 +1402,12 @@ export function applyPermissionsToVersion(
     }
 
     if (agentId === 'cursor') {
-      // Cursor CLI permissions live in ~/.cursor/cli-config.json
       const configPath = path.join(configDir, 'cli-config.json');
       let config: Record<string, unknown> = {};
       if (fs.existsSync(configPath)) {
         try {
           config = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
-        } catch { /* start fresh */ }
+        } catch {  }
       }
       const converted = convertToCursorFormat(set);
       if (merge && config.permissions && typeof config.permissions === 'object') {
@@ -1610,8 +1512,6 @@ export function applyPermissionsToVersion(
         deny = converted.deny;
       }
 
-      // Set or delete each key: avoid writing empty arrays (churn). On a
-      // non-merge replace with nothing to write, delete the stale key.
       const tools: Record<string, unknown> = { ...existingTools };
       if (alsoAllow.length > 0) tools.alsoAllow = alsoAllow;
       else delete tools.alsoAllow;
@@ -1663,13 +1563,7 @@ export function applyPermissionsToVersion(
   }
 }
 
-// ============================================================================
-// Export canonical format from agent
-// ============================================================================
 
-/**
- * Convert Claude permissions back to canonical format.
- */
 export function claudeToCanonical(perms: ClaudePermissions): PermissionSet {
   const result: PermissionSet = {
     name: 'exported',
@@ -1682,9 +1576,6 @@ export function claudeToCanonical(perms: ClaudePermissions): PermissionSet {
   return result;
 }
 
-/**
- * Convert OpenCode permissions back to canonical format.
- */
 export function openCodeToCanonical(perms: OpenCodePermissions): PermissionSet {
   const allow: string[] = [];
   const deny: string[] = [];
@@ -1704,9 +1595,6 @@ export function openCodeToCanonical(perms: OpenCodePermissions): PermissionSet {
   };
 }
 
-/**
- * Convert Codex permissions back to canonical format (approximation).
- */
 export function codexToCanonical(perms: CodexPermissions): PermissionSet {
   const allow: string[] = [];
 
@@ -1751,9 +1639,6 @@ export function detectPermissionAgentFromPath(filePath: string): AgentId | null 
 
   for (const [agent, target] of Object.entries(PERMISSION_TARGETS)) {
     const agentId = agent as AgentId;
-    // `altSuffixes` first: home()/project() may probe the filesystem to choose
-    // between accepted spellings, and with an empty root that probe resolves
-    // against process.cwd() -- so detection must not depend on it.
     const candidates = [
       ...(target!.altSuffixes ?? []),
       target!.home(''),
@@ -1771,9 +1656,6 @@ export function detectPermissionAgentFromPath(filePath: string): AgentId | null 
   return best?.agentId ?? null;
 }
 
-/**
- * Save a permission set to central storage.
- */
 function savePermissionSet(set: PermissionSet): { success: boolean; error?: string } {
   ensurePermissionsDir();
   const filePath = safeJoin(path.join(getUserPermissionsDir(), 'groups'), set.name + '.yml');
@@ -1792,12 +1674,8 @@ function savePermissionSet(set: PermissionSet): { success: boolean; error?: stri
   }
 }
 
-/** Name used for the default permission set in central storage. */
 const DEFAULT_PERMISSION_SET_NAME = 'default';
 
-/**
- * Get the default permission set from central storage.
- */
 export function getDefaultPermissionSet(): PermissionSet {
   const existing = getPermissionSet(DEFAULT_PERMISSION_SET_NAME);
   if (existing) {
@@ -1836,9 +1714,6 @@ export function computePermissionsDiff(
   };
 }
 
-/**
- * Merge incoming permissions into existing, deduplicating.
- */
 export function mergePermissionSets(existing: PermissionSet, incoming: PermissionSet): PermissionSet {
   const allowSet = new Set([...existing.allow, ...incoming.allow]);
   const denySet = new Set([...(existing.deny || []), ...(incoming.deny || [])]);
@@ -1856,17 +1731,11 @@ export function mergePermissionSets(existing: PermissionSet, incoming: Permissio
   return result;
 }
 
-/**
- * Save the default permission set.
- */
 export function saveDefaultPermissionSet(set: PermissionSet): { success: boolean; error?: string } {
   set.name = DEFAULT_PERMISSION_SET_NAME;
   return savePermissionSet(set);
 }
 
-// ============================================================================
-// Content-drift check (agents doctor, PHNX-3504)
-// ============================================================================
 
 /** Harnesses whose permission file has a per-rule allow/deny list written verbatim, so `agents
  * doctor` can verify a group rule-for-rule in the harness's OWN vocabulary (canonical round-trips
@@ -1896,7 +1765,6 @@ function readJsonFileSafe(filePath: string): Record<string, unknown> | null {
   }
 }
 
-/** allow/deny rule strings in `agent`'s NATIVE vocabulary from its version home. */
 function homeNativePermissionRules(agent: AgentId, versionHome: string): NativeRuleSets | null {
   const target = PERMISSION_TARGETS[agent];
   if (!target) return null;
@@ -1937,7 +1805,6 @@ function homeNativePermissionRules(agent: AgentId, versionHome: string): NativeR
   }
 }
 
-/** allow/deny rule strings in `agent`'s NATIVE vocabulary the writer WOULD emit. */
 function expectedNativePermissionRules(agent: AgentId, set: PermissionSet): NativeRuleSets {
   switch (agent) {
     case 'claude': {
@@ -1981,7 +1848,7 @@ export function permissionsGroupMatches(
 ): boolean {
   if (!PERMISSIONS_REPRESENTABLE.has(agent)) return true;
   const expected = expectedNativePermissionRules(agent, buildPermissionsFromGroups([groupName]));
-  if (expected.allow.size === 0 && expected.deny.size === 0) return true; // header / empty group
+  if (expected.allow.size === 0 && expected.deny.size === 0) return true;
   const home = homeNativePermissionRules(agent, versionHome);
   if (!home) return false;
   for (const r of expected.allow) if (!home.allow.has(r)) return false;

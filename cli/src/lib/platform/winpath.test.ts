@@ -25,7 +25,6 @@ describe('computeNewUserPath', () => {
     expect(computeNewUserPath('', dir)).toEqual({ changed: true, value: 'C:\\shims' });
   });
 
-  // The #308 regression: %VAR% segments must survive verbatim, never expanded.
   it('preserves %VAR% segments verbatim when prepending', () => {
     expect(computeNewUserPath('%USERPROFILE%\\bin;C:\\other', dir)).toEqual({
       changed: true,
@@ -78,8 +77,6 @@ describe('shouldWriteExpandable', () => {
 // the PowerShell primitives are exercised on Windows at install.
 
 describe('blocksLocalScripts', () => {
-  // Restricted/AllSigned block the unsigned .ps1 launchers npm and agents-cli
-  // generate, so the bare commands fail in PowerShell even when on PATH.
   it('flags policies that block unsigned local scripts', () => {
     for (const p of ['Restricted', 'AllSigned', 'restricted', 'allsigned', '  Restricted  ']) {
       expect(blocksLocalScripts(p)).toBe(true);
@@ -99,9 +96,6 @@ describe('blocksLocalScripts', () => {
 });
 
 describe('npmGlobalBinFromEntry', () => {
-  // entry = <prefix>/node_modules/@phnx-labs/agents-cli/dist/index.js -> <prefix>
-  // (on Windows the npm bin launchers live in the prefix root, where agents.cmd
-  // is — exactly the dir that must be on PATH for `agents` to resolve).
   it('resolves the prefix four levels up from dist/index.js', () => {
     const prefix = path.join('opt', 'tools', 'npmglobal');
     const entry = path.join(prefix, 'node_modules', '@phnx-labs', 'agents-cli', 'dist', 'index.js');

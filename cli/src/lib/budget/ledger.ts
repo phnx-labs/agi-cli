@@ -6,31 +6,20 @@ import * as path from 'path';
 import { getHistoryDir } from '../state.js';
 import { actualCost } from '../pricing/index.js';
 
-/** A single spend observation. Append-only; never mutated in place. */
 export interface SpendEntry {
-  /** Run identifier — groups multiple usage observations from one dispatch. */
   runId: string;
-  /** Agent id (claude, codex, ...). The cross-vendor attribution key. */
   agent: string;
-  /** Project key (absolute path or repo slug). Empty string when unknown. */
   project: string;
-  /** Local calendar day, YYYY-MM-DD. */
   day: string;
-  /** Model id as reported by the stream (may carry vendor prefix / date suffix). */
   model: string;
   inputTok: number;
   outputTok: number;
-  /** Combined cache read + creation tokens (kept as one field for the ledger). */
   cacheTok: number;
-  /** USD cost of THIS observation, via actualCost() at write time. */
   costUsd: number;
-  /** Where the spend came from: local run, teams teammate, or cloud dispatch. */
   source: 'run' | 'teams' | 'cloud';
-  /** ISO timestamp of the observation. */
   ts: string;
 }
 
-/** Token bundle for a single observation (matches session/parse usage fields). */
 export interface UsageObservation {
   model?: string;
   inputTokens?: number;
@@ -39,12 +28,10 @@ export interface UsageObservation {
   cacheCreationTokens?: number;
 }
 
-/** Default ledger path: <history>/spend/ledger.jsonl. */
 function defaultLedgerPath(): string {
   return path.join(getHistoryDir(), 'spend', 'ledger.jsonl');
 }
 
-/** Local YYYY-MM-DD for a Date (defaults to now). Local, not UTC — caps are a human-day notion. */
 export function localDay(d: Date = new Date()): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -92,7 +79,6 @@ export function recordSpend(
   return entry;
 }
 
-/** Load every entry. Skips malformed lines (a half-written final line never breaks a rollup). */
 export function loadLedger(ledgerPath: string = defaultLedgerPath()): SpendEntry[] {
   if (!fs.existsSync(ledgerPath)) return [];
   const out: SpendEntry[] = [];
@@ -103,7 +89,6 @@ export function loadLedger(ledgerPath: string = defaultLedgerPath()): SpendEntry
       const parsed = JSON.parse(trimmed) as SpendEntry;
       if (typeof parsed.costUsd === 'number') out.push(parsed);
     } catch {
-      // Tolerate a torn final line; everything before it is intact.
     }
   }
   return out;
@@ -115,27 +100,22 @@ function sum(entries: SpendEntry[], pred: (e: SpendEntry) => boolean): number {
   return total;
 }
 
-/** Total USD spend on a given local day across ALL agents (cross-vendor). */
 export function spendForDay(day: string, ledger: SpendEntry[] = loadLedger()): number {
   return sum(ledger, (e) => e.day === day);
 }
 
-/** Total USD spend on a given day for ONE agent (per-agent cap accounting). */
 export function spendForAgentDay(agent: string, day: string, ledger: SpendEntry[] = loadLedger()): number {
   return sum(ledger, (e) => e.agent === agent && e.day === day);
 }
 
-/** Total USD spend attributed to an agent across all time. */
 export function spendForAgent(agent: string, ledger: SpendEntry[] = loadLedger()): number {
   return sum(ledger, (e) => e.agent === agent);
 }
 
-/** Total USD spend attributed to a project across all time (cross-vendor). */
 export function spendForProject(project: string, ledger: SpendEntry[] = loadLedger()): number {
   return sum(ledger, (e) => e.project === project);
 }
 
-/** Total USD spend for a single run id (all of its usage observations). */
 export function spendForRun(runId: string, ledger: SpendEntry[] = loadLedger()): number {
   return sum(ledger, (e) => e.runId === runId);
 }

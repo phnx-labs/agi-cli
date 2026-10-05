@@ -1,10 +1,6 @@
-/**
- * Executable resolution, platform-aware.
- */
 import { execFileSync } from 'child_process';
 import * as path from 'path';
 
-/** PATH-search command for the platform: `where` on Windows, else `which`. */
 export function whichCommand(platform: NodeJS.Platform = process.platform): string {
   return platform === 'win32' ? 'where' : 'which';
 }
@@ -14,8 +10,6 @@ export function whichCommand(platform: NodeJS.Platform = process.platform): stri
  * ENOENT/EINVAL). Always false off Windows. */
 export function needsWindowsShell(binary: string, platform: NodeJS.Platform = process.platform): boolean {
   if (platform !== 'win32') return false;
-  // path.win32.isAbsolute, not path.isAbsolute: the latter uses the HOST's rules,
-  // so a Windows path would read as relative when this runs on a Linux CI host.
   return !path.win32.isAbsolute(binary) || /\.(cmd|bat)$/i.test(binary);
 }
 
@@ -47,6 +41,8 @@ export function posixShellPath(platform: NodeJS.Platform = process.platform): st
  * metachars; escape per CommandLineToArgvW. CAVEAT: cmd expands %VAR%/!VAR! even inside quotes
  * (CVE-2024-1874); not escaped as callers own those tokens. */
 export function quoteWin32ExecArg(arg: string): string {
+  // Shell composition is a DEP0190/CVE-2024-1874 boundary; callers must not pass
+  // untrusted percent/exclamation expansion because cmd.exe expands those after quoting.
   if (arg.length > 0 && !/[\s"&|<>()^]/.test(arg)) return arg;
   let result = '"';
   let backslashes = 0;
@@ -56,7 +52,6 @@ export function quoteWin32ExecArg(arg: string): string {
       continue;
     }
     if (ch === '"') {
-      // Double the run of backslashes, then escape this quote.
       result += '\\'.repeat(backslashes * 2 + 1) + '"';
       backslashes = 0;
       continue;
@@ -64,7 +59,6 @@ export function quoteWin32ExecArg(arg: string): string {
     result += '\\'.repeat(backslashes) + ch;
     backslashes = 0;
   }
-  // Trailing backslashes precede the closing quote → must be doubled.
   result += '\\'.repeat(backslashes * 2) + '"';
   return result;
 }
@@ -84,6 +78,7 @@ export function execFileShellSpec(
   args: string[],
   platform: NodeJS.Platform = process.platform,
 ): { command: string; args: string[]; shell: boolean } {
+  // Windows PATH commands and cmd/bat files require a shell; direct binaries must avoid it.
   if (!needsWindowsShell(bin, platform)) {
     return { command: bin, args, shell: false };
   }

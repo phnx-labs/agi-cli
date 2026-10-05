@@ -36,8 +36,6 @@ export const cursorAdapter: HarnessAdapter = {
     } else if (ctx.mode === 'skip') {
       cmd.push('-f');
     } else {
-      // The configured cwd is the user's workspace trust decision. --trust is
-      // narrower than --yolo/-f because it does not bypass tool permissions.
       cmd.push('--trust');
     }
   },

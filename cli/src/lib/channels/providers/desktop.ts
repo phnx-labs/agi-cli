@@ -8,7 +8,6 @@ import type { ChannelProvider, SendOptions, SendResult } from '../registry.js';
 
 const NAME = 'desktop';
 
-/** Longest title before macOS truncates it in the banner. Keeps the ask readable. */
 const TITLE_MAX = 64;
 
 /** Split a message into notification title and body at the first newline; a long single line splits
@@ -25,8 +24,6 @@ export function splitDesktopMessage(text: string): { title: string; body: string
   if (trimmed.length <= TITLE_MAX) {
     return { title: trimmed, body: '' };
   }
-  // Break on the last word boundary inside the limit so the title doesn't end
-  // mid-word; fall back to a hard cut when there is no space to break on.
   const head = trimmed.slice(0, TITLE_MAX);
   const cut = head.lastIndexOf(' ');
   const at = cut > TITLE_MAX / 2 ? cut : TITLE_MAX;
@@ -63,9 +60,6 @@ export function desktopDeliverable(
 export const desktopProvider: ChannelProvider = {
   name: NAME,
   async send(text: string, opts: SendOptions): Promise<SendResult> {
-    // `target` is meaningless for a local notification — the recipient is whoever
-    // is at this machine — but it is echoed for --json parity with every other
-    // provider, and `agents send --to owner` still requires notify.owner.to to be set.
     const id = opts.target || os.hostname();
 
     // Order matters (CI caught it): validate the caller first, then honour dry-run, then probe the
@@ -77,6 +71,7 @@ export const desktopProvider: ChannelProvider = {
     }
 
     if (opts.dryRun) {
+      // Dry-run validates shape only; it does not prove notifier reachability or delivery.
       return { ok: true, channel: NAME, id };
     }
 
@@ -85,6 +80,7 @@ export const desktopProvider: ChannelProvider = {
       return { ok: false, channel: NAME, id, error: deliverable.reason };
     }
 
+    // Desktop notification APIs are fire-and-forget, so success is enqueueing, not confirmation.
     notifyDesktop({ title, body });
     return { ok: true, channel: NAME, id };
   },

@@ -79,7 +79,6 @@ fi
       const planIndex = cmd.indexOf('plan');
       if (planIndex !== -1) cmd[planIndex] = 'auto';
     } else if (mode === 'skip') {
-      // Replace --permission-mode plan with --dangerously-skip-permissions
       const pmIndex = cmd.indexOf('--permission-mode');
       if (pmIndex !== -1) cmd.splice(pmIndex, 2, '--dangerously-skip-permissions');
     }
@@ -100,15 +99,11 @@ export function claudeWorkerLoginTrapPreflight(args: {
   machine?: string;
 }): string | null {
   if (args.agent !== 'claude') return null;
-  // A headless run with no token fails loud with a 401 already; only an
-  // interactive run falls through to Claude Code's login screen.
   if (!args.interactive) return null;
   // Gate only an explicit `role: worker` box, not headed or unmarked ones. A real worker holds no
   // native login (owner rule), so no token means a login screen with nothing behind it. Unmarked
   // boxes get no synced token and usually have a native login, so gating them would false-refuse.
   if (args.deviceRole !== 'worker') return null;
-  // A credential will reach the child (worker setup-token, or an explicit
-  // --env CLAUDE_CODE_OAUTH_TOKEN override) — proceed.
   if (args.hasWorkerCredential) return null;
 
   const where = args.machine ? `worker '${args.machine}'` : 'this worker';
@@ -123,9 +118,6 @@ export function claudeWorkerLoginTrapPreflight(args: {
     `  • If that account has no token yet, mint it on a HEADED box (e.g. your laptop):`,
     `        agents accounts login claude#<name>`,
     ``,
-    // NB: keep this text clear of RATE_LIMIT_PATTERNS (exec.ts) — this string is
-    // returned as spawn stderr, which runWithFallback scans; a stray "rate limit"
-    // / "quota" phrase here would spuriously trigger an account-rotation fallback.
     `See which accounts are LIVE (signed in, with headroom) with:  agents accounts list`,
   ].join('\n');
 }

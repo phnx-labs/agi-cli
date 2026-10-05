@@ -63,19 +63,14 @@ export function getCentralRulesFileName(agentId: AgentId): string {
   const agent = AGENTS[agentId];
   const instrFile = agent.instructionsFile;
 
-  // If it contains a path separator, extract just the filename
   const filename = instrFile.includes('/') ? path.basename(instrFile) : instrFile;
 
-  // If the agent's instructionsFile isn't AGENTS.md, it was renamed FROM AGENTS.md
   if (filename !== CENTRAL_RULES_FILENAME) {
     return CENTRAL_RULES_FILENAME;
   }
   return filename;
 }
 
-/**
- * Get the user-scope config dir for an agent (version-aware).
- */
 function getUserConfigDir(agentId: AgentId): string {
   const home = getEffectiveHome(agentId);
   return path.join(home, agentConfigDirName(agentId));
@@ -122,8 +117,6 @@ export function discoverInstructionsFromRepo(repoPath: string): DiscoveredInstru
 
   for (const agentId of ALL_AGENT_IDS) {
     const agent = AGENTS[agentId];
-    // AGENTS.md is the canonical central rules file - don't claim it per-agent.
-    // It gets installed centrally to ~/.agents/rules/ and synced per-agent.
     const possibleNames = [
       `${agentId}.md`,
       agent.instructionsFile,
@@ -178,7 +171,6 @@ export function listInstalledInstructionsWithScope(
   const results: InstalledInstructions[] = [];
   const agent = AGENTS[agentId];
 
-  // User-scoped instructions (version-aware when home is provided)
   const home = options?.home || getEffectiveHome(agentId);
   const userConfigDir = path.join(home, agentConfigDirName(agentId));
   const userPath = path.join(userConfigDir, agent.instructionsFile);
@@ -257,9 +249,6 @@ export function installInstructionsCentrally(
   return { installed, errors };
 }
 
-/**
- * List top-level rules files from user and system dirs (user wins on collision).
- */
 export function listCentralRules(): string[] {
   const seen = new Set<string>();
   for (const dir of [getUserRulesDir(), getResolvedRulesDir()]) {

@@ -6,16 +6,13 @@ import { die } from '../format.js';
 import { resolveChannelProvider, listChannelProviders, type ChannelProvider } from './registry.js';
 
 interface TransportLookup {
-  /** Provider name after applying the `notify.transports` mapping. */
   providerName: string;
-  /** Registered provider, or undefined when `providerName` resolves to nothing. */
   provider?: ChannelProvider;
-  /** Why resolution failed — set exactly when `provider` is undefined. */
   error?: string;
 }
 
-/** Resolve a channel to its provider, returning the failure instead of exiting. */
 export function lookupTransport(channel: string, meta: Meta): TransportLookup {
+  // Daemon callers need an error value; only the interactive resolver below may terminate.
   const providerName = meta.notify?.transports?.[channel] ?? channel;
   const provider = resolveChannelProvider(providerName);
   if (provider) return { providerName, provider };
@@ -28,7 +25,6 @@ export function lookupTransport(channel: string, meta: Meta): TransportLookup {
   };
 }
 
-/** Interactive-command resolution: an unregistered provider dies loud. */
 export function resolveTransport(channel: string, meta: Meta): ChannelProvider {
   const { provider, error } = lookupTransport(channel, meta);
   if (!provider) die(error!);

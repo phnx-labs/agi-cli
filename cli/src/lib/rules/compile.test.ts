@@ -7,8 +7,6 @@ import { resolveImports, compileRulesForProject } from './compile.js';
 import { AGENTS } from '../agents.js';
 import type { RulesLayer } from './compose.js';
 
-/** Build the layer list used by the project tests below — only the project layer,
- *  so the composed output is deterministic regardless of ~/.agents-system state. */
 function projectOnlyLayers(cwd: string): RulesLayer[] {
   return [{ scope: 'project', rulesDir: path.join(cwd, '.agents', 'rules') }];
 }
@@ -61,9 +59,7 @@ describe('resolveImports', () => {
     const result = resolveImports(root, tmpDir);
 
     expect(result.content).toContain('live: REAL');
-    // The fenced block must preserve its literal @-import text
     expect(result.content).toContain('```markdown\n@rules/a.md\n```');
-    // Only one actual import was resolved
     expect(result.sources).toHaveLength(1);
   });
 
@@ -94,7 +90,6 @@ describe('resolveImports', () => {
 
     const result = resolveImports(root, tmpDir);
 
-    // First visit expands a → b, then b → a is cycle-skipped (empty)
     expect(result.content).toBe('');
     expect(result.sources.length).toBeLessThanOrEqual(2);
   });
@@ -113,20 +108,16 @@ describe('resolveImports', () => {
   });
 
   it('respects MAX_DEPTH and does not hang on deep chains', () => {
-    // Chain of 10 files; only 5 levels should resolve before depth cutoff.
     for (let i = 0; i < 10; i++) {
       const body = i < 9 ? `@f${i + 1}.md` : 'leaf';
       writeFile(`f${i}.md`, body);
     }
     const result = resolveImports('@f0.md', tmpDir);
-    // Once depth exceeds, the inner @-token remains literal — so the final
-    // content is some path of expansions followed by a leftover @f{n}.md.
     expect(result.content).toMatch(/@f\d+\.md$|leaf$/);
   });
 });
 
 describe('compileRulesForProject', () => {
-  /** Set up a minimal project rules tree with a `default` preset and one subrule. */
   function setupProject(opts: { subruleBody?: string } = {}): void {
     writeFile(
       '.agents/rules/rules.yaml',
@@ -152,7 +143,6 @@ describe('compileRulesForProject', () => {
     const written = fs.readFileSync(result.agentsPath, 'utf-8');
     expect(written).toContain('Auto-compiled by agents-cli');
     expect(written).toContain('TOKEN_FRAGMENT');
-    // No raw @-import syntax should leak into the output.
     expect(written).not.toMatch(/^@\.\//m);
   });
 
@@ -161,13 +151,11 @@ describe('compileRulesForProject', () => {
     const result = compileRulesForProject(tmpDir, { layers: projectOnlyLayers(tmpDir) });
 
     expect(result.compiled).toBe(true);
-    // Every distinct non-AGENTS.md, flat-name instructions file should be symlinked.
-    // Nested-path filenames (e.g. workspace/AGENTS.md) are excluded.
     const expected = new Set<string>();
     for (const agent of Object.values(AGENTS)) {
       const f = agent.instructionsFile;
       if (f === 'AGENTS.md') continue;
-      if (agent.deprecated?.hard) continue; // hard-deprecated agents get no symlink (e.g. Gemini)
+      if (agent.deprecated?.hard) continue;
       if (f.includes('/') || f.includes('\\')) continue;
       expected.add(f);
     }

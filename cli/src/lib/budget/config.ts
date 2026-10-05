@@ -35,7 +35,6 @@ function coerceBudget(raw: unknown): BudgetConfig {
   return out;
 }
 
-/** Merge a higher-precedence budget over a base. Set fields win; per_agent merges key-by-key. */
 function mergeBudget(base: BudgetConfig, over: BudgetConfig): BudgetConfig {
   const merged: BudgetConfig = { ...base, ...stripUndefined(over) };
   if (base.per_agent || over.per_agent) {
@@ -52,8 +51,8 @@ function stripUndefined(cfg: BudgetConfig): BudgetConfig {
   return out;
 }
 
-/** Read project-local `budget:` blocks from nearest dir upward, nearest LAST (highest precedence). */
 function getProjectBudgets(startPath: string): BudgetConfig[] {
+  // Merge ancestor manifests from root to cwd so the nearest project wins field by field.
   const configs: BudgetConfig[] = [];
   let dir = path.resolve(startPath);
   const userAgentsYaml = path.join(getUserAgentsDir(), 'agents.yaml');
@@ -67,12 +66,11 @@ function getProjectBudgets(startPath: string): BudgetConfig[] {
           configs.push(coerceBudget(parsed.budget));
         }
       } catch {
-        // Malformed project config — ignore and keep walking.
+        // Malformed project budgets do not erase valid user or ancestor limits.
       }
     }
     dir = path.dirname(dir);
   }
-  // configs[0] is the nearest dir. Reverse so the nearest applies LAST (wins).
   return configs.reverse();
 }
 
@@ -84,11 +82,11 @@ export function resolveBudgetConfig(cwd: string = process.cwd()): BudgetConfig {
   for (const projectBudget of getProjectBudgets(cwd)) {
     merged = mergeBudget(merged, projectBudget);
   }
+  // An omitted policy fails closed: configured caps block unless explicitly set to warn.
   if (merged.on_exceed === undefined) merged.on_exceed = 'block';
   return merged;
 }
 
-/** True when at least one enforceable cap is set. No caps => budget feature is dormant. */
 export function hasAnyCap(cfg: BudgetConfig): boolean {
   return (
     cfg.per_run !== undefined ||

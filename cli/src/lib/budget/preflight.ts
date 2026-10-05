@@ -7,19 +7,14 @@ import { loadLedger, spendForDay, spendForAgentDay, spendForProject, localDay } 
 import type { SpendEntry } from './ledger.js';
 import { resolveBudgetConfig, hasAnyCap } from './config.js';
 
-/** A pre-flight cost estimate for one run. */
 interface RunEstimate {
-  /** Estimated USD for this run. 0 when the model is unpriced. */
   estUsd: number;
-  /** How the token count was derived. */
   basis: 'ledger-average' | 'prompt-heuristic' | 'none';
-  /** True when the model resolved to a priced entry. */
   priced: boolean;
   estInputTokens: number;
   estOutputTokens: number;
 }
 
-/** Roughly 4 characters per token — the standard coarse heuristic for English text. */
 const CHARS_PER_TOKEN = 4;
 /** Output is typically a multiple of the visible prompt for an agentic run. 6x is a deliberately
  * conservative lower bound so the estimate doesn't under-report and wave through a run that blows
@@ -66,7 +61,6 @@ export function estimateRunCost(args: {
   };
 }
 
-/** Average input/output tokens per RUN for an agent, from the ledger. Null when no history. */
 export function ledgerAverageTokens(
   agent: string,
   ledger: SpendEntry[],
@@ -89,32 +83,22 @@ export function ledgerAverageTokens(
   return { input: Math.round(input / runs.size), output: Math.round(output / runs.size) };
 }
 
-/** Decision returned by the pre-flight gate. */
 interface PreflightDecision {
-  /** Whether the run may proceed. */
   allow: boolean;
-  /** Whether the caller must interactively confirm (estimate >= require_confirm_over). */
   needsConfirm: boolean;
-  /** Human reason when blocked or confirming. */
   reason?: string;
-  /** Which cap blocked, if any. */
   blockedCap?: 'per_run' | 'per_day' | 'per_agent' | 'per_project';
-  /** Projected day spend if this run lands at its estimate. */
   projectedDaySpend: number;
-  /** Projected project spend if this run lands at its estimate. */
   projectedProjectSpend: number;
 }
 
-/** Current spend snapshot the gate compares the estimate against. */
 export interface LedgerState {
-  /** Agent this snapshot is for (used to pick the matching per_agent cap). */
   agent: string;
   daySpend: number;
   projectSpend: number;
   agentDaySpend: number;
 }
 
-/** Read the ledger snapshot the gate needs for `agent` / `project` / today. */
 export function ledgerStateFor(agent: string, project: string, ledger?: SpendEntry[]): LedgerState {
   const entries = ledger ?? loadLedger();
   const today = localDay();
@@ -166,7 +150,6 @@ export function enforcePreflight(
     });
   }
 
-  // require_confirm_over only governs interactive confirm, not a hard block.
   let needsConfirm =
     cfg.require_confirm_over !== undefined && est.estUsd >= cfg.require_confirm_over;
 
@@ -207,7 +190,6 @@ export function enforcePreflight(
   };
 }
 
-/** Build a one-line human estimate banner for `agents run` preamble. */
 function formatEstimateBanner(agent: string, model: string, est: RunEstimate): string {
   const cost = est.priced ? formatUsd(est.estUsd) : 'unpriced';
   const basisLabel =
@@ -219,9 +201,7 @@ function formatEstimateBanner(agent: string, model: string, est: RunEstimate): s
   return `[budget] est. ${cost} for this ${agent} run (${model}, ${basisLabel})`;
 }
 
-/** Result of the high-level run gate consumed by `agents run` / teams / cloud. */
 interface PreflightGateResult {
-  /** True when no caps are configured — budget feature dormant, nothing to do. */
   dormant: boolean;
   cfg: BudgetConfig;
   estimate: RunEstimate;
@@ -272,6 +252,4 @@ export function runPreflightGate(args: {
   return { dormant: false, cfg, estimate, decision, banner };
 }
 
-// Re-export so the per_agent projection is available to the gate's caller without
-// a second ledger import. (agentDaySpend projection is used by exec wiring.)
 export type { SpendEntry };

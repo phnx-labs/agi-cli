@@ -6,9 +6,6 @@ import { registerBuiltinProviders } from './index.js';
 import { resolveChannelProvider, listChannelProviders } from '../registry.js';
 
 describe('splitDesktopMessage', () => {
-  // A broadcast sink hands over composeBroadcastMessage's shape: "<project> · <text>"
-  // with the link on line 2. Getting this wrong buries the ask in the body where
-  // the banner truncates it.
   it('puts the first line in the title and the link underneath', () => {
     const { title, body } = splitDesktopMessage(
       'agents-cli · release blocked: npm token expired\nhttps://github.com/x/y/pull/1',
@@ -23,15 +20,12 @@ describe('splitDesktopMessage', () => {
     expect(body).toBe('');
   });
 
-  // The real bug this guards: a long ask silently losing its tail. The remainder
-  // must still be delivered in the body, not dropped.
   it('carries the remainder of a long single line into the body, losing nothing', () => {
     const text =
       'force-push denied by git-guard on PR #1749 and I need you to either grant the permission or push it yourself';
     const { title, body } = splitDesktopMessage(text);
     expect(title.length).toBeLessThanOrEqual(64);
     expect(body).not.toBe('');
-    // Nothing is dropped: title + body reconstitute the original words.
     expect(`${title} ${body}`.split(/\s+/)).toEqual(text.split(/\s+/));
   });
 
@@ -49,8 +43,6 @@ describe('desktopNotifier', () => {
     expect(desktopNotifier('linux')).toBeTruthy();
   });
 
-  // notifyDesktop is a documented no-op off darwin/linux. Claiming deliverability
-  // there is the silent-failure bug this whole subsystem exists to remove.
   it('reports none where notifyDesktop is a no-op', () => {
     expect(desktopNotifier('win32')).toBeUndefined();
     expect(desktopNotifier('aix')).toBeUndefined();
@@ -78,9 +70,6 @@ describe('desktopProvider', () => {
     expect(res.id).toBe(os.hostname());
   });
 
-  // Empty text would post a blank banner the operator cannot act on, and on macOS
-  // MenubarHelper's one-shot exits 2 without a title. Fail loud instead — and with
-  // the CALLER's error, not the platform's, on a box with no notifier.
   it('refuses an empty message with the caller error, not the platform error', async () => {
     const res = await desktopProvider.send('   \n  ', { target: 'local', dryRun: true });
     expect(res.ok).toBe(false);

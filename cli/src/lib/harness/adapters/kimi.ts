@@ -5,8 +5,6 @@ import { stripForeignConfigDir, slotAwareConfigEnvBash } from '../adapter.js';
 export const kimiAdapter: HarnessAdapter = {
   id: 'kimi',
 
-  // Kimi honors KIMI_CODE_HOME (relocates ~/.kimi-code, including config,
-  // skills, hooks, sessions). Pin it at the per-version home.
   applyExecConfigEnv(result, ctx) {
     if (ctx.versionHome) {
       result.KIMI_CODE_HOME = path.join(ctx.versionHome, '.kimi-code');
@@ -28,16 +26,12 @@ ${slotAwareConfigEnvBash([{ env: 'KIMI_CODE_HOME', rel: ctx.configDirName }], '$
     // kimi's headless `-p`/`--prompt` mode refuses any startup-mode flag (`--plan`, `--auto`,
     // `--yolo` abort with "Cannot combine --prompt with --X"; verified live).
     if (ctx.interactive) return undefined;
-    // Plan can't reach here headless — resolveHeadlessMode already downgraded it to
-    // auto (kimi's headlessPlan:false); this asserts that invariant so a plan-mode
-    // run can never silently mutate the workspace.
     if (ctx.resolvedMode === 'plan') {
       throw new Error(
         `Internal error: kimi reached headless command build with resolved mode 'plan'; ` +
           `resolveHeadlessMode should have downgraded it to auto (capabilities.headlessPlan is false).`,
       );
     }
-    // edit/auto/skip: emit no mode flag — `kimi -p` auto-runs.
     return [];
   },
 

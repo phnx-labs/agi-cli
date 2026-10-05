@@ -153,11 +153,8 @@ export function buildDiscoveredPlugin(
   };
 }
 
-/** One category of resources a plugin packages, for display breakdowns. */
 export interface PluginResourceGroup {
-  /** Category key: 'skills' | 'commands' | 'subagents' | 'hooks' | 'mcp' | 'lsp' | 'monitors' | 'bin' | 'scripts' | 'settings'. */
   label: string;
-  /** Display names — slash-prefixed for skills/commands (e.g. `/code:dispatch`), raw names otherwise. */
   items: string[];
 }
 
@@ -187,6 +184,7 @@ export function pluginResourceGroups(plugin: DiscoveredPlugin): PluginResourceGr
  * object). `hooks`/`mcpServers` may live inline in the manifest, so filesystem-only detection would
  * miss them and auto-enable a hostile plugin. */
 function manifestDeclaresExecSurface(value: unknown): boolean {
+  // Inline hooks and MCP declarations execute even when no hooks/MCP directory exists.
   if (typeof value === 'string') return value.trim().length > 0;
   if (Array.isArray(value)) return value.length > 0;
   if (value && typeof value === 'object') return Object.keys(value).length > 0;
@@ -197,9 +195,6 @@ export function inspectPluginCapabilities(pluginRoot: string): PluginCapabilitie
   const manifest = loadPluginManifest(pluginRoot);
   const plugin = manifest ? buildDiscoveredPlugin(pluginRoot, manifest) : null;
   return {
-    // Inline manifest `hooks`/`mcpServers` are execution surfaces too — a cloned
-    // repo's project plugin must not be auto-enabled just because it ships the
-    // exec config inline in plugin.json rather than as a hooks/ dir or .mcp.json.
     hasHooks:
       (plugin?.hooks.length || 0) > 0 ||
       pluginHasDirectoryEntries(pluginRoot, 'hooks') ||
@@ -224,9 +219,6 @@ export function pluginCapabilityLabels(capabilities: PluginCapabilities): string
     .map((key) => PLUGIN_EXEC_SURFACE_LABELS[key]);
 }
 
-/**
- * Load a plugin manifest from a plugin directory.
- */
 export function loadPluginManifest(pluginRoot: string): PluginManifest | null {
   const manifestPath = path.join(pluginRoot, PLUGIN_MANIFEST_DIR, PLUGIN_MANIFEST_FILE);
   if (!fs.existsSync(manifestPath)) {
@@ -278,6 +270,7 @@ export function assertPluginTargetContained(targetRoot: string, pluginsDir: stri
  * > extra > user > system). discoverPlugins() yields low-to-high precedence, so the LAST match
  * wins; the first would resolve to the lowest scope. */
 export function getPlugin(name: string): DiscoveredPlugin | null {
+  // Discovery is low-to-high precedence; reverse lookup yields project, extra, user, system.
   const plugins = discoverPlugins();
   for (let i = plugins.length - 1; i >= 0; i--) {
     if (plugins[i].name === name) return plugins[i];
@@ -295,9 +288,7 @@ export function pluginSupportsAgent(plugin: DiscoveredPlugin, agent: AgentId): b
   return true;
 }
 
-// ─── Discovery helpers ────────────────────────────────────────────────────────
 
-/** Fact basenames (no .md) from a plugin's memory/ directory. */
 export function discoverPluginMemory(pluginRoot: string): string[] {
   const dir = path.join(pluginRoot, 'memory');
   if (!fs.existsSync(dir)) return [];
@@ -346,7 +337,6 @@ function discoverPluginScripts(pluginRoot: string): string[] {
   return fs.readdirSync(scriptsDir).filter(f => !f.startsWith('.'));
 }
 
-/** Discover command .md files inside a plugin's commands/ directory. */
 export function discoverPluginCommands(pluginRoot: string): string[] {
   const commandsDir = path.join(pluginRoot, 'commands');
   if (!fs.existsSync(commandsDir)) return [];
@@ -356,7 +346,6 @@ export function discoverPluginCommands(pluginRoot: string): string[] {
     .map(f => f.slice(0, -3));
 }
 
-/** Discover agent definition .md files inside a plugin's agents/ directory. */
 export function discoverPluginAgentDefs(pluginRoot: string): string[] {
   const agentsDir = path.join(pluginRoot, 'agents');
   if (!fs.existsSync(agentsDir)) return [];
@@ -381,7 +370,6 @@ export function discoverPluginWorkflows(pluginRoot: string): string[] {
   }
 }
 
-/** Discover executable files in a plugin's bin/ directory. */
 export function discoverPluginBin(pluginRoot: string): string[] {
   const binDir = path.join(pluginRoot, 'bin');
   if (!fs.existsSync(binDir)) return [];
@@ -389,7 +377,6 @@ export function discoverPluginBin(pluginRoot: string): string[] {
   return fs.readdirSync(binDir).filter(f => !f.startsWith('.'));
 }
 
-/** Discover MCP server names from .mcp.json at the plugin root. */
 export function discoverPluginMcpServers(pluginRoot: string): string[] {
   const mcpFile = path.join(pluginRoot, '.mcp.json');
   if (!fs.existsSync(mcpFile)) return [];
@@ -401,7 +388,6 @@ export function discoverPluginMcpServers(pluginRoot: string): string[] {
   }
 }
 
-/** Discover LSP server keys from .lsp.json at the plugin root. */
 export function discoverPluginLspServers(pluginRoot: string): string[] {
   const lspFile = path.join(pluginRoot, '.lsp.json');
   if (!fs.existsSync(lspFile)) return [];
@@ -413,7 +399,6 @@ export function discoverPluginLspServers(pluginRoot: string): string[] {
   }
 }
 
-/** Discover monitor names from monitors/monitors.json. */
 export function discoverPluginMonitors(pluginRoot: string): string[] {
   const monitorsFile = path.join(pluginRoot, 'monitors', 'monitors.json');
   if (!fs.existsSync(monitorsFile)) return [];
@@ -426,7 +411,6 @@ export function discoverPluginMonitors(pluginRoot: string): string[] {
   }
 }
 
-/** Return true if settings.json contains non-permission keys worth merging. */
 function pluginHasNonPermissionSettings(pluginRoot: string): boolean {
   const settingsPath = path.join(pluginRoot, 'settings.json');
   if (!fs.existsSync(settingsPath)) return false;
@@ -438,7 +422,6 @@ function pluginHasNonPermissionSettings(pluginRoot: string): boolean {
   }
 }
 
-// ─── Variable expansion ───────────────────────────────────────────────────────
 
 /** Expand plugin variables: ${CLAUDE_PLUGIN_ROOT} (plugin dir), ${CLAUDE_PLUGIN_DATA} (per-version
  * data dir), ${user_config.<key>} (from .user-config.json). */
@@ -464,11 +447,7 @@ export function expandPluginVars(
   return result;
 }
 
-// ─── userConfig storage ───────────────────────────────────────────────────────
 
-/**
- * Load persisted user config for a plugin from .user-config.json.
- */
 export function loadUserConfig(pluginName: string): Record<string, string> {
   const configPath = path.join(getPluginsDir(), pluginName, USER_CONFIG_FILE);
   if (!fs.existsSync(configPath)) return {};
@@ -479,16 +458,12 @@ export function loadUserConfig(pluginName: string): Record<string, string> {
   }
 }
 
-/**
- * Persist user config for a plugin to .user-config.json.
- */
 export function saveUserConfig(pluginName: string, config: Record<string, string>): void {
   const configPath = path.join(getPluginsDir(), pluginName, USER_CONFIG_FILE);
   fs.mkdirSync(path.dirname(configPath), { recursive: true });
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
 }
 
-// ─── Dependency checking ──────────────────────────────────────────────────────
 
 /** Returns names of missing plugin dependencies (warning only, not a hard error). */
 export function checkPluginDependencies(manifest: PluginManifest): string[] {
@@ -497,7 +472,6 @@ export function checkPluginDependencies(manifest: PluginManifest): string[] {
   return manifest.dependencies.filter(dep => !installed.has(dep));
 }
 
-// ─── Marketplace routing ──────────────────────────────────────────────────────
 
 /** Reconstruct a MarketplaceSpec from a marketplace name, the inverse of marketplaceNameFor().
  * Resolves the real source root so the spec is honest for callers like descriptionFor. */
@@ -527,7 +501,6 @@ function listVersionMarketplaceNames(agent: AgentId, versionHome: string): strin
   }
 }
 
-// ─── Main sync entry point ────────────────────────────────────────────────────
 
 /** Sync a plugin into an agent version's home: copy into the native marketplace path, expand
  * ${user_config.*}, re-synthesize marketplace.json, register it, enable it in settings.json, and
@@ -567,8 +540,6 @@ export function syncPluginToVersion(
     return result;
   }
 
-  // OpenCode uses TS/JS modules under ~/.config/opencode/plugins/, not the
-  // Claude marketplace layout. Install those modules and return early.
   if (agent === 'opencode') {
     // RUSH-1756: OpenCode plugins are raw executable TS/JS, so they must clear the same consent
     // check as every other exec surface. This branch used to return early and bypass it.
@@ -582,8 +553,6 @@ export function syncPluginToVersion(
     return result;
   }
 
-  // Goose loads Open Plugins from $HOME/.agents/plugins/<name>/ (same layout as
-  // agents-cli's source tree). Under the shim HOME is the version home.
   if (agent === 'goose') {
     const ok = installGoosePlugin(plugin, versionHome);
     result.success = ok;
@@ -591,8 +560,6 @@ export function syncPluginToVersion(
     return result;
   }
 
-  // Hermes loads plugins from a flat $HOME/.hermes/plugins/<name>/ dir with a
-  // plugin.yaml manifest, gated by a plugins.enabled allowlist in config.yaml.
   if (agent === 'hermes') {
     const enablePlugin = options.allowExecSurfaces === true || !hasPluginExecSurfaces(inspectPluginCapabilities(plugin.root));
     const ok = installHermesPlugin(plugin, versionHome, enablePlugin);
@@ -603,23 +570,15 @@ export function syncPluginToVersion(
 
   const userConfig = loadUserConfig(plugin.name);
 
-  // Route every marketplace op through the plugin's own marketplace, so a plugin
-  // discovered in an extra/project repo installs under its own
-  // marketplaces/<name>/ tree — never the user marketplace.
   const spec = marketplaceSpecForName(plugin.marketplace);
   const marketplaceName = marketplaceNameFor(spec);
 
-  // 1. Copy plugin to native marketplace install dir.
   const installDir = copyPluginToMarketplace(plugin, spec, agent, versionHome);
 
-  // 2. Pre-expand ${user_config.*} in the copy. Leave ${CLAUDE_PLUGIN_ROOT} /
-  //    ${CLAUDE_PLUGIN_DATA} alone — Claude expands those natively at runtime.
   if (Object.keys(userConfig).length > 0) {
     expandUserConfigInDir(installDir, userConfig);
   }
 
-  // 2b. Write agent-native manifest dir alongside .claude-plugin/ when the agent
-  //     expects a different directory name (e.g. Codex uses .codex-plugin/).
   const agentManifestDir = AGENTS[agent].pluginManifestDir;
   if (agentManifestDir && agentManifestDir !== PLUGIN_MANIFEST_DIR) {
     const srcManifest = path.join(installDir, PLUGIN_MANIFEST_DIR, PLUGIN_MANIFEST_FILE);
@@ -630,7 +589,6 @@ export function syncPluginToVersion(
     }
   }
 
-  // 3-5. Synthesize manifest, register marketplace, enable plugin.
   syncMarketplaceManifest(spec, agent, versionHome);
   registerMarketplace(spec, agent, versionHome);
   // Trust check: plugins with exec surfaces (hooks/, bin/, scripts/, .mcp.json, settings.json,
@@ -668,9 +626,6 @@ export function syncPluginToVersion(
     );
   }
 
-  // 5b. Convert plugin commands/ to skills for agents that dropped command support
-  //     (Codex >= 0.117.0). Skill name is prefixed with plugin name to avoid
-  //     collision with standalone command skills.
   if (options.version && shouldInstallCommandAsSkill(agent, options.version) && plugin.commands.length > 0) {
     const agentDir = path.join(versionHome, agentConfigDirName(agent));
     const skillSourceDirs = [path.join(agentDir, 'skills')];
@@ -682,10 +637,8 @@ export function syncPluginToVersion(
     }
   }
 
-  // 6. Migrate legacy dual-dash flat layout from previous versions of agents-cli.
   migrateLegacyFlatLayout(plugin, agent, versionHome);
 
-  // Populate the result shape for backward-compatible callers/reporting.
   result.skills = plugin.skills.map(s => `${plugin.name}:${s}`);
   result.commands = plugin.commands.map(c => `${plugin.name}:${c}`);
   result.agentDefs = plugin.agentDefs.map(a => `${plugin.name}:${a}`);
@@ -746,7 +699,7 @@ function expandUserConfigInDir(dir: string, userConfig: Record<string, string>):
       if (expanded !== content) {
         fs.writeFileSync(full, expanded, 'utf-8');
       }
-    } catch { /* skip unreadable */ }
+    } catch {  }
   }
 }
 
@@ -760,46 +713,40 @@ function migrateLegacyFlatLayout(
   const prefix = `${plugin.name}--`;
   const agentRoot = path.join(versionHome, agentConfigDirName(agent));
 
-  // 1. skills
   const skillsDir = path.join(agentRoot, 'skills');
   if (fs.existsSync(skillsDir)) {
     for (const entry of fs.readdirSync(skillsDir, { withFileTypes: true })) {
       if (entry.isDirectory() && entry.name.startsWith(prefix)) {
-        try { fs.rmSync(path.join(skillsDir, entry.name), { recursive: true, force: true }); } catch { /* skip */ }
+        try { fs.rmSync(path.join(skillsDir, entry.name), { recursive: true, force: true }); } catch {  }
       }
     }
   }
 
-  // 2. commands
   if (agent === 'claude' || agent === 'openclaw') {
     const cmdsDir = path.join(agentRoot, AGENTS[agent]?.commandsSubdir ?? 'commands');
     if (fs.existsSync(cmdsDir)) {
       for (const entry of fs.readdirSync(cmdsDir, { withFileTypes: true })) {
         if (entry.isFile() && entry.name.startsWith(prefix) && entry.name.endsWith('.md')) {
-          try { fs.unlinkSync(path.join(cmdsDir, entry.name)); } catch { /* skip */ }
+          try { fs.unlinkSync(path.join(cmdsDir, entry.name)); } catch {  }
         }
       }
     }
   }
 
-  // 3. agent definitions
   const agentsDir = path.join(agentRoot, 'agents');
   if (fs.existsSync(agentsDir)) {
     for (const entry of fs.readdirSync(agentsDir, { withFileTypes: true })) {
       if (entry.isFile() && entry.name.startsWith(prefix) && entry.name.endsWith('.md')) {
-        try { fs.unlinkSync(path.join(agentsDir, entry.name)); } catch { /* skip */ }
+        try { fs.unlinkSync(path.join(agentsDir, entry.name)); } catch {  }
       }
     }
   }
 
-  // 4. plugin-bin
   const binDir = path.join(agentRoot, 'plugin-bin', plugin.name);
   if (fs.existsSync(binDir)) {
-    try { fs.rmSync(binDir, { recursive: true, force: true }); } catch { /* skip */ }
+    try { fs.rmSync(binDir, { recursive: true, force: true }); } catch {  }
   }
 
-  // 5. settings.json — strip namespaced mcpServers, hooks referencing plugin
-  //    root, permissions referencing plugin root, and pluginBinPaths entries.
   const settingsPath = path.join(agentRoot, 'settings.json');
   if (!fs.existsSync(settingsPath)) return;
 
@@ -869,12 +816,11 @@ function migrateLegacyFlatLayout(
   }
 
   if (changed) {
-    try { fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf-8'); } catch { /* ignore */ }
+    try { fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf-8'); } catch {  }
   }
 }
 
 
-// ─── OpenCode plugins (TS/JS modules) ─────────────────────────────────────────
 
 /** OpenCode loads modules from $HOME/.config/opencode/plugins/; under version isolation HOME is the
  * version home. Claude-style plugins are not converted; modules come from opencode/, plugins/, then
@@ -883,20 +829,16 @@ export function openCodePluginsDir(versionHome: string): string {
   return path.join(versionHome, '.config', 'opencode', 'plugins');
 }
 
-// OpenCode's local-plugin loader only auto-loads direct *.ts / *.js files under
-// plugins/ — not nested dirs and not .mjs/.cjs (see opencode.ai/docs/plugins).
 const OPENCODE_MODULE_RE = /\.(ts|js)$/i;
 const OPENCODE_TEST_RE = /\.(test|spec)\./i;
 
 function listOpenCodeModules(dir: string): string[] {
   if (!fs.existsSync(dir)) return [];
-  // readdir without recursion — only loader-visible direct children.
   return fs.readdirSync(dir, { withFileTypes: true })
     .filter((e) => e.isFile() && OPENCODE_MODULE_RE.test(e.name) && !OPENCODE_TEST_RE.test(e.name) && !e.name.startsWith('.'))
     .map((e) => e.name);
 }
 
-/** Resolve source module files for an agents-cli plugin to install into OpenCode. */
 export function resolveOpenCodePluginSources(pluginRoot: string): string[] {
   for (const sub of ['opencode', 'plugins']) {
     const dir = path.join(pluginRoot, sub);
@@ -913,18 +855,15 @@ export function installOpenCodePlugin(plugin: DiscoveredPlugin, versionHome: str
   const sources = resolveOpenCodePluginSources(plugin.root);
   const destPluginDir = path.join(destDir, plugin.name);
 
-  // Clean previous install of this plugin name (file or dir)
   const bareTs = path.join(destDir, `${plugin.name}.ts`);
   const bareJs = path.join(destDir, `${plugin.name}.js`);
   for (const p of [bareTs, bareJs, destPluginDir]) {
     try {
       if (fs.existsSync(p)) fs.rmSync(p, { recursive: true, force: true });
-    } catch { /* best effort */ }
+    } catch {  }
   }
 
   if (sources.length === 0) {
-    // No TS/JS modules — still create a managed marker so isPluginSynced can
-    // track that we processed the plugin (and so re-sync is idempotent).
     fs.mkdirSync(destPluginDir, { recursive: true });
     fs.writeFileSync(
       path.join(destPluginDir, '.agents-cli-managed'),
@@ -934,9 +873,6 @@ export function installOpenCodePlugin(plugin: DiscoveredPlugin, versionHome: str
     return true;
   }
 
-  // Install each module as a direct file under plugins/ so the loader sees it.
-  // Multi-module plugins get `<name>` or `<name>-<stem>` basenames (never a
-  // nested directory — OpenCode does not scan nested plugin dirs).
   for (let i = 0; i < sources.length; i++) {
     const src = sources[i];
     const ext = path.extname(src);
@@ -948,7 +884,6 @@ export function installOpenCodePlugin(plugin: DiscoveredPlugin, versionHome: str
           : `${plugin.name}-${stem}${ext}`);
     fs.copyFileSync(src, path.join(destDir, destName));
   }
-  // Marker file so isOpenCodePluginInstalled / remove can track multi-file installs.
   fs.mkdirSync(destPluginDir, { recursive: true });
   fs.writeFileSync(
     path.join(destPluginDir, '.agents-cli-managed'),
@@ -986,14 +921,13 @@ export function removeOpenCodePlugin(pluginName: string, versionHome: string): b
       removed = true;
     }
   }
-  // Flat multi-module installs: <name>-<stem>.ts/js next to the marker dir.
   if (fs.existsSync(destDir)) {
     for (const entry of fs.readdirSync(destDir)) {
       if (entry.startsWith(`${pluginName}-`) && /\.(ts|js)$/i.test(entry)) {
         try {
           fs.rmSync(path.join(destDir, entry), { force: true });
           removed = true;
-        } catch { /* ignore */ }
+        } catch {  }
       }
     }
   }
@@ -1005,6 +939,7 @@ export function removeOpenCodePlugin(pluginName: string, versionHome: string): b
  * root. After copying, remove symlinks resolving outside both destRoot and sourceRoot (internal
  * ones resolve under sourceRoot). */
 function stripEscapingSymlinks(destRoot: string, sourceRoot: string): string[] {
+  // Managed-marker writes are safe only when copied links remain inside source or destination.
   const realRoots = [destRoot, sourceRoot].map((r) => {
     try { return fs.realpathSync(r); }
     catch { return r; }
@@ -1023,19 +958,15 @@ function stripEscapingSymlinks(destRoot: string, sourceRoot: string): string[] {
         try {
           escapes = !within(fs.realpathSync(full));
         } catch {
-          // Dangling / unresolvable symlink — treat as escaping and drop it.
           escapes = true;
         }
         if (escapes) {
           try {
             fs.rmSync(full, { force: true });
             removed.push(path.relative(destRoot, full) || entry.name);
-          } catch { /* best effort */ }
+          } catch {  }
         }
       } else if (entry.isDirectory()) {
-        // Do not descend into symlinked dirs — isDirectory() is false for a
-        // symlink even when it points at a directory, so this only recurses
-        // into real subdirectories, keeping the walk inside destRoot.
         walk(full);
       }
     }
@@ -1044,7 +975,6 @@ function stripEscapingSymlinks(destRoot: string, sourceRoot: string): string[] {
   return removed;
 }
 
-// ─── Goose plugins (Open Plugins under .agents/plugins/) ─────────────────────
 
 /** Goose auto-discovers Open Plugins at $HOME/.agents/plugins/<name>/; under version isolation HOME
  * is the version home. This is a full directory copy, not a marketplace. */
@@ -1082,7 +1012,6 @@ export function removeGoosePlugin(pluginName: string, versionHome: string): bool
   return true;
 }
 
-// ─── Hermes plugins (flat ~/.hermes/plugins/ + config.yaml enable toggle) ─────
 
 /** Hermes loads plugins from a flat $HOME/.hermes/plugins/<name>/ with plugin.yaml, not the Claude
  * marketplace layout. A plugin loads only once listed in `plugins.enabled` in config.yaml;
@@ -1133,7 +1062,7 @@ export function setHermesPluginEnabled(pluginName: string, versionHome: string, 
   } else if (!enabled && has) {
     plugins.enabled = current.filter((n) => n !== pluginName);
   } else {
-    return; // desired state already holds — no rewrite
+    return;
   }
 
   fs.mkdirSync(path.dirname(configPath), { recursive: true });
@@ -1178,12 +1107,10 @@ export function removeHermesPlugin(pluginName: string, versionHome: string): boo
   const destRoot = path.join(hermesPluginsDir(versionHome), pluginName);
   const existed = fs.existsSync(destRoot);
   if (existed) fs.rmSync(destRoot, { recursive: true, force: true });
-  // Always drop it from the enabled allowlist, even if the dir was already gone.
   setHermesPluginEnabled(pluginName, versionHome, false);
   return existed;
 }
 
-// ─── Sync status ──────────────────────────────────────────────────────────────
 
 /** True when the plugin is at the native marketplace install path; legacy dual-dash entries count as
  * stale and are migrated on the next sync. */
@@ -1204,15 +1131,12 @@ export function isPluginSynced(
   }
   const spec = marketplaceSpecForName(plugin.marketplace);
   if (!isInstalledInMarketplace(plugin.name, spec, agent, versionHome)) return false;
-  // Droid additionally requires its installed_plugins.json registry entry —
-  // without it the marketplace copy is invisible to `droid plugin list`.
   if (agent === 'droid') {
     return isDroidPluginInstalled(plugin.name, marketplaceNameFor(spec), agent, versionHome);
   }
   return true;
 }
 
-// ─── Removal ─────────────────────────────────────────────────────────────────
 
 /** Remove a plugin from an agent version's home (inverse of syncPluginToVersion); works even if the
  * source no longer exists. */
@@ -1240,7 +1164,6 @@ export function removePluginFromVersion(
     mcp: 0,
   };
 
-  // OpenCode: remove TS/JS modules from ~/.config/opencode/plugins/.
   if (agent === 'opencode') {
     if (removeOpenCodePlugin(pluginName, versionHome)) {
       result.skills.push(pluginName);
@@ -1248,7 +1171,6 @@ export function removePluginFromVersion(
     return result;
   }
 
-  // Goose: remove Open Plugin directory from versionHome/.agents/plugins/.
   if (agent === 'goose') {
     if (removeGoosePlugin(pluginName, versionHome)) {
       result.skills.push(pluginName);
@@ -1256,7 +1178,6 @@ export function removePluginFromVersion(
     return result;
   }
 
-  // Hermes: remove the flat plugin dir and drop it from config.yaml plugins.enabled.
   if (agent === 'hermes') {
     if (removeHermesPlugin(pluginName, versionHome)) {
       result.skills.push(pluginName);
@@ -1264,8 +1185,6 @@ export function removePluginFromVersion(
     return result;
   }
 
-  // 1. Remove the plugin from every marketplace it's installed under. A name can
-  //    appear in more than one (collision across repos), so we sweep them all.
   let removedAny = false;
   for (const name of listVersionMarketplaceNames(agent, versionHome)) {
     const spec = marketplaceSpecForName(name);
@@ -1280,11 +1199,8 @@ export function removePluginFromVersion(
       unregisterCopilotInstalledPlugin(pluginName, name, agent, versionHome);
     }
 
-    // Refresh marketplace.json so it reflects what's left under plugins/.
     syncMarketplaceManifest(spec, agent, versionHome);
 
-    // If we just removed the last plugin, drop the marketplace dir and the
-    // known_marketplaces.json entry too.
     if (marketplaceIsEmpty(name, agent, versionHome)) {
       removeEmptyMarketplaceDir(name, agent, versionHome);
       unregisterMarketplace(name, agent, versionHome);
@@ -1294,7 +1210,6 @@ export function removePluginFromVersion(
     result.skills.push(pluginName);
   }
 
-  // 4. Strip any legacy dual-dash entries from prior agents-cli versions.
   cleanLegacyFlatLayout(pluginName, pluginRoot, agent, versionHome, result);
 
   return result;
@@ -1319,7 +1234,7 @@ function cleanLegacyFlatLayout(
       try {
         fs.rmSync(path.join(skillsDir, entry.name), { recursive: true, force: true });
         result.skills.push(entry.name);
-      } catch { /* skip */ }
+      } catch {  }
     }
   }
 
@@ -1331,7 +1246,7 @@ function cleanLegacyFlatLayout(
         try {
           fs.unlinkSync(path.join(commandsDir, entry.name));
           result.commands.push(entry.name);
-        } catch { /* skip */ }
+        } catch {  }
       }
     }
   }
@@ -1343,7 +1258,7 @@ function cleanLegacyFlatLayout(
       try {
         fs.unlinkSync(path.join(agentsDir, entry.name));
         result.agentDefs.push(entry.name);
-      } catch { /* skip */ }
+      } catch {  }
     }
   }
 
@@ -1352,7 +1267,7 @@ function cleanLegacyFlatLayout(
     try {
       fs.rmSync(binDir, { recursive: true, force: true });
       result.bin.push(binDir);
-    } catch { /* skip */ }
+    } catch {  }
   }
 
   const settingsPath = path.join(agentRoot, 'settings.json');
@@ -1430,21 +1345,17 @@ function cleanLegacyFlatLayout(
   }
 
   if (changed) {
-    try { fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf-8'); } catch { /* ignore */ }
+    try { fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf-8'); } catch {  }
   }
 }
 
-// ─── Orphan cleanup ───────────────────────────────────────────────────────────
 
 /** The active plugin set: bare names (legacy callers), or discovered plugins carrying marketplace
  * provenance for per-marketplace orphan detection (PHNX-2618). */
 export type ActivePluginsInput = Set<string> | Array<{ name: string; marketplace?: string }>;
 
 interface ActivePluginIndex {
-  /** Every active plugin name across all marketplaces. */
   names: Set<string>;
-  /** `${marketplace} ${name}` for each active plugin, or null when the
-   * caller passed bare names (marketplace-aware detection disabled). */
   pairs: Set<string> | null;
 }
 
@@ -1458,9 +1369,6 @@ function indexActivePlugins(input: ActivePluginsInput): ActivePluginIndex {
   const pairs = new Set<string>();
   for (const p of input) {
     names.add(p.name);
-    // A discovered plugin always carries provenance; the type allows undefined,
-    // so mirror discovery's own default (a marketplace-less plugin is the user
-    // "agents-cli" marketplace — see discoverPlugins / buildDiscoveredPlugin).
     pairs.add(pairKey(p.marketplace ?? MARKETPLACE_NAME, p.name));
   }
   return { names, pairs };
@@ -1509,7 +1417,6 @@ export function cleanOrphanedPluginSkills(
   const cwd = process.cwd();
   const removed: string[] = [];
 
-  // 1. Walk every marketplace's install dir and trash entries no longer active.
   for (const name of listVersionMarketplaceNames(agent, versionHome)) {
     const spec = marketplaceSpecForName(name);
     const mktPluginsDir = path.join(marketplaceRoot(name, agent, versionHome), 'plugins');
@@ -1533,9 +1440,8 @@ export function cleanOrphanedPluginSkills(
         }
         removed.push(entry.name);
         trashedHere = true;
-      } catch { /* skip on error */ }
+      } catch {  }
     }
-    // Keep manifest in sync with on-disk state and drop the marketplace if empty.
     if (trashedHere) {
       syncMarketplaceManifest(spec, agent, versionHome);
       if (marketplaceIsEmpty(name, agent, versionHome)) {
@@ -1545,7 +1451,6 @@ export function cleanOrphanedPluginSkills(
     }
   }
 
-  // 2. Sweep legacy dual-dash skills directories from older agents-cli versions.
   const skillsDir = path.join(versionHome, agentConfigDirName(agent), 'skills');
   if (fs.existsSync(skillsDir)) {
     for (const entry of fs.readdirSync(skillsDir, { withFileTypes: true })) {
@@ -1561,14 +1466,13 @@ export function cleanOrphanedPluginSkills(
         fs.mkdirSync(trashDir, { recursive: true, mode: 0o700 });
         fs.renameSync(path.join(skillsDir, entry.name), trashDest);
         removed.push(entry.name);
-      } catch { /* skip on error */ }
+      } catch {  }
     }
   }
 
   return removed;
 }
 
-// ─── Diff / iteration ─────────────────────────────────────────────────────────
 
 export interface VersionPluginDiff {
   agent: AgentId;
@@ -1593,7 +1497,6 @@ export function diffVersionPlugins(agent: AgentId, version: string): VersionPlug
     }
   }
 
-  // Also surface legacy dual-dash skill dirs as orphans during migration period.
   const skillsDir = path.join(versionHome, agentConfigDirName(agent), 'skills');
   if (fs.existsSync(skillsDir)) {
     for (const entry of fs.readdirSync(skillsDir, { withFileTypes: true })) {
@@ -1648,11 +1551,9 @@ export function removePluginSkillFromVersion(
   return { success: true };
 }
 
-// ─── Install / Update ─────────────────────────────────────────────────────────
 
 /** Parse an install spec `name@source` or just `source`; source is a git URL or local path. */
 export function parseInstallSpec(spec: string): { name: string | null; source: string } {
-  // Check for name@source form
   const atIdx = spec.indexOf('@');
   if (atIdx > 0) {
     const name = spec.slice(0, atIdx);
@@ -1667,7 +1568,6 @@ export function parseInstallSpec(spec: string): { name: string | null; source: s
 export async function installPlugin(spec: string): Promise<{ name: string; root: string; isNew: boolean; capabilities: PluginCapabilities }> {
   const { name: specName, source } = parseInstallSpec(spec);
 
-  // Resolve local path (handle ~)
   const isLocalPath = source.startsWith('/') || source.startsWith('./') || source.startsWith('../') || source.startsWith('~')
     || (IS_WINDOWS && isWindowsAbsolutePath(source));
   const resolvedSource = isLocalPath
@@ -1677,7 +1577,6 @@ export async function installPlugin(spec: string): Promise<{ name: string; root:
   const pluginsDir = getPluginsDir();
   fs.mkdirSync(pluginsDir, { recursive: true });
 
-  // If local path, load manifest to get the name
   let targetName = specName;
   if (!targetName) {
     if (isLocalPath) {
@@ -1685,7 +1584,6 @@ export async function installPlugin(spec: string): Promise<{ name: string; root:
       if (!manifest) throw new Error(`No valid plugin.json found at ${resolvedSource}`);
       targetName = manifest.name;
     } else {
-      // Derive from git URL: last path segment without .git
       targetName = path.basename(resolvedSource).replace(/\.git$/, '');
     }
   }
@@ -1698,14 +1596,11 @@ export async function installPlugin(spec: string): Promise<{ name: string; root:
   const isNew = !fs.existsSync(targetRoot);
 
   if (isLocalPath) {
-    // Copy local directory
     if (fs.existsSync(targetRoot)) {
       fs.rmSync(targetRoot, { recursive: true, force: true });
     }
     fs.cpSync(resolvedSource, targetRoot, { recursive: true });
   } else {
-    // Git clone. Validate the transport (blocks ext::/file:///http:///leading-"-")
-    // and pass "--" so the source can never be parsed as a git option.
     assertSafeGitTransport(resolvedSource);
     if (fs.existsSync(targetRoot)) {
       fs.rmSync(targetRoot, { recursive: true, force: true });
@@ -1715,7 +1610,6 @@ export async function installPlugin(spec: string): Promise<{ name: string; root:
     });
   }
 
-  // Validate manifest
   const manifest = loadPluginManifest(targetRoot);
   if (!manifest) {
     fs.rmSync(targetRoot, { recursive: true, force: true });
@@ -1735,16 +1629,12 @@ export async function installPlugin(spec: string): Promise<{ name: string; root:
   return { name: manifest.name, root: targetRoot, isNew, capabilities };
 }
 
-/** Parsed `.source` provenance written by install/update. `version` is the
- *  upstream manifest version captured at the last pull (absent on pre-existing
- *  installs from before baseline tracking). */
 export interface PluginSourceInfo {
   source: string;
   isGit: boolean;
   version?: string;
 }
 
-/** Read a plugin's `.source` provenance, or null when absent/unreadable. */
 export function readPluginSourceInfo(root: string): PluginSourceInfo | null {
   const f = path.join(root, SOURCE_FILE);
   if (!fs.existsSync(f)) return null;
@@ -1785,11 +1675,8 @@ export async function updatePlugin(
 ): Promise<{
   success: boolean;
   error?: string;
-  /** True when the update was refused because it introduced new exec surfaces. */
   blockedByExecSurfaces?: boolean;
-  /** Labels of exec surfaces newly introduced by this update, if any. */
   newExecSurfaces?: string[];
-  /** Whether the applied revision carries executable surfaces (for the caller's re-sync). */
   hasExecSurfaces?: boolean;
 }> {
   const plugin = getPlugin(name);
@@ -1809,25 +1696,19 @@ export async function updatePlugin(
     return { success: false, error: `Could not read source info for '${name}'` };
   }
 
-  // Baseline: what the live (already-trusted) revision ships today.
   const before = inspectPluginCapabilities(plugin.root);
 
-  // Quarantine dir lives beside plugin.root (same filesystem) so the final
-  // apply can be a rename. The dot-prefix keeps it out of plugin discovery.
   const quarantine = path.join(
     path.dirname(plugin.root),
     `.${path.basename(plugin.root)}.update-quarantine`,
   );
   const cleanupQuarantine = () => {
-    try { fs.rmSync(quarantine, { recursive: true, force: true }); } catch { /* best effort */ }
+    try { fs.rmSync(quarantine, { recursive: true, force: true }); } catch {  }
   };
   cleanupQuarantine();
 
   try {
-    // 1. Fetch the incoming revision into quarantine — never touch plugin.root yet.
     if (sourceInfo.isGit) {
-      // Copy the working checkout (with its .git) and fast-forward the copy, so a
-      // hostile upstream diff lands in the quarantine, not the live tree.
       fs.cpSync(plugin.root, quarantine, { recursive: true });
       execFileSync('git', ['-C', quarantine, 'pull', '--ff-only'], { stdio: 'pipe' });
     } else {
@@ -1839,12 +1720,9 @@ export async function updatePlugin(
       fs.cpSync(resolvedSource, quarantine, { recursive: true });
     }
 
-    // 2. Diff capabilities of the incoming revision against the baseline.
     const after = inspectPluginCapabilities(quarantine);
     const newSurfaces = newExecSurfaceLabels(before, after);
 
-    // 3. Refuse a surface-introducing update without renewed consent. The
-    //    last-good content stays in place untouched.
     if (newSurfaces.length > 0 && options.allowExecSurfaces !== true) {
       cleanupQuarantine();
       return {
@@ -1857,8 +1735,6 @@ export async function updatePlugin(
       };
     }
 
-    // 4. Apply: swap the quarantined revision into plugin.root, preserving the
-    //    user config and re-stamping .source.
     const userConfigPath = path.join(plugin.root, USER_CONFIG_FILE);
     const userConfigBackup = fs.existsSync(userConfigPath)
       ? fs.readFileSync(userConfigPath, 'utf-8')
@@ -1869,8 +1745,6 @@ export async function updatePlugin(
       fs.writeFileSync(userConfigPath, userConfigBackup, 'utf-8');
     }
 
-    // Re-stamp .source with the freshly pulled manifest version so the baseline
-    // tracks what's now on disk (keeps the heal "unmodified?" check honest).
     const freshVersion = loadPluginManifest(plugin.root)?.version;
     fs.writeFileSync(
       path.join(plugin.root, SOURCE_FILE),

@@ -10,7 +10,6 @@ const stub = (name: string): ChannelProvider => ({
   },
 });
 
-// Providers used by these cases.
 registerChannelProvider(stub('telegram'));
 registerChannelProvider(stub('openclaw-telegram'));
 registerChannelProvider(stub('slack'));

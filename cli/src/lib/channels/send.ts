@@ -8,7 +8,6 @@ import type { SendResult } from './registry.js';
 import { sendToOwner } from '../notify.js';
 import type { SinkMessageFormat } from '../sink-format.js';
 
-/** Normalized delivery request after CLI/config resolution. */
 interface SendEnvelope {
   text: string;
   channel: string;
@@ -24,17 +23,13 @@ export interface ResolveSendInput {
   /** Body text. Prefer `--text`; positional `[text]` is accepted for compat when `--text` is
    * omitted. */
   text?: string;
-  /** Positional `[text]` from commander (legacy). */
   positionalText?: string;
   /** Recipient: a channel-specific id, or the alias `owner` which expands to
    * `notify.owner.{channel,to}`. */
   to?: string;
-  /** Provider/channel name. Required unless `to` is `owner` (or ownerMode). */
   channel?: string;
   thread?: string;
-  /** Local file paths. */
   attachments?: string[];
-  /** Links / remote media refs — appended to the body so every provider sees them. */
   urls?: string[];
   from?: string;
   dryRun?: boolean;
@@ -49,12 +44,10 @@ type ResolveSendResult =
 
 const OWNER_ALIAS = 'owner';
 
-/** True when the destination token means “the configured owner”. */
 export function isOwnerAlias(to: string | undefined): boolean {
   return (to ?? '').trim().toLowerCase() === OWNER_ALIAS;
 }
 
-/** Compose body + optional URL lines (skip urls already present in the body). */
 export function composeSendText(text: string, urls?: string[]): string {
   const body = text.trim();
   const extra = (urls ?? [])
@@ -95,8 +88,6 @@ export function resolveSendEnvelope(input: ResolveSendInput, meta: Meta): Resolv
     };
   }
 
-  // Owner defaults fill only missing fields (and expand the bare "owner" alias).
-  // humans.yaml is the canonical source. Explicit --channel/--to always win.
   let channel = (input.channel ?? '').trim();
   let to = (input.to ?? '').trim();
   const usedOwnerAlias = isOwnerAlias(to);

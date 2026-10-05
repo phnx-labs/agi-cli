@@ -4,7 +4,6 @@
 import type { AgentId, BudgetConfig } from '../types.js';
 import { actualCost } from '../pricing/index.js';
 
-/** A parsed usage event from any agent's stream (fields match session/parse). */
 export interface UsageEvent {
   agent?: AgentId | string;
   model?: string;
@@ -21,42 +20,27 @@ export interface LiveCaps {
   perRun?: number;
   perDay?: number;
   perProject?: number;
-  /** Per-agent daily caps. Each agent's running spend is checked against its own cap. */
   perAgent?: Partial<Record<string, number>>;
-  /** Day spend already on the ledger before this run (cross-vendor). */
   priorDaySpend?: number;
-  /** Project spend already on the ledger before this run (cross-vendor). */
   priorProjectSpend?: number;
-  /** Per-agent day spend already on the ledger before this run, keyed by agent. */
   priorAgentDaySpend?: Partial<Record<string, number>>;
 }
 
-/** Which cap tripped, and the spend figures at the moment of the breach. */
 export interface BreachInfo {
   cap: 'per_run' | 'per_day' | 'per_project' | 'per_agent';
-  /** The configured limit that was crossed (USD). */
   limit: number;
-  /** The spend that crossed it (USD). */
   spend: number;
-  /** Agent attributed to the breach (only meaningful for per_agent). */
   agent?: string;
-  /** This run's accumulated spend so far (USD). */
   runSpend: number;
 }
 
-/** Public watcher surface. `feedUsage` is idempotent after a breach (no double-fire). */
 export interface LiveSpendWatcher {
-  /** Feed one parsed usage event; accrues cost and may fire onBreach. */
   feedUsage(event: UsageEvent): void;
-  /** Total USD this run has accumulated across all fed events. */
   runSpend(): number;
-  /** True once a cap has been breached. */
   breached(): boolean;
-  /** Stop accepting events / release references. Idempotent. */
   dispose(): void;
 }
 
-/** Convert a resolved BudgetConfig + prior ledger spend into the caps the watcher needs. */
 export function capsFromConfig(
   cfg: BudgetConfig,
   prior?: {
@@ -85,7 +69,7 @@ export function makeLiveSpendWatcher(args: {
 }): LiveSpendWatcher {
   const { caps, onBreach } = args;
   let run = 0;
-  // Cross-vendor accumulators, seeded with pre-run ledger spend.
+  // Persisted ledger spend seeds shared day/project/agent caps; only run spend starts at zero.
   let day = caps.priorDaySpend ?? 0;
   let project = caps.priorProjectSpend ?? 0;
   const agentDay: Record<string, number> = {};
@@ -130,6 +114,7 @@ export function makeLiveSpendWatcher(args: {
       project += usd;
       if (agent) agentDay[agent] = (agentDay[agent] ?? 0) + usd;
 
+      // Keep accounting after the first breach, but invoke the destructive callback only once.
       if (didBreach) return;
       const breach = checkBreach(agent);
       if (breach) {
@@ -154,6 +139,7 @@ export function extractUsageEvents(
   fallbackModel?: string,
   fallbackAgent?: string,
 ): { events: UsageEvent[]; rest: string } {
+  // stdout chunks may split a JSON record; retain the incomplete final line for the next feed.
   const combined = pending + chunk;
   const lines = combined.split('\n');
   const rest = lines.pop() ?? '';
@@ -179,7 +165,6 @@ function usageFromObject(obj: any, fallbackModel?: string, fallbackAgent?: strin
   // (src/lib/session/parse.ts) reads only `message.usage`; skip result lines for usage.
   if (obj?.type === 'result') return null;
 
-  // Claude stream-json assistant turn.
   const mu = obj?.message?.usage;
   if (mu && (typeof mu.input_tokens === 'number' || typeof mu.output_tokens === 'number')) {
     return {
@@ -191,9 +176,6 @@ function usageFromObject(obj: any, fallbackModel?: string, fallbackAgent?: strin
       cacheCreationTokens: mu.cache_creation_input_tokens,
     };
   }
-  // Flatter usage.record / usage shape (Codex / `usage.record`). The result-line
-  // guard above already excludes Claude's cumulative result usage, so this only
-  // matches genuine per-event usage records.
   const u = obj?.usage;
   if (u && (typeof u.input_tokens === 'number' || typeof u.output === 'number' || typeof u.output_tokens === 'number')) {
     return {

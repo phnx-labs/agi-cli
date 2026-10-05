@@ -13,7 +13,6 @@ import { getPluginsDir, getEnabledExtraRepos, getProjectPluginsDir, getSystemPlu
 export const MARKETPLACE_NAME = 'agents-cli';
 export const SYSTEM_MARKETPLACE_NAME = 'agents-system';
 
-/** Marketplace name for <cwd>/.agents/plugins/*. */
 export const PROJECT_MARKETPLACE_NAME = 'agents-project';
 
 interface KnownMarketplaceEntry {
@@ -77,26 +76,23 @@ interface MarketplaceManifest {
   plugins: MarketplacePluginEntry[];
 }
 
-/** Result of synthesizing + registering one marketplace via syncAllMarketplaces. */
 export interface SyncAllResult {
   spec: MarketplaceSpec;
   name: string;
   plugins: number;
 }
 
-// ─── Naming policy (single source of truth) ──────────────────────────────────
 
 /** Map a MarketplaceSpec to its catalog name. The only place that encodes the repo to name policy. */
 export function marketplaceNameFor(spec: MarketplaceSpec): string {
   switch (spec.kind) {
-    case 'user':    return MARKETPLACE_NAME;          // "agents-cli"
-    case 'extra':   return `agents-${spec.alias}`;    // e.g. "agents-extras"
-    case 'project': return PROJECT_MARKETPLACE_NAME;  // "agents-project"
-    case 'system':  return SYSTEM_MARKETPLACE_NAME;   // "agents-system"
+    case 'user':    return MARKETPLACE_NAME;
+    case 'extra':   return `agents-${spec.alias}`;
+    case 'project': return PROJECT_MARKETPLACE_NAME;
+    case 'system':  return SYSTEM_MARKETPLACE_NAME;
   }
 }
 
-/** Resolve a spec-or-name argument to the bare marketplace name string. */
 function nameOf(specOrName: MarketplaceSpec | string): string {
   return typeof specOrName === 'string' ? specOrName : marketplaceNameFor(specOrName);
 }
@@ -110,7 +106,6 @@ function descriptionFor(spec: MarketplaceSpec): string {
   }
 }
 
-// ─── Source-side discovery ────────────────────────────────────────────────────
 
 /** Discover every DotAgents repo contributing plugins, in precedence order: user, enabled extras,
  * then the project repo if <cwd>/.agents/plugins/ exists. Source-side only; no agent or version
@@ -127,14 +122,12 @@ export function discoverMarketplaces(opts: { cwd?: string } = {}): DiscoveredMar
     out.push({ spec, name: marketplaceNameFor(spec), pluginsRoot: systemRoot, description: descriptionFor(spec) });
   }
 
-  // User repo — always the canonical "agents-cli" marketplace.
   const userRoot = getPluginsDir();
   if (dirExists(userRoot)) {
     const spec: MarketplaceSpec = { kind: 'user' };
     out.push({ spec, name: marketplaceNameFor(spec), pluginsRoot: userRoot, description: descriptionFor(spec) });
   }
 
-  // Extra repos — peer ~/.agents-<alias>/ clones (and user-owned path:-repos).
   for (const extra of getEnabledExtraRepos()) {
     const pluginsRoot = path.join(extra.dir, 'plugins');
     if (!dirExists(pluginsRoot)) continue;
@@ -142,7 +135,6 @@ export function discoverMarketplaces(opts: { cwd?: string } = {}): DiscoveredMar
     out.push({ spec, name: marketplaceNameFor(spec), pluginsRoot, description: descriptionFor(spec) });
   }
 
-  // Project repo — <cwd>/.agents/plugins/.
   const projectRoot = getProjectPluginsDir(opts.cwd ?? process.cwd());
   if (projectRoot && dirExists(projectRoot)) {
     const spec: MarketplaceSpec = { kind: 'project', root: projectRoot };
@@ -160,11 +152,8 @@ function dirExists(p: string): boolean {
   }
 }
 
-// ─── Per-version paths ────────────────────────────────────────────────────────
 
 function pluginsRootForVersion(agent: AgentId, versionHome: string): string {
-  // Muse Code keeps its plugin store under XDG data (`~/.local/share/muse/plugins`),
-  // not under the config dir. Under HOME isolation the version home is $HOME.
   if (agent === 'muse') {
     return path.join(versionHome, '.local', 'share', 'muse', 'plugins');
   }
@@ -195,7 +184,6 @@ function settingsPath(agent: AgentId, versionHome: string): string {
   return path.join(versionHome, agentConfigDirName(agent), 'settings.json');
 }
 
-// ─── Copy plugin source into a marketplace ────────────────────────────────────
 
 /** Copy plugin source into the marketplace install dir (a per-version snapshot). Symlinks pointing
  * OUTSIDE the plugin root are dropped: copying them pulled gigabytes of node_modules and assets
@@ -206,6 +194,7 @@ export function copyPluginToMarketplace(
   agent: AgentId,
   versionHome: string
 ): string {
+  // Preserve internal links, but never copy a symlink that escapes the plugin source root.
   const dest = pluginInstallDir(plugin, spec, agent, versionHome);
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   if (fs.existsSync(dest)) {
@@ -232,8 +221,6 @@ export function copyPluginToMarketplace(
         skipped.push(path.relative(plugin.root, src) || path.basename(src));
         return false;
       } catch {
-        // Dangling symlink or stat failure — drop it; it can't be useful in
-        // the marketplace and would error the consumer's walk anyway.
         skipped.push(path.relative(plugin.root, src) || path.basename(src));
         return false;
       }
@@ -251,7 +238,6 @@ export function copyPluginToMarketplace(
   return dest;
 }
 
-// ─── Manifest validation ─────────────────────────────────────────────────────
 
 /** Claude Code requires skills/commands/agents path fields to start with "./"; bare names make it
  * reject the ENTIRE plugin, visible only in its /plugin Errors tab. Returns one warning per
@@ -299,7 +285,6 @@ export function validateClaudePluginManifest(manifest: unknown): string[] {
  * overloads as its own AgentId[] targeting list. */
 const REPAIRABLE_PATH_FIELDS = ['skills', 'commands'] as const;
 
-/** True when a manifest field holds bare-name entries Claude Code rejects. */
 function fieldHasBareEntries(value: unknown): boolean {
   if (value === undefined || value === null) return false;
   const entries = Array.isArray(value) ? value : [value];
@@ -326,7 +311,7 @@ export function repairPluginManifestFile(
   try {
     manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
   } catch {
-    return []; // unparseable manifest is a different failure; don't touch it.
+    return [];
   }
   const dropped = repairableManifestFields(manifest);
   if (dropped.length === 0 || opts.dryRun) return dropped;
@@ -335,7 +320,6 @@ export function repairPluginManifestFile(
   return dropped;
 }
 
-// ─── Catalog synthesis ──────────────────────────────────────────────────────
 
 /** Re-synthesize <marketplace>/.claude-plugin/marketplace.json from installed plugins. Run after
  * every add or remove. Returns the manifest, or null when there is no plugins dir yet. */
@@ -348,8 +332,6 @@ export function syncMarketplaceManifest(spec: MarketplaceSpec, agent: AgentId, v
   const entries: MarketplacePluginEntry[] = [];
   for (const entry of fs.readdirSync(pluginsDir, { withFileTypes: true })) {
     if (entry.name.startsWith('.')) continue;
-    // Follow symlinks: Dirent.isDirectory() is false for a symlink even when the
-    // target is a directory. statSync follows the link.
     const entryPath = path.join(pluginsDir, entry.name);
     let isDir = entry.isDirectory();
     if (!isDir && entry.isSymbolicLink()) {
@@ -368,9 +350,6 @@ export function syncMarketplaceManifest(spec: MarketplaceSpec, agent: AgentId, v
     }
 
     for (const warning of validateClaudePluginManifest(manifest)) {
-      // Reference the plugin by name, not the marketplace-copy path: that copy is
-      // regenerated from source on every sync, so editing it gets stomped. The fix
-      // belongs in the plugin's SOURCE .claude-plugin/plugin.json.
       process.stderr.write(
         `agents-cli: plugin '${manifest.name ?? entry.name}' has a Claude-invalid manifest — ${warning}\n`
       );
@@ -399,11 +378,11 @@ export function syncMarketplaceManifest(spec: MarketplaceSpec, agent: AgentId, v
   return manifest;
 }
 
-// ─── Registration in known_marketplaces.json ──────────────────────────────────
 
 /** Register a marketplace in known_marketplaces.json so Claude Code discovers it. Idempotent
  * (refreshes lastUpdated); other entries are untouched. */
 export function registerMarketplace(spec: MarketplaceSpec, agent: AgentId, versionHome: string): void {
+  // Native marketplace registries are harness-owned records; update only our named entry.
   const name = marketplaceNameFor(spec);
   const root = marketplaceRoot(spec, agent, versionHome);
 
@@ -440,7 +419,6 @@ export function registerMarketplace(spec: MarketplaceSpec, agent: AgentId, versi
   fs.writeFileSync(knownPath, JSON.stringify(known, null, 2) + '\n', 'utf-8');
 }
 
-// ─── Droid installed-plugins registry ─────────────────────────────────────────
 
 function installedPluginsPath(agent: AgentId, versionHome: string): string {
   return path.join(pluginsRootForVersion(agent, versionHome), 'installed_plugins.json');
@@ -454,7 +432,7 @@ function readInstalledPlugins(agent: AgentId, versionHome: string): DroidInstall
       if (parsed && typeof parsed === 'object' && parsed.plugins && typeof parsed.plugins === 'object') {
         return { schemaVersion: parsed.schemaVersion ?? 1, plugins: parsed.plugins };
       }
-    } catch { /* fall through to fresh registry */ }
+    } catch {  }
   }
   return { schemaVersion: 1, plugins: {} };
 }
@@ -469,6 +447,7 @@ export function registerDroidInstalledPlugin(
   agent: AgentId,
   versionHome: string
 ): void {
+  // Replace our user-scope record while retaining other scopes and unrelated registry keys.
   const registry = readInstalledPlugins(agent, versionHome);
   const key = `${pluginName}@${marketplaceName}`;
   const now = new Date().toISOString();
@@ -492,7 +471,6 @@ export function registerDroidInstalledPlugin(
   fs.writeFileSync(p, JSON.stringify(registry, null, 2) + '\n', 'utf-8');
 }
 
-/** True when Droid's installed_plugins.json carries a user-scope entry for the plugin. */
 export function isDroidPluginInstalled(
   pluginName: string,
   marketplaceName: string,
@@ -527,13 +505,12 @@ export function unregisterDroidInstalledPlugin(
   }
 
   if (Object.keys(registry.plugins).length === 0) {
-    try { fs.unlinkSync(p); } catch { /* ignore */ }
+    try { fs.unlinkSync(p); } catch {  }
     return;
   }
   fs.writeFileSync(p, JSON.stringify(registry, null, 2) + '\n', 'utf-8');
 }
 
-// ─── Copilot marketplace + installed-plugin registry ──────────────────────────
 
 function copilotConfigPath(agent: AgentId, versionHome: string): string {
   return path.join(versionHome, agentConfigDirName(agent), 'config.json');
@@ -545,7 +522,7 @@ function readCopilotSettings(agent: AgentId, versionHome: string): Record<string
     try {
       const parsed = JSON.parse(fs.readFileSync(p, 'utf-8')) as Record<string, unknown>;
       if (parsed && typeof parsed === 'object') return parsed;
-    } catch { /* fall through */ }
+    } catch {  }
   }
   return {};
 }
@@ -556,8 +533,8 @@ function writeCopilotSettings(agent: AgentId, versionHome: string, settings: Rec
   fs.writeFileSync(p, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
 }
 
-/** Register a marketplace in Copilot's settings.json#extraKnownMarketplaces. */
 function registerCopilotMarketplace(name: string, root: string, agent: AgentId, versionHome: string): void {
+  // Copilot stores marketplace ownership in settings; preserve every unrelated setting/key.
   const settings = readCopilotSettings(agent, versionHome);
   const known = (settings.extraKnownMarketplaces && typeof settings.extraKnownMarketplaces === 'object'
     ? settings.extraKnownMarketplaces
@@ -567,7 +544,6 @@ function registerCopilotMarketplace(name: string, root: string, agent: AgentId, 
   writeCopilotSettings(agent, versionHome, settings);
 }
 
-/** Inverse of registerCopilotMarketplace: drop the entry, prune the empty key. */
 function unregisterCopilotMarketplace(name: string, agent: AgentId, versionHome: string): void {
   const p = settingsPath(agent, versionHome);
   if (!fs.existsSync(p)) return;
@@ -583,14 +559,12 @@ function readCopilotConfig(agent: AgentId, versionHome: string): CopilotConfig {
   const p = copilotConfigPath(agent, versionHome);
   if (fs.existsSync(p)) {
     try {
-      // config.json may carry a leading `//` comment banner written by Copilot;
-      // strip line comments before parsing so we never clobber a real config.
       const raw = fs.readFileSync(p, 'utf-8').replace(/^\s*\/\/.*$/gm, '');
       const parsed = JSON.parse(raw) as Partial<CopilotConfig>;
       if (parsed && typeof parsed === 'object') {
         return { ...parsed, installedPlugins: Array.isArray(parsed.installedPlugins) ? parsed.installedPlugins : [] };
       }
-    } catch { /* fall through to fresh config */ }
+    } catch {  }
   }
   return { installedPlugins: [] };
 }
@@ -606,6 +580,7 @@ export function registerCopilotInstalledPlugin(
   agent: AgentId,
   versionHome: string
 ): void {
+  // Replace only the matching marketplace identity and preserve all unrelated installations.
   const config = readCopilotConfig(agent, versionHome);
   const now = new Date().toISOString();
   const prior = config.installedPlugins.find(e => e.name === pluginName && e.marketplace === marketplaceName);
@@ -649,8 +624,6 @@ export function unregisterCopilotInstalledPlugin(
 export function unregisterMarketplace(specOrName: MarketplaceSpec | string, agent: AgentId, versionHome: string): void {
   const name = nameOf(specOrName);
 
-  // Copilot stores registrations in settings.json#extraKnownMarketplaces, not
-  // known_marketplaces.json. Mirror the branch in registerMarketplace.
   if (agent === 'copilot') {
     unregisterCopilotMarketplace(name, agent, versionHome);
     return;
@@ -672,13 +645,12 @@ export function unregisterMarketplace(specOrName: MarketplaceSpec | string, agen
   if (Object.keys(known).length === 0) {
     try {
       fs.unlinkSync(knownPath);
-    } catch { /* ignore */ }
+    } catch {  }
   } else {
     fs.writeFileSync(knownPath, JSON.stringify(known, null, 2) + '\n', 'utf-8');
   }
 }
 
-// ─── Top-level orchestration ──────────────────────────────────────────────────
 
 /** Re-synthesize each marketplace catalog from plugins already copied under the version home and
  * register it. Returns a result per marketplace with plugins. Copying is the caller's job. Empty
@@ -694,7 +666,6 @@ export function syncAllMarketplaces(agent: AgentId, versionHome: string, opts: {
   return results;
 }
 
-// ─── Per-plugin settings ops ──────────────────────────────────────────────────
 
 /** Mark a plugin enabled in <versionHome>/.{agent}/settings.json as
  * enabledPlugins["<plugin>@<marketplace>"]: true, preserving other keys. Trust gating is the
@@ -710,7 +681,6 @@ export function addPluginToSettings(pluginName: string, marketplaceName: string,
     }
   }
 
-  // Muse refuses to start without schema_version: 1.
   if (agent === 'muse' && settings.schema_version === undefined) {
     settings.schema_version = 1;
   }
@@ -727,9 +697,6 @@ export function addPluginToSettings(pluginName: string, marketplaceName: string,
   fs.writeFileSync(sPath, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
 }
 
-/**
- * Remove the enabledPlugins key for this plugin. Inverse of addPluginToSettings.
- */
 export function removePluginFromSettings(pluginName: string, marketplaceName: string, agent: AgentId, versionHome: string): void {
   const sPath = settingsPath(agent, versionHome);
   if (!fs.existsSync(sPath)) return;
@@ -755,7 +722,6 @@ export function removePluginFromSettings(pluginName: string, marketplaceName: st
   fs.writeFileSync(sPath, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
 }
 
-// ─── Marketplace teardown helpers ─────────────────────────────────────────────
 
 /** Remove a plugin's installed marketplace directory. Returns true if it existed and was removed. */
 export function removePluginFromMarketplace(
@@ -770,9 +736,6 @@ export function removePluginFromMarketplace(
   return true;
 }
 
-/**
- * Return true if the marketplace has no plugins left under it.
- */
 export function marketplaceIsEmpty(specOrName: MarketplaceSpec | string, agent: AgentId, versionHome: string): boolean {
   const pluginsDir = path.join(marketplaceRoot(specOrName, agent, versionHome), 'plugins');
   if (!fs.existsSync(pluginsDir)) return true;
@@ -781,18 +744,12 @@ export function marketplaceIsEmpty(specOrName: MarketplaceSpec | string, agent: 
   return remaining.length === 0;
 }
 
-/**
- * Drop the entire marketplace directory. Called after the last plugin removal.
- */
 export function removeEmptyMarketplaceDir(specOrName: MarketplaceSpec | string, agent: AgentId, versionHome: string): void {
   const root = marketplaceRoot(specOrName, agent, versionHome);
   if (!fs.existsSync(root)) return;
   fs.rmSync(root, { recursive: true, force: true });
 }
 
-/**
- * Detect whether a plugin is installed via the native marketplace path.
- */
 export function isInstalledInMarketplace(
   pluginName: string,
   specOrName: MarketplaceSpec | string,

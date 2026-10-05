@@ -20,7 +20,6 @@ function entry(over: Partial<SpendEntry>): SpendEntry {
 
 describe('estimateRunCost', () => {
   it('uses ledger average tokens when history exists (claude-opus-4)', () => {
-    // Two prior runs averaging 1M in / 1M out => $5 + $25 = $30.
     const ledger = [
       entry({ runId: 'a', inputTok: 1_000_000, outputTok: 1_000_000 }),
       entry({ runId: 'b', inputTok: 1_000_000, outputTok: 1_000_000 }),
@@ -34,7 +33,6 @@ describe('estimateRunCost', () => {
   it('falls back to the prompt-char heuristic with no history', () => {
     const est = estimateRunCost({ agent: 'claude', model: 'claude-opus-4', promptChars: 4000, ledger: [] });
     expect(est.basis).toBe('prompt-heuristic');
-    // 4000 chars / 4 = 1000 input tokens; output = 6000. priced > 0.
     expect(est.estInputTokens).toBe(1000);
     expect(est.estOutputTokens).toBe(6000);
     expect(est.estUsd).toBeGreaterThan(0);
@@ -51,10 +49,9 @@ describe('ledgerAverageTokens', () => {
   it('averages per-RUN, not per-entry (multi-entry run counts once)', () => {
     const ledger = [
       entry({ runId: 'a', inputTok: 100 }),
-      entry({ runId: 'a', inputTok: 100 }),  // same run — 200 total
+      entry({ runId: 'a', inputTok: 100 }),
       entry({ runId: 'b', inputTok: 400 }),
     ];
-    // (200 + 400) / 2 runs = 300.
     expect(ledgerAverageTokens('claude', ledger)).toEqual({ input: 300, output: 0 });
   });
 
@@ -76,7 +73,7 @@ describe('enforcePreflight', () => {
   it('WARNS (allows) the same overrun under on_exceed:warn', () => {
     const d = enforcePreflight({ per_run: 5, on_exceed: 'warn' }, state, est(6));
     expect(d.allow).toBe(true);
-    expect(d.blockedCap).toBe('per_run'); // still reported
+    expect(d.blockedCap).toBe('per_run');
   });
 
   it('blocks on projected per_day even when this run alone is small', () => {
@@ -107,7 +104,6 @@ describe('enforcePreflight', () => {
   });
 
   it('a hard block stays a block regardless of require_confirm_over (--yes cannot save it)', () => {
-    // per_run breached AND under confirm threshold — must block, not just confirm.
     const d = enforcePreflight({ per_run: 1, require_confirm_over: 100, on_exceed: 'block' }, state, est(5));
     expect(d.allow).toBe(false);
     expect(d.needsConfirm).toBe(false);
@@ -125,7 +121,6 @@ describe('enforcePreflight', () => {
   });
 
   it('a PRICED $0-ish estimate under caps is allowed without forced confirm', () => {
-    // Sanity: the unpriced guard must not fire for genuinely priced runs.
     const d = enforcePreflight({ per_run: 5, on_exceed: 'block' }, state, est(0.001));
     expect(d.allow).toBe(true);
     expect(d.needsConfirm).toBe(false);
@@ -140,8 +135,8 @@ describe('ledgerStateFor', () => {
     ];
     const s = ledgerStateFor('claude', '/p', ledger);
     expect(s.agent).toBe('claude');
-    expect(s.daySpend).toBeCloseTo(5, 6);      // cross-vendor day total
+    expect(s.daySpend).toBeCloseTo(5, 6);
     expect(s.projectSpend).toBeCloseTo(5, 6);
-    expect(s.agentDaySpend).toBeCloseTo(3, 6); // claude only
+    expect(s.agentDaySpend).toBeCloseTo(3, 6);
   });
 });

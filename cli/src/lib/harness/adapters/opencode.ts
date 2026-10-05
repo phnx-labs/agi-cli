@@ -2,8 +2,6 @@ import * as path from 'path';
 import type { HarnessAdapter } from '../adapter.js';
 import { stripForeignConfigDir, slotAwareConfigEnvBash } from '../adapter.js';
 
-// OpenCode reads plugins/agents/commands from OPENCODE_CONFIG_DIR and auth from
-// $XDG_DATA_HOME/opencode (HARNESS_AUTH.slotEnv). Pin both at the slot / version
 // home so two accounts in one install never share a credential (PHNX-3940 T5).
 export const opencodeAdapter: HarnessAdapter = {
   id: 'opencode',

@@ -6,7 +6,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Pin HOME BEFORE any state.ts import so getHistoryDir() points at a temp dir.
 const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'live-cloud-home-'));
 process.env.HOME = fakeHome;
 fs.mkdirSync(path.join(fakeHome, '.agents'), { recursive: true });
@@ -50,7 +49,6 @@ class StubProvider implements CloudProvider {
   async message(_id: string, _c: string): Promise<void> { throw new Error('message called'); }
 }
 
-/** Build a synthetic SSE stream from a fixed event list. */
 async function* mkStream(events: CloudEvent[]): AsyncIterable<CloudEvent> {
   for (const e of events) yield e;
 }
@@ -65,7 +63,6 @@ async function collect(stream: AsyncIterable<CloudEvent>): Promise<CloudEvent[]>
 
 describe('wrapStreamWithBudgetGate', () => {
   it('returns null when no caps are configured (feature dormant)', () => {
-    // No agents.yaml, no user meta → hasAnyCap = false.
     const provider = new StubProvider();
     const wrapped = wrapStreamWithBudgetGate({
       provider,
@@ -92,7 +89,6 @@ describe('wrapStreamWithBudgetGate', () => {
     });
     expect(wrapped).not.toBeNull();
 
-    // 1M input on claude-opus-4 = $5, well under $100.
     const events: CloudEvent[] = [
       { type: 'text', content: 'hello' },
       { type: 'usage', model: 'claude-opus-4', inputTokens: 1_000_000, outputTokens: 0 },
@@ -105,7 +101,6 @@ describe('wrapStreamWithBudgetGate', () => {
   });
 
   it('cancels the cloud task and emits an error frame on cap breach', async () => {
-    // per_project = $3; one 1M-input Claude turn is $5 → breach.
     fs.writeFileSync(
       path.join(projectDir, 'agents.yaml'),
       'budget:\n  per_project: 3\n  on_exceed: block\n',
@@ -119,9 +114,6 @@ describe('wrapStreamWithBudgetGate', () => {
       cwd: projectDir,
     });
 
-    // Include events AFTER the breaching usage frame — they must NOT come out
-    // downstream. If they did, the renderer would keep printing text after
-    // the task was already cancelled.
     const events: CloudEvent[] = [
       { type: 'text', content: 'hi' },
       { type: 'usage', model: 'claude-opus-4', inputTokens: 1_000_000 },
@@ -130,15 +122,11 @@ describe('wrapStreamWithBudgetGate', () => {
     ];
     const collected = await collect(wrapped!.wrap(mkStream(events)));
 
-    // Cancel called exactly once with the task id we handed the wrapper.
     expect(provider.cancelCalls).toEqual(['task-XYZ']);
     expect(wrapped!.gate.breached()).toBe(true);
     expect(wrapped!.gate.breach()?.cap).toBe('per_project');
 
-    // Downstream sees: pre-breach text, the breaching usage, then the
-    // synthetic error + cancelled status. NO events after the breach.
     expect(collected[0]).toEqual({ type: 'text', content: 'hi' });
-    // Last two frames are the gate's own signals.
     expect(collected[collected.length - 2].type).toBe('error');
     expect(collected[collected.length - 1]).toMatchObject({ type: 'status', status: 'cancelled' });
     expect(collected.some((e) => e.type === 'text' && e.content === 'this-must-not-appear')).toBe(false);
@@ -164,21 +152,16 @@ describe('wrapStreamWithBudgetGate', () => {
     ];
     const collected = await collect(wrapped!.wrap(mkStream(events)));
     expect(provider.cancelCalls).toEqual(['task-oom']);
-    // Even when cancel fails we must still surface the breach + cancelled
-    // status downstream so the CLI exits with a visible reason.
     expect(collected.some((e) => e.type === 'error' && /cancel FAILED/.test(e.message))).toBe(true);
     expect(collected[collected.length - 1]).toMatchObject({ type: 'status', status: 'cancelled' });
   });
 
   it('per_agent cap trips ONLY when the dispatch agent matches', async () => {
-    // per_agent.codex $1 → only codex would breach, not claude.
     fs.writeFileSync(
       path.join(projectDir, 'agents.yaml'),
       'budget:\n  per_agent:\n    codex: 1\n',
     );
     const provider = new StubProvider();
-    // Dispatch registered as agent=claude → $5 of "usage" attributed to
-    // claude does NOT breach the codex cap.
     const wrapped = wrapStreamWithBudgetGate({
       provider,
       taskId: 't',

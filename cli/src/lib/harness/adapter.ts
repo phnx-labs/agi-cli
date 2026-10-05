@@ -10,11 +10,8 @@ import type { ConfiguredDeviceRole } from '../device-config.js';
  * on the accumulating `result` env, as the old per-agent branch did. */
 export interface ExecConfigEnvCtx {
   agent: AgentId;
-  /** The version to pin, pre-resolved by the caller (null = unresolved/not installed). */
   version: string | null;
-  /** That version's home, pre-resolved by the caller (null when version is null). */
   versionHome: string | null;
-  /** resolveInteractive(options) — computed once by the caller. */
   interactive: boolean;
   /** The role marked on THIS machine (worker, personal, desktop), from selfConfiguredDeviceRole().
    * On a headed device (personal/desktop) every run, interactive or headless, must use its native
@@ -26,7 +23,6 @@ export interface ExecConfigEnvCtx {
   resolveClaudeSetupToken: (versionHome: string) => string | null;
 }
 
-/** Context for the shim-script config-env block (mapping A, shims.ts side). */
 export interface ShimConfigEnvCtx {
   /** The config-dir path relative to `$HOME` (e.g. `.claude`, nested `.gemini/antigravity-cli`),
    * derived by the caller from the AGENTS registry. */
@@ -39,7 +35,6 @@ export interface ExecLaunchArgsCtx {
   resolvedMode: Mode;
   interactive: boolean;
   cwd: string;
-  /** Extra writable roots (`--add-dir`) requested for this run, home-expanded. */
   addDirs: string[];
 }
 
@@ -47,7 +42,6 @@ export interface ExecLaunchArgsCtx {
  * token array baked from AGENT_COMMANDS (bakeRoutineArgv), distinct from buildExecCommand's
  * declarative modeFlags, so it is a separate adapter method. */
 export interface RoutineLaunchCtx {
-  /** normalizeMode(config.mode) — the canonicalized mode. */
   mode: Mode;
   config: JobConfig;
   /** exec.ts resolveHeadlessMode, injected to avoid an import cycle (exec.ts imports this
@@ -58,7 +52,6 @@ export interface RoutineLaunchCtx {
 export interface HarnessAdapter {
   id: AgentId;
 
-  // --- Mapping A: config-dir env, two call sites, one source of truth --------
 
   /** Applies this harness's config-dir env pins to the process env for `agents run` (exec.ts
    * buildExecEnv), mutating `result` in place. The caller already stripped CONFIG_DIR_ENV_KEYS,
@@ -69,7 +62,6 @@ export interface HarnessAdapter {
    * omitted (empty) for a harness with no managed config-dir env. */
   shimConfigEnvBash?(ctx: ShimConfigEnvCtx): string;
 
-  // --- Mapping B: launch-arg quirks, exec + shim + routine sites -------------
 
   /** Launch args appended to the shim `exec` line (shims.ts); Codex pins
    * `check_for_update_on_startup=false` and its edit-profile policy args. Empty when none. */

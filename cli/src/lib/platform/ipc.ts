@@ -1,6 +1,3 @@
-/**
- * Local-daemon IPC endpoint, platform-aware.
- */
 import * as crypto from 'crypto';
 
 /** Resolves the address a local daemon listens on: the AF_UNIX path on POSIX; on Windows a named

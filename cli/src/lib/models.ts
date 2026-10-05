@@ -14,7 +14,6 @@ import { stripJsonComments } from './permissions-registry.js';
 import { resolveRunDefaults } from './run-defaults.js';
 import { getModelPricing, type ModelPricing } from './pricing/index.js';
 
-/** Model identifiers per cloud provider (used by Claude's multi-cloud routing). */
 export interface ModelPerCloud {
   firstParty: string;
   bedrock?: string;
@@ -24,39 +23,29 @@ export interface ModelPerCloud {
   mantle?: string | null;
 }
 
-/** A reasoning effort level exposed by an agent's model. */
 export interface ReasoningLevel {
   effort: string;
   description?: string;
 }
 
-/** Metadata for a single model within an agent's catalog. */
 export interface ModelInfo {
   id: string;
   displayName?: string;
   description?: string;
-  /** alias label (e.g. "opus", "sonnet", "haiku") that resolves to this id */
   alias?: string;
-  /** true if this is the agent's default model */
   isDefault?: boolean;
-  /** Per-cloud routing IDs (claude only) */
   perCloud?: ModelPerCloud;
-  /** Reasoning levels (codex; claude exposes via --effort with global levels) */
   reasoningLevels?: ReasoningLevel[];
-  /** Default reasoning level if applicable */
   defaultReasoningLevel?: string;
-  /** Per-token USD pricing when known (from prices.json); absent for subscription/unpriced models. */
   pricing?: ModelPricing;
 }
 
-/** The complete model catalog for a specific (agent, version) pair. */
 export interface ModelCatalog {
   agent: AgentId;
   version: string;
   source: ModelSourceKind;
   sourcePath: string;
   models: ModelInfo[];
-  /** Aliases that the CLI resolves to a canonical id (e.g. { opus: "claude-opus-4-7" } for claude, { flash: "gemini-3-flash-preview" } for gemini) */
   aliases: Record<string, string>;
 }
 
@@ -71,16 +60,13 @@ const CACHE_SCHEMA_VERSION = 4;
  * call. */
 const EMPTY_CATALOG_RETRY_MS = 24 * 60 * 60 * 1000;
 
-/** A single cached model catalog entry keyed by source path and mtime. */
 interface CacheEntry {
   sourcePath: string;
   mtime: number;
   catalog: ModelCatalog;
-  /** When this entry was extracted. Only checked for a 0-model catalog, to bound its retry window. */
   attemptedAt?: number;
 }
 
-/** On-disk shape of the model catalog cache file. */
 interface CacheFile {
   schema: number;
   entries: Record<string, CacheEntry>;
@@ -92,7 +78,6 @@ function cacheKey(agent: AgentId, version: string): string {
   return `${agent}@${version}`;
 }
 
-/** Load the cache file from disk (or return the in-memory copy). */
 function loadCache(): CacheFile {
   if (memoryCache) return memoryCache;
   try {
@@ -100,7 +85,6 @@ function loadCache(): CacheFile {
     if (raw && raw.schema === CACHE_SCHEMA_VERSION && raw.entries) {
       memoryCache = raw as CacheFile;
     } else {
-      // Legacy (pre-schema) or stale-schema cache -- drop it.
       memoryCache = { schema: CACHE_SCHEMA_VERSION, entries: {} };
     }
   } catch {
@@ -109,7 +93,6 @@ function loadCache(): CacheFile {
   return memoryCache!;
 }
 
-/** Persist the in-memory cache to disk. Best-effort; failures are silent. */
 function saveCache(): void {
   if (!memoryCache) return;
   try {
@@ -117,14 +100,11 @@ function saveCache(): void {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(CACHE_PATH, JSON.stringify(memoryCache));
   } catch {
-    /* best-effort */
   }
 }
 
-/** How the model catalog source was obtained. */
 export type ModelSourceKind = 'bundle' | 'binary' | 'cli';
 
-/** Describes the location and extraction strategy for a model catalog source. */
 export interface ModelSource {
   path: string;
   kind: ModelSourceKind;
@@ -142,7 +122,6 @@ export function locateModelSource(
   if (agent === 'claude') {
     const bundle = path.join(versionDir, 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js');
     if (fs.existsSync(bundle)) return { path: bundle, kind: 'bundle' };
-    // 2.1.113+ ships a native Mach-O binary
     const bin = path.join(versionDir, 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe');
     if (fs.existsSync(bin)) return { path: bin, kind: 'binary' };
     return null;
@@ -173,9 +152,6 @@ export function locateModelSource(
   }
 
   if (agent === 'opencode') {
-    // The `opencode` shim under node_modules/.bin dispatches to a platform-
-    // specific native binary. We don't parse the 100MB binary; we let the CLI
-    // produce its own catalog via `opencode models --verbose`.
     const cli = path.join(versionDir, 'node_modules', '.bin', 'opencode');
     if (fs.existsSync(cli)) return { path: cli, kind: 'cli' };
     return null;
@@ -184,15 +160,12 @@ export function locateModelSource(
   if (agent === 'openclaw') {
     const cli = path.join(versionDir, 'node_modules', '.bin', 'openclaw');
     if (fs.existsSync(cli)) return { path: cli, kind: 'cli' };
-    // Fallback: installed outside agents-cli version management (e.g. global npm).
     const pathBin = findOnPath('openclaw');
     if (pathBin) return { path: pathBin, kind: 'cli' };
     return null;
   }
 
   if (agent === 'antigravity') {
-    // The `agy` shim under node_modules/.bin exposes `agy models`. We don't parse
-    // any bundle; the CLI produces its own (display-name-only) catalog.
     const cli = path.join(versionDir, 'node_modules', '.bin', 'agy');
     if (fs.existsSync(cli)) return { path: cli, kind: 'cli' };
     const pathBin = findOnPath('agy');
@@ -209,9 +182,6 @@ export function locateModelSource(
   }
 
   if (agent === 'grok') {
-    // Grok ships a native binary under the version home's `.grok/downloads/`,
-    // not node_modules/.bin. Prefer a real binary over a failed-download stub
-    // (a 99-byte placeholder sometimes left beside a prior good download).
     const preferred = getBinaryPath('grok', version);
     if (isUsableGrokBinary(preferred)) return { path: preferred, kind: 'cli' };
     const downloads = path.join(getVersionHomePath('grok', version), '.grok', 'downloads');
@@ -230,14 +200,11 @@ export function locateModelSource(
         });
       if (candidates[0]) return { path: candidates[0], kind: 'cli' };
     } catch {
-      /* empty downloads */
     }
     return null;
   }
 
   if (agent === 'cursor') {
-    // cursor-agent is installed via curl script, not agents-cli. Version argument
-    // is accepted for API symmetry but ignored -- cursor lives on PATH.
     const pathBin = findOnPath('cursor-agent');
     if (pathBin) return { path: pathBin, kind: 'cli' };
     return null;
@@ -255,7 +222,6 @@ export function locateModelSource(
   return null;
 }
 
-/** Real Grok binaries are ~100MB+; failed-download stubs are tens of bytes. */
 function isUsableGrokBinary(filePath: string): boolean {
   try {
     const st = fs.statSync(filePath);
@@ -265,7 +231,6 @@ function isUsableGrokBinary(filePath: string): boolean {
   }
 }
 
-/** Search PATH for a command and return its absolute path, or null. */
 function findOnPath(command: string): string | null {
   const pathEnv = process.env.PATH || '';
   const exts = process.platform === 'win32' ? (process.env.PATHEXT || '').split(';') : [''];
@@ -276,14 +241,12 @@ function findOnPath(command: string): string | null {
       try {
         if (fs.statSync(full).isFile()) return full;
       } catch {
-        /* not here */
       }
     }
   }
   return null;
 }
 
-/** Map the current Node.js platform/arch pair to a Rust-style target triple. */
 function currentTargetTriple(): string | null {
   switch (`${process.platform}-${process.arch}`) {
     case 'darwin-arm64': return 'aarch64-apple-darwin';
@@ -304,7 +267,6 @@ function extractStrings(filePath: string, minLen = 6): string {
   let run: number[] = [];
   for (let i = 0; i < buf.length; i++) {
     const b = buf[i];
-    // printable ASCII (incl. tab, newline)
     if ((b >= 0x20 && b <= 0x7e) || b === 0x09 || b === 0x0a) {
       run.push(b);
     } else {
@@ -323,6 +285,7 @@ function extractStrings(filePath: string, minLen = 6): string {
  * beside `claude-opus-4-8`), from `.includes()` strings (#1892) and per-cloud values (#2233). A
  * bare id with no sibling is kept; the boundary avoids merging `-4-1` into `-4-10`. */
 export function dropBareLegacyIds(ids: string[]): string[] {
+  // Drop only a dash-boundary prefix with a longer sibling; unrelated IDs remain valid.
   return ids.filter(
     (id) => !ids.some((other) => other !== id && other.startsWith(`${id}-`)),
   );
@@ -362,8 +325,6 @@ function extractClaudeCatalog(text: string): { models: ModelInfo[]; aliases: Rec
   }
 
   const perCloud: Record<string, ModelPerCloud> = {};
-  // The record may carry additional trailing fields (e.g. gateway, eagerInputStreaming)
-  // in newer Claude bundles, so the regex does not anchor at the closing brace.
   const perCloudRe = /\{firstParty:"(claude-[^"]+)",bedrock:"([^"]+)"(?:,vertex:"([^"]+)")?(?:,foundry:"([^"]+)")?(?:,anthropicAws:"([^"]+)")?(?:,mantle:(?:null|"([^"]*)"))?/g;
   let m: RegExpExecArray | null;
   while ((m = perCloudRe.exec(text)) !== null) {
@@ -395,8 +356,6 @@ function extractClaudeCatalog(text: string): { models: ModelInfo[]; aliases: Rec
         perCloud: perCloud[id],
       }));
 
-  // The structured maps (alias/perCloud/const) are the curated, accurate
-  // supported set. Prefer them.
   let models = build([
     ...Object.values(aliases),
     ...Object.keys(displayNames),
@@ -420,7 +379,6 @@ function extractCodexCatalog(text: string): { models: ModelInfo[]; aliases: Reco
   const models: ModelInfo[] = [];
   const seen = new Set<string>();
 
-  // Anchor on each "slug" then walk forward for the related fields within ~1500 chars
   const slugRe = /"slug":\s*"([^"]+)"/g;
   let m: RegExpExecArray | null;
   while ((m = slugRe.exec(text)) !== null) {
@@ -482,7 +440,6 @@ function extractOpenCodeCatalog(binaryPath: string): { models: ModelInfo[]; alia
     const line = lines[i];
     if (!/^[a-z0-9][a-z0-9.-]*\/[^\s]+$/i.test(line)) continue;
     const fullKey = line;
-    // Find the opening `{` right after this line, collect until matching `}`.
     let start = -1;
     for (let j = i + 1; j < lines.length; j++) {
       if (lines[j] === '{') { start = j; break; }
@@ -504,8 +461,6 @@ function extractOpenCodeCatalog(binaryPath: string): { models: ModelInfo[]; alia
       const obj = JSON.parse(json);
       if (seen.has(fullKey)) continue;
       seen.add(fullKey);
-      // obj.status can be "active" | "deprecated" | "preview" -- surface only
-      // when it isn't the default so the consumer can flag stale models.
       const nonDefaultStatus = obj.status && obj.status !== 'active' ? obj.status : undefined;
       models.push({
         id: fullKey,
@@ -513,12 +468,10 @@ function extractOpenCodeCatalog(binaryPath: string): { models: ModelInfo[]; alia
         description: nonDefaultStatus,
       });
     } catch {
-      /* skip malformed block */
     }
     i = end;
   }
 
-  // Second pass: if --verbose produced nothing, fall back to the plain list.
   if (models.length === 0) {
     try {
       const plain = execFileSync(binaryPath, ['models'], {
@@ -535,7 +488,6 @@ function extractOpenCodeCatalog(binaryPath: string): { models: ModelInfo[]; alia
         models.push({ id });
       }
     } catch {
-      /* leave empty */
     }
   }
 
@@ -557,7 +509,6 @@ function extractCursorCatalog(binaryPath: string): { models: ModelInfo[]; aliase
     return { models: [], aliases: {} };
   }
 
-  // Strip ANSI escape sequences; cursor renders a loading spinner.
   // eslint-disable-next-line no-control-regex
   const plain = stdout.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
   const models: ModelInfo[] = [];
@@ -566,7 +517,6 @@ function extractCursorCatalog(binaryPath: string): { models: ModelInfo[]; aliase
   for (const raw of plain.split('\n')) {
     const line = raw.trim();
     if (!line) continue;
-    // Expect `id - display[  (flag1, flag2, ...)]`
     const m = line.match(/^([A-Za-z0-9][A-Za-z0-9.\-_]*)\s+-\s+(.+)$/);
     if (!m) continue;
     const id = m[1];
@@ -601,8 +551,6 @@ function extractOpenClawCatalog(binaryPath: string): { models: ModelInfo[]; alia
     return { models: [], aliases: {} };
   }
 
-  // OpenClaw prefaces output with a banner line on stderr; stdout should be
-  // pure JSON, but be defensive and skip preface text if any slipped through.
   const firstBrace = stdout.indexOf('{');
   if (firstBrace === -1) return { models: [], aliases: {} };
   let parsed: any;
@@ -640,7 +588,6 @@ function extractAntigravityCatalog(binaryPath: string): { models: ModelInfo[]; a
     return { models: [], aliases: {} };
   }
 
-  // Strip ANSI in case a spinner or color codes slip through.
   // eslint-disable-next-line no-control-regex
   const plain = stdout.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
   const models: ModelInfo[] = [];
@@ -649,17 +596,12 @@ function extractAntigravityCatalog(binaryPath: string): { models: ModelInfo[]; a
   for (const raw of plain.split('\n')) {
     const name = raw.trim();
     if (!name) continue;
-    // Guard against any stray banner/usage lines: real rows look like
-    // "<Vendor> <Model> (<Level>)". Require an alphanumeric start and a
-    // parenthesized suffix, which every observed model row has.
     if (!/^[A-Za-z0-9].*\([^)]+\)\s*$/.test(name)) continue;
     if (seen.has(name)) continue;
     seen.add(name);
     models.push({
       id: name,
       displayName: name,
-      // Antigravity's first listed model is its default (unknown --model values
-      // fall back to it), so flag the first row we accept.
       isDefault: models.length === 0,
     });
   }
@@ -671,7 +613,6 @@ function extractAntigravityCatalog(binaryPath: string): { models: ModelInfo[]; a
  * authoritative; rows may carry `*` and `(default)`. No `--json`; settings live in config.toml, so
  * this catalog is what lets `resolveConfiguredModel` return a cli-default for Grok. */
 export function parseGrokModelsStdout(stdout: string): { models: ModelInfo[]; aliases: Record<string, string> } {
-  // Strip ANSI in case a spinner or color codes slip through.
   // eslint-disable-next-line no-control-regex
   const plain = stdout.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
 
@@ -685,11 +626,9 @@ export function parseGrokModelsStdout(stdout: string): { models: ModelInfo[]; al
   for (const raw of plain.split('\n')) {
     const line = raw.trim();
     if (!line) continue;
-    // Rows: "* grok-4.5 (default)" or "grok-4.5" or "  grok-code-fast-1"
     const m = line.match(/^\*?\s*([A-Za-z0-9][A-Za-z0-9._-]*)(?:\s+\(([^)]*)\))?\s*$/);
     if (!m) continue;
     const id = m[1];
-    // Real model ids are grok-* (or match the Default model: line). Skip banner words.
     if (!/^grok[-_]/i.test(id) && id !== defaultId) continue;
     if (seen.has(id)) continue;
     seen.add(id);
@@ -700,12 +639,10 @@ export function parseGrokModelsStdout(stdout: string): { models: ModelInfo[]; al
     });
   }
 
-  // If Default model was set but did not appear as a row, still surface it.
   if (defaultId && !seen.has(defaultId)) {
     models.unshift({ id: defaultId, isDefault: true });
   }
 
-  // Normalize: exactly one default when we know the Default model: id.
   if (defaultId) {
     for (const model of models) model.isDefault = model.id === defaultId;
   } else if (models.length > 0 && !models.some((model) => model.isDefault)) {
@@ -715,12 +652,8 @@ export function parseGrokModelsStdout(stdout: string): { models: ModelInfo[]; al
   return { models, aliases: {} };
 }
 
-/** Extract Grok's catalog via `grok models` (see parseGrokModelsStdout). */
 function extractGrokCatalog(binaryPath: string): { models: ModelInfo[]; aliases: Record<string, string> } {
   const env = { ...process.env };
-  // Point GROK_HOME at the version home that owns this binary so auth +
-  // models_cache come from the right install, not a host ~/.grok symlink.
-  // binary: <home>/.grok/downloads/grok-<ver>-...
   const downloadsDir = path.dirname(binaryPath);
   if (path.basename(downloadsDir) === 'downloads') {
     env.GROK_HOME = path.dirname(downloadsDir);
@@ -767,7 +700,6 @@ function extractKimiCatalog(binaryPath: string): { models: ModelInfo[]; aliases:
     return { models: [], aliases: {} };
   }
 
-  // Resolve the default model id from the plain listing's "Default model:" line.
   let defaultId: string | null = null;
   try {
     const plain = execFileSync(binaryPath, ['provider', 'list'], {
@@ -779,7 +711,6 @@ function extractKimiCatalog(binaryPath: string): { models: ModelInfo[]; aliases:
     const m = plain.match(/Default model:\s*(\S+)/);
     if (m) defaultId = m[1];
   } catch {
-    /* default flag is best-effort */
   }
 
   const modelsObj = parsed?.models && typeof parsed.models === 'object' ? parsed.models : {};
@@ -868,9 +799,6 @@ export function getModelCatalog(agent: AgentId, version: string): ModelCatalog |
     else if (agent === 'muse') ({ models, aliases } = extractMuseCatalog());
   }
 
-  // Attach per-token pricing where the offline table knows the model, so the
-  // catalog carries $/token for the tier display and budgeting. Subscription /
-  // unknown models keep `pricing` undefined (surfaced as "--", never faked).
   for (const m of models) {
     const p = getModelPricing(m.id);
     if (p) m.pricing = p;
@@ -893,13 +821,9 @@ export function getModelCatalog(agent: AgentId, version: string): ModelCatalog |
   return catalog;
 }
 
-/** The result of resolving a user-supplied model string against the catalog. */
 export interface ResolvedModel {
-  /** The model string to forward to the CLI (canonical id when we can resolve, else passed through unchanged). */
   forwarded: string;
-  /** The canonical id, when we could resolve the input through the alias map. */
   canonical?: string;
-  /** Warning to surface to the user (e.g. "model X not in known catalog for v Y"). */
   warning?: string;
 }
 
@@ -922,12 +846,12 @@ export function resolveModel(agent: AgentId, version: string, requested: string)
     return { forwarded: requested, canonical: requested };
   }
 
-  // Strip [1m] context-window suffix before checking (Claude appends at runtime)
   const stripped = requested.replace(/\[[^\]]+\]$/, '');
   if (knownIds.has(stripped)) {
     return { forwarded: requested, canonical: requested };
   }
 
+  // Catalogs are advisory: new provider model IDs must pass through unchanged.
   const suggestions = pickSuggestions(requested, catalog);
   const hint = suggestions.length > 0 ? ` (closest: ${suggestions.join(', ')})` : '';
   return {
@@ -954,11 +878,9 @@ export function resolveEffectiveModel(
   return def?.id ?? null;
 }
 
-/** Where the model a given agent+version will actually run with came from. */
 export type ConfiguredModelSource = 'run-default' | 'config' | 'cli-default';
 
 export interface ConfiguredModel {
-  /** The model id the agent will run with (e.g. `opus`, `gpt-5-codex`). */
   model: string;
   source: ConfiguredModelSource;
 }
@@ -967,15 +889,13 @@ export interface ConfiguredModel {
  * (`run.defaults`); 2) config (the agent's native settings.json `model`); 3) cli-default (catalog
  * `isDefault`, else literal `default`). Null only with no catalog. */
 export function resolveConfiguredModel(agent: AgentId, version: string, home?: string): ConfiguredModel | null {
+  // Precedence is explicit run default, native config, native selection, then catalog default.
   const runModel = resolveRunDefaults(agent, version).model;
   if (runModel && runModel.trim() !== '') return { model: runModel, source: 'run-default' };
 
   const nativeModel = readNativeConfigModel(agent, version, home);
   if (nativeModel) return { model: nativeModel, source: 'config' };
 
-  // The agent's own persisted selection, for a runtime that stores one instead
-  // of flagging a catalog default. Ranks below `config` (an explicit setting
-  // wins) and above the catalog, whose `isDefault` OpenCode never sets.
   const selected = readNativeSelectedModel(agent, version);
   if (selected) return { model: selected, source: 'cli-default' };
 
@@ -988,11 +908,8 @@ export function resolveConfiguredModel(agent: AgentId, version: string, home?: s
   return null;
 }
 
-/** An agent's own config document, for agents whose `model` is not in settings.json. */
 interface NativeModelConfig {
-  /** Accepted spellings under a version home, in precedence order. */
   paths: (home: string) => string[];
-  /** Whether the harness's own loader tolerates comments in these files. */
   jsonc: boolean;
 }
 
@@ -1023,7 +940,6 @@ function readNativeConfigModel(agent: AgentId, version: string, home?: string): 
       const parsed = JSON.parse(native?.jsonc ? stripJsonComments(raw) : raw) as { model?: unknown };
       if (typeof parsed.model === 'string' && parsed.model.trim() !== '') return parsed.model;
     } catch {
-      /* absent or malformed — try the next spelling */
     }
   }
   return null;
@@ -1057,7 +973,6 @@ export function formatAgentIdentity(...parts: Array<string | null | undefined>):
   return parts.filter((p): p is string => !!p && p.length > 0).join(` ${chalk.gray('·')} `);
 }
 
-/** Find the closest matching model ids/aliases using edit distance. */
 function pickSuggestions(requested: string, catalog: ModelCatalog): string[] {
   const all = [...catalog.models.map((m) => m.id), ...Object.keys(catalog.aliases)];
   return all
@@ -1068,7 +983,6 @@ function pickSuggestions(requested: string, catalog: ModelCatalog): string[] {
     .map((s) => s.id);
 }
 
-/** Normalized Levenshtein similarity (0..1, where 1 is identical). */
 function similarity(a: string, b: string): number {
   const longer = a.length >= b.length ? a : b;
   const shorter = a.length >= b.length ? b : a;
@@ -1077,7 +991,6 @@ function similarity(a: string, b: string): number {
   return (longer.length - distance) / longer.length;
 }
 
-/** Standard Levenshtein edit distance between two strings. */
 function levenshtein(a: string, b: string): number {
   const m = a.length;
   const n = b.length;
@@ -1102,8 +1015,6 @@ function levenshtein(a: string, b: string): number {
 export function buildReasoningFlags(agent: AgentId, level: string): string[] {
   const normalized = level.toLowerCase();
   if (normalized === 'auto') {
-    // For claude, forward --effort auto if the agent supports it
-    // For codex and others, omit (let agent use its default)
     return agent === 'claude' ? ['--effort', 'auto'] : [];
   }
   if (agent === 'claude') {
@@ -1114,20 +1025,14 @@ export function buildReasoningFlags(agent: AgentId, level: string): string[] {
     return ['-c', `model_reasoning_effort=${codexLevel}`];
   }
   if (agent === 'droid') {
-    // Droid: `-r off|none|low|medium|high`. xhigh/max clamp to high.
     const droidLevel = (normalized === 'xhigh' || normalized === 'max') ? 'high' : normalized;
     return ['-r', droidLevel];
   }
   if (agent === 'grok') {
-    // Grok: `--reasoning-effort <low|medium|high>` (alias --effort). xhigh/max
-    // clamp to high. This is the effort dial cost tiers steer for Grok, whose
-    // catalog exposes a single model.
     const grokLevel = (normalized === 'xhigh' || normalized === 'max') ? 'high' : normalized;
     return ['--reasoning-effort', grokLevel];
   }
   if (agent === 'muse') {
-    // Muse Code: `--reasoning-effort none|minimal|low|medium|high|xhigh|ultra`.
-    // Map our unified `max` to Muse's `ultra` (client-side multi-agent aggression).
     const museLevel = normalized === 'max' ? 'ultra' : normalized;
     return ['--reasoning-effort', museLevel];
   }

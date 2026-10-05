@@ -14,7 +14,6 @@ describe('whichCommand', () => {
 
 describe('findExecutable', () => {
   it('resolves a real executable to an absolute path on the current platform', () => {
-    // `node` is guaranteed present in CI and dev.
     const p = findExecutable('node');
     expect(p).toBeTruthy();
     expect(p!.length).toBeGreaterThan(0);
@@ -95,8 +94,6 @@ describe('quoteWin32ExecArg', () => {
   });
 
   it('leaves %VAR%/!VAR! untouched at the quoting layer (documented cmd-expansion caveat)', () => {
-    // We deliberately do NOT escape % / ! — matching the pre-change behavior where
-    // these tokens were passed to cmd.exe unquoted. No trigger char, so passthrough.
     expect(quoteWin32ExecArg('%PATH%')).toBe('%PATH%');
     expect(quoteWin32ExecArg('!DELAYED!')).toBe('!DELAYED!');
   });
@@ -104,7 +101,6 @@ describe('quoteWin32ExecArg', () => {
   it('passes unicode text through untouched (no trigger char)', () => {
     expect(quoteWin32ExecArg('café')).toBe('café');
     expect(quoteWin32ExecArg('日本語')).toBe('日本語');
-    // With a space it gets quoted, but the codepoints are preserved verbatim.
     expect(quoteWin32ExecArg('café ☕')).toBe('"café ☕"');
   });
 });
@@ -123,9 +119,6 @@ describe('composeWin32CommandLine', () => {
       .toBe('"C:\\Program Files\\x\\node.exe" -e "a&b"');
   });
 
-  // RUSH-1752: MCP install paths pass user-controlled command/args through execFile
-  // with shell:true on Windows. Metacharacters in those tokens must be quoted so
-  // cmd.exe does not interpret & | > ^ as operators (injection).
   it('quotes cmd.exe metacharacters in MCP-shaped command/args', () => {
     const mcpArgs = [
       'mcp', 'add', '--scope', 'user', '--transport', 'stdio', '--',
@@ -135,7 +128,6 @@ describe('composeWin32CommandLine', () => {
     ];
     expect(composeWin32CommandLine('claude.cmd', mcpArgs))
       .toBe('claude.cmd mcp add --scope user --transport stdio -- demo npx "a&b|c>d^e"');
-    // Each metachar is only safe inside the quoted token — not free in the line.
     const line = composeWin32CommandLine('codex.cmd', [
       'mcp', 'add', '--', 'svc', 'node', 'server.js', 'x&y', 'p|q', 'a>b', 'c^d',
     ]);
@@ -147,7 +139,6 @@ describe('composeWin32CommandLine', () => {
 });
 
 describe('execFileShellSpec', () => {
-  // RUSH-1752: the three MCP execFile sites must empty argv on the win32 shell path.
   it('on win32 shell path, MCP command/args with metacharacters become a quoted line + empty argv', () => {
     const args = ['mcp', 'add', '--', 'demo', 'npx', 'a&b|c>d^e'];
     const spec = execFileShellSpec('claude.cmd', args, 'win32');
@@ -182,8 +173,6 @@ describe('composeWin32CommandLine spawn round-trip (win32)', () => {
   const runOnWin32 = process.platform === 'win32' ? it : it.skip;
 
   runOnWin32('the child receives the tricky args byte-exact', () => {
-    // `node -e "<code>" A B ...` -> the child's process.argv is [nodePath, A, B, ...]
-    // (with -e there is no script filename), so argv.slice(1) is our tricky args.
     const script = 'process.stdout.write(JSON.stringify(process.argv.slice(1)))';
     const trickyArgs = [
       'hello world',
@@ -195,8 +184,6 @@ describe('composeWin32CommandLine spawn round-trip (win32)', () => {
       'café ☕ 日本語',
       '',
     ];
-    // process.execPath is `C:\Program Files\nodejs\node.exe` — its space forces the
-    // command token itself to be quoted, covering the spaced-executable case too.
     const line = composeWin32CommandLine(process.execPath, ['-e', script, ...trickyArgs]);
     const res = spawnSync(line, [], { shell: true, encoding: 'utf-8' });
     expect(res.status).toBe(0);
@@ -211,13 +198,10 @@ describe('posixShellPath', () => {
     expect(posixShellPath('darwin')).toBe('/bin/sh');
   });
 
-  // Host-gated: resolving sh.exe needs a real Windows PATH with Git for
-  // Windows on it (dev boxes and the windows-latest runners both have it).
   it.runIf(process.platform === 'win32')('resolves a real sh/bash executable on Windows', () => {
     const shell = posixShellPath('win32');
     expect(path.win32.isAbsolute(shell)).toBe(true);
     expect(fs.existsSync(shell)).toBe(true);
-    // The resolved shell must actually run a POSIX command string.
     const res = spawnSync(shell, ['-c', "printf 'ok'"], { encoding: 'utf-8' });
     expect(res.status).toBe(0);
     expect(res.stdout).toBe('ok');

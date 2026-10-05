@@ -14,16 +14,12 @@ import { buildRemoteAgentsInvocation, stripClixml } from '../hosts/remote-cmd.js
  * against a future fan-out loop. */
 export const OWNER_FORWARD_GUARD_ENV = 'AGENTS_OWNER_NO_FORWARD';
 
-/** Per-peer SSH deadline for a one-shot owner delivery. */
 const PEER_SEND_TIMEOUT_MS = 15_000;
 
-/** Why forwarding did not run, so a caller/test can assert the decision. */
 type OwnerForwardSkip = 'guarded' | 'not-rush-backed' | 'no-capable-peer';
 
 interface OwnerForwardPlan {
-  /** Ordered machine ids to try — capable (macOS), reachable, self excluded. */
   candidates: string[];
-  /** Set when forwarding does not apply; the caller keeps its local error. */
   skip?: OwnerForwardSkip;
 }
 
@@ -43,6 +39,7 @@ export function planOwnerForward(
   self: string,
   opts: { guarded?: boolean } = {},
 ): OwnerForwardPlan {
+  // Only Rush-backed transports need a headed macOS peer; the guard prevents fleet recursion.
   if (opts.guarded) return { candidates: [], skip: 'guarded' };
   if (!isRushBackedTransport(channel, meta)) return { candidates: [], skip: 'not-rush-backed' };
 
@@ -54,6 +51,7 @@ export function planOwnerForward(
   const interactiveHost = typeof meta.config?.interactiveHost === 'string'
     ? normalizeHost(meta.config.interactiveHost)
     : undefined;
+  // Prefer the configured interactive host, then try other capable peers in stable order.
   const rank = (name: string): number => (interactiveHost && normalizeHost(name) === interactiveHost ? 0 : 1);
   const candidates = capable
     .map((d) => normalizeHost(d.name))
@@ -115,9 +113,6 @@ export async function forwardOwnerNotifyToPeer(
   meta: Meta,
   opts: { self?: string; devices?: DeviceProfile[]; send?: PeerOwnerSender; envelope?: PeerOwnerEnvelope } = {},
 ): Promise<SendResult | undefined> {
-  // Cheap, I/O-free gate first: a box that already received a forward, or an
-  // owner channel that isn't the macOS-only rush family, can never forward — so
-  // a normal local success/failure never pays a device-registry disk read.
   if (process.env[OWNER_FORWARD_GUARD_ENV] === '1') return undefined;
   if (!isRushBackedTransport(channel, meta)) return undefined;
 
@@ -127,7 +122,7 @@ export async function forwardOwnerNotifyToPeer(
     try {
       devices = Object.values(await loadDevices());
     } catch {
-      return undefined; // no registry, nothing to forward to
+      return undefined;
     }
   }
 
@@ -137,6 +132,7 @@ export async function forwardOwnerNotifyToPeer(
   const send = opts.send ?? sendOnPeer;
   for (const machine of plan.candidates) {
     const result = await send(machine, text, channel, target, opts.envelope);
+    // A successful peer owns delivery; continuing would duplicate the owner notification.
     if (result?.ok) return result;
   }
   return undefined;

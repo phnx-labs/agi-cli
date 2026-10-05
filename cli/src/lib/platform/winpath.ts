@@ -6,7 +6,6 @@ import * as path from 'path';
 
 interface WinPathResult {
   success: boolean;
-  /** True when `dir` was already the first PATH entry (no write performed). */
   alreadyPresent?: boolean;
   error?: string;
 }
@@ -25,19 +24,14 @@ export function computeNewUserPath(currentRaw: string, dir: string): { changed: 
 /** Whether to write PATH back as REG_EXPAND_SZ: true if the original was ExpandString, the raw
  * value has %VAR%, or Path was absent. Only plain String without % stays REG_SZ. Pure. */
 export function shouldWriteExpandable(originalKind: string | null, rawValue: string): boolean {
+  // Preserve raw %VAR% references and their expandable registry value kind.
   if (originalKind === null || originalKind === 'Absent') return true;
   if (originalKind === 'ExpandString') return true;
   return rawValue.includes('%');
 }
 
-// Sentinel separating the value kind from the (possibly '%'-laden) raw value in
-// the read script's stdout — PATH entries never contain a newline, so an
-// exclusive line marker parses unambiguously.
 const READ_MARKER = '===AGENTS-PATH-VALUE===';
 
-// Reads the RAW User PATH preserving REG_EXPAND_SZ: DoNotExpandEnvironmentNames
-// keeps `%VAR%` literal, and GetValueKind reports the original type (throws when
-// 'Path' is absent -> caught, reported as Absent).
 const READ_SCRIPT = [
   "$key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $false)",
   'if ($null -eq $key) {',
@@ -73,8 +67,8 @@ const WRITE_SCRIPT = [
   '  public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg, UIntPtr wParam, string lParam, uint fuFlags, uint uTimeout, out UIntPtr lpdwResult);',
   '}',
   '"@',
+  // Broadcast WM_SETTINGCHANGE so future processes observe the updated user environment.
   '$res = [UIntPtr]::Zero',
-  // HWND_BROADCAST=0xffff, WM_SETTINGCHANGE=0x1a, SMTO_ABORTIFHUNG=2, 5s timeout
   "[AgentsWinPath]::SendMessageTimeout([IntPtr]0xffff, 0x1a, [UIntPtr]::Zero, 'Environment', 2, 5000, [ref]$res) | Out-Null",
   "Write-Output 'written'",
 ].join('\n');
@@ -88,14 +82,12 @@ function runPowerShell(script: string, extraEnv?: Record<string, string>): strin
   });
 }
 
-/** Parse the read script's stdout into the original value kind and RAW value. */
 function parseReadOutput(out: string): { kind: string | null; raw: string } {
   const idx = out.indexOf(READ_MARKER);
   if (idx === -1) return { kind: null, raw: '' };
   const head = out.slice(0, idx);
   const kindMatch = head.match(/KIND:(\S+)/);
   const kind = kindMatch ? kindMatch[1] : null;
-  // Everything after the marker line, minus the leading/trailing newline PS adds.
   const raw = out
     .slice(idx + READ_MARKER.length)
     .replace(/^\r?\n/, '')

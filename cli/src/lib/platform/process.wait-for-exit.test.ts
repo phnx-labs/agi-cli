@@ -38,7 +38,7 @@ describe.skipIf(process.platform === 'win32')('waitForExit — the wait stopDaem
     const exited = waitForExit(child.pid!, 300);
     expect(exited).toBe(false);
     expect(hasExited(child.pid!)).toBe(false);
-    process.kill(child.pid!, 'SIGKILL'); // clean up the test's own child
+    process.kill(child.pid!, 'SIGKILL');
     expect(waitForExit(child.pid!, 5000)).toBe(true);
   });
 
@@ -49,6 +49,6 @@ describe.skipIf(process.platform === 'win32')('waitForExit — the wait stopDaem
     waitForExit(pid, 5000);
     const started = Date.now();
     expect(waitForExit(pid, 5000)).toBe(true);
-    expect(Date.now() - started).toBeLessThan(500); // no needless blocking
+    expect(Date.now() - started).toBeLessThan(500);
   });
 });

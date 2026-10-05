@@ -64,9 +64,6 @@ describe('claudeAdapter.applyExecConfigEnv — role-aware CLAUDE_CODE_OAUTH_TOKE
 
   describe('worker device — INTERACTIVE runs also use the setup-token (PHNX-3502)', () => {
     it('injects the per-account setup-token on an interactive worker run', () => {
-      // `agents run claude --interactive --device <worker>`: a remotely dispatched
-      // TUI, not a human at that box's own Keychain-trusted session — there is no
-      // per-version login to defer to, so this must behave exactly like headless.
       expect(resolvedToken({ interactive: true, deviceRole: 'worker', setupToken: OWN_TOKEN }))
         .toBe(OWN_TOKEN);
     });
@@ -97,8 +94,6 @@ describe('claudeAdapter.applyExecConfigEnv — role-aware CLAUDE_CODE_OAUTH_TOKE
 
   describe('personal device — every run defers to the per-version login', () => {
     it('a HEADLESS run on a personal box does NOT inject the setup-token (the RUSH-2395 fix)', () => {
-      // `agents run claude "fix the bug"` on the laptop: prompt present -> headless,
-      // but role personal -> must stay on the login, not the setup-token.
       expect(resolvedToken({ interactive: false, deviceRole: 'personal', setupToken: OWN_TOKEN }))
         .toBeUndefined();
     });
@@ -127,8 +122,6 @@ describe('claudeAdapter.applyExecConfigEnv — role-aware CLAUDE_CODE_OAUTH_TOKE
     });
 
     it('a desktop box is in the same headed bucket — a headless run defers to the login too', () => {
-      // desktop (a headed always-on Mac) holds a real per-version login just like
-      // personal, so it must never fall back to the worker setup-token.
       expect(resolvedToken({ interactive: false, deviceRole: 'desktop', setupToken: OWN_TOKEN }))
         .toBeUndefined();
     });
@@ -157,14 +150,10 @@ describe('claudeWorkerLoginTrapPreflight — refuse the worker login-screen trap
       machine: 'yosemite-m5',
     });
     expect(msg).toBeTruthy();
-    // Names the box, and hands the operator the real fix — never "log in here".
     expect(msg).toContain("yosemite-m5");
     expect(msg).toContain('agents accounts default claude');
     expect(msg).toContain('agents run claude#');
     expect(msg).not.toMatch(/log ?in here/i);
-    // The message is returned as spawn stderr, which runWithFallback scans with
-    // RATE_LIMIT_PATTERNS — a stray rate-limit/quota phrase would spuriously
-    // trigger an account-rotation fallback. Keep it clear of every such token.
     expect(msg).not.toMatch(
       /rate[\s-]?limit|usage[\s-]?limit|quota\s*(exceeded|reached|limit)|\b429\b|5[\s-]?hour[\s-]?limit|too many requests|overloaded|spend[\s-]?limit|out of (?:usage )?credits/i,
     );

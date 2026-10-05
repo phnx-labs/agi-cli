@@ -26,7 +26,7 @@ describe('probeOwnerSink', () => {
   });
 
   it('imessage on non-macOS is unreachable', async () => {
-    if (process.platform === 'darwin') return; // skip on macOS where it IS reachable
+    if (process.platform === 'darwin') return;
     const meta = { notify: { owner: { channel: 'imessage', to: '+15550000000' } } } as Meta;
     const s = await probeOwnerSink(meta);
     expect(s).toMatchObject({

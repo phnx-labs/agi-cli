@@ -10,9 +10,7 @@ import {
 import { resolveBudgetConfig, hasAnyCap } from './config.js';
 import { loadLedger, localDay, spendForDay, spendForProject } from './ledger.js';
 
-/** Result surface exposed to the caller so it can act on a mid-stream breach. */
 interface CloudBudgetGate {
-  /** True once a cap crossed and cancel() was invoked. */
   breached(): boolean;
   breach(): BreachInfo | null;
 }
@@ -23,11 +21,8 @@ interface CloudBudgetGate {
 export function wrapStreamWithBudgetGate(args: {
   provider: CloudProvider;
   taskId: string;
-  /** Project attribution key — repo slug for Rush, or cwd. */
   project: string;
-  /** Agent the dispatch runs under (for per_agent cap accounting). */
   agent: string;
-  /** cwd used to resolve the effective budget config. */
   cwd?: string;
 }): {
   wrap: (source: AsyncIterable<CloudEvent>) => AsyncIterable<CloudEvent>;
@@ -62,14 +57,10 @@ export function wrapStreamWithBudgetGate(args: {
             outputTokens: event.outputTokens ?? 0,
           });
           if (watcher.breached() && firstBreach) {
-            // Cancel server-side FIRST so we stop the meter; then surface the
-            // breach to the renderer as an error + cancelled status so the CLI
-            // exits with a visible reason (not a silent stream close).
+            // Stopping local iteration is insufficient: cancel the provider task server-side.
             try {
               await args.provider.cancel(args.taskId);
             } catch (err) {
-              // Best-effort — even if cancel fails, break the stream: the
-              // caller sees the error frame and can retry manually.
               yield {
                 type: 'error',
                 message: `[budget] cap ${firstBreach.cap} exceeded ($${firstBreach.spend.toFixed(2)} > $${firstBreach.limit.toFixed(2)}); cancel FAILED: ${(err as Error).message}`,

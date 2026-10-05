@@ -19,12 +19,10 @@ export type LayerScope = 'project' | 'user' | 'extra' | 'system';
 export interface RulesLayer {
   scope: LayerScope;
   rulesDir: string;
-  /** Set when scope is 'extra'; undefined otherwise. */
   alias?: string;
 }
 
 interface PresetDef {
-  /** Subrule names (without `.md`), in concatenation order. */
   subrules: string[];
 }
 
@@ -33,9 +31,7 @@ interface RulesYaml {
 }
 
 interface ComposeOptions {
-  /** Defaults to `"default"`. */
   preset?: string;
-  /** Layers in precedence order, highest first. */
   layers: RulesLayer[];
 }
 
@@ -44,18 +40,13 @@ export interface ComposedSubrule {
   sourcePath: string;
   layerScope: LayerScope;
   layerAlias?: string;
-  /** Set when the subrule is dir-form (`subrules/<name>/`); the dir itself. */
   subruleDir?: string;
 }
 
 interface ComposeResult {
-  /** Fully concatenated, no @-imports. */
   content: string;
-  /** The preset name that was applied. */
   preset: string;
-  /** The layer that defined the preset. */
   presetLayer: LayerScope;
-  /** Subrules included, in concatenation order. */
   subrules: ComposedSubrule[];
 }
 
@@ -63,9 +54,7 @@ const SUBRULES_DIR_NAME = 'subrules';
 const RULES_YAML_NAME = 'rules.yaml';
 const DEFAULT_PRESET = 'default';
 const SUBRULES_README = 'README.md';
-/** Inside a dir-form subrule, the prose file. */
 const SUBRULE_RULE_FILE = 'rule.md';
-/** Inside a dir-form subrule, the optional hook manifest. */
 const SUBRULE_HOOKS_FILE = 'hooks.yaml';
 
 /** Resolve a subrule's prose file under `<rulesDir>/subrules/`: the DIRECTORY form `<name>/rule.md`
@@ -142,6 +131,7 @@ function listLayerSubruleNames(layer: RulesLayer): string[] {
 /** Compose a rules document from the given layers; throws when the preset isn't defined in any
  * layer's rules.yaml (a typo, or no layer ships it). */
 export function composeRules(opts: ComposeOptions): ComposeResult {
+  // Layers are ordered project, user, extras, system; first match shadows by rule name.
   const presetName = opts.preset || DEFAULT_PRESET;
 
   const presetMatch = resolvePreset(opts.layers, presetName);
@@ -154,11 +144,10 @@ export function composeRules(opts: ComposeOptions): ComposeResult {
   const composed: ComposedSubrule[] = [];
   const seen = new Set<string>();
 
-  // 1. Preset's named subrules, resolved by per-name shadowing.
   for (const name of presetMatch.def.subrules || []) {
     if (seen.has(name)) continue;
     const found = findSubrule(opts.layers, name);
-    if (!found) continue; // missing subrule: skip silently — same as @-import miss
+    if (!found) continue;
     composed.push({
       name,
       sourcePath: found.sourcePath,
@@ -169,8 +158,7 @@ export function composeRules(opts: ComposeOptions): ComposeResult {
     seen.add(name);
   }
 
-  // 2. Auto-append: any subrule in a non-system layer not yet included.
-  //    Honors precedence — project layer's auto-appends come first.
+  // Unnamed non-system rules auto-append; system rules require explicit preset membership.
   for (const layer of opts.layers) {
     if (layer.scope === 'system') continue;
     for (const name of listLayerSubruleNames(layer)) {
@@ -188,8 +176,6 @@ export function composeRules(opts: ComposeOptions): ComposeResult {
     }
   }
 
-  // 3. Concatenate. Trim trailing whitespace on each fragment so spacing is
-  //    predictable — fragments often end in a newline already.
   const parts = composed.map((c) => fs.readFileSync(c.sourcePath, 'utf-8').replace(/\s+$/, ''));
   const content = parts.length === 0 ? '' : parts.join('\n\n') + '\n';
 
@@ -237,7 +223,6 @@ export function discoverRulesLayers(opts: { cwd?: string } = {}): RulesLayer[] {
   return layers;
 }
 
-/** Convenience wrapper — discovers layers from state, then composes. */
 export function composeRulesFromState(opts: { preset?: string; cwd?: string } = {}): ComposeResult {
   const layers = discoverRulesLayers({ cwd: opts.cwd });
   return composeRules({ preset: opts.preset, layers });
@@ -272,7 +257,7 @@ export function collectSubruleHooks(
   }
 
   for (const sub of composed.subrules) {
-    if (!sub.subruleDir) continue; // flat subrule — no hooks
+    if (!sub.subruleDir) continue;
     const hooksFile = path.join(sub.subruleDir, SUBRULE_HOOKS_FILE);
     if (!fs.existsSync(hooksFile)) continue;
     try {
@@ -283,14 +268,12 @@ export function collectSubruleHooks(
         result[`${sub.name}__${hookName}`] = { ...def, script: absScript };
       }
     } catch {
-      // Malformed hooks.yaml — skip this subrule's hooks, keep the rest.
     }
   }
 
   return result;
 }
 
-/** Convenience wrapper — discovers layers from state, then collects hooks. */
 export function collectSubruleHooksFromState(
   opts: { preset?: string; cwd?: string } = {}
 ): Record<string, ManifestHook> {

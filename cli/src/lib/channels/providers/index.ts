@@ -8,7 +8,6 @@ import { sessionProvider } from './session.js';
 
 let registered = false;
 
-/** Register all built-in providers once (idempotent). */
 export function registerBuiltinProviders(): void {
   if (registered) return;
   registered = true;

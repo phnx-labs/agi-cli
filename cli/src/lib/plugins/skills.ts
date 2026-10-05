@@ -17,7 +17,6 @@ import { emit } from '../feed/events.js';
 
 const HOME = os.homedir();
 
-/** User-scoped skills dir (~/.agents/skills/). Used for installs. */
 export function getSkillsDir(): string {
   return getUserSkillsDir();
 }
@@ -41,7 +40,6 @@ export function getProjectSkillsDir(agentId: AgentId, cwd: string = process.cwd(
     dirs.push(path.join(projectAgentsDir, 'skills'));
   }
   dirs.push(path.join(cwd, `.${agentId}`, 'skills'));
-  // Return the first existing dir, otherwise default to the first candidate
   for (const dir of dirs) {
     if (fs.existsSync(dir)) return dir;
   }
@@ -63,7 +61,6 @@ export function validateSkillMetadata(metadata: SkillMetadata | null, skillName:
     return { valid: false, errors, warnings };
   }
 
-  // name is required
   if (!metadata.name || metadata.name.trim() === '') {
     errors.push('Missing required field: name');
   } else {
@@ -75,7 +72,6 @@ export function validateSkillMetadata(metadata: SkillMetadata | null, skillName:
     }
   }
 
-  // description is required
   if (!metadata.description || metadata.description.trim() === '') {
     errors.push('Missing required field: description');
   } else if (metadata.description.length > 1024) {
@@ -97,9 +93,6 @@ export interface SkillParseResult {
   error?: string;
 }
 
-/**
- * Parse skill metadata from SKILL.md, returning both result and any error.
- */
 export function tryParseSkillMetadata(skillDir: string): SkillParseResult {
   const skillMdPath = path.join(skillDir, 'SKILL.md');
   if (!fs.existsSync(skillMdPath)) {
@@ -110,7 +103,6 @@ export function tryParseSkillMetadata(skillDir: string): SkillParseResult {
     const content = fs.readFileSync(skillMdPath, 'utf-8');
     const lines = content.split('\n');
 
-    // Check for YAML frontmatter (required)
     if (lines[0] === '---') {
       const endIndex = lines.slice(1).findIndex((l) => l === '---');
       if (endIndex > 0) {
@@ -130,7 +122,6 @@ export function tryParseSkillMetadata(skillDir: string): SkillParseResult {
       }
     }
 
-    // No valid frontmatter
     return { metadata: null, error: 'No valid YAML frontmatter found' };
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Unknown parse error';
@@ -138,9 +129,6 @@ export function tryParseSkillMetadata(skillDir: string): SkillParseResult {
   }
 }
 
-/**
- * Parse skill metadata from SKILL.md (backward-compatible, returns null on error).
- */
 export function parseSkillMetadata(skillDir: string): SkillMetadata | null {
   return tryParseSkillMetadata(skillDir).metadata;
 }
@@ -201,11 +189,10 @@ export interface DiscoveredSkill {
 export function discoverSkillsFromRepo(repoPath: string): DiscoveredSkill[] {
   const skills: DiscoveredSkill[] = [];
 
-  // Look for skills in common locations
   const searchPaths = [
     path.join(repoPath, 'skills'),
     path.join(repoPath, 'agent-skills'),
-    repoPath, // Root level skill directories
+    repoPath,
   ];
 
   for (const searchPath of searchPaths) {
@@ -215,7 +202,6 @@ export function discoverSkillsFromRepo(repoPath: string): DiscoveredSkill[] {
       const entries = fs.readdirSync(searchPath, { withFileTypes: true });
       for (const entry of entries) {
         if (!entry.isDirectory()) continue;
-        // Skip hidden directories (e.g., .system)
         if (entry.name.startsWith('.')) continue;
 
         const skillDir = path.join(searchPath, entry.name);
@@ -224,7 +210,6 @@ export function discoverSkillsFromRepo(repoPath: string): DiscoveredSkill[] {
         if (fs.existsSync(skillMdPath)) {
           const parseResult = tryParseSkillMetadata(skillDir);
           const validation = validateSkillMetadata(parseResult.metadata, entry.name);
-          // Include even if invalid (for discovery/listing with warnings)
           skills.push({
             name: entry.name,
             path: skillDir,
@@ -236,7 +221,6 @@ export function discoverSkillsFromRepo(repoPath: string): DiscoveredSkill[] {
         }
       }
     } catch {
-      // Skip inaccessible directories
     }
   }
 
@@ -249,7 +233,6 @@ export function installSkill(
   agents: AgentId[],
   method: 'symlink' | 'copy' = 'symlink'
 ): { success: boolean; error?: string; warnings?: string[] } {
-  // Validate skill metadata before installation
   const metadata = parseSkillMetadata(sourcePath);
   const validation = validateSkillMetadata(metadata, skillName);
 
@@ -265,7 +248,6 @@ export function installSkill(
 
   const centralPath = path.join(getSkillsDir(), skillName);
 
-  // Copy to central location if not already there
   if (!fs.existsSync(centralPath)) {
     try {
       fs.cpSync(sourcePath, centralPath, { recursive: true });
@@ -274,7 +256,6 @@ export function installSkill(
     }
   }
 
-  // Symlink to each agent
   for (const agentId of agents) {
     if (!isCapable(agentId, 'skills')) {
       continue;
@@ -283,12 +264,10 @@ export function installSkill(
     ensureSkillsDir(agentId);
     const agentSkillPath = path.join(getAgentSkillsDir(agentId), skillName);
 
-    // Remove existing if present
     if (fs.existsSync(agentSkillPath)) {
       try {
         fs.rmSync(agentSkillPath, { recursive: true, force: true });
       } catch {
-        // Ignore removal errors
       }
     }
 
@@ -310,24 +289,15 @@ export function installSkill(
   return { success: true };
 }
 
-/**
- * Check if a skill exists for an agent.
- */
 export function skillExists(agentId: AgentId, skillName: string): boolean {
   const agentSkillPath = path.join(getAgentSkillsDir(agentId), skillName);
   return fs.existsSync(agentSkillPath);
 }
 
-/**
- * Normalize content for comparison (trim, normalize line endings).
- */
 function normalizeContent(content: string): string {
   return content.replace(/\r\n/g, '\n').trim();
 }
 
-/**
- * Compare two directories recursively for content equality.
- */
 function directoriesMatch(dir1: string, dir2: string): boolean {
   if (!fs.existsSync(dir1) || !fs.existsSync(dir2)) {
     return fs.existsSync(dir1) === fs.existsSync(dir2);
@@ -438,9 +408,6 @@ export function listAllSkills(): string[] {
   return Array.from(seen).sort();
 }
 
-/**
- * Path to the skills dir of a specific version home (not the active one).
- */
 export function getVersionSkillsDir(agent: AgentId, version: string): string {
   const home = getVersionHomePath(agent, version);
   return path.join(home, agentConfigDirName(agent), 'skills');
@@ -463,9 +430,6 @@ export function listSkillsInVersionHome(agent: AgentId, version: string): string
     .sort();
 }
 
-/**
- * Check if a skill installed in a specific version matches central content.
- */
 function versionSkillMatches(agent: AgentId, version: string, skillName: string): boolean {
   const installedPath = path.join(getVersionSkillsDir(agent, version), skillName);
   const sourcePath = resolveSkillSourcePath(skillName);
@@ -490,24 +454,15 @@ function versionSkillMatches(agent: AgentId, version: string, skillName: string)
 export interface VersionSkillDiff {
   agent: AgentId;
   version: string;
-  toAdd: string[];      // in central, not in version home
-  toUpdate: string[];   // in both, content differs
-  matched: string[];    // in both, content matches
-  orphans: string[];    // in version home, not in central
+  toAdd: string[];
+  toUpdate: string[];
+  matched: string[];
+  orphans: string[];
 }
 
-/**
- * Compare a version home's skills against central. Returns the reconciliation diff.
- */
 export function diffVersionSkills(agent: AgentId, version: string): VersionSkillDiff {
-  // Plugin-provided skills (`plugins/<plugin>/skills`) are legitimate sources too, so a
-  // skill materialized from a plugin is NOT an orphan (PHNX-3185). Without this
-  // the detector offered to delete the entire plugin-installed skill library.
   const available = new Set([...listAllSkills(), ...listPluginSkillNames({ agent })]);
 
-  // Goose and other native ~/.agents/skills consumers read central storage
-  // directly. They intentionally have no per-version copy to diff, so every
-  // available central skill is already current for every supported version.
   if (AGENTS[agent].nativeAgentsSkillsDir) {
     return {
       agent,
@@ -607,7 +562,6 @@ export function installSkillToVersion(
           mode: fs.statSync(abs).mode,
         });
       } catch {
-        // Unreadable — skip rather than fail the whole install
       }
     }
   }
@@ -630,7 +584,6 @@ export function installSkillToVersion(
     return { success: false, error: `Failed to ${method}: ${(err as Error).message}` };
   }
 
-  // Restore preserved files on top of the fresh copy.
   for (const { rel, buf, mode } of preserved) {
     try {
       const dest = path.join(target, rel);
@@ -638,7 +591,6 @@ export function installSkillToVersion(
       fs.writeFileSync(dest, buf);
       fs.chmodSync(dest, mode);
     } catch {
-      // Best-effort; failure here shouldn't unwind the install
     }
   }
 
@@ -646,9 +598,6 @@ export function installSkillToVersion(
   return { success: true };
 }
 
-/**
- * Remove a single skill from a specific version home.
- */
 export function removeSkillFromVersion(
   agent: AgentId,
   version: string,
@@ -687,20 +636,17 @@ export function iterSkillsCapableVersions(filter?: { agent?: AgentId; version?: 
 }
 
 export function uninstallSkill(skillName: string): { success: boolean; error?: string } {
-  // Remove from central location
   const centralPath = path.join(getSkillsDir(), skillName);
   if (!fs.existsSync(centralPath)) {
     return { success: false, error: `Skill '${skillName}' not found` };
   }
 
-  // Remove from all agents
   for (const agentId of capableAgents('skills')) {
     const agentSkillPath = path.join(getAgentSkillsDir(agentId), skillName);
     if (fs.existsSync(agentSkillPath)) {
       try {
         fs.rmSync(agentSkillPath, { recursive: true, force: true });
       } catch {
-        // Ignore removal errors
       }
     }
   }
@@ -708,7 +654,6 @@ export function uninstallSkill(skillName: string): { success: boolean; error?: s
   try {
     fs.rmSync(centralPath, { recursive: true, force: true });
   } catch {
-    // Ignore removal errors
   }
 
   emit('skill.remove', { skill: skillName });
@@ -723,9 +668,7 @@ export function listInstalledSkills(): Map<string, DiscoveredSkill> {
       const entries = fs.readdirSync(dir, { withFileTypes: true });
       for (const entry of entries) {
         if (!entry.isDirectory()) continue;
-        // Skip hidden directories (e.g., .system)
         if (entry.name.startsWith('.')) continue;
-        // Primary wins on name collisions.
         if (skills.has(entry.name)) continue;
 
         const skillDir = path.join(dir, entry.name);
@@ -743,7 +686,6 @@ export function listInstalledSkills(): Map<string, DiscoveredSkill> {
         }
       }
     } catch {
-      // Ignore errors
     }
   };
 
@@ -763,7 +705,6 @@ export function listInstalledSkillsWithScope(
   const results: InstalledSkill[] = [];
   const seen = new Set<string>();
 
-  // Project-scoped skills
   const projectCandidates: string[] = [];
   const projectAgentsDir = getProjectAgentsDir(cwd);
   if (projectAgentsDir) {
@@ -814,11 +755,9 @@ export function listInstalledSkillsWithScope(
         }
       }
     } catch {
-      // Ignore errors
     }
   }
 
-  // User-scoped skills (version-aware when home is provided)
   const userSkillsDir = options?.home
     ? path.join(options.home, agentConfigDirName(agentId), 'skills')
     : getAgentSkillsDir(agentId);
@@ -864,7 +803,6 @@ export function listInstalledSkillsWithScope(
         }
       }
     } catch {
-      // Ignore errors
     }
   }
 
@@ -916,12 +854,10 @@ export function installSkillCentrally(
   sourcePath: string,
   skillName: string
 ): { success: boolean; error?: string; warnings?: string[] } {
-  // Validate skill metadata (warnings only, don't block installation)
   const metadata = parseSkillMetadata(sourcePath);
   const validation = validateSkillMetadata(metadata, skillName);
   const allWarnings = [...validation.warnings];
 
-  // Convert validation errors to warnings instead of blocking
   if (!validation.valid) {
     allWarnings.push(...validation.errors.map(e => `Validation: ${e}`));
   }
@@ -929,21 +865,17 @@ export function installSkillCentrally(
   ensureCentralSkillsDir();
   const centralPath = path.join(getSkillsDir(), skillName);
 
-  // Resolve to absolute paths for comparison
   const resolvedSource = path.resolve(sourcePath);
   const resolvedCentral = path.resolve(centralPath);
 
-  // If source is already the central path, nothing to copy
   if (resolvedSource === resolvedCentral) {
     return { success: true, warnings: allWarnings.length > 0 ? allWarnings : undefined };
   }
 
-  // Remove existing if present
   if (fs.existsSync(centralPath)) {
     try {
       fs.rmSync(centralPath, { recursive: true, force: true });
     } catch {
-      // Ignore removal errors
     }
   }
 

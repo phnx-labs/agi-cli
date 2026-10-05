@@ -18,7 +18,6 @@ interface RunSyncSentinel {
   entry: RulesEntry;
 }
 
-/** ~/.agents/.cache/rules-run-sync/ — regenerable; a lost sentinel just costs one extra compose+write. */
 function sentinelPath(agent: AgentId, version: string): string {
   const key = `${agent}@${version}`.replace(/[^a-zA-Z0-9@._-]/g, '_');
   return path.join(getCacheDir(), 'rules-run-sync', `${key}.json`);
@@ -38,7 +37,6 @@ function saveSentinel(agent: AgentId, version: string, sentinel: RunSyncSentinel
     fs.mkdirSync(path.dirname(p), { recursive: true });
     fs.writeFileSync(p, JSON.stringify(sentinel));
   } catch {
-    // Best-effort — a failed write just means the next run redoes the compose+write.
   }
 }
 
@@ -50,6 +48,7 @@ export function applyActiveRulesPresetAtRun(
   version: string,
   versionHome: string,
 ): boolean {
+  // Version-home sync excludes cwd so project rules never contaminate every run of a version.
   const cap = AGENTS[agent].capabilities.rules;
   if (cap === false) return false;
   const rulesWriter = getWriter('rules', agent);
@@ -58,14 +57,16 @@ export function applyActiveRulesPresetAtRun(
   const preset = getActiveRulesPreset(agent, version);
   const current = buildRules(agent, version, '');
 
+  // Preset identity is part of freshness even when two presets fingerprint the same files.
   const stored = loadSentinel(agent, version);
   if (stored && stored.preset === preset && !isRulesStale(stored.entry, agent, version, '')) {
-    return false; // skip-fast: preset unchanged AND composed source set unchanged
+    return false;
   }
 
   try {
     rulesWriter.write({ version, versionHome, selection: { preset }, cwd: '' });
   } catch {
+    // Launch must remain available when optional rule synchronization cannot be written.
     return false;
   }
 

@@ -25,9 +25,7 @@ import {
 } from './plugin-marketplace.js';
 import type { DiscoveredPlugin, MarketplaceSpec } from '../types.js';
 
-// ─── Fixtures ─────────────────────────────────────────────────────────────────
 
-/** Write a real plugin source tree (dir + .claude-plugin/plugin.json). */
 function writePluginSource(parent: string, name: string, extra: Record<string, unknown> = {}): string {
   const root = path.join(parent, name);
   fs.mkdirSync(path.join(root, '.claude-plugin'), { recursive: true });
@@ -48,7 +46,6 @@ function discoveredPlugin(root: string, name: string): DiscoveredPlugin {
   };
 }
 
-/** Copy a plugin into a marketplace dest (the version-home side) for synth tests. */
 function installInto(spec: MarketplaceSpec, plugin: DiscoveredPlugin, versionHome: string): void {
   copyPluginToMarketplace(plugin, spec, 'claude', versionHome);
 }
@@ -59,7 +56,6 @@ const SPECS = {
   extra: (alias: string, root: string) => ({ kind: 'extra', alias, root } as MarketplaceSpec),
 };
 
-// ─── marketplaceNameFor ─────────────────────────────────────────────────────
 
 describe('marketplaceNameFor', () => {
   it('maps user → agents-cli', () => {
@@ -77,7 +73,6 @@ describe('marketplaceNameFor', () => {
   });
 });
 
-// ─── discoverMarketplaces ───────────────────────────────────────────────────
 
 describe('discoverMarketplaces', () => {
   let tmpDir: string;
@@ -111,9 +106,6 @@ describe('discoverMarketplaces', () => {
         getPluginsDir: () => overrides.pluginsDir ?? userPlugins,
         getEnabledExtraRepos: () => overrides.extras ?? [],
         getProjectPluginsDir: () => overrides.projectPlugins ?? null,
-        // Default to a non-existent path so tests that don't opt into a system
-        // repo see no agents-system marketplace (deterministic across machines
-        // that may have a real ~/.agents/.system/plugins on disk).
         getSystemPluginsDir: () => overrides.systemPlugins ?? path.join(tmpDir, 'no-system', 'plugins'),
       };
     });
@@ -138,7 +130,6 @@ describe('discoverMarketplaces', () => {
   it('returns user + each enabled extra repo, skipping disabled (filtered upstream)', async () => {
     const extraDir = path.join(tmpDir, 'extra-extras');
     fs.mkdirSync(path.join(extraDir, 'plugins'), { recursive: true });
-    // getEnabledExtraRepos already filters disabled repos — we feed only enabled ones.
     await withState(
       { extras: [{ alias: 'extras', dir: extraDir, url: 'gh:x/y' }] },
       ({ discoverMarketplaces }) => {
@@ -152,7 +143,7 @@ describe('discoverMarketplaces', () => {
   });
 
   it('skips an extra repo whose plugins/ dir does not exist on disk', async () => {
-    const extraDir = path.join(tmpDir, 'extra-empty'); // no plugins/ subdir
+    const extraDir = path.join(tmpDir, 'extra-empty');
     fs.mkdirSync(extraDir, { recursive: true });
     await withState(
       { extras: [{ alias: 'empty', dir: extraDir, url: 'gh:x/y' }] },
@@ -177,7 +168,6 @@ describe('discoverMarketplaces', () => {
     fs.mkdirSync(systemPlugins, { recursive: true });
     await withState({ systemPlugins }, ({ discoverMarketplaces }) => {
       const found = discoverMarketplaces();
-      // System listed first (lowest precedence), then the user repo.
       expect(found.map(m => m.name)).toEqual(['agents-system', 'agents-cli']);
       expect(found[0].spec).toMatchObject({ kind: 'system', root: systemPlugins });
       expect(found[0].pluginsRoot).toBe(systemPlugins);
@@ -200,8 +190,6 @@ describe('discoverMarketplaces', () => {
     await withState(
       { systemPlugins, extras: [{ alias: 'extras', dir: extraDir, url: 'gh:x/y' }], projectPlugins },
       ({ discoverMarketplaces }) => {
-        // Order is the dedupe order consumers rely on (Map/last-wins): a plugin
-        // present in multiple repos resolves to project > extra > user > system.
         expect(discoverMarketplaces({ cwd: '/whatever' }).map(m => m.name)).toEqual([
           'agents-system',
           'agents-cli',
@@ -213,7 +201,6 @@ describe('discoverMarketplaces', () => {
   });
 });
 
-// ─── syncMarketplaceManifest ─────────────────────────────────────────────────
 
 describe('syncMarketplaceManifest', () => {
   let tmpDir: string;
@@ -252,16 +239,12 @@ describe('syncMarketplaceManifest', () => {
       expect(manifest!.plugins.map(p => p.name)).toEqual(['alpha']);
       expect(manifest!.plugins[0]).toMatchObject({ name: 'alpha', source: './plugins/alpha', version: '1.0.0' });
 
-      // Manifest is written to disk at the expected path.
       const onDisk = JSON.parse(fs.readFileSync(marketplaceManifestPath(spec, 'claude', versionHome), 'utf-8'));
       expect(onDisk.name).toBe(expectedName);
     }
   );
 
   it('FOLLOWS SYMLINKS — a plugin symlinked into the marketplace plugins dir is catalogued', () => {
-    // Reproduces the phoenix/prix/rush case: plugins that are symlinks-to-dirs.
-    // The old code used Dirent.isDirectory() which is false for a symlink and
-    // silently dropped them. statSync follows the link.
     const realPlugin = writePluginSource(srcDir, 'linked');
     const mktPluginsDir = path.join(marketplaceRoot(SPECS.user, 'claude', versionHome), 'plugins');
     fs.mkdirSync(mktPluginsDir, { recursive: true });
@@ -274,7 +257,6 @@ describe('syncMarketplaceManifest', () => {
   it('sorts plugins by name and skips dirs without a plugin.json', () => {
     installInto(SPECS.user, discoveredPlugin(writePluginSource(srcDir, 'zeta'), 'zeta'), versionHome);
     installInto(SPECS.user, discoveredPlugin(writePluginSource(srcDir, 'beta'), 'beta'), versionHome);
-    // A stray dir with no manifest must be ignored.
     fs.mkdirSync(path.join(marketplaceRoot(SPECS.user, 'claude', versionHome), 'plugins', 'not-a-plugin'), { recursive: true });
 
     const manifest = syncMarketplaceManifest(SPECS.user, 'claude', versionHome);
@@ -282,10 +264,7 @@ describe('syncMarketplaceManifest', () => {
   });
 
   it('WIRING: warns to stderr when a synced plugin ships a Claude-invalid manifest', () => {
-    // The real bug: a plugin.json with bare-name skills syncs "successfully" but
-    // Claude rejects the whole plugin. The sync path must surface it loudly.
     installInto(SPECS.user, discoveredPlugin(writePluginSource(srcDir, 'badplug', { skills: ['loop'] }), 'badplug'), versionHome);
-    // A valid neighbour must NOT warn.
     installInto(SPECS.user, discoveredPlugin(writePluginSource(srcDir, 'goodplug'), 'goodplug'), versionHome);
 
     const origWrite = process.stderr.write.bind(process.stderr);
@@ -293,7 +272,6 @@ describe('syncMarketplaceManifest', () => {
     process.stderr.write = ((chunk: unknown) => { captured.push(String(chunk)); return true; }) as typeof process.stderr.write;
     try {
       const manifest = syncMarketplaceManifest(SPECS.user, 'claude', versionHome);
-      // Sync still completes and catalogues both plugins — the warning is advisory, not fatal.
       expect(manifest!.plugins.map(p => p.name)).toEqual(['badplug', 'goodplug']);
     } finally {
       process.stderr.write = origWrite;
@@ -303,15 +281,12 @@ describe('syncMarketplaceManifest', () => {
     expect(out).toContain("plugin 'badplug'");
     expect(out).toContain('"skills"');
     expect(out).toContain('"./');
-    // Carries actionable fix text, not just a complaint.
     expect(out).toContain('Fix:');
     expect(out).toContain('delete the "skills" field');
-    // The valid neighbour never warns.
     expect(out).not.toContain('goodplug');
   });
 });
 
-// ─── registerMarketplace / unregisterMarketplace ─────────────────────────────
 
 describe('register/unregister marketplace', () => {
   let tmpDir: string;
@@ -356,7 +331,6 @@ describe('register/unregister marketplace', () => {
   });
 });
 
-// ─── Copilot plugin registration ─────────────────────────────────────────────
 
 describe('copilot plugin registration', () => {
   let tmpDir: string;
@@ -380,7 +354,6 @@ describe('copilot plugin registration', () => {
   it('marketplace manifest for copilot lives at the marketplace ROOT (not .claude-plugin/)', () => {
     const p = marketplaceManifestPath(SPECS.user, 'copilot', versionHome);
     expect(p).toBe(path.join(marketplaceRoot(SPECS.user, 'copilot', versionHome), 'marketplace.json'));
-    // Claude keeps the canonical .claude-plugin/ location.
     expect(marketplaceManifestPath(SPECS.user, 'claude', versionHome)).toContain(
       path.join('.claude-plugin', 'marketplace.json')
     );
@@ -451,7 +424,6 @@ describe('copilot plugin registration', () => {
   });
 });
 
-// ─── syncAllMarketplaces ─────────────────────────────────────────────────────
 
 describe('syncAllMarketplaces', () => {
   let tmpDir: string;
@@ -493,8 +465,6 @@ describe('syncAllMarketplaces', () => {
       const userSpec: MarketplaceSpec = { kind: 'user' };
       const projSpec: MarketplaceSpec = { kind: 'project', root: projectPlugins };
 
-      // Copy a plugin into each marketplace's version-home dest (the work a
-      // per-plugin sync would do) before reconciling.
       mod.copyPluginToMarketplace(discoveredPlugin(writePluginSource(srcDir, 'u1'), 'u1'), userSpec, 'claude', versionHome);
       mod.copyPluginToMarketplace(discoveredPlugin(writePluginSource(srcDir, 'p1'), 'p1'), projSpec, 'claude', versionHome);
       mod.copyPluginToMarketplace(discoveredPlugin(writePluginSource(srcDir, 'p2'), 'p2'), projSpec, 'claude', versionHome);
@@ -503,7 +473,6 @@ describe('syncAllMarketplaces', () => {
       const byName = Object.fromEntries(results.map(r => [r.name, r.plugins]));
       expect(byName).toEqual({ 'agents-cli': 1, 'agents-project': 2 });
 
-      // Both got registered in known_marketplaces.json.
       const known = JSON.parse(fs.readFileSync(mod.knownMarketplacesPath('claude', versionHome), 'utf-8'));
       expect(Object.keys(known).sort()).toEqual(['agents-cli', 'agents-project']);
     } finally {
@@ -521,7 +490,7 @@ describe('syncAllMarketplaces', () => {
         ...actual,
         getPluginsDir: () => userPlugins,
         getEnabledExtraRepos: () => [],
-        getProjectPluginsDir: () => projectPlugins, // discovered, but nothing copied
+        getProjectPluginsDir: () => projectPlugins,
       };
     });
     try {
@@ -537,7 +506,6 @@ describe('syncAllMarketplaces', () => {
   });
 });
 
-// ─── add/removePluginFromSettings ────────────────────────────────────────────
 
 describe('add/removePluginFromSettings', () => {
   let tmpDir: string;
@@ -602,7 +570,6 @@ describe('validateClaudePluginManifest', () => {
     expect(warnings[0]).toContain('"skills"');
     expect(warnings[0]).toContain('"dispatch"');
     expect(warnings[0]).toContain('"./');
-    // Must tell the reader (human or agent) exactly how to fix it.
     expect(warnings[0]).toContain('Fix:');
     expect(warnings[0]).toContain('delete the "skills" field');
   });

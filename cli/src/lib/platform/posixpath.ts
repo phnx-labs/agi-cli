@@ -6,17 +6,13 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-/** The XDG user-bin dir, `~/.local/bin`. */
 export function localBinDir(home: string = os.homedir()): string {
   return path.join(home, '.local', 'bin');
 }
 
 interface SymlinkResult {
-  /** A usable symlink to `target` exists at the path after this call. */
   ok: boolean;
-  /** True only when this call created the symlink (false = already correct, or left untouched). */
   created: boolean;
-  /** Why an existing entry was left untouched (set only when ok is false). */
   skippedReason?: string;
   path: string;
 }
@@ -29,6 +25,7 @@ export function ensureLocalBinSymlink(
   target: string,
   dir: string = localBinDir(),
 ): SymlinkResult {
+  // PATH healing never clobbers a real file or a symlink owned by another installation.
   const linkPath = path.join(dir, name);
   const want = path.resolve(target);
   let current: string | null = null;
@@ -37,18 +34,15 @@ export function ensureLocalBinSymlink(
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === 'EINVAL') {
-      // The path exists but is not a symlink — a real file/dir. Never clobber.
       return { ok: false, created: false, skippedReason: 'a non-symlink file already exists here', path: linkPath };
     }
     if (code !== 'ENOENT') {
       return { ok: false, created: false, skippedReason: (err as Error).message, path: linkPath };
     }
-    // ENOENT — nothing there; fall through to create.
   }
   if (current !== null) {
     const resolved = path.isAbsolute(current) ? current : path.resolve(dir, current);
     if (resolved === want) return { ok: true, created: false, path: linkPath };
-    // Points somewhere else (e.g. a dev build) — the existing link wins.
     return { ok: false, created: false, skippedReason: `symlink already points to ${current}`, path: linkPath };
   }
   fs.mkdirSync(dir, { recursive: true });
@@ -74,6 +68,7 @@ function bashPath(): string {
  * install PATH, which would resolve `agents` and skip the heal. Strip PATH and nvm hints so the
  * login profile rebuilds it; non-interactive bash skips ~/.bashrc's nvm block. */
 function loginProbeEnv(): NodeJS.ProcessEnv {
+  // Remove inherited PATH/tool-manager state so bash computes a fresh login environment.
   const env = { ...process.env };
   delete env.PATH;
   delete env.NVM_BIN;
@@ -99,7 +94,6 @@ export function loginShellResolves(cmd: string): boolean {
   }
 }
 
-/** Is `dir` on a fresh `bash -lc` PATH? Best-effort; a probe failure returns false. */
 export function dirOnLoginPath(dir: string): boolean {
   try {
     const res = spawnSync(bashPath(), ['-lc', 'printf %s "$PATH"'], {

@@ -102,7 +102,6 @@ describe('composeRules — per-name shadowing', () => {
 
     const result = composeRules({ layers: [user, sys] });
 
-    // User's preset wins as a whole — only 'a' is included.
     expect(result.subrules.map((s) => s.name)).toEqual(['a']);
     expect(result.content).toBe('A user\n');
     expect(result.presetLayer).toBe('user');
@@ -205,9 +204,7 @@ describe('composeRules — output sanity', () => {
     writeFile('system/rules.yaml', 'presets:\n  default:\n    subrules: [a]\n');
 
     const result = composeRules({ layers: [sys] });
-    // The fragment text itself is preserved verbatim; we don't try to expand it.
     expect(result.content).toContain('@other/path.md');
-    // What matters: no leading `@./...` lines from a manifest.
     expect(result.content.split('\n').every((line) => !/^@\.\//.test(line))).toBe(true);
   });
 
@@ -243,10 +240,8 @@ describe('composeRules — dir-form subrules', () => {
   it('flat and dir forms coexist; a dir-form shadows a lower-layer flat one', () => {
     const sys = makeLayer('system', 'system');
     const user = makeLayer('user', 'user');
-    // Lower layer (system) has flat foo; higher layer (user) has dir-form foo.
     writeFile('system/subrules/foo.md', 'SYS FLAT FOO');
     writeFile('user/subrules/foo/rule.md', 'USER DIR FOO');
-    // A coexisting flat subrule in the same higher layer.
     writeFile('user/subrules/bar.md', 'USER BAR');
     writeFile('system/rules.yaml', 'presets:\n  default:\n    subrules: [foo, bar]\n');
 

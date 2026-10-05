@@ -11,9 +11,6 @@ import type { AgentId } from '../types.js';
 import { getResolvedRulesDir, getVersionsDir, isReservedAgentsDir } from '../state.js';
 import { composeRules, composeRulesFromState, type RulesLayer } from './compose.js';
 
-// Match `@path` preceded by start-of-string or whitespace. This avoids
-// matching emails ("foo@bar.com") and the middle of words. The leading
-// whitespace (if any) is captured so we can preserve it in the output.
 const IMPORT_RE = /(^|\s)@(\S+)/g;
 const MAX_DEPTH = 5;
 /** Header that the non-@-import compile path (`agents refresh-rules` -> compileRulesForAgent)
@@ -27,7 +24,6 @@ export const COMPILED_HEADER_PROJECT =
   '<!-- Auto-compiled by agents-cli from .agents/rules/AGENTS.md + imports.\n' +
   '     Edit the source files under .agents/rules/ — edits to this file will be overwritten on next sync. -->\n\n';
 
-/** Sidecar manifest recording source file hashes for staleness detection. */
 interface CompileManifest {
   compiledAt: string;
   sources: { path: string; sha256: string; mtime?: number; size?: number }[];
@@ -65,11 +61,8 @@ function restoreCodeRegions(content: string, fences: string[], inlines: string[]
   return restored;
 }
 
-/** Result of resolving @-imports in a rules file. */
 interface ResolveResult {
-  /** Fully-inlined content. */
   content: string;
-  /** Absolute paths of every file read during resolution (including the root). */
   sources: string[];
 }
 
@@ -91,8 +84,8 @@ export function resolveImports(content: string, baseDir: string): ResolveResult 
         ? tildeExpanded
         : path.resolve(currentDir, tildeExpanded);
 
-      if (seen.has(resolved)) return lead; // cycle break — keep leading whitespace
-      if (!fs.existsSync(resolved)) return match; // preserve literal including lead
+      if (seen.has(resolved)) return lead;
+      if (!fs.existsSync(resolved)) return match;
 
       seen.add(resolved);
       sources.push(resolved);
@@ -107,7 +100,6 @@ export function resolveImports(content: string, baseDir: string): ResolveResult 
   return { content: result, sources };
 }
 
-/** True if the agent's native runtime resolves `@path` imports in its rules file. */
 export function supportsRulesImports(agentId: AgentId): boolean {
   return !!AGENTS[agentId].capabilities.rulesImports;
 }
@@ -136,12 +128,10 @@ export function isRulesStale(agentId: AgentId, version: string): boolean {
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as CompileManifest;
     for (const src of manifest.sources) {
       if (!fs.existsSync(src.path)) return true;
-      // Tier 1: mtime+size fast path (no file read needed)
       if (src.mtime !== undefined && src.size !== undefined) {
         const stat = fs.statSync(src.path);
         if (stat.mtimeMs === src.mtime && stat.size === src.size) continue;
       }
-      // Tier 2: content hash
       if (sha256(fs.readFileSync(src.path, 'utf8')) !== src.sha256) return true;
     }
     return false;
@@ -168,8 +158,6 @@ function compileRulesForAgent(
   try {
     composed = composeRulesFromState({ preset: undefined });
   } catch {
-    // No rules.yaml in any layer, or the default preset is missing — leave
-    // the version home untouched (matches the previous file-missing branch).
     return { compiled: false, compiledPath: '', sources: 0 };
   }
 
@@ -185,8 +173,6 @@ function compileRulesForAgent(
 
   fs.writeFileSync(compiledPath, newContent);
 
-  // Track every concrete subrule file the composer included as a source for
-  // staleness. composeRulesFromState exposes sourcePath on each ComposedSubrule.
   const allSources = composed.subrules.map(s => s.sourcePath);
   const manifest: CompileManifest = {
     compiledAt: new Date().toISOString(),
@@ -211,15 +197,10 @@ export function ensureRulesFresh(agentId: AgentId, version: string): boolean {
 }
 
 interface ProjectCompileResult {
-  /** True when cwd/AGENTS.md was newly written or rewritten. */
   compiled: boolean;
-  /** Absolute path to cwd/AGENTS.md. Empty when no project rules dir was present. */
   agentsPath: string;
-  /** Per-agent instruction filenames symlinked (or copied) to AGENTS.md. */
   symlinks: string[];
-  /** Number of source files inlined (root + recursive @-imports). */
   sources: number;
-  /** Per-agent files we left alone because the user wrote/owns them. */
   skippedClobber: string[];
 }
 
@@ -230,6 +211,7 @@ export function compileRulesForProject(
   cwd: string,
   opts: { preset?: string; layers?: RulesLayer[] } = {}
 ): ProjectCompileResult {
+  // Only files bearing our compiled header are mutable; authored instructions stay untouched.
   const projectRulesDir = path.join(cwd, '.agents', 'rules');
 
   const empty: ProjectCompileResult = {
@@ -245,15 +227,11 @@ export function compileRulesForProject(
 
   let composed: { content: string; subrules: { sourcePath: string }[] };
   try {
-    // Tests inject `layers` to isolate from real ~/.agents-system / ~/.agents
-    // state. Production callers omit it and compose from discovered state.
     const result = opts.layers
       ? composeRules({ preset: opts.preset, layers: opts.layers })
       : composeRulesFromState({ cwd, preset: opts.preset });
     composed = { content: result.content, subrules: result.subrules };
   } catch {
-    // Composer threw (no preset, malformed yaml). Don't write a half-baked
-    // file — bail out cleanly, same as if the rules dir didn't exist.
     return empty;
   }
 
@@ -265,7 +243,7 @@ export function compileRulesForProject(
   let weOwnAgentsMd = false;
 
   let agentsLstat: fs.Stats | null = null;
-  try { agentsLstat = fs.lstatSync(agentsPath); } catch { /* missing */ }
+  try { agentsLstat = fs.lstatSync(agentsPath); } catch {  }
 
   if (!agentsLstat) {
     fs.writeFileSync(agentsPath, newContent);
@@ -273,7 +251,7 @@ export function compileRulesForProject(
     weOwnAgentsMd = true;
   } else if (agentsLstat.isFile()) {
     let existing = '';
-    try { existing = fs.readFileSync(agentsPath, 'utf8'); } catch { /* unreadable */ }
+    try { existing = fs.readFileSync(agentsPath, 'utf8'); } catch {  }
     if (existing.startsWith(COMPILED_HEADER_PROJECT)) {
       if (existing !== newContent) {
         fs.writeFileSync(agentsPath, newContent);
@@ -284,13 +262,11 @@ export function compileRulesForProject(
       skippedClobber.push('AGENTS.md');
     }
   } else {
-    // Symlink or other non-regular file — treat as user-owned, do not clobber
     skippedClobber.push('AGENTS.md');
   }
 
-  // Per-agent symlinks. Only attempt when we own AGENTS.md — never create a
-  // dangling symlink to a file we couldn't write.
   const symlinks: string[] = [];
+  // Native instruction links are managed only when this compiler owns AGENTS.md.
   if (weOwnAgentsMd) {
     const seen = new Set<string>(['AGENTS.md']);
     for (const agent of Object.values(AGENTS)) {
@@ -300,19 +276,17 @@ export function compileRulesForProject(
       // symlink; GEMINI.md would only litter the tree. Mirrors the `deprecated?.hard` skip in
       // capabilities.ts, MANAGED_AGENT_IDS and modes.ts.
       if (agent.deprecated?.hard) continue;
-      // Skip agents whose instructions live at a nested path (e.g. OpenClaw's
-      // workspace/AGENTS.md) — those are managed by their own setup paths.
       if (fname.includes('/') || fname.includes('\\')) continue;
       seen.add(fname);
 
       const linkPath = path.join(cwd, fname);
       let lstat: fs.Stats | null = null;
-      try { lstat = fs.lstatSync(linkPath); } catch { /* missing */ }
+      try { lstat = fs.lstatSync(linkPath); } catch {  }
 
       if (lstat) {
         if (lstat.isSymbolicLink()) {
           let target = '';
-          try { target = fs.readlinkSync(linkPath); } catch { /* unreadable */ }
+          try { target = fs.readlinkSync(linkPath); } catch {  }
           if (target === 'AGENTS.md') {
             symlinks.push(fname);
             continue;
@@ -320,7 +294,6 @@ export function compileRulesForProject(
           skippedClobber.push(fname);
           continue;
         }
-        // Regular file — user authored
         skippedClobber.push(fname);
         continue;
       }
@@ -329,14 +302,10 @@ export function compileRulesForProject(
         fs.symlinkSync('AGENTS.md', linkPath);
         symlinks.push(fname);
       } catch {
-        // Filesystems that disallow symlinks (some Windows configs) — fall
-        // back to a copy. The agent reads the same content either way.
         try {
           fs.copyFileSync(agentsPath, linkPath);
           symlinks.push(fname);
         } catch {
-          // Give up on this one quietly; the agent that needs this filename
-          // will fall back to its own discovery rules.
         }
       }
     }

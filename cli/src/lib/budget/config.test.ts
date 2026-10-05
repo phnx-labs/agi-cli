@@ -33,7 +33,6 @@ afterAll(() => {
 let projectDir: string;
 
 beforeEach(() => {
-  // Fresh user agents.yaml each test.
   writeUserYaml('');
   projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'budget-config-proj-'));
 });
@@ -51,9 +50,9 @@ describe('resolveBudgetConfig', () => {
     writeUserYaml('budget:\n  per_run: 5\n  per_day: 50\n  per_project: 100\n');
     fs.writeFileSync(path.join(projectDir, 'agents.yaml'), 'budget:\n  per_run: 1\n');
     const cfg = resolveBudgetConfig(projectDir);
-    expect(cfg.per_run).toBe(1);   // project wins
-    expect(cfg.per_day).toBe(50);  // inherited from user
-    expect(cfg.per_project).toBe(100); // inherited from user
+    expect(cfg.per_run).toBe(1);
+    expect(cfg.per_day).toBe(50);
+    expect(cfg.per_project).toBe(100);
   });
 
   it('nearest project agents.yaml wins over an ancestor project agents.yaml', () => {

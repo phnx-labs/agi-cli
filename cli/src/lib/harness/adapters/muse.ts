@@ -30,8 +30,6 @@ ${slotAwareConfigEnvBash([{ env: 'XDG_CONFIG_HOME', rel: '.config' }, { env: 'XD
 `;
   },
 
-  // muse exec: plan ≈ no non-shell writes; auto skips approval prompts but
-  // keeps the OS sandbox; skip is --yolo (no approval, no sandbox, trust).
   routineModeArgs(cmd, ctx) {
     if (ctx.mode === 'plan') {
       cmd.push('--disable-write');
@@ -40,6 +38,5 @@ ${slotAwareConfigEnvBash([{ env: 'XDG_CONFIG_HOME', rel: '.config' }, { env: 'XD
     } else if (ctx.mode === 'skip') {
       cmd.push('--yolo');
     }
-    // edit: default on-request approval + sandbox
   },
 };

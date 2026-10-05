@@ -13,19 +13,13 @@ import {
 import { resolveBudgetConfig, hasAnyCap } from './config.js';
 import { loadLedger, localDay, spendForDay, spendForProject } from './ledger.js';
 
-/** Public surface of the team-scoped budget watcher. */
 export interface TeamBudgetWatcher {
-  /** Feed any new usage events from every running teammate's stdout.log. */
   poll(): Promise<void>;
-  /** True once any cap has been crossed (mirrors LiveSpendWatcher). */
   breached(): boolean;
-  /** The first breach seen, or null if none yet. */
   breach(): BreachInfo | null;
-  /** Release references and stop tapping streams. Idempotent. */
   dispose(): void;
 }
 
-/** Per-teammate cursor tracking how far we've read the stdout.log. */
 interface StreamCursor {
   offset: number;
   pending: string;
@@ -37,10 +31,10 @@ interface StreamCursor {
 export function createTeamBudgetWatcher(args: {
   manager: AgentManager;
   team: string;
-  /** Project/cwd used to (a) resolve budget config and (b) seed project spend. */
   cwd: string;
   onBreach: (breach: BreachInfo) => void;
 }): TeamBudgetWatcher | null {
+  // One watcher aggregates every local teammate against the team's shared persisted caps.
   const cfg = resolveBudgetConfig(args.cwd);
   if (!hasAnyCap(cfg)) return null;
 
@@ -68,18 +62,15 @@ export function createTeamBudgetWatcher(args: {
       if (disposed || watcher.breached()) return;
       const teammates = await args.manager.listByTask(args.team);
       for (const agent of teammates) {
-        // Only tap running local teammates: PENDING has no output yet, cloud
-        // teammates emit through a different channel (their own SSE stream),
-        // and terminal states produce no new bytes.
         if (agent.status !== 'running') continue;
-        if (agent.cloudProvider) continue;
+        if (agent.cloudProvider) continue; // Cloud streams enforce their own server-side gate.
 
         const stdoutPath = await agent.getStdoutPath();
         let stat: fs.Stats;
         try {
           stat = fs.statSync(stdoutPath);
         } catch {
-          continue; // File not yet created — nothing to read.
+          continue;
         }
 
         const cursor = cursors.get(agent.agentId) ?? { offset: 0, pending: '' };

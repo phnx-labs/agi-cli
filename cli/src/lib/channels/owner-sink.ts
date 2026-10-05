@@ -43,6 +43,5 @@ export async function probeOwnerSink(meta: Meta): Promise<OwnerSinkStatus> {
     return { configured: true, reachable: false, channel, transport, reason: 'slack-no-token' };
   }
 
-  // telegram / discord — daemon removed, no direct transport.
   return { configured: true, reachable: false, channel, transport, reason: 'channel-unsupported' };
 }

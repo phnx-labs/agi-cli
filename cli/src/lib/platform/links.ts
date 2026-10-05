@@ -9,8 +9,6 @@ import * as fs from 'fs';
 export function createLink(src: string, dst: string): void {
   const win = process.platform === 'win32';
   const isDir = fs.statSync(src).isDirectory();
-  // Type is ignored on POSIX; on Windows, junction (dir) avoids the elevation a
-  // dir symlink would need, and 'file' is the explicit file-symlink form.
   const type: fs.symlink.Type | undefined = win ? (isDir ? 'junction' : 'file') : undefined;
   try {
     fs.symlinkSync(src, dst, type);

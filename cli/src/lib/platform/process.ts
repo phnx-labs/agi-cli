@@ -1,6 +1,3 @@
-/**
- * Process liveness / control, platform-aware.
- */
 import { execFileSync } from 'child_process';
 import { readFileSync } from 'fs';
 import * as os from 'os';
@@ -10,15 +7,16 @@ import { sleepSync } from '../fs-atomic.js';
  * (TerminateProcess orphans children). POSIX: SIGKILL to the pid (callers owning a process group
  * can pass the negative pid). Best-effort, never throws; an already-exited process is success. */
 export function killTree(pid: number): void {
+  // Windows taskkill must terminate descendants too; POSIX callers manage process groups separately.
   if (!pid || pid <= 0) return;
   if (process.platform === 'win32') {
     try {
       execFileSync('taskkill', ['/F', '/T', '/PID', String(pid)], { stdio: 'ignore', windowsHide: true });
-    } catch { /* already gone, or no such pid */ }
+    } catch {  }
   } else {
     try {
       process.kill(pid, 'SIGKILL');
-    } catch { /* already gone */ }
+    } catch {  }
   }
 }
 
@@ -31,6 +29,7 @@ export function backgroundSpawnOptions(
   const platform = opts.platform ?? process.platform;
   const cwd = opts.cwd ?? os.homedir();
   if (platform === 'win32') {
+    // Detached Windows children lose usable stdio unless real descriptors were supplied.
     return opts.fdStdio
       ? { cwd, detached: true, windowsHide: true }
       : { cwd, detached: false, windowsHide: true };
@@ -47,7 +46,8 @@ const EXIT_POLL_MS = 50;
  * waitForExit blocks the event loop so our own child daemon never gets reaped. */
 export function hasExited(pid: number): boolean {
   if (!isAlive(pid)) return true;
-  if (process.platform === 'win32') return false; // no zombie state to unwrap
+  if (process.platform === 'win32') return false;
+  // kill(0) reports zombies alive; ps state is needed before bounded shutdown waits can finish.
   try {
     const state = execFileSync('ps', ['-o', 'state=', '-p', String(pid)], { encoding: 'utf-8' }).trim();
     return state.startsWith('Z');
@@ -57,7 +57,7 @@ export function hasExited(pid: number): boolean {
     if (err?.code === 'ENOENT' && err?.syscall === 'spawnSync ps') return false;
     const out = String(err?.stdout ?? '').trim();
     const errOut = String(err?.stderr ?? '').trim();
-    if (err?.status === 1 && out === '' && errOut === '') return true; // no such pid
+    if (err?.status === 1 && out === '' && errOut === '') return true;
     return false;
   }
 }
@@ -69,7 +69,7 @@ export function waitForExit(pid: number, timeoutMs: number): boolean {
   for (;;) {
     if (hasExited(pid)) return true;
     if (Date.now() >= deadline) return false;
-    sleepSync(EXIT_POLL_MS); // blocks this thread outright; no busy-loop
+    sleepSync(EXIT_POLL_MS);
   }
 }
 
@@ -91,6 +91,7 @@ const startTimeByPid = new Map<number, string | null>();
  * only compared for equality against an earlier capture. Linux: /proc/<pid>/stat field 22. macOS:
  * `ps -o lstart=`. Windows: Win32_Process CreationDate. */
 export function captureProcessStartTime(pid: number, opts: { fresh?: boolean } = {}): string | null {
+  // Persist start identity with a PID so later cleanup cannot kill an unrelated recycled process.
   if (!Number.isInteger(pid) || pid <= 0) return null;
   const cached = startTimeByPid.get(pid);
   if (!opts.fresh && cached !== undefined) return cached;
@@ -102,9 +103,6 @@ export function captureProcessStartTime(pid: number, opts: { fresh?: boolean } =
 function readProcessStartTime(pid: number): string | null {
   try {
     if (process.platform === 'win32') {
-      // ToFileTimeUtc() rather than the raw DateTime: the default string form is
-      // rendered in the current culture, so a persisted fingerprint would stop
-      // comparing equal across a locale change.
       const out = execFileSync(
         'powershell.exe',
         [
@@ -120,12 +118,9 @@ function readProcessStartTime(pid: number): string | null {
     }
     if (process.platform === 'linux') {
       const stat = readFileSync(`/proc/${pid}/stat`, 'utf-8');
-      // The comm field (#2) is parenthesized and may contain spaces, so split
-      // off everything after the last ')' to get a clean field list.
       const lastParen = stat.lastIndexOf(')');
       if (lastParen < 0) return null;
       const fields = stat.slice(lastParen + 2).split(' ');
-      // After comm we are at field 3; starttime is field 22, so index 19 here.
       return fields[19] || null;
     }
     const out = execFileSync('ps', ['-o', 'lstart=', '-p', String(pid)], {

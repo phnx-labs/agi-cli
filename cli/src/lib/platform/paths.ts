@@ -1,10 +1,6 @@
-/**
- * Path classification + normalization, platform-aware.
- */
 import * as os from 'os';
 import * as path from 'path';
 
-/** Windows drive-letter absolute path: `C:\` or `C:/`. */
 const WIN_DRIVE_RE = /^[a-zA-Z]:[\\/]/;
 
 /** Does this positional argument look like a path (vs a search term)? POSIX markers (`.`, `./`,

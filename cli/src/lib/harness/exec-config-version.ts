@@ -5,9 +5,7 @@ import { getVersionHomePath, isVersionInstalled, resolveVersion } from '../insta
 import type { AgentId } from '../types.js';
 
 interface ResolvedConfigVersion {
-  /** The version to pin, or null when unresolved / not installed. */
   version: string | null;
-  /** The version home for that version, or null. */
   versionHome: string | null;
 }
 
