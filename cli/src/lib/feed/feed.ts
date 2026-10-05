@@ -625,15 +625,15 @@ function acquireReleaseToken(release: string): boolean {
   // released the same claim too (PHNX-4131: two processes adopted one claim).
   const create = (): boolean => {
     const staged = `${release}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
-    fs.writeFileSync(staged, JSON.stringify(mine), { mode: 0o644 });
     try {
+      fs.writeFileSync(staged, JSON.stringify(mine), { mode: 0o644 });
       fs.linkSync(staged, release);
       return true;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false;
       throw error;
     } finally {
-      fs.unlinkSync(staged);
+      fs.rmSync(staged, { force: true });
     }
   };
   if (create()) return true;
