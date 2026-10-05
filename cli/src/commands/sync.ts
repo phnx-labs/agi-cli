@@ -115,6 +115,8 @@ function printResidual(residual: ResidualDrift[], errLog: (msg: string) => void)
 }
 
 function parseKindSelection(opts: SyncOpts): ResourceSelection | undefined {
+  // Bare singular/plural flags mean all, arrays mean named resources;
+  // rule(s)/memory always recompiles the full composed memory.
   function resolve(singular: string[] | true | undefined, plural: string[] | true | undefined): string[] | 'all' | undefined {
     const val = singular ?? plural;
     if (val === undefined) return undefined;
@@ -796,7 +798,7 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
 
   const kindFilter = parseKindSelection(opts);
   if (repoScope || kindFilter) {
-    // Targeted repo/kind sync skips full-tree verification but always runs generated-shim repair.
+    // After an actual targeted reconcile, skip full-tree verification and repair generated shims.
     const scoped = buildSelection(repoScope ? [`${repoScope}:*`] : [], kindFilter ?? undefined, cwd);
     if (Object.keys(scoped).length === 0) {
       if (json) {

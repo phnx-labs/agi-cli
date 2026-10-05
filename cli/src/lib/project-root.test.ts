@@ -148,6 +148,7 @@ describe('resolveProjectDirs', () => {
     expect(extraDirs).toEqual([]);
   });
 
+  // A worktree remains cwd while the primary checkout and sibling bindings stay readable grants.
   it('a @worktree ref keeps the worktree as cwd and grants the main checkout too', async () => {
     const wt = path.join(mainDir, '.agents', 'worktrees', 'fix');
     fs.mkdirSync(wt, { recursive: true });
@@ -164,6 +165,7 @@ describe('inferProjectRoot', () => {
   const expectedRoot = () =>
     toHomeRelative(process.platform === 'win32' ? tmp : fs.realpathSync(tmp));
 
+  // Canonicalize temp roots because git returns macOS /private/var and Windows long paths while os.tmpdir may use /var or 8.3 aliases.
   beforeAll(() => {
     tmp = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'proot-')));
     repo = path.join(tmp, 'my-repo');
