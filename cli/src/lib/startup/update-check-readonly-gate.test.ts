@@ -1,23 +1,3 @@
-/**
- * PHNX-3940: `agents update --check` is a READ-ONLY preview and must not trigger
- * the mutating startup steps every other real command runs.
- *
- * The planner (`planAutoUpdates`) is already read-only, but bootstrap ran the
- * migration pass, the legacy device-config fold, and the background sync/auto-
- * update BEFORE the command's action — so `--check` wrote the migration sentinel
- * and folded a legacy `fleet.devices.<name>.config` store to disk. Separately,
- * `device-config.getConfigValue` folded the device stores even on the pure
- * USER-scope `updates.auto` read the plan makes.
- *
- * This spawns the real CLI against a temp HOME with the startup suppression
- * flags explicitly OFF (AGENTS_SKIP_MIGRATION=0 etc.) — otherwise the dev-build
- * detector sets them to 1 and the migration never runs at all, hiding the very
- * behavior under test. It asserts `--check` (with and without a target) leaves
- * the migration sentinel absent, the legacy device store un-folded, and every
- * installation record byte-identical, while a real `--auto` invocation over the
- * SAME fixture DOES migrate — proving the exemption is real, not a fixture that
- * never folds.
- */
 import { afterEach, describe, expect, it } from 'vitest';
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';
@@ -37,7 +17,6 @@ afterEach(() => {
   }
 });
 
-/** Paths inside a fixture HOME, mirroring src/lib/state.ts. */
 function paths(home: string) {
   const agents = path.join(home, '.agents');
   return {
@@ -51,20 +30,11 @@ function paths(home: string) {
   };
 }
 
-/**
- * Build a fully set-up fixture HOME: a system repo (so `ensureInitialized`
- * returns without prompting), one claude + one codex managed installation,
- * `updates.auto=false` so the plan resolves NO network target, and a legacy
- * `fleet.devices.oldbox.config` store that the device-config migration would
- * fold into `devices/oldbox/agents.yaml` and strip from central.
- */
 function makeFixture(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'update-check-ro-'));
   const home = path.join(dir, 'home');
   const p = paths(home);
-  // System repo present → ensureInitialized is a no-op read.
   fs.mkdirSync(path.join(p.agents, '.system', '.git'), { recursive: true });
-  // Central config: kill switch off (no network), plus the legacy device store.
   fs.writeFileSync(
     p.central,
     'agents: {}\n' +
@@ -112,9 +82,6 @@ function runCli(args: string[], home: string, extraEnv: NodeJS.ProcessEnv = {}) 
       ...process.env,
       HOME: home,
       USERPROFILE: home,
-      // Suppression flags explicitly OFF — otherwise the dev-build detector sets
-      // them to '1' and the migration/sync/auto-update never run, so a
-      // regression in the read-only gate would be invisible.
       AGENTS_SKIP_MIGRATION: '0',
       AGENTS_NO_AUTOPULL: '0',
       AGENTS_CLI_DISABLE_AUTO_UPDATE: '0',
@@ -136,17 +103,13 @@ describe('agents update --check is read-only at the bootstrap boundary (PHNX-394
     const beforeCentral = fs.readFileSync(p.central, 'utf-8');
 
     const { status, stdout, stderr } = runCli(['update', '--check'], home);
-    // The plan renders (installations exist, kill switch off → "not eligible").
     expect(status, `stderr:\n${stderr}`).toBe(0);
     expect(stdout).toMatch(/Automatic-update plan/);
 
-    // No migration ran: sentinel absent, legacy device store un-folded, central
-    // unchanged, and the update-check cache never written.
     expect(fs.existsSync(p.migratedSentinel), 'migration sentinel must not be written on --check').toBe(false);
     expect(fs.existsSync(p.oldboxDoc), 'legacy device store must not be folded on --check').toBe(false);
     expect(fs.readFileSync(p.central, 'utf-8')).toBe(beforeCentral);
     expect(fs.existsSync(p.updateCheckCache), 'auto-update cache must not be written on --check').toBe(false);
-    // The planner read the installation, never rewrote it.
     expect(fs.readFileSync(p.installation('claude', '2.0.65'), 'utf-8')).toBe(beforeClaude);
   });
 
@@ -189,14 +152,10 @@ describe('agents update --check is read-only at the bootstrap boundary (PHNX-394
     scratch = path.dirname(home);
     const p = paths(home);
 
-    // The control only proves the fixture is fold-able; suppress its background
-    // network so the assertion on migration is not gated on registry reachability.
     const { status, stderr } = runCli(['update', '--auto'], home, {
       AGENTS_NO_AUTOPULL: '1',
       AGENTS_CLI_DISABLE_AUTO_UPDATE: '1',
     });
-    // updates.auto=false → nothing eligible → clean exit, but the bootstrap
-    // migration still ran ahead of the action.
     expect(status, `stderr:\n${stderr}`).toBe(0);
     expect(fs.existsSync(p.migratedSentinel), 'a non-check command writes the migration sentinel').toBe(true);
     expect(fs.existsSync(p.oldboxDoc), 'a non-check command folds the legacy device store').toBe(true);
