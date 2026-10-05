@@ -1,11 +1,3 @@
-/**
- * Tests for the REST read core behind the `gh` overload.
- *
- * The gh runner returns the payloads real `gh api --jq` streams (NDJSON, one
- * object per line) for each endpoint — the same shape `rest.ts` parses. This
- * exercises the real union/dedupe/mapping and the head-SHA anchor, not a stub of
- * the result. A live end-to-end test against a real PR is gated on AGENTS_TEST_GH.
- */
 
 import { describe, expect, it } from 'vitest';
 import { isCiGreen } from './pr-verdict.js';
@@ -17,7 +9,6 @@ import {
   rollupForSha,
 } from './rest.js';
 
-/** A gh that routes by endpoint substring and returns recorded REST payloads. */
 function ghRoutes(routes: {
   head?: string;
   checkRuns?: string;
@@ -65,7 +56,6 @@ describe('rollupForSha', () => {
       conclusion: 'SUCCESS',
     });
     expect(rollup.find((c) => c.name === 'ci/external')).toMatchObject({ state: 'SUCCESS' });
-    // Head-exact, terminal, all success/skipped -> green (reuses isCiGreen).
     expect(isCiGreen(rollup)).toBe(true);
   });
 

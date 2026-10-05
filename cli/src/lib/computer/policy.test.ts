@@ -1,14 +1,3 @@
-/**
- * The allow list is the security boundary of `agents computer`, and PHNX-4075
- * moved it to the seam: the standalone engine enforces whatever agents-cli
- * renders into the policy file and has no way to second-guess it. A rule this
- * parser wrongly ADMITS is an app an agent can drive that the user never
- * authorized; one it wrongly DROPS is a broken workflow.
- *
- * Exercised against real permission-group YAML on disk through the same
- * `AGENTS_USER_PERMISSIONS_DIR` / `AGENTS_SYSTEM_PERMISSIONS_DIR` seams the CLI
- * itself reads — no mocking of the resolution layer.
- */
 import { describe, it, expect, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -32,7 +21,6 @@ afterEach(() => {
   }
 });
 
-/** Write real group YAML into a real directory and point the resolver at it. */
 function withGroups(groups: { user?: Record<string, string>; system?: Record<string, string> }): void {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-computer-policy-'));
   tempDirs.push(root);
@@ -84,9 +72,6 @@ describe('loadComputerAllowList', () => {
   });
 
   it('only honors the allow: section — a rule under deny: must not be admitted', () => {
-    // The section tracker is what makes this true; a naive whole-file regex
-    // would turn a deny rule into a grant, which is the worst possible failure
-    // for this parser.
     withGroups({
       user: {
         'computer.yaml': [
@@ -111,8 +96,6 @@ describe('loadComputerAllowList', () => {
   });
 
   it('lets the USER layer win a filename collision', () => {
-    // Resource resolution is user-over-system; the allow list must not quietly
-    // union a system group the user deliberately overrode.
     withGroups({
       user: { 'computer.yaml': 'name: computer\nallow:\n  - "Computer(com.apple.notes)"\n' },
       system: { 'computer.yaml': 'name: computer\nallow:\n  - "Computer(com.apple.systempreferences)"\n' },

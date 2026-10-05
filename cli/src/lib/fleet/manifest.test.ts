@@ -104,7 +104,7 @@ describe('resolveDesired', () => {
     const out = resolveDesired(m, ctx);
     expect(out.map((d) => d.device)).toEqual(['s1', 'mac']);
     expect(out.every((d) => d.agents[0] === 'claude@latest')).toBe(true);
-    expect(out.every((d) => d.login === 'sync')).toBe(true); // default
+    expect(out.every((d) => d.login === 'sync')).toBe(true);
   });
 
   it('merges per-device overrides over defaults', () => {
@@ -115,8 +115,8 @@ describe('resolveDesired', () => {
     const out = resolveDesired(m, ctx);
     const s1 = out.find((d) => d.device === 's1')!;
     const mac = out.find((d) => d.device === 'mac')!;
-    expect(s1.agents).toEqual(['claude@latest']); // inherited
-    expect(mac.agents).toEqual(['codex@latest']); // overridden
+    expect(s1.agents).toEqual(['claude@latest']);
+    expect(mac.agents).toEqual(['codex@latest']);
     expect(mac.login).toBe('skip');
   });
 
@@ -126,11 +126,9 @@ describe('resolveDesired', () => {
   });
 
   it('SKIPS an unresolved device instead of aborting the whole reconcile', () => {
-    // bootstrap could not register `ghost-box` (off-tailnet) — the run must still
-    // reconcile the resolvable devices, not throw for every one of them.
     const m = parseFleetManifest({ defaults: { agents: ['claude@latest'] }, devices: { s1: {}, 'ghost-box': {} } });
     const out = resolveDesired(m, { ...ctx, unresolved: ['ghost-box'] });
-    expect(out.map((d) => d.device)).toEqual(['s1']); // ghost-box skipped, s1 kept
+    expect(out.map((d) => d.device)).toEqual(['s1']);
   });
 
   it('still throws for an unregistered name that is NOT unresolved (genuine misconfig, no bootstrap)', () => {
@@ -176,7 +174,6 @@ describe('emptyTargetsMessage', () => {
     const msg = emptyTargetsMessage(parseFleetManifest({ devices: {} }));
     expect(msg.style).toBe('hint');
     expect(msg.lines[0]).toMatch(/fleet\.devices is empty/);
-    // The hint must name both ways to declare a roster, so it is fixable from the message alone.
     expect(msg.lines.join(' ')).toMatch(/devices: all/);
     expect(msg.lines.join(' ')).toMatch(/<name>/);
   });
@@ -188,8 +185,6 @@ describe('emptyTargetsMessage', () => {
   });
 
   it('stays a plain note for a non-empty roster whose names all dropped out', () => {
-    // A named roster that resolved to zero targets (every name unresolved) already
-    // had each skip surfaced by the caller, so this is not the empty-roster case.
     const msg = emptyTargetsMessage(parseFleetManifest({ devices: { 'mac-mini': {} } }));
     expect(msg.style).toBe('plain');
   });

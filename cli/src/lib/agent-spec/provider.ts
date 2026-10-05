@@ -1,5 +1,3 @@
-// The production VersionProvider: the only fs/meta-coupled file in the engine.
-// Everything else in this module is pure and testable without it.
 
 import {
   listInstalledVersions,

@@ -1,14 +1,3 @@
-/**
- * Hook profiling — reads `hook.fire` events from the daily JSONL logs that
- * generated shims (see `cache.ts`) emit on every invocation, and aggregates
- * per-hook timing + cache stats.
- *
- * Every hook gets a generated shim now (resolveHookCommand in hooks.ts) —
- * `cache:`, `matches:`, or a bare `matcher:` (e.g. git-guard/rm-guard) are all
- * enough to opt in. The only hooks NOT in this profile are ones with none of
- * the three, since a pure lifecycle hook with nothing to gate/cache/match runs
- * the raw script path with no timing wrapper at all.
- */
 import * as fs from 'fs';
 import * as path from 'path';
 import { getLogsDir } from '../state.js';
@@ -26,23 +15,10 @@ export interface HookProfileRow {
   cacheStalePct: number;
   cacheMissPct: number;
   errorCount: number;
-  /**
-   * Fraction (0-1) of fires with a real crash exit (exit 1 / other nonzero
-   * except intentional PreToolUse deny code 2). Exit 2 is blockRate.
-   */
   errorRate?: number;
-  /**
-   * Count of intentional deny/block exits (PreToolUse exit 2). Deny-by-design
-   * guards (ask-user-question-guard, git-guard, plan-html-reminder) use this
-   * path — not a crash.
-   */
   blockCount: number;
-  /** Fraction (0-1) of fires with exit code 2 (intentional deny/block). */
   blockRate?: number;
-  /** Fraction (0-1) of fires that hit their configured timeout. */
   timeoutRate?: number;
-  /** Project key the row is scoped to (see project-key.ts) — set only when
-   *  a `--project` filter narrowed the underlying query. */
   project?: string;
 }
 
@@ -54,11 +30,6 @@ interface RawFireEvent {
   exit?: number;
 }
 
-/**
- * Load every `hook.fire` event from the last `days` daily log files.
- * Lines that aren't JSON or aren't `hook.fire` events are silently skipped —
- * the events log is multiplexed (version.switch, secrets.get, …).
- */
 export function loadHookFireEvents(days = 7, logsDir: string = getLogsDir()): RawFireEvent[] {
   if (!fs.existsSync(logsDir)) return [];
   const today = new Date();
@@ -85,7 +56,6 @@ export function loadHookFireEvents(days = 7, logsDir: string = getLogsDir()): Ra
   return events;
 }
 
-/** Aggregate fire events into a per-hook profile, sorted by p99 desc. */
 export function aggregateHookProfile(events: RawFireEvent[]): HookProfileRow[] {
   const byHook = new Map<string, RawFireEvent[]>();
   for (const e of events) {
@@ -102,8 +72,6 @@ export function aggregateHookProfile(events: RawFireEvent[]): HookProfileRow[] {
     const hits = evs.filter(e => e.cache === 'hit').length;
     const stale = evs.filter(e => e.cache === 'stale-prefetch').length;
     const misses = evs.filter(e => e.cache === 'miss').length;
-    // Exit classes (Claude/Codex PreToolUse convention): 0 allow, 2 deny/block,
-    // 1 / other nonzero = real error. Exit 2 is not a crash.
     const blocks = evs.filter(e => e.exit === 2).length;
     const errors = evs.filter(e => typeof e.exit === 'number' && e.exit !== 0 && e.exit !== 2).length;
     rows.push({
@@ -121,13 +89,6 @@ export function aggregateHookProfile(events: RawFireEvent[]): HookProfileRow[] {
       blockCount: blocks,
       ...(errors > 0 ? { errorRate: Math.round((errors / n) * 1000) / 1000 } : {}),
       ...(blocks > 0 ? { blockRate: Math.round((blocks / n) * 1000) / 1000 } : {}),
-      // timeoutRate is not derivable here: the daily JSONL a shim writes only
-      // covers fires that reached their own trailing printf — an externally
-      // enforced timeout (the agent harness killing the process) never gets
-      // that far, so this log has no timeout signal at all. The warehouse
-      // path (asHookRows in commands/perf.ts) is the one that can see it,
-      // via the perf-spool `status:"timeout"` sample OpenCode's generated
-      // plugin writes directly (hooks.ts's recordTimeoutSample).
     });
   }
 
@@ -135,7 +96,6 @@ export function aggregateHookProfile(events: RawFireEvent[]): HookProfileRow[] {
   return rows;
 }
 
-/** Human-friendly duration: "42ms" / "1.2s" / "12s" / "2m". */
 export function formatMs(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   if (ms < 10_000) return `${(ms / 1000).toFixed(1)}s`;
@@ -145,7 +105,6 @@ export function formatMs(ms: number): string {
   return secs > 0 ? `${mins}m${secs}s` : `${mins}m`;
 }
 
-/** Format a row's cache column: `hit:97% miss:3%` or `n/a` when nothing cached. */
 export function formatCacheColumn(row: HookProfileRow): string {
   if (row.cacheHitPct + row.cacheStalePct + row.cacheMissPct === 0) return 'n/a';
   const parts: string[] = [];

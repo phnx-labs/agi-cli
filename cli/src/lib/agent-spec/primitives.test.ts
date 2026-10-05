@@ -4,7 +4,7 @@ import { compareVersions, VERSION_RE } from './primitives.js';
 describe('compareVersions — semver-ish numeric ordering', () => {
   it('orders by numeric segment, not lexical', () => {
     expect(compareVersions('2.1.187', '2.1.143')).toBeGreaterThan(0);
-    expect(compareVersions('2.1.9', '2.1.10')).toBeLessThan(0); // 9 < 10 numerically
+    expect(compareVersions('2.1.9', '2.1.10')).toBeLessThan(0);
     expect(compareVersions('2.1.0', '2.1.0')).toBe(0);
   });
 
@@ -18,8 +18,8 @@ describe('compareVersions — OpenClaw date-style versions', () => {
   it('orders yyyy.m.d correctly (real installed set)', () => {
     const sorted = ['2026.3.8', '2026.5.7', '2026.2.19-2'].sort(compareVersions);
     expect(sorted).toEqual(['2026.2.19-2', '2026.3.8', '2026.5.7']);
-    expect(sorted[sorted.length - 1]).toBe('2026.5.7'); // @latest
-    expect(sorted[0]).toBe('2026.2.19-2');              // @oldest
+    expect(sorted[sorted.length - 1]).toBe('2026.5.7');
+    expect(sorted[0]).toBe('2026.2.19-2');
   });
 
   it('breaks same-day -N ties deterministically (higher -N is newer)', () => {

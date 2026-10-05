@@ -11,23 +11,20 @@ import {
 
 describe('costOfUsage', () => {
   it('computes a known token->cost fixture (claude-opus-4)', () => {
-    // 1000 in @ $5/M = $0.005, 2000 out @ $25/M = $0.05 => $0.055
     const usd = costOfUsage({ model: 'claude-opus-4', inputTokens: 1000, outputTokens: 2000 });
     expect(usd).toBeCloseTo(0.055, 10);
   });
 
   it('prices cache read and cache write at their dedicated rates', () => {
-    // opus: cacheRead $0.5/M, cacheWrite $6.25/M
     const usd = costOfUsage({
       model: 'claude-opus-4',
-      cacheReadTokens: 10_000,    // 10000 * 5e-7 = 0.005
-      cacheCreationTokens: 1_000, // 1000 * 6.25e-6 = 0.00625
+      cacheReadTokens: 10_000,
+      cacheCreationTokens: 1_000,
     });
     expect(usd).toBeCloseTo(0.005 + 0.00625, 10);
   });
 
   it('falls back to input rate for cache tokens when no cache price (gpt-4o-mini cacheWrite)', () => {
-    // gpt-4o-mini has cacheRead but no cacheWrite -> cacheWrite uses input rate (1.5e-7).
     const usd = costOfUsage({ model: 'gpt-4o-mini', cacheCreationTokens: 1_000_000 });
     expect(usd).toBeCloseTo(0.00000015 * 1_000_000, 10);
   });
@@ -43,25 +40,21 @@ describe('costOfUsage', () => {
 
 describe('costOfUsageNoCache', () => {
   it('bills cache read and cache write at the full input rate', () => {
-    // opus: input $5/M. Cached tokens repriced from their discount to $5/M.
     const usd = costOfUsageNoCache({
       model: 'claude-opus-4',
-      cacheReadTokens: 10_000,    // 10000 * 5e-6 = 0.05  (vs 0.005 cached)
-      cacheCreationTokens: 1_000, // 1000  * 5e-6 = 0.005 (vs 0.00625 cached)
+      cacheReadTokens: 10_000,
+      cacheCreationTokens: 1_000,
     });
     expect(usd).toBeCloseTo(0.05 + 0.005, 10);
   });
 
   it('leaves uncached input and output untouched', () => {
     const args = { model: 'claude-opus-4', inputTokens: 1000, outputTokens: 2000 } as const;
-    // No cache tokens -> identical to the cache-aware cost.
     expect(costOfUsageNoCache(args)).toBeCloseTo(costOfUsage(args), 10);
     expect(costOfUsageNoCache(args)).toBeCloseTo(0.055, 10);
   });
 
   it('exceeds the cache-aware cost when cache reads dominate (the common case)', () => {
-    // Cache reads are the cheap-relative-to-input bucket, so repricing them up to
-    // the input rate raises the total — the typical session shape.
     const args = {
       model: 'claude-opus-4',
       inputTokens: 5_000,
@@ -73,10 +66,6 @@ describe('costOfUsageNoCache', () => {
   });
 
   it('can fall BELOW the cache-aware cost in a cache-write-heavy session', () => {
-    // Claude prices a cache write at 1.25x input (opus: cacheWrite 6.25e-6 vs input
-    // 5e-6), so repricing writes DOWN to the input rate lowers the total when writes
-    // dominate and reads are small. This is why no-cache is not an unconditional
-    // upper bound — the output savings line is guarded accordingly (RUSH-2287 review).
     const args = {
       model: 'claude-opus-4',
       inputTokens: 100_000,
@@ -96,9 +85,9 @@ describe('costOfUsageNoCache', () => {
 describe('costOfSession', () => {
   it('sums a multi-model session', () => {
     const usd = costOfSession([
-      { model: 'claude-opus-4', inputTokens: 1000, outputTokens: 1000 },  // 5e-3 + 2.5e-2 = 0.03
-      { model: 'claude-haiku-4', inputTokens: 1000, outputTokens: 1000 }, // 1e-3 + 5e-3 = 0.006
-      { model: 'unknown-model', inputTokens: 999999 },                     // 0
+      { model: 'claude-opus-4', inputTokens: 1000, outputTokens: 1000 },
+      { model: 'claude-haiku-4', inputTokens: 1000, outputTokens: 1000 },
+      { model: 'unknown-model', inputTokens: 999999 },
     ]);
     expect(usd).toBeCloseTo(0.03 + 0.006, 10);
   });
@@ -121,7 +110,7 @@ describe('formatUsd', () => {
 describe('estimateCost', () => {
   it('returns usd + matched model for a priced model', () => {
     const r = estimateCost('claude-sonnet-4', { inputTokens: 1_000_000, outputTokens: 0 });
-    expect(r.usd).toBeCloseTo(3, 10); // $3/M input
+    expect(r.usd).toBeCloseTo(3, 10);
     expect(r.modelMatched).toBe('claude-sonnet-4');
   });
   it('returns 0 usd + null match for an unpriced model', () => {

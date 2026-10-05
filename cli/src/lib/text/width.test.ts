@@ -7,7 +7,6 @@ describe('stringWidth', () => {
   });
 
   it('ignores ANSI colour escapes', () => {
-    // chalk.green('ok') style input must measure as the visible text only.
     const colored = '\x1b[32mok\x1b[39m';
     expect(stringWidth(colored)).toBe(2);
     expect(stripAnsi(colored)).toBe('ok');
@@ -22,15 +21,11 @@ describe('stringWidth', () => {
   });
 
   it('treats combining marks as zero-width', () => {
-    // 'e' + combining acute accent renders in one cell.
     expect(stringWidth('é')).toBe(1);
   });
 });
 
 describe('OSC-8 hyperlinks (RUSH-2205)', () => {
-  // osc8() form: ESC ]8;;<url> ESC \ <label> ESC ]8;; ESC \  — the URL is not
-  // visible, so a clickable RUSH-2205 badge must measure as its 9-char label and
-  // never be sliced mid-escape by truncateToWidth.
   const link = '\x1b]8;;https://linear.app/x/issue/RUSH-2205\x1b\\RUSH-2205\x1b]8;;\x1b\\';
 
   it('measures only the visible label, not the URL', () => {
@@ -45,11 +40,8 @@ describe('OSC-8 hyperlinks (RUSH-2205)', () => {
   });
 
   it('truncates without leaving a corrupted (unterminated) escape', () => {
-    // A badge + trailing text truncated to below the label: the result must carry
-    // no partial OSC-8 opener (the corruption bug this fixes).
     const out = truncateToWidth(link + ' idle 3h', 6);
     expect(stringWidth(out)).toBeLessThanOrEqual(6);
-    // stripAnsi removes complete escapes; any residual ESC means a cut mid-sequence.
     expect(stripAnsi(out)).not.toContain('\x1b');
   });
 });
@@ -66,7 +58,6 @@ describe('truncateToWidth', () => {
   });
 
   it('never splits a wide glyph across the boundary', () => {
-    // Two CJK chars = 4 cells; truncate to 3 must keep one char + ellipsis (2+1=3).
     const out = truncateToWidth('日本', 3);
     expect(stringWidth(out)).toBeLessThanOrEqual(3);
     expect(out).toBe('日…');
@@ -84,7 +75,6 @@ describe('padToWidth', () => {
     expect(padToWidth('ab', 5)).toBe('ab   ');
   });
   it('pads accounting for wide chars', () => {
-    // '日' is 2 cells, so pad to 5 adds 3 spaces.
     expect(padToWidth('日', 5)).toBe('日   ');
   });
   it('does not truncate when already wider', () => {

@@ -107,7 +107,6 @@ describe('generateHookShim', () => {
     });
     expect(shim).toBe(path.join(testPaths.shimsDir, 'my-hook.sh'));
     expect(fs.existsSync(shim)).toBe(true);
-    // NTFS has no POSIX exec bit; Node reports mode without 0o111 on Windows.
     if (process.platform !== 'win32') {
       const stat = fs.statSync(shim);
       expect(stat.mode & 0o111).not.toBe(0);
@@ -156,10 +155,6 @@ describe('generateHookShim', () => {
   });
 
   it('getHookShimPath returns the state.ts-resolved shims dir for production callers', () => {
-    // The root is whatever getHookShimsDir() resolves to (AGENTS_HOOK_SHIMS_DIR
-    // in this test run — see tests/setup.ts's hermeticity redirect). Doesn't
-    // matter what root — what matters is that production callers (who don't
-    // pass `paths`) get `<that dir>/<name>.sh` consistently.
     expect(toPosix(getHookShimPath('foo'))).toBe(`${toPosix(getHookShimsDir())}/foo.sh`);
   });
 
@@ -202,11 +197,9 @@ describe('generateHookShim', () => {
     expect(fs.existsSync(shim)).toBe(true);
     removeHookShim('doomed', testPaths.shimsDir);
     expect(fs.existsSync(shim)).toBe(false);
-    // Removing again is a no-op
     expect(() => removeHookShim('doomed', testPaths.shimsDir)).not.toThrow();
   });
 
-  // Fix 1: single-flight lock guard (thundering herd prevention)
   it('background-prefetch shim wraps bg spawn in an atomic mkdir lock', () => {
     const shim = generateHookShim({
       name: 'bg-lock-test',
@@ -220,7 +213,6 @@ describe('generateHookShim', () => {
     expect(body).toMatch(/trap 'rm -rf "\$LOCK_DIR"' EXIT/);
   });
 
-  // Fix 2: backoff sentinel so a persistently-failing refresh is not retried every invocation
   it('background-prefetch shim skips spawn while in backoff window', () => {
     const shim = generateHookShim({
       name: 'bg-backoff-test',
@@ -232,12 +224,10 @@ describe('generateHookShim', () => {
     expect(body).toMatch(/FAIL_FILE=/);
     expect(body).toMatch(/BACKOFF_SEC=/);
     expect(body).toMatch(/_in_backoff=0/);
-    // Failure path must record the sentinel; success path must clear it.
     expect(body).toMatch(/touch "\$FAIL_FILE"/);
     expect(body).toMatch(/rm -f "\$FAIL_FILE"/);
   });
 
-  // Fix 3: background subshell logs its real exit code, not the hardcoded EXIT=0
   it('background-prefetch shim logs hook.cache.refresh with real exit code', () => {
     const shim = generateHookShim({
       name: 'bg-exit-log-test',
@@ -251,9 +241,6 @@ describe('generateHookShim', () => {
     expect(body).toMatch(/"exit":%d/);
   });
 
-  // Fix 4 (RUSH-2259): the bg lockdir has a TTL so an orphaned lock (bg refresh
-  // hard-killed before its EXIT trap) is reclaimed instead of stopping all
-  // future refresh permanently.
   it('background-prefetch shim reclaims a stale bg lockdir before acquiring', () => {
     const shim = generateHookShim({
       name: 'bg-lock-ttl-test',
@@ -263,13 +250,11 @@ describe('generateHookShim', () => {
     });
     const body = fs.readFileSync(shim, 'utf-8');
     expect(body).toMatch(/LOCK_TTL_SEC=/);
-    // Guards the reclaim on the lock's own age, then removes it before mkdir.
     expect(body).toMatch(/\[ -d "\$LOCK_DIR" \]/);
     expect(body).toMatch(/_lock_age=/);
     expect(body).toMatch(/\[ "\$_lock_age" -ge "\$LOCK_TTL_SEC" \] && rm -rf "\$LOCK_DIR"/);
   });
 
-  // Fix 2 (sync path): synchronous fetch also clears the FAIL_FILE sentinel on success
   it('synchronous-prefetch shim clears FAIL_FILE on a successful fetch', () => {
     const shim = generateHookShim({
       name: 'sync-clear-fail-test',
@@ -283,11 +268,6 @@ describe('generateHookShim', () => {
   });
 });
 
-// ─── missing source ──────────────────────────────────────────────────────────
-//
-// Observed on zion 2026-09-14/15: every shimmed guard exited 127 for ~17 hours
-// because the embedded SOURCE path was gone, and Claude Code treats any exit
-// but 2 as "allow". A PreToolUse shim must deny instead.
 
 describe('generated shim — missing source', () => {
   let tmp: string;
@@ -350,7 +330,6 @@ describe('generated shim — missing source', () => {
       paths,
     });
     const res = run(shim);
-    // bash's own "No such file" exit, which every harness reads as allow.
     expect(res.status).toBe(127);
     expect(res.stderr).not.toContain('fail-closed');
     expect(loggedExit()).toBe(127);

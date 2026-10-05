@@ -1,12 +1,3 @@
-/**
- * Schema-v3 `execution` block parsing for a portable agent package (agent.yaml).
- *
- * Pure and fs-free beyond reading the manifest file itself — never resolves or
- * hashes referenced resources (that's `package-resolve.ts`). Fails closed on
- * anything malformed: this is the "malformed shared config fails closed"
- * boundary from the PHNX-3838 brief, so a bad manifest throws immediately
- * rather than materializing a partial package.
- */
 import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
@@ -50,7 +41,6 @@ function parseHarnessOverlay(raw: unknown, agent: string): PackageHarnessOverlay
   };
 }
 
-/** Parse and shape-validate the `execution` block of a schema-v3 agent.yaml already read into memory. */
 export function parseAgentPackageManifest(raw: unknown, sourceLabel: string): AgentPackageManifest {
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
     fail(`${sourceLabel}: expected a YAML mapping at the document root`);
@@ -141,7 +131,6 @@ export function parseAgentPackageManifest(raw: unknown, sourceLabel: string): Ag
   };
 }
 
-/** Read + parse `<packageDir>/agent.yaml`. Fails closed on missing file or malformed YAML. */
 export function loadAgentPackageManifest(packageDir: string): AgentPackageManifest {
   const manifestPath = path.join(packageDir, 'agent.yaml');
   let raw: string;

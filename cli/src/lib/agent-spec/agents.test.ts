@@ -58,10 +58,6 @@ function makeTempDir(): string {
 }
 
 describe('credentialPresence (RUSH-2069 provable-logout signal)', () => {
-  // credentialPresence splits a credential file's existence into the per-version
-  // home and the active/global HOME. A provable logout is only when BOTH are
-  // absent. Pin AGENTS_REAL_HOME to a fresh empty dir so the "active" side never
-  // leaks the developer's real ~/.codex login.
   let prevRealHome: string | undefined;
   let activeHome: string;
   beforeEach(() => {
@@ -85,7 +81,6 @@ describe('credentialPresence (RUSH-2069 provable-logout signal)', () => {
     writeCodexAuth(versionHome);
     const p = credentialPresence('codex', versionHome);
     expect(p.perVersion).toBe(true);
-    // Not provable: perVersion present means signed in for that version.
     expect(p.active).toBe(false);
   });
 
@@ -94,7 +89,6 @@ describe('credentialPresence (RUSH-2069 provable-logout signal)', () => {
     const p = credentialPresence('codex', makeTempDir());
     expect(p.perVersion).toBe(false);
     expect(p.active).toBe(true);
-    // Shared global login → NOT provable logout even though the version lacks it.
     expect(p.perVersion && p.active).toBe(false);
     expect(!p.perVersion && !p.active).toBe(false);
   });
@@ -103,16 +97,11 @@ describe('credentialPresence (RUSH-2069 provable-logout signal)', () => {
     const p = credentialPresence('codex', makeTempDir());
     expect(p.perVersion).toBe(false);
     expect(p.active).toBe(false);
-    // Provable: absent per-version AND globally.
     expect(!p.perVersion && !p.active).toBe(true);
   });
 
   it('honors the claude alternative credential paths (.claude/.claude.json OR .claude.json)', () => {
     const versionHome = makeTempDir();
-    // A bare `.claude.json` with no oauthAccount and no `.credentials.json`/
-    // `.oauth_token` is the PHNX-3502 false-healthy shape on non-macOS — write a
-    // real setup-token alongside it so this test isolates the ALTERNATIVE-PATH
-    // concern from the credential-floor concern covered separately below.
     fs.writeFileSync(path.join(versionHome, '.claude.json'), '{}', 'utf-8');
     fs.mkdirSync(path.join(versionHome, '.claude'), { recursive: true });
     fs.writeFileSync(path.join(versionHome, '.claude', '.oauth_token'), 'sk-ant-oat01-test', 'utf-8');
@@ -120,16 +109,10 @@ describe('credentialPresence (RUSH-2069 provable-logout signal)', () => {
   });
 
   it('reports perVersion=false for claude when .claude.json exists but the real credential is blank (PHNX-3502)', () => {
-    // Off macOS `.claude.json` is stale account METADATA, not the credential —
-    // a version can carry it with neither `.credentials.json` nor the
-    // `.oauth_token` setup-token file, which used to read as "present" here
-    // even though a real launch would find no usable credential at all.
     const versionHome = makeTempDir();
     fs.writeFileSync(path.join(versionHome, '.claude.json'), '{}', 'utf-8');
     const p = credentialPresence('claude', versionHome);
     if (process.platform === 'darwin') {
-      // Keychain-only: there is no on-disk credential floor to apply, so the
-      // identity file alone is the signal, unchanged from before this fix.
       expect(p.perVersion).toBe(true);
     } else {
       expect(p.perVersion).toBe(false);
@@ -137,22 +120,15 @@ describe('credentialPresence (RUSH-2069 provable-logout signal)', () => {
   });
 
   it('reports knownLocation=false for an agent with no credential path', () => {
-    // amp has no CREDENTIAL_FILE_SEGMENTS entry, so both probes are trivially
-    // false — absence of a file we never knew how to find. `knownLocation` is what
-    // stops a caller reading that as evidence of a logout.
     const p = credentialPresence('amp' as any, makeTempDir());
     expect(p).toEqual({ perVersion: false, active: false, knownLocation: false });
   });
 
   it('every inspectable agent WITHOUT a credential path is unprovable, never a false critical', () => {
-    // The two registries move independently: cursor was added to
-    // ACCOUNT_INSPECTION_AGENT_IDS with no credential path, which without the
-    // knownLocation gate printed `logged out` for versions that were signed in.
     const dir = makeTempDir();
     for (const agent of ALL_AGENT_IDS.filter(supportsAccountInspection)) {
       const p = credentialPresence(agent, dir);
       if (!p.knownLocation) {
-        // Mirrors the caller's rule in fleet-inventory.ts.
         expect(p.knownLocation && !p.perVersion && !p.active).toBe(false);
       }
     }
@@ -204,13 +180,6 @@ afterEach(() => {
   }
 });
 
-// These prove the SOURCE passes MCP commands as an argv array (never a shell
-// string), so injection payloads like `; touch pwned` stay inert. The proof
-// relies on a `#!/bin/sh` argv-logger fake that records each arg — a POSIX-only
-// mechanism (no shebang/argv-logger on Windows, where the agent CLI is a `.cmd`
-// reached through cmd.exe). The argv-safety property itself is platform-agnostic
-// (execFileAsync with an array), but it can only be asserted via the sh fake, so
-// these run on POSIX. registerMcp's Windows spawn path is hardened in agents.ts.
 describe.skipIf(IS_WINDOWS)('MCP CLI execution', () => {
   it('registers MCP servers with argv, not a shell command string', async () => {
     const dir = makeTempDir();
@@ -248,9 +217,6 @@ describe.skipIf(IS_WINDOWS)('MCP CLI execution', () => {
     expect(log).toContain('ARG:mcp\nARG:remove');
     expect(log).toContain(`ARG:${evilName}`);
 
-    // RUSH-1752: Windows shell path must quote the attacker-controlled name so
-    // metacharacters never reach cmd.exe unescaped (empty argv + composed line).
-    // Matches unregisterMcp's args: ['mcp', 'remove', name].
     const metaName = 'demo&evil|more>out';
     const winSpec = execFileShellSpec('codex.cmd', ['mcp', 'remove', metaName], 'win32');
     expect(winSpec.shell).toBe(true);
@@ -452,8 +418,6 @@ describe('resolveLastActive', () => {
 
     expect(resolveLastActive('claude', home, undefined, cachePath, t0)?.getTime()).toBe(5_000_000);
 
-    // A newer session appears, but the cache is still fresh — the cached
-    // value must win, proving the walk was skipped.
     const newer = path.join(home, '.claude', 'projects', 'some-project', 'newer.jsonl');
     fs.writeFileSync(newer, '{}', 'utf-8');
     fs.utimesSync(newer, 9_000, 9_000);
@@ -461,8 +425,6 @@ describe('resolveLastActive', () => {
     const within = new Date(t0.getTime() + 60_000);
     expect(resolveLastActive('claude', home, undefined, cachePath, within)?.getTime()).toBe(5_000_000);
 
-    // Past the fresh window (5 min, matching USAGE_CACHE_FRESH_MS) the walk
-    // runs again and picks up the newer file.
     const beyond = new Date(t0.getTime() + 6 * 60_000);
     expect(resolveLastActive('claude', home, undefined, cachePath, beyond)?.getTime()).toBe(9_000_000);
   });
@@ -476,7 +438,6 @@ describe('resolveLastActive', () => {
     const t0 = new Date('2026-06-11T00:00:00Z');
 
     expect(resolveLastActive('claude', home, config, cachePath, t0)?.getTime()).toBe(7_000_000);
-    // Second call hits the fresh null entry and must still fall through to config mtime.
     const within = new Date(t0.getTime() + 60_000);
     expect(resolveLastActive('claude', home, config, cachePath, within)?.getTime()).toBe(7_000_000);
   });
@@ -528,20 +489,19 @@ describe('resolveAgentName', () => {
   });
 
   it('corrects a single typo against canonical ids', () => {
-    expect(resolveAgentName('cladue')).toBe('claude'); // transposition
-    expect(resolveAgentName('claud')).toBe('claude'); // deletion
-    expect(resolveAgentName('clude')).toBe('claude'); // deletion
+    expect(resolveAgentName('cladue')).toBe('claude');
+    expect(resolveAgentName('claud')).toBe('claude');
+    expect(resolveAgentName('clude')).toBe('claude');
     expect(resolveAgentName('codx')).toBe('codex');
     expect(resolveAgentName('kim')).toBe('kimi');
     expect(resolveAgentName('grook')).toBe('grok');
   });
 
   it('corrects a single typo against multi-letter aliases', () => {
-    expect(resolveAgentName('clw')).toBe('openclaw'); // claw minus a letter
+    expect(resolveAgentName('clw')).toBe('openclaw');
   });
 
   it('returns null when the correction is ambiguous', () => {
-    // 'arp' is one edit from BOTH amp and warp, so the correction is ambiguous
     expect(resolveAgentName('arp')).toBeNull();
   });
 
@@ -553,15 +513,11 @@ describe('resolveAgentName', () => {
   });
 });
 
-/** Encode a minimal JWT (only the payload segment is ever decoded). */
 function makeJwt(payload: Record<string, unknown>): string {
   const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url');
   return `${b64({ alg: 'ES256', typ: 'JWT' })}.${b64(payload)}.sig`;
 }
 
-// Write a Droid credential the way the CLI does: a JSON blob (with a WorkOS
-// access_token JWT) encrypted AES-256-GCM as `ivB64:tagB64:ctB64`, keyed by the
-// base64 contents of auth.v2.key. Uses real crypto — no mocking.
 function writeDroidCredential(dir: string, claims: Record<string, unknown>): void {
   fs.mkdirSync(dir, { recursive: true });
   const key = crypto.randomBytes(32);
@@ -580,12 +536,6 @@ function writeDroidCredential(dir: string, claims: Record<string, unknown>): voi
 }
 
 describe('getAccountInfo — token-only agents (no local email)', () => {
-  // Sign-in is account-global: getAccountInfo falls back from the passed
-  // per-version home to the active config under AGENTS_REAL_HOME. Pin that to a
-  // fresh empty dir so "signed out" assertions don't leak into the developer's
-  // real ~/.factory / ~/.kimi-code / ~/.gemini login (RUSH-1318 fallback).
-  // Antigravity on macOS stores its token in the real keychain, which can't be
-  // sandboxed per-test — opt out of the probe so "signed out" is hermetic.
   let prevRealHome: string | undefined;
   let prevNoKeychain: string | undefined;
   beforeEach(() => {
@@ -616,12 +566,7 @@ describe('getAccountInfo — token-only agents (no local email)', () => {
 
     const info = await getAccountInfo('antigravity', home);
     expect(info.signedIn).toBe(true);
-    // Consumer Google OAuth exposes no email/identity claim locally.
     expect(info.email).toBeNull();
-    // A stable usage identity is derived from the refresh token so `agents
-    // view` can dedupe + cache the per-model quota bars for this login. The
-    // raw (non-JWT) refresh token is a live credential, so the key carries
-    // only its SHA-256 fingerprint — never the token itself.
     expect(info.accountKey).toMatch(/^antigravity:sub=[0-9a-f]{16}$/);
     expect(info.accountKey).not.toContain('1//refresh');
     expect(info.usageKey).toBe(info.accountKey);
@@ -651,7 +596,6 @@ describe('getAccountInfo — token-only agents (no local email)', () => {
       cmd: 'security',
       args: ['find-generic-password', '-s', 'gemini', '-a', 'antigravity'],
     });
-    // go-keyring Secret Service attributes are service + username (not account).
     expect(antigravityOsKeyringProbe('linux')).toEqual({
       cmd: 'secret-tool',
       args: ['lookup', 'service', 'gemini', 'username', 'antigravity'],
@@ -660,9 +604,6 @@ describe('getAccountInfo — token-only agents (no local email)', () => {
   });
 
   it('marks Antigravity signed in via Linux secret-tool when no token file exists (RUSH-1329)', async () => {
-    // Hermetic: a fake secret-tool on PATH that exits 0 only for the exact
-    // go-keyring attributes. The real keyring is unreachable under
-    // AGENTS_NO_KEYCHAIN_PROBE for other tests; here we exercise the live path.
     if (process.platform !== 'linux') return;
 
     const binDir = makeTempDir();
@@ -754,9 +695,6 @@ describe('getAccountInfo — token-only agents (no local email)', () => {
   });
 
   it('detects Muse signed-in from providers.meta.access_token (live muse login shape)', async () => {
-    // muse login writes { schema_version, providers: { meta: { access_token, … } } }.
-    // A one-level walk only saw `providers` and reported signed_out, so balanced
-    // excluded the only install after a successful login.
     const home = makeTempDir();
     const dir = path.join(home, '.config', 'muse');
     fs.mkdirSync(dir, { recursive: true });
@@ -816,8 +754,6 @@ describe('getAccountInfo — token-only agents (no local email)', () => {
     const home = makeTempDir();
     const dir = path.join(home, '.factory');
     fs.mkdirSync(dir, { recursive: true });
-    // Garbage blob with no matching key file: decrypt fails, but the auth file's
-    // presence still reads as signed in (the conservative floor).
     fs.writeFileSync(path.join(dir, 'auth.v2.file'), 'opaque-encrypted-blob', 'utf-8');
 
     const info = await getAccountInfo('droid', home);
@@ -833,12 +769,6 @@ describe('getAccountInfo — token-only agents (no local email)', () => {
 });
 
 describe('getAccountInfo — OpenCode provider credentials', () => {
-  // OpenCode stores its login at $XDG_DATA_HOME/opencode/auth.json (defaulting
-  // to ~/.local/share/opencode/auth.json on every platform). getAccountInfo
-  // checks the passed per-version home first, then $XDG_DATA_HOME, then the
-  // active real home. Pin XDG_DATA_HOME and AGENTS_REAL_HOME at fresh empty dirs
-  // so assertions can't leak into (or false-positive from) the developer's real
-  // OpenCode login, and so "signed out" is hermetic.
   let prevXdg: string | undefined;
   let prevRealHome: string | undefined;
   beforeEach(() => {
@@ -866,7 +796,6 @@ describe('getAccountInfo — OpenCode provider credentials', () => {
 
     const info = await getAccountInfo('opencode', home);
     expect(info.signedIn).toBe(true);
-    // Non-secret provider id is surfaced; the secret key never is.
     expect(info.accountId).toBe('muse-spark');
     expect(info.accountKey).toBe('opencode:providers=muse-spark');
     expect(info.email).toBeNull();
@@ -882,7 +811,6 @@ describe('getAccountInfo — OpenCode provider credentials', () => {
 
     const info = await getAccountInfo('opencode', home);
     expect(info.signedIn).toBe(true);
-    // Providers are sorted so the key is stable regardless of file order.
     expect(info.accountId).toBe('anthropic+openai');
     expect(info.accountKey).toBe('opencode:providers=anthropic+openai');
   });
@@ -897,7 +825,6 @@ describe('getAccountInfo — OpenCode provider credentials', () => {
   });
 
   it('resolves auth.json under $XDG_DATA_HOME when the per-version home has none', async () => {
-    // No auth under the passed home; the login lives at $XDG_DATA_HOME/opencode.
     const xdg = process.env.XDG_DATA_HOME!;
     fs.mkdirSync(path.join(xdg, 'opencode'), { recursive: true });
     fs.writeFileSync(
@@ -927,11 +854,8 @@ describe('getAccountInfo — OpenCode provider credentials', () => {
   it('ignores corrupt/incomplete entries that carry no real credential', async () => {
     const home = makeTempDir();
     writeOpenCodeAuth(home, {
-      // Missing key -> not signed in via this entry.
       broken: { type: 'api' },
-      // Empty-string secret -> not a real credential.
       blank: { type: 'oauth', access: '', refresh: '' },
-      // Unknown type -> ignored.
       weird: { type: 'mystery', key: 'x' },
     });
     const info = await getAccountInfo('opencode', home);
@@ -947,10 +871,6 @@ describe('getAccountInfo — OpenCode provider credentials', () => {
     expect(info.signedIn).toBe(false);
   });
 
-  // An OAuth provider hands OpenCode a real access token. OpenAI's — the one
-  // `opencode auth login openai` stores — is a JWT carrying the same namespaced
-  // profile/auth claims Codex's own auth.json does, so the row can name WHO is
-  // signed in instead of only `id:<providers>`.
   function jwt(claims: Record<string, unknown>): string {
     const part = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url');
     return `${part({ alg: 'RS256', typ: 'JWT' })}.${part(claims)}.signature`;
@@ -973,7 +893,6 @@ describe('getAccountInfo — OpenCode provider credentials', () => {
     expect(info.signedIn).toBe(true);
     expect(info.email).toBe('dev@example.com');
     expect(info.plan).toBe('Pro');
-    // The providers join stays the identity key — OpenCode bills per provider.
     expect(info.accountId).toBe('openai');
     expect(info.accountKey).toBe('opencode:providers=openai');
     expect(JSON.stringify(info)).not.toContain('rt-secret-value');
@@ -1002,7 +921,6 @@ describe('getAccountInfo — OpenCode provider credentials', () => {
 
   it('reports no email for an opaque (non-JWT) oauth token, still signed in', async () => {
     const home = makeTempDir();
-    // Anthropic's OpenCode login stores an opaque `sk-ant-oat…`, not a JWT.
     writeOpenCodeAuth(home, { anthropic: { type: 'oauth', access: 'sk-ant-oat01-opaque' } });
 
     const info = await getAccountInfo('opencode', home);
@@ -1021,8 +939,6 @@ describe('getAccountInfo — OpenCode provider credentials', () => {
   });
 
   it('dates lastActive from opencode.db, which the per-file session walk cannot see', async () => {
-    // Every OpenCode session lives in one sqlite file, so there is no directory
-    // of transcripts to walk — the db's own mtime is the activity signal.
     const home = makeTempDir();
     writeOpenCodeAuth(home, { anthropic: { type: 'api', key: 'sk-ant' } });
     const db = path.join(home, '.local', 'share', 'opencode', 'opencode.db');
@@ -1043,12 +959,6 @@ describe('getAccountInfo — OpenCode provider credentials', () => {
 });
 
 describe('getAccountInfo — claude credential floor (blanked .credentials.json)', () => {
-  // A failed OAuth refresh rewrites .claude/.credentials.json with empty
-  // accessToken/refreshToken and expiresAt 0, keeping only the descriptive
-  // fields — while .claude.json keeps a full oauthAccount. Before the floor,
-  // that home reported signedIn:true with usage bars, and balanced rotation kept
-  // routing runs into it; each spawn died on "OAuth session expired and could
-  // not be refreshed".
   function writeClaudeHome(
     home: string,
     oauth: Record<string, unknown> | null,
@@ -1139,8 +1049,6 @@ describe('getAccountInfo — claude credential floor (blanked .credentials.json)
     expect(info.email).toBe('dev@example.com');
   });
 
-  // The wiring assertion is only meaningful where the file is the authoritative
-  // store; on macOS getAccountInfo deliberately declines to judge from it.
   it.skipIf(process.platform === 'darwin')(
     'reports a blanked home as signed out, so rotation cannot pick it',
     async () => {
@@ -1149,7 +1057,6 @@ describe('getAccountInfo — claude credential floor (blanked .credentials.json)
 
       const info = await getAccountInfo('claude', home);
       expect(info.signedIn).toBe(false);
-      // email is what rotation reads as `authValid` — it must not survive.
       expect(info.email).toBeNull();
       expect(info.plan).toBeNull();
       expect(info.usageStatus).toBeNull();
@@ -1182,7 +1089,6 @@ describe('agent deprecation warnings', () => {
 });
 
 describe('getAccountInfo — grok (nested auth.json)', () => {
-  // Isolate the HOME fallback so a missing fixture doesn't read the dev's real ~/.grok.
   let prevRealHome: string | undefined;
   beforeEach(() => { prevRealHome = process.env.AGENTS_REAL_HOME; process.env.AGENTS_REAL_HOME = makeTempDir(); });
   afterEach(() => {
@@ -1273,14 +1179,9 @@ describe('getAccountInfo — cursor (cli-config authInfo + separate auth.json)',
 });
 
 describe('getAccountInfo — Claude organization identity', () => {
-  // Fixture shapes below mirror real .claude.json oauthAccount payloads: a
-  // personal Max plan carries an auto-generated organizationName while a Team
-  // seat carries the actual org name.
   function writeClaudeConfig(oauthAccount: Record<string, unknown>): string {
     const home = makeTempDir();
     fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ oauthAccount }), 'utf-8');
-    // Off macOS getAccountInfo requires a real credential file (PHNX-2685);
-    // these fixtures describe signed-in homes, so plant a token pair.
     fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
     fs.writeFileSync(
       path.join(home, '.claude', '.credentials.json'),
@@ -1304,8 +1205,6 @@ describe('getAccountInfo — Claude organization identity', () => {
     const info = await getAccountInfo('claude', home);
     expect(info.organizationType).toBe('claude_team');
     expect(info.organizationName).toBe('Turing Labs');
-    // Plan tier is derived from organizationType, so a Team seat reads "Team" —
-    // not the billingType-derived "Pro" that mislabelled every subscription.
     expect(info.plan).toBe('Team');
   });
 
@@ -1321,9 +1220,7 @@ describe('getAccountInfo — Claude organization identity', () => {
     });
     const info = await getAccountInfo('claude', home);
     expect(info.organizationType).toBe('claude_max');
-    // The whole point of the fix: a Max account reads "Max", not "Pro".
     expect(info.plan).toBe('Max');
-    // Raw value: display layers decide whether the boilerplate name is shown.
     expect(info.organizationName).toBe("taylor@example.com's Organization");
   });
 
@@ -1382,8 +1279,6 @@ describe('formatClaudeOrgLabel', () => {
 
 describe('accountOrgBadge', () => {
   it('shows just the org NAME for multi-seat org types', () => {
-    // The tier label (Team/Enterprise) now lives in the plan column, so the badge
-    // carries only the org name — the identity that disambiguates a Team seat.
     expect(accountOrgBadge({ organizationType: 'claude_team', organizationName: 'Turing Labs' }))
       .toBe('Turing Labs');
     expect(accountOrgBadge({ organizationType: 'claude_enterprise', organizationName: 'BigCo' }))
@@ -1391,8 +1286,6 @@ describe('accountOrgBadge', () => {
   });
 
   it('returns null for personal plans — the tier shows in the plan column instead', () => {
-    // Personal orgs carry auto-generated boilerplate names, and the tier already
-    // renders in the aligned column, so no badge (avoids the duplicate "(Max) … Max").
     expect(accountOrgBadge({
       organizationType: 'claude_max',
       organizationName: "taylor@example.com's Organization",

@@ -1,24 +1,9 @@
-/**
- * Hook predicate evaluator.
- *
- * Evaluates the optional `matches:` block on a hook manifest entry against
- * the runtime input passed by the agent CLI on a hook event. All declared
- * predicates AND together — the hook fires only if every one passes.
- *
- * Empty/missing matches => always passes (backward compat with hooks
- * authored before predicate support).
- *
- * Used at hook-fire time by either:
- *   (a) generated hook wrappers we install alongside the script, or
- *   (b) the script itself, by calling shouldFire() with parsed JSON input.
- */
 
 import * as fs from 'fs';
 import * as path from 'path';
 import { execSync } from 'child_process';
 import type { HookMatches } from '../types.js';
 
-/** Runtime context passed to a hook by the agent CLI. */
 interface HookInput {
   hook_event_name?: string;
   prompt?: string;
@@ -26,7 +11,6 @@ interface HookInput {
   tool_args?: unknown;
   cwd?: string;
   permission_mode?: string;
-  /** Grok-style camelCase spelling of permission_mode. */
   permissionMode?: string;
 }
 
@@ -109,14 +93,6 @@ function compileHookRegex(source: string): RegExp | null {
   }
 }
 
-/**
- * Decide whether a hook with the given match config should fire on this input.
- * Pure function — no side effects, no IO except git/cwd checks for predicates
- * that explicitly require them.
- *
- * Returns true if the hook should fire (all declared predicates pass), false
- * if it should be skipped.
- */
 export function shouldFire(matches: HookMatches | undefined, input: HookInput): boolean {
   if (!matches) return true;
 
@@ -142,26 +118,19 @@ export function shouldFire(matches: HookMatches | undefined, input: HookInput): 
     }
   }
 
+  // Missing mode passes; older harness payloads omit it.
   if (matches.permission_mode !== undefined) {
     const allowed = arrayOf(matches.permission_mode);
     if (allowed.length > 0) {
-      // Fail-open on absence: only some harnesses (Claude Code) report the
-      // live mode. An input with no mode field passes; an explicit value not
-      // in the allowed list skips.
       const mode = input.permission_mode || input.permissionMode;
       if (mode && !allowed.includes(mode)) return false;
     }
   }
 
+  // Negative matching keeps unknown future modes guarded rather than skipped.
   if (matches.permission_mode_not !== undefined) {
     const denied = arrayOf(matches.permission_mode_not);
     if (denied.length > 0) {
-      // The negative form exists because the positive one cannot express
-      // "everywhere except plan" without enumerating every other mode — and an
-      // enumeration silently stops firing the moment a harness adds or renames
-      // one, which for a guard means it quietly stops guarding. Naming the mode
-      // to skip keeps every unknown mode firing, so the failure direction is
-      // "ran unnecessarily", never "did not run".
       const mode = input.permission_mode || input.permissionMode;
       if (mode && denied.includes(mode)) return false;
     }

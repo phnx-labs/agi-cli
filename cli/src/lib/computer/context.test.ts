@@ -1,11 +1,3 @@
-/**
- * The fd-3 context is the engine's input contract, so its SHAPE is the thing
- * under test: the engine accepts `version`/`permissions`/`peers`/`target`/
- * `session` and nothing else. A field the engine does not read is not a
- * harmless extra — it is a second, drifting copy of an answer the engine
- * already resolves for itself (the transport it hydrates from its own tunnel
- * state, for one).
- */
 import { describe, expect, it, afterEach } from 'vitest';
 import { buildComputerContext } from './context.js';
 
@@ -45,8 +37,6 @@ describe('buildComputerContext', () => {
     const context = await buildComputerContext({ computerBin: '/usr/local/bin/computer' });
     expect(Array.isArray(context.permissions!.allow)).toBe(true);
     expect(context.permissions!.allow.every((id) => typeof id === 'string')).toBe(true);
-    // The standalone's own path is always a peer — it is the process that opens
-    // the daemon socket now.
     expect(context.peers.allow).toContain('/usr/local/bin/computer');
   });
 
