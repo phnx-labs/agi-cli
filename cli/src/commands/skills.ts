@@ -1,3 +1,11 @@
+/**
+ * Skill management commands for adding domain-specific capabilities to agents.
+ *
+ * Implements `agents skills` -- list, add, remove, sync, prune, and view
+ * packaged SKILL.md bundles (with optional rules/ directories). Central
+ * storage lives in ~/.agents/skills/ and skills are synced to individual
+ * version homes via copy or symlink.
+ */
 import type { Command } from 'commander';
 import { withAliases } from '../lib/verbs.js';
 import chalk from 'chalk';
@@ -61,6 +69,7 @@ import {
   type SyncTarget,
 } from './resource-view.js';
 
+/** Register the `agents skills` command tree (list, add, remove, sync, prune, view). */
 export function registerSkillsCommands(program: Command): void {
   const skillsCmd = program
     .command('skills')
@@ -158,6 +167,7 @@ Examples:
         let skills: { name: string; path?: string; metadata: { description?: string }; ruleCount?: number }[];
 
         if (!source) {
+          // Interactive mode: pick from central storage
           const installedSkills = listInstalledSkills();
           if (installedSkills.size === 0) {
             console.log(chalk.yellow('No skills in ~/.agents/skills/'));
@@ -216,6 +226,7 @@ Examples:
             return { name, metadata: skill?.metadata || {} };
           });
         } else {
+          // Source provided: fetch from repo or local path
           const spinner = ora('Fetching skills...').start();
 
           const isGitRepo = source.startsWith('gh:') || source.startsWith('git:') ||
@@ -247,6 +258,7 @@ Examples:
               const parseResult = tryParseSkillMetadata(localPath);
               const validation = validateSkillMetadata(parseResult.metadata, skillName);
 
+              // Warn if YAML is invalid
               if (parseResult.error) {
                 spinner.warn(`Skill '${skillName}' has invalid SKILL.md`);
                 console.log(chalk.yellow(`  ${parseResult.error}`));
@@ -273,6 +285,8 @@ Examples:
             return;
           }
 
+          // Filter by --names if provided. Mirrors the no-source path's behavior
+          // so users can pluck specific skills from a multi-skill repo.
           const requestedNames = parseCommaSeparatedList(options.names);
           if (requestedNames.length > 0) {
             const discoveredNames = new Set(discoveredSkills.map((s) => s.name));
@@ -298,6 +312,7 @@ Examples:
             }
           }
 
+          // Install to central storage first
           const installSpinner = ora('Installing skills to central storage...').start();
           let installed = 0;
 
@@ -316,6 +331,7 @@ Examples:
           skills = discoveredSkills;
         }
 
+        // Get agent and version selection
         let selectedAgents: AgentId[];
         let versionSelections: Map<AgentId, string[]>;
 
@@ -340,6 +356,7 @@ Examples:
           return;
         }
 
+        // Sync to selected versions
         const syncSpinner = ora('Syncing to agent versions...').start();
         let synced = 0;
         const skillNames = skills.map((s) => s.name);
@@ -382,6 +399,7 @@ Examples:
   agents skills remove
 `)
     .action(async (name?: string) => {
+      // Build map of skill -> targets for all installed versions
       type SkillTargetInfo = { name: string; targets: Array<{ agent: AgentId; version: string }> };
       const skillTargetMap = new Map<string, SkillTargetInfo>();
 
@@ -484,6 +502,7 @@ Examples:
       }
     });
 
+  // `skills prune` moved to the top-level `agents prune cleanup` command.
   skillsCmd
     .command('prune', { hidden: true })
     .allowUnknownOption()
@@ -506,6 +525,7 @@ Examples:
   agents skills view
 `)
     .action(async (name?: string) => {
+      // If no name provided, show interactive select
       if (!name) {
         const cwd = process.cwd();
         const allSkills: Array<{ name: string; description: string }> = [];
@@ -564,6 +584,7 @@ Examples:
         return;
       }
 
+      // Build output
       const lines: string[] = [];
       lines.push(chalk.bold(`\n${skill.metadata.name}\n`));
       if (skill.metadata.description) {
@@ -596,11 +617,15 @@ Examples:
 
 }
 
+/**
+ * Build the row data for `agents skills list`. Each row = one central skill
+ * with a sync-status target per (agent, version) in scope.
+ */
 async function buildSkillRows(opts: {
   filterAgent?: AgentId;
   filterVersion?: string;
 }): Promise<ResourceRow[]> {
-  const central = listInstalledSkills();
+  const central = listInstalledSkills(); // Map<name, DiscoveredSkill>
   if (central.size === 0) return [];
 
   const targetPairs = iterSkillsCapableVersions({
@@ -608,6 +633,8 @@ async function buildSkillRows(opts: {
     version: opts.filterVersion,
   });
 
+  // Precompute per-(agent, version) diffs so we can look up each skill's
+  // status without re-diffing 16 times per skill.
   const diffByTarget = new Map<string, VersionSkillDiff>();
   const defaultByAgent = new Map<AgentId, string | null>();
   for (const { agent, version } of targetPairs) {
@@ -633,6 +660,8 @@ async function buildSkillRows(opts: {
     }
 
     const fileCount = countSkillFiles(skill.path);
+    // Append repo source when a skill comes from a registered extra so users
+    // can see which DotAgent repo owns it at a glance.
     const description = skill.source
       ? `${skill.metadata.description || ''}${skill.metadata.description ? ' ' : ''}${chalk.gray(`[${skill.source}]`)}`
       : skill.metadata.description;
@@ -645,6 +674,7 @@ async function buildSkillRows(opts: {
     });
   }
 
+  // Sort: fully-synced first, then partial, then missing — stable by name within each tier.
   rows.sort((a, b) => {
     const aSynced = a.targets.filter((t) => t.status === 'synced').length;
     const bSynced = b.targets.filter((t) => t.status === 'synced').length;

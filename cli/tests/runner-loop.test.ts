@@ -1,3 +1,11 @@
+/**
+ * Tests for the loop driver wired into executeJob (issue #400).
+ *
+ * Proves:
+ *   1. A job with config.loop runs through runLoop (the loop driver is invoked,
+ *      counting iterations via the injectable runIteration seam).
+ *   2. A job without config.loop does NOT invoke the loop driver.
+ */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdirSync, rmSync, mkdtempSync, writeFileSync } from 'fs';
@@ -8,11 +16,17 @@ import type { ExecOptions } from '../src/lib/exec.js';
 import type { LoopDeps, IterationResult } from '../src/lib/loop.js';
 import * as activation from '../src/lib/routine-activation.js';
 
+// Hoist state the same way jobs.test.ts does (works with both vitest's hoist and Bun).
+// The string literal is used inside vi.mock to avoid TDZ issues with const references.
 interface LoopTestState { TEST_DIR: string }
 const hoistedState: LoopTestState =
   ((globalThis as Record<string, unknown>)['__agents_cli_runner_loop_test_state__'] as LoopTestState | undefined)
   ?? (((globalThis as Record<string, unknown>)['__agents_cli_runner_loop_test_state__'] = { TEST_DIR: '' }) as LoopTestState);
 
+// Partial mock: keep the real state.js exports (getModelsCachePath, loaded at
+// models.ts import time, and getMailboxRootDir, used by runLoop) and override
+// only the path getters to the isolated TEST_DIR. A full replacement drops
+// those transitive exports and fails under vitest (the CI runner).
 vi.mock('../src/lib/state.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/lib/state.js')>();
   const gt = globalThis as Record<string, unknown>;
@@ -45,7 +59,7 @@ function makeConfig(overrides: Partial<JobConfig> = {}): JobConfig {
     enabled: true,
     prompt: 'iterate over the task',
     cwd: hoistedState.TEST_DIR,
-    sandbox: false,
+    sandbox: false,  // skip HOME overlay so tests need no real filesystem setup
     ...overrides,
   };
 }
@@ -90,6 +104,8 @@ describe('executeJob — loop driver (issue #400)', () => {
 
     await executeJob(config, makeLoopDeps(calls));
 
+    // Iteration 1 gets the bare entrypoint; iterations >= 2 get the /continue prefix —
+    // check that the entrypoint appears in every call.
     for (const call of calls) {
       expect(call.prompt).toContain('do the work');
     }
@@ -99,14 +115,21 @@ describe('executeJob — loop driver (issue #400)', () => {
     const calls: ExecOptions[] = [];
     const deps = makeLoopDeps(calls);
 
+    // No loop field — should go to the single-shot spawn path.
+    // Use a sentinel agent which command construction rejects before a real spawn.
     const result = await executeJob(makeConfig({ agent: 'no-such-agent' as any }), deps);
     expect(result.meta.status).toBe('failed');
     expect(result.meta.errorMessage).toContain('Unsupported agent for daemon jobs');
 
+    // Loop driver must not have been invoked.
     expect(calls.length).toBe(0);
   });
 
   it('stamps harnessName on loop ExecOptions for a custom-harness profile (PHNX-2935)', async () => {
+    // The loop path resolves the profile to its host agent and spawns
+    // in-process via runLoop — it never re-enters `agents run <name>`, so
+    // ExecOptions.harnessName must be set here or a deepseek loop-routine
+    // is recorded as claude.
     mkdirSync(join(hoistedState.TEST_DIR, 'profiles'), { recursive: true });
     writeFileSync(
       join(hoistedState.TEST_DIR, 'profiles', 'deepseek.yml'),

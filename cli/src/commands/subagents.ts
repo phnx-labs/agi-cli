@@ -1,3 +1,10 @@
+/**
+ * Subagent management commands.
+ *
+ * Registers the `agents subagents` command tree for listing, viewing,
+ * installing, and removing lightweight agent definitions (AGENT.md files)
+ * that parent agents can spawn for focused subtasks.
+ */
 
 import type { Command } from 'commander';
 import { withAliases } from '../lib/verbs.js';
@@ -48,6 +55,7 @@ import {
   type SyncTarget,
 } from './resource-view.js';
 
+/** Replace the home directory prefix with ~ for display. */
 function formatPath(p: string): string {
   const home = homeDir();
   if (home && p.startsWith(home)) {
@@ -56,6 +64,7 @@ function formatPath(p: string): string {
   return p;
 }
 
+/** Register the `agents subagents` command tree. */
 export function registerSubagentsCommands(program: Command): void {
   const subagentsCmd = program
     .command('subagents')
@@ -82,6 +91,7 @@ When to use:
   - Team sharing: distribute subagent definitions via GitHub repos
 `);
 
+  // Shared list implementation, registered as `list` and hidden `view` alias.
   const runList = async (opts?: { json?: boolean }) => {
     const rows = buildSubagentRows();
     await showResourceList({
@@ -95,6 +105,7 @@ When to use:
     });
   };
 
+  // agents subagents list
   withAliases(subagentsCmd
     .command('list'), 'list')
     .description('Show subagents in a table with sync status across agent versions')
@@ -106,6 +117,7 @@ Examples:
 `)
     .action(runList);
 
+  // agents subagents view <name>
   withAliases(subagentsCmd
     .command('view [name]'), 'view')
     .description('Show details for a specific subagent (use "list" to see all)')
@@ -133,6 +145,7 @@ Examples:
       console.log(formatSubagentDetail(subagent, buildSubagentTargets(subagent.name)));
     });
 
+  // agents subagents add <source>
   subagentsCmd
     .command('add <source>')
     .description('Install subagents from a source (GitHub, local path) and sync to agent versions')
@@ -159,6 +172,8 @@ Examples:
     .action(async (source, options) => {
       const spinner = ora({ text: 'Fetching source...', isSilent: !process.stdout.isTTY }).start();
 
+      // Clone or use local source. Accept any git-like scheme to match the
+      // other <resource> add commands (skills, workflows, commands, hooks).
       let sourcePath: string;
       const isGitRepo = source.startsWith('gh:') || source.startsWith('git:') ||
                         source.startsWith('ssh:') || source.startsWith('https://') ||
@@ -178,6 +193,7 @@ Examples:
         process.exit(1);
       }
 
+      // Discover subagents
       spinner.text = 'Discovering subagents...';
       let discovered = discoverSubagentsFromRepo(sourcePath);
 
@@ -187,6 +203,7 @@ Examples:
         process.exit(1);
       }
 
+      // --names filter: pluck specific subagents from a multi-subagent source.
       const requestedNames = parseCommaSeparatedList(options.names);
       if (requestedNames.length > 0) {
         const discoveredNames = new Set(discovered.map((s) => s.name));
@@ -201,12 +218,16 @@ Examples:
 
       spinner.succeed(`Found ${discovered.length} subagent(s)`);
 
+      // Show what we found
       console.log();
       for (const sub of discovered) {
         console.log(`  ${chalk.cyan(sub.name)}: ${chalk.gray(sub.frontmatter.description)}`);
       }
       console.log();
 
+      // Determine target agent versions, using the same path skills/workflows use.
+      // Back-compat: commander's old `--agents <agents...>` shape arrives as an array;
+      // join it with commas so resolveAgentVersionTargets can parse it.
       const agentsArg: string | undefined = Array.isArray(options.agents)
         ? options.agents.join(',')
         : options.agents;
@@ -230,6 +251,7 @@ Examples:
         versionSelections = result.versionSelections;
       }
 
+      // Install centrally
       const installSpinner = ora({ text: 'Installing subagents...', isSilent: !process.stdout.isTTY }).start();
 
       for (const sub of discovered) {
@@ -242,6 +264,7 @@ Examples:
 
       installSpinner.succeed(`Installed ${discovered.length} subagent(s) to ${formatPath(getSubagentsDir())}`);
 
+      // Sync to selected versions
       if (versionSelections.size > 0) {
         const syncSpinner = ora({ text: 'Syncing to agents...', isSilent: !process.stdout.isTTY }).start();
         const subagentNames = discovered.map((s) => s.name);
@@ -265,6 +288,7 @@ Examples:
       console.log();
     });
 
+  // agents subagents remove [name]
   withAliases(subagentsCmd
     .command('remove [name]'), 'remove')
     .description('Delete a subagent from central storage and unsync from all agent versions')
@@ -294,6 +318,7 @@ Examples:
         process.exit(1);
       }
 
+      // Build list of targets that have this subagent synced
       const availableTargets: Array<{ agent: AgentId; version: string }> = [];
       for (const { agent, version } of iterSubagentsCapableVersions()) {
         const home = getVersionHomePath(agent, version);
@@ -308,6 +333,7 @@ Examples:
         return;
       }
 
+      // Show multi-select picker for targets
       const removalTargets: RemovalTarget[] = availableTargets.map((t) => ({
         agent: t.agent,
         version: t.version,
@@ -343,6 +369,7 @@ Examples:
 
 import type { InstalledSubagent } from '../lib/types.js';
 
+/** Every (agent, version) that supports subagents and is installed. */
 function iterSubagentCapableVersions(): Array<{ agent: AgentId; version: string; home: string }> {
   const out: Array<{ agent: AgentId; version: string; home: string }> = [];
   for (const agent of capableAgents('subagents')) {
@@ -368,12 +395,14 @@ function buildSubagentTargets(name: string): SyncTarget[] {
   return targets;
 }
 
+/** Build resource rows for all centrally-installed subagents with sync status. */
 function buildSubagentRows(): ResourceRow[] {
   const central = listInstalledSubagents();
   if (central.length === 0) return [];
 
   const pairs = iterSubagentCapableVersions();
 
+  // Read each target's installed subagents once; lookup by name per row.
   const installedByTarget = new Map<string, Set<string>>();
   for (const { agent, version, home } of pairs) {
     const names = new Set(listSubagentsForAgent(agent, home).map((s) => s.name));
@@ -412,6 +441,7 @@ function buildSubagentRows(): ResourceRow[] {
   return rows;
 }
 
+/** Build the multi-line detail pane shown when a subagent is selected in the picker. */
 function formatSubagentDetail(sub: InstalledSubagent, targets: SyncTarget[]): string {
   const lines: string[] = [];
   lines.push(chalk.bold.cyan(sub.name));
