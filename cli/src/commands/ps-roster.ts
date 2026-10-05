@@ -1,8 +1,3 @@
-/**
- * The live agent roster behind `agents ps` (and, until R3 of PHNX-4227,
- * `agents sessions --active`): gather running sessions on this machine and the
- * fleet, filter them by live state, and render them grouped by machine.
- */
 import * as path from 'path';
 import chalk from 'chalk';
 import { sessionDisplayAgent, linkUrl, linearIssueUrl } from '@phnx-labs/sessions-cli/reader';
@@ -30,7 +25,6 @@ import { listBookmarks } from '../lib/session/bookmarks.js';
 import { formatTodoCompact, githubRepoUrlFromCwd } from './sessions-picker.js';
 import { isInteractiveTerminal } from './utils.js';
 
-/** The live-state flags `ps` and `sessions --active` share; each one narrows the roster. */
 export interface LiveStatusFlags {
   working?: boolean;
   idle?: boolean;
@@ -554,8 +548,7 @@ export async function gatherActiveSessions(
 
   if (opts.local && !scoped) {
     const loaded = await loadLocalActiveSessions({ forceRefresh });
-    // The default gather stamps machine; a snapshot published by an older daemon
-    // does not, and every row in the local scope is this machine's.
+    // An older daemon's snapshot carries no machine; local rows are this box's.
     const self = machineId();
     for (const s of loaded.sessions) if (!s.machine) s.machine = self;
     return { sessions: loaded.sessions, remoteDeviceCount: 0 };
@@ -764,7 +757,6 @@ export function resolveRoutineName(query: string, names: readonly string[]): str
 }
 
 
-/** Everything the live roster reads from `ps` or `sessions --active`. */
 export interface LiveRosterOptions extends LiveStatusFlags {
   json?: boolean;
   interactive?: boolean;
@@ -781,12 +773,6 @@ export interface LiveRosterOptions extends LiveStatusFlags {
   sort?: string;
 }
 
-/**
- * The one entry behind `agents ps` and `agents sessions --active`. On a TTY with
- * no status/window/project/sort narrowing it opens the session browser seeded
- * running-only (the `r` key toggles that filter); otherwise it prints the roster
- * grouped by machine, or JSON with `--json`.
- */
 export async function runLiveRoster(options: LiveRosterOptions): Promise<void> {
   const liveStatuses = requestedLiveStatuses(options);
   const hosts = options.host;
