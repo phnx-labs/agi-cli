@@ -29,11 +29,6 @@ import type { CredentialAccount } from './account-registry.js';
 import type { QuotaSummary } from './devices/harness-inventory.js';
 import type { Meta } from './types.js';
 
-// The provider-row verdict reads the secret's presence through the process
-// client, which honors SECRETS_HOME; the embedded engine did not (PHNX-3989).
-// Account bundles carry no explicit backend, so on a headed macOS box the real
-// standalone would use the operator's login keychain — run where items are
-// file-backed (headless Linux/Windows, CI).
 const fileBacked = await standaloneKeychainIsFileBacked();
 
 describe('native account catalog', () => {
@@ -107,7 +102,6 @@ describe('buildNativeCatalog account-first read model', () => {
   it('does not invent a native default from an unmatched/provider account default', () => {
     const rows = [home({})];
     const meta: Pick<Meta, 'accounts' | 'deviceAccounts'> = {
-      // The configured default names a provider bundle, not this native account.
       accounts: { defaults: { claude: 'openrouter-work' }, native: { 'id-1': { id: 'id-1', name: 'work', agent: 'claude', identityKey: 'claude:user=1', scope: 'version' } } },
     };
     expect(buildNativeCatalog(rows, meta, () => 'acct-1')[0].isDefault).toBe(false);
@@ -202,8 +196,6 @@ describe('resolveLocalAccountObservation (newest observation wins)', () => {
   });
 
   it('a NEWER daemon cache verdict beats an older slot verdict — revoked is never masked', () => {
-    // The regression this fixes: T1 wrote slot live at t1, the daemon probed
-    // revoked at t2 > t1, and `slot ?? cached` kept rendering LIVE.
     const out = resolveLocalAccountObservation(
       slot('2026-09-06T01:00:00.000Z', 'live'),
       cached('2026-09-06T02:00:00.000Z', 'revoked'),
@@ -235,21 +227,14 @@ describe('resolveLocalAccountObservation (newest observation wins)', () => {
   it('falls back to whichever source exists, and to signedIn when neither does', () => {
     expect(resolveLocalAccountObservation(slot('2026-09-06T01:00:00.000Z'), undefined, true).verdict).toBe('live');
     expect(resolveLocalAccountObservation(undefined, cached('2026-09-06T01:00:00.000Z', 'revoked'), true).verdict).toBe('revoked');
-    // A present credential with no observation either way is `no_evidence`, not
-    // `unverified` (PHNX-4116) — the display becomes a fact, not this word.
     expect(resolveLocalAccountObservation(undefined, undefined, true).verdict).toBe('no_evidence');
     expect(resolveLocalAccountObservation(undefined, undefined, false).verdict).toBe('missing');
   });
 
   it("an `unconfigured` slot record is ensureSlot's default, not a verdict — the live signedIn read decides", () => {
-    // The 2026-09-10 zion case: `accounts login` re-materialized the slot while the
-    // device doc was unreadable (verdict: unconfigured, no checkedAt), the user
-    // logged in, and the row still rendered MISSING because `unconfigured` was
-    // mapped to missing unconditionally.
     const stale = { authMode: 'native' as const, verdict: 'unconfigured' as const };
     expect(resolveLocalAccountObservation(stale, undefined, true).verdict).toBe('no_evidence');
     expect(resolveLocalAccountObservation(stale, undefined, false).verdict).toBe('missing');
-    // A newer daemon probe of the slot still wins over the default.
     expect(resolveLocalAccountObservation(stale, cached('2026-09-10T19:06:37.000Z', 'live'), true).verdict).toBe('live');
   });
 });
@@ -303,10 +288,7 @@ describe('fleet-synced account verdict rows', () => {
         },
       }));
       const shared = readSharedAccountVerdicts(root);
-      // The stable id key is the join a REGISTERED account uses…
       expect(shared.get('claude:id-work')?.[0]?.verdict).toBe('revoked');
-      // …and the label index exists for unnamed legacy logins only. Both index
-      // the same row; the catalog never resolves a registered row by label.
       expect(shared.get('label:claude:shared@example.com')?.[0]?.verdict).toBe('revoked');
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
@@ -356,7 +338,6 @@ describe('isLaunchableSignedIn (strict — a live credential, not metadata alone
   it.skipIf(process.platform === 'darwin')('is still false with metadata present but a BLANK credential (stale/expired login)', () => {
     const home = mkHome();
     fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
-    // `.claude.json` metadata exists but no usable credential behind it.
     fs.writeFileSync(path.join(home, '.claude', '.claude.json'), JSON.stringify({ oauthAccount: { emailAddress: 'a@x.com' } }));
     expect(isLaunchableSignedIn('claude', home, { signedIn: true })).toBe(false);
   });
@@ -414,12 +395,9 @@ describe.skipIf(process.platform === 'win32')('loadAccountCatalog tolerates an u
   });
 
   it('renders native rows + flags secretsUnavailable instead of throwing when secrets is broken', async () => {
-    // A standalone that answers nothing (the class of failure PHNX-3989 hit under
-    // Bun) must not take down `agents view` / `agents accounts`: the provider
-    // section is reported unavailable while the rest of the catalog still loads.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'catalog-broken-secrets-'));
     const bin = path.join(dir, 'mock-secrets');
-    fs.writeFileSync(bin, '#!/bin/sh\nexit 0\n'); // writes nothing to fd 4
+    fs.writeFileSync(bin, '#!/bin/sh\nexit 0\n');
     fs.chmodSync(bin, 0o755);
     process.env.SECRETS_BIN = bin;
     _resetSecretsClientForTest();
@@ -538,10 +516,6 @@ describe('account catalog per-window USAGE rendering (PHNX-3940 regression)', ()
 
 describe('agents accounts list --json never leaks the stale sentinel (PHNX-3348 follow-up)', () => {
   it('a signed-in account with no collected usage has a display-safe usageError', () => {
-    // Real path: harness-inventory sanitizes via usageErrorForDisplay before the
-    // row reaches NativeAccountCatalogRow and accountListJson (fix/view-usage-windows).
-    // A never-refreshed cache returns USAGE_NOT_COLLECTED_MARKER ('stale') from
-    // getUsageInfoForIdentity (readOnly); the JSON must never carry that raw sentinel.
     const row: import('./account-catalog.js').NativeAccountCatalogRow = {
       kind: 'native',
       agent: 'claude',
@@ -644,9 +618,7 @@ describe('aggregateAccountVerdict honours local usage snapshot (PHNX-3940/4051)'
       { device: 'zion', authMode: 'native' as const, verdict: 'live' as const },
       ...devices(['rate_limited', 'rate_limited', 'rate_limited', 'rate_limited', 'rate_limited', 'rate_limited']),
     ];
-    // aggregate ignores remote rate_limited when hasLocalSnapshot (usedPercent !== null)
     expect(aggregateAccountVerdict('portable', all, staleBelow100)).toBe('live');
-    // honesty keeps it live because usage is available, not throttled
     const honest = applyUsageHonesty(aggregateAccountVerdict('portable', all, staleBelow100), staleBelow100);
     expect(honest.verdict).toBe('live');
   });
@@ -659,13 +631,11 @@ describe('aggregateAccountVerdict honours local usage snapshot (PHNX-3940/4051)'
       windows: [{ key: 'session' as const, label: 'Session', shortLabel: 'S', usedPercent: 100, resetsAt: new Date(Date.now() + 60_000), windowMinutes: 300 }],
     };
     expect(deriveUsageStatusFromSnapshot(snap)).toBe('rate_limited');
-    // Even with a stale surrounding tick, a 100% blocking window is rate_limited
     const all = [
       { device: 'zion', authMode: 'native' as const, verdict: 'live' as const },
       ...devices(['rate_limited', 'rate_limited']),
     ];
     const base = aggregateAccountVerdict('portable', all, blocking100Limited);
-    // base is live (remote ignored), honesty promotes to rate_limited
     expect(base).toBe('live');
     const honest = applyUsageHonesty(base, blocking100Limited);
     expect(honest.verdict).toBe('rate_limited');
@@ -678,7 +648,6 @@ describe('aggregateAccountVerdict honours local usage snapshot (PHNX-3940/4051)'
   });
 
   it('freshly added account with no usage windows but a genuine remote rate_limited is not discarded as LIVE (reviewer BLOCKING)', () => {
-    // summarizeQuota NO-SNAPSHOT branch for Claude returns status available + usedPercent null (hardcoded available)
     const all = [
       { device: 'zion', authMode: 'native' as const, verdict: 'live' as const },
       { device: 'worker-1', authMode: 'durable' as const, verdict: 'rate_limited' as const },
@@ -751,7 +720,7 @@ describe('per-account per-box FACTS (PHNX-4116)', () => {
       const tokenPath = path.join(dir, '.claude', '.oauth_token');
       fs.mkdirSync(path.dirname(tokenPath), { recursive: true });
       fs.writeFileSync(tokenPath, 'sk-ant-oat01-THIS-IS-SECRET-DO-NOT-LEAK');
-      fs.utimesSync(tokenPath, new Date(2026, 8, 16), new Date(2026, 8, 16)); // Sep 16
+      fs.utimesSync(tokenPath, new Date(2026, 8, 16), new Date(2026, 8, 16));
       const fact = readTokenFact('claude', dir);
       expect(fact).toBe('sk-ant-oat01 (Sep 16)');
       expect(fact).not.toContain('SECRET');
@@ -790,7 +759,6 @@ describe('per-account per-box FACTS (PHNX-4116)', () => {
     };
     const out = strip(renderAccountRows([row], { heading: false, footer: false, harnessHeadings: false, localDevice: 'yosemite-m5', harness: 'claude' }));
     expect(out).toContain('(from zion)');
-    // A locally-captured reading carries no origin suffix.
     const local: NativeAccountCatalogRow = { ...row, usageSnapshot: { ...row.usageSnapshot!, freshness: { source: 'statusline', poller: 'yosemite-m5' } } };
     expect(strip(renderAccountRows([local], { heading: false, footer: false, harnessHeadings: false, localDevice: 'yosemite-m5', harness: 'claude' }))).not.toContain('(from');
   });
