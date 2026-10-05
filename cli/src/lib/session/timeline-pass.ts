@@ -159,9 +159,13 @@ function readCompleteLines(
         partial: false,
       };
     }
-    // EOF inside the budget: the writer has not finished a record that will
-    // still fit in one window. Leave it for the tick that sees its newline.
-    if (!allowPartial || read < stop - start) return { text: '', offset: start, partial: false };
+    // A record that still fits in one window stays unread until its newline
+    // arrives. `stop` is already the file end when the tail is shorter than
+    // the cap, so a full read of that tail compares equal and must not be
+    // consumed: a fragment over the partial-text cap would be discarded and
+    // the finished turn would never reach the watch row.
+    const atEof = start + read >= end;
+    if (!allowPartial || atEof || read < stop - start) return { text: '', offset: start, partial: false };
     const cut = utf8Cut(buffer, read);
     if (cut <= 0) return { text: '', offset: start, partial: false };
     return {
