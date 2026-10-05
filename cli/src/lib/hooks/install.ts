@@ -1,12 +1,3 @@
-/**
- * Hook management -- discovery, registration, and syncing of event hooks.
- *
- * Hooks are shell scripts in ~/.agents/hooks/ that fire on agent events
- * (tool calls, session start, etc.). Each hook directory contains a manifest
- * (agents.yaml) declaring events, matchers, and timeout. This module handles
- * parsing those manifests, registering hooks into agent-native settings files,
- * and syncing them across version switches.
- */
 
 import * as crypto from 'crypto';
 import * as fs from 'fs';
@@ -25,10 +16,6 @@ import { codexShortKey, resolveCodexHome } from '../codex-home.js';
 
 function getCentralHooksDir(): string { return getUserHooksDir(); }
 
-/**
- * Resolve a hook script's absolute path. Checks user dir first, then enabled
- * extra repos in insertion order, then system dir. Returns null if not found.
- */
 function resolveContainedHookPath(hooksRoot: string, script: string): string | null {
   const resolvedRoot = path.resolve(hooksRoot);
   const candidate = path.join(hooksRoot, script);
@@ -38,11 +25,6 @@ function resolveContainedHookPath(hooksRoot: string, script: string): string | n
   return resolved;
 }
 
-/**
- * Subdirectories under hooks/ that group event families (e.g. session-starts/).
- * Scripts one level down are first-class hooks; their install name remains the
- * file basename so version-home copies stay flat and doctor/diff keep matching.
- */
 const HOOK_GROUP_SKIP_DIRS = new Set(['node_modules', '.git', '.cache']);
 
 export function resolveHookScriptPath(script: string): string | null {
@@ -51,8 +33,6 @@ export function resolveHookScriptPath(script: string): string | null {
     const hooksRoot = path.join(root, 'hooks');
     const resolved = resolveContainedHookPath(hooksRoot, script);
     if (resolved) return resolved;
-    // Basename fallback: manifests may say `session-starts/foo.sh` or just
-    // `foo.sh` while the file lives under a one-level group dir.
     const base = path.basename(script);
     const nested = findHookScriptInGroupDirs(hooksRoot, base);
     if (nested) return nested;
@@ -60,10 +40,6 @@ export function resolveHookScriptPath(script: string): string | null {
   return null;
 }
 
-/**
- * Find `basename` under hooks/<group>/ (one level). Skips known non-group dirs.
- * Returns the first match in sorted group order for stability.
- */
 function findHookScriptInGroupDirs(hooksRoot: string, basename: string): string | null {
   if (!fs.existsSync(hooksRoot)) return null;
   let entries: string[];
@@ -82,8 +58,6 @@ function findHookScriptInGroupDirs(hooksRoot: string, basename: string): string 
       continue;
     }
     if (!st.isDirectory() || st.isSymbolicLink()) continue;
-    // Only treat dirs that themselves contain scripts as groups (session-starts/),
-    // not fixture-only directory bundles (tests/).
     let hasScript = false;
     try {
       for (const child of fs.readdirSync(groupDir)) {
@@ -102,39 +76,18 @@ function findHookScriptInGroupDirs(hooksRoot: string, basename: string): string 
   return null;
 }
 
-/**
- * Prefixes used for stale-entry cleanup in agent settings files. A registered
- * hook command is considered "managed" if it lives under any known hooks dir
- * (user, extra repos, or system). Entries from removed extra repos are also
- * garbage-collected because they won't appear in this list any more.
- */
 function getManagedHookPrefixes(): string[] {
   const extraDirs = getEnabledExtraRepos().map(e => e.dir);
   return [
     path.join(getUserAgentsDir(), 'hooks') + path.sep,
     ...extraDirs.map(d => path.join(d, 'hooks') + path.sep),
     path.join(getSystemAgentsDir(), 'hooks') + path.sep,
-    // Subrule-dir hook scripts register by their absolute source path under a
-    // rules `subrules/` tree. Cover those trees so a removed subrule/hook's
-    // stale settings entry gets garbage-collected like any other managed hook.
     path.join(getUserRulesDir(), 'subrules') + path.sep,
     ...extraDirs.map(d => path.join(d, 'rules', 'subrules') + path.sep),
     path.join(getResolvedRulesDir(), 'subrules') + path.sep,
   ];
 }
 
-/**
- * Convert an absolute path under HOME to a portable ~/... form with forward
- * slashes. Hook commands stored this way work on both macOS and Windows:
- * absolute Windows paths break in bash because backslashes are stripped as
- * escape characters, whereas ~/... paths expand correctly via the ~/.claude
- * symlink/junction on both platforms.
- *
- * `home` and `sep` are injectable so the Windows behavior (backslash sep,
- * drive-letter home) is unit-testable on a POSIX CI host — pass sep='\\' to
- * simulate Windows. With the defaults this is byte-identical to reading
- * os.homedir()/path.sep at the call site.
- */
 export function toPortableCommand(
   absPath: string,
   home: string = os.homedir(),
@@ -149,47 +102,25 @@ export function toPortableCommand(
 }
 
 function isManagedHookCommand(command: string, prefixes: string[]): boolean {
-  // Expand ~/... so tilde-form portable commands can be matched against
-  // absolute managed prefixes.
   let expanded = command;
   if (command.startsWith('~/')) {
     expanded = path.join(os.homedir(), command.slice(2));
   }
-  // Resolve the directory through symlinks/junctions (e.g. ~/.claude on
-  // Windows is a junction to the versioned home dir where prefixes live).
-  // Resolve the dir, not the full path — the file may not exist after removal.
   const dir = path.dirname(expanded);
   let resolvedDir = dir;
-  try { resolvedDir = fs.realpathSync(dir); } catch { /* absent or broken link */ }
+  try { resolvedDir = fs.realpathSync(dir); } catch {  }
   const resolved = path.join(resolvedDir, path.basename(expanded));
 
   for (const prefix of prefixes) {
     if (resolved.startsWith(prefix)) return true;
-    // The command dir above is realpath-resolved, but a raw prefix may still
-    // point through a symlink (macOS TMPDIR /var -> /private/var, or a
-    // symlinked ~/.agents). Compare against a realpath-normalized prefix too
-    // so the two sides match. Strip the trailing sep, resolve the dir, re-add.
     const rawPrefixDir = prefix.endsWith(path.sep) ? prefix.slice(0, -path.sep.length) : prefix;
     let resolvedPrefix = prefix;
-    try { resolvedPrefix = fs.realpathSync(rawPrefixDir) + path.sep; } catch { /* absent or broken link */ }
+    try { resolvedPrefix = fs.realpathSync(rawPrefixDir) + path.sep; } catch {  }
     if (resolvedPrefix !== prefix && resolved.startsWith(resolvedPrefix)) return true;
   }
   return false;
 }
 
-/**
- * Per-version-home command detection. Sync copies each hook script into the
- * active version's home and registers the command by that version-scoped path
- * (`~/.agents/.history/versions/<agent>/<version>/home/…`). Because the path
- * embeds the version number, a later version's sync appends a fresh set whose
- * paths never string-match (and thus never prune) the prior version's entries —
- * so entries for every version installed over time pile up in one settings
- * file, and once a version is removed its entries become dead hooks that error
- * on every tool call. `versionHomeIdentity` extracts the `<agent>/<version>` a
- * command (or home path) belongs to so stale sibling-version entries can be
- * pruned. Returns null for any path outside a per-version home (system hooks,
- * the user's own custom hooks) — those are never a prune target.
- */
 const VERSION_HOME_SEGMENT_RE = /\.history\/versions\/([^/]+)\/([^/]+)\/home(?:\/|$)/;
 function versionHomeIdentity(commandOrPath: string): { agent: string; version: string } | null {
   const norm = commandOrPath.split(/[\\/]/).join('/');
@@ -197,11 +128,6 @@ function versionHomeIdentity(commandOrPath: string): { agent: string; version: s
   return m ? { agent: m[1], version: m[2] } : null;
 }
 
-/**
- * True when `command` points into a DIFFERENT version home of the same agent as
- * `current` — i.e. a stale entry left behind by an earlier version's sync.
- * Non-version-home commands (system + user-custom hooks) always return false.
- */
 function isStaleSiblingVersionCommand(
   command: string,
   current: { agent: string; version: string } | null
@@ -216,16 +142,11 @@ function hookResourceName(command: string): string {
   return path.basename(withoutArgs).replace(/\.[^.]+$/, '');
 }
 
-/**
- * Collapse version-scoped registrations by logical resource identity rather
- * than absolute command path. When the same resource is present in several
- * homes, the active home's command wins even if it appears later. Commands
- * outside version homes are user-owned and remain untouched.
- */
 export function deduplicateVersionHookCommands(
   commands: string[],
   activeVersionHome: string,
 ): string[] {
+  // Active-version entries win; user and non-version-home hooks pass through untouched.
   const active = versionHomeIdentity(activeVersionHome);
   if (!active) return [...commands];
 
@@ -247,15 +168,6 @@ export function deduplicateVersionHookCommands(
   return [...passthrough, ...Array.from(selected.values(), ({ command }) => command)];
 }
 
-/**
- * Collapse a matcher group's hook entries down to the deduplicated command
- * multiset {@link deduplicateVersionHookCommands} returns, preserving order and
- * the concrete entry objects. The deduped list is honored as a per-command
- * budget, NOT a membership set: two identical active-version entries collapse to
- * one because the budget for that command is one. (A membership `Set.has` test
- * would keep both — the bug this replaces.) Passthrough (user / non-version-home)
- * commands keep their original multiplicity, so genuine user hooks are untouched.
- */
 function collapseVersionHookEntries<T extends { command: string }>(
   entries: T[],
   activeVersionHome: string,
@@ -307,12 +219,6 @@ function hookContentHash(scriptPath: string): string {
   return crypto.createHash('sha256').update(fs.readFileSync(scriptPath)).digest('hex');
 }
 
-/**
- * Inspect every installed hooks-capable harness without assuming a native
- * settings format. Same-name copies with one content hash are installation
- * noise; multiple hashes are drift. The active version is always selected as
- * the authoritative copy when it participates in the group.
- */
 export function inspectDuplicateVersionHooks(cwd = process.cwd()): DuplicateVersionHook[] {
   const byResource = new Map<string, VersionHookCopy[]>();
   for (const { agent, version } of iterHooksCapableVersions()) {
@@ -355,24 +261,6 @@ export function inspectDuplicateVersionHooks(cwd = process.cwd()): DuplicateVers
   return findings.sort((a, b) => `${a.agent}/${a.name}`.localeCompare(`${b.agent}/${b.name}`));
 }
 
-/**
- * Resolve the command path to register for a hook.
- *
- * Returns either the raw script path (no `cache:`, `matches:`, or `matcher:`
- * set — a bare lifecycle hook with nothing to gate or time) or the path to a
- * generated wrapper shim. The shim is written as a side effect when `cache:`
- * and/or `matches:` is configured — it enforces the `matches:` gate at fire
- * time and layers the caching/timing machinery when `cache:` is set.
- *
- * A hook that declares only `matcher:` (e.g. git-guard/rm-guard scoped to the
- * `Bash` tool, no `cache:`/`matches:`) also gets a shim now — a pass-through
- * one with no gate and no cache, whose only job is the trailing timing sample
- * (see PASSTHROUGH_TAIL in hooks/cache.ts). Before this, a matcher-only hook
- * took the raw-path branch and fired completely uninstrumented: `agents perf
- * hooks` showed zero samples for it no matter how often it ran. The agent-
- * native settings file gets the same shape either way — just a different
- * command path.
- */
 function resolveHookCommand(
   name: string,
   hookDef: ManifestHook,
@@ -386,18 +274,9 @@ function resolveHookCommand(
   const hasMatches = matches != null && Object.keys(matches).length > 0;
   const hasMatcher = !!hookDef.matcher;
   if (!cache && !hasMatches && !hasMatcher) {
-    // Nothing to gate, cache, or time: make sure a previously generated shim
-    // from an earlier cache:/matches:/matcher config is gone so the JSONL
-    // doesn't keep claiming hits.
     removeHookShim(name);
     return toPortableCommand(scriptPath);
   }
-  // A shim is generated when the hook opts into caching, declares `matches:`
-  // predicates, or declares a `matcher:` (even alone — see the doc comment
-  // above). The shim enforces the `matches:` gate at fire time (skipping the
-  // script when predicates don't hold) and, when `cache:` is set, layers the
-  // cache/timing machinery on top; with neither, it is a pure pass-through
-  // timing wrapper.
   return toPortableCommand(generateHookShim({
     name,
     scriptPath,
@@ -407,24 +286,11 @@ function resolveHookCommand(
   }));
 }
 
-/**
- * Extensions that are NEVER hooks — docs, configuration, plain data. A file
- * in hooks/ with one of these extensions is auxiliary content (e.g., the
- * `promptcuts.yaml` data file read directly by the expand-promptcuts
- * script, or the `README.md` that documents the hooks directory). They
- * sometimes carry an exec bit by accident (older sync runs chmod 0o755'd
- * everything) but they are not scripts.
- */
 const NON_SCRIPT_EXTENSIONS = new Set([
   '.md', '.markdown', '.rst', '.txt',
   '.yaml', '.yml', '.json', '.toml', '.ini', '.conf',
 ]);
 
-// Documentation siblings of a hook (e.g. `git-guard.md` next to `git-guard.sh`)
-// are human-readable docs the hook never reads at runtime — NOT a data sidecar.
-// Treating them as the hook's `dataFile` made the installer's correct omission
-// of docs look like perpetual drift in `agents doctor` that no sync could fix.
-// Structured siblings (.yaml/.json/.toml/...) remain valid data files.
 const DOC_EXTENSIONS = new Set(['.md', '.markdown', '.rst']);
 
 const SCRIPT_EXTENSIONS = new Set([
@@ -447,16 +313,11 @@ function isExecutable(mode: number): boolean {
   return (mode & 0o111) !== 0;
 }
 
-/**
- * Ensure a script file carries an exec bit. Subrule-dir hook scripts are
- * registered by their source path (not copied), so they must be executable in
- * place. Best-effort: a chmod failure (read-only fs, foreign owner) is ignored.
- */
 function ensureExecutable(scriptPath: string): void {
   try {
     const mode = fs.statSync(scriptPath).mode;
     if (!isExecutable(mode)) fs.chmodSync(scriptPath, mode | 0o755);
-  } catch { /* best effort */ }
+  } catch {  }
 }
 
 function getHooksDir(agentId: AgentId): string {
@@ -500,12 +361,6 @@ function removeHookFiles(dir: string, name: string): void {
   }
 }
 
-/**
- * Collect hook-adjacent files from a hooks root: top-level files plus files in
- * one-level group subdirs (e.g. hooks/session-starts/*.sh). Group dirs exist
- * only for layout; the install/list name stays the file basename so sync and
- * doctor keep a flat version-home model.
- */
 function collectHookFilesFromRoot(dir: string): {
   name: string;
   base: string;
@@ -555,8 +410,6 @@ function collectHookFilesFromRoot(dir: string): {
       continue;
     }
     if (!stat.isDirectory() || HOOK_GROUP_SKIP_DIRS.has(file)) continue;
-    // One-level event-group layout: hooks/<group>/<script>. Only dirs that
-    // contain top-level scripts are groups; fixture-only dirs (tests/) are not.
     let nested: string[];
     try {
       nested = fs.readdirSync(fullPath);
@@ -584,13 +437,6 @@ function collectHookFilesFromRoot(dir: string): {
   return files;
 }
 
-/**
- * List hook entries in a single directory, grouping script + data files by
- * basename. Also discovers scripts in one-level group subdirs
- * (hooks/session-starts/). Exported so doctor-diff can reuse the same grouping
- * the sync path applies; without this, doctor would double-count `foo.sh` and
- * `foo.yaml`. On basename collision, the top-level file wins over a nested one.
- */
 export function listHookEntriesFromDir(dir: string): HookEntry[] {
   if (!fs.existsSync(dir)) {
     return [];
@@ -598,11 +444,9 @@ export function listHookEntriesFromDir(dir: string): HookEntry[] {
 
   const files = collectHookFilesFromRoot(dir);
 
-  // Prefer top-level over nested when basenames collide (stable install name).
   const byBase = new Map<string, typeof files>();
   for (const file of files) {
     const list = byBase.get(file.base) || [];
-    // Top-level files sit directly under dir; nested have an extra path segment.
     const isTop = path.dirname(file.fullPath) === path.resolve(dir);
     if (isTop) list.unshift(file);
     else list.push(file);
@@ -611,9 +455,6 @@ export function listHookEntriesFromDir(dir: string): HookEntry[] {
 
   const entries: HookEntry[] = [];
   for (const [base, groupAll] of byBase) {
-    // Keep only files that share the winning script's directory so a nested
-    // data sidecar next to a nested script still pairs, and a top-level
-    // winner is not paired with a nested yaml of the same basename.
     const winnerScript =
       groupAll.find((f) => SCRIPT_EXTENSIONS.has(f.ext.toLowerCase())) ||
       groupAll.find((f) => f.isExec && !NON_SCRIPT_EXTENSIONS.has(f.ext.toLowerCase()));
@@ -621,13 +462,6 @@ export function listHookEntriesFromDir(dir: string): HookEntry[] {
     const groupDir = path.dirname(winnerScript.fullPath);
     const group = groupAll.filter((f) => path.dirname(f.fullPath) === groupDir);
     group.sort((a, b) => a.name.localeCompare(b.name));
-    // A group is a hook only if it has an actual script: a script extension,
-    // OR an executable bit on a file whose extension is not a known data /
-    // docs type. Files like `README.md` (docs) or `promptcuts.yaml` (data
-    // the expand-promptcuts hook reads directly) sit alongside hooks but
-    // are NOT hooks themselves and must not surface in the hooks list
-    // anywhere — doctor, sync, view, or otherwise. Older sync runs may have
-    // chmod 0o755'd these files; an exec bit alone is not enough.
     const script =
       group.find((f) => SCRIPT_EXTENSIONS.has(f.ext.toLowerCase())) ||
       group.find((f) => f.isExec && !NON_SCRIPT_EXTENSIONS.has(f.ext.toLowerCase()));
@@ -667,22 +501,13 @@ function copyHook(entry: HookEntry, targetDir: string): void {
   }
 }
 
-/**
- * Normalize content for comparison (trim, normalize line endings).
- */
 function normalizeContent(content: string): string {
   return content.replace(/\r\n/g, '\n').trim();
 }
 
-/**
- * Hooks dir for an agent under an arbitrary home (version home or effective
- * home). An agent whose `hooksDir` is configured absolute under `$HOME` (grok,
- * kimi) must be translated to config-dir-relative first — a raw `path.join`
- * would embed the absolute path as a relative segment and produce a hybrid
- * path that never exists (RUSH-2237).
- */
 export function getHooksDirInHome(agentId: AgentId, home: string): string {
   const config = AGENTS[agentId];
+  // Absolute Grok/Kimi hook dirs become config-relative before joining a version HOME.
   const hooksDir = path.isAbsolute(config.hooksDir)
     ? path.relative(config.configDir, config.hooksDir)
     : config.hooksDir;
@@ -714,7 +539,6 @@ export function listInstalledHooksWithScope(
     seen.add(hook.name);
   };
 
-  // Project-scoped hooks (project .agents overrides agent-specific dirs)
   const projectDirs = getProjectHooksDirs(agentId, cwd);
   for (const dir of projectDirs) {
     const projectHooks = listHookEntriesFromDir(dir);
@@ -723,7 +547,6 @@ export function listInstalledHooksWithScope(
     }
   }
 
-  // User-scoped hooks (version-aware when home is provided)
   const home = options?.home || getEffectiveHome(agentId);
   const userDir = getHooksDirInHome(agentId, home);
   const userHooks = listHookEntriesFromDir(userDir);
@@ -771,46 +594,26 @@ export async function installHooks(
   return { installed, errors };
 }
 
-/**
- * Path to the hooks dir of a specific version home (not the active one).
- */
 export function getVersionHooksDir(agent: AgentId, version: string): string {
   return getHooksDirInHome(agent, getVersionHomePath(agent, version));
 }
 
-/**
- * List hook entries in a specific version home.
- */
 export function listHooksInVersionHome(agent: AgentId, version: string): HookEntry[] {
   return listHookEntriesFromDir(getVersionHooksDir(agent, version));
 }
 
-// ─── wiring inspection ────────────────────────────────────────────────────────
 
-/**
- * Native hook-config families understood by this read-only inspector. Claude,
- * Droid, and Muse share settings.json; Grok uses the same grouped event shape
- * in hooks/hooks.json; Kimi stores one hook per [[hooks]] config.toml table.
- * Other harnesses report unsupported rather than risk a false verdict.
- */
 const SETTINGS_JSON_HOOK_FAMILY: readonly AgentId[] = ['claude', 'droid', 'muse'];
 const HOOKS_JSON_HOOK_FAMILY: readonly AgentId[] = ['grok'];
 const TOML_ARRAY_HOOK_FAMILY: readonly AgentId[] = ['kimi'];
 
 export interface HookWiringIssue {
-  /** Hook name (script basename minus extension). */
   name: string;
-  /** Native lifecycle event the hook should be wired to (Stop, PreToolUse, …). */
   event: string;
-  /** Matcher group the hook belongs to under `event` (`''` = the catch-all
-   *  group). Real hooks scope by matcher — ask-user-question-guard=AskUserQuestion,
-   *  user-message-guard=Bash — so wiring is verified per (event, matcher). */
   matcher: string;
-  /** The command the harness-native config should reference under `event`. */
   command: string;
 }
 
-/** A generated, agents-managed hook wrapper and the inputs needed to recreate it. */
 interface ManagedHookRuntimeArtifact {
   agent: AgentId;
   version: string;
@@ -821,13 +624,10 @@ interface ManagedHookRuntimeArtifact {
   matches?: HookMatches;
 }
 
-/** A generated hook wrapper that is referenced by managed configuration but cannot run. */
 export interface BrokenManagedHookRuntimeArtifact extends ManagedHookRuntimeArtifact {
-  /** Stable, human-readable filesystem failure; the hook is never executed to find it. */
   reason: string;
 }
 
-/** Public, doctor-safe shape for a broken generated hook wrapper. */
 export interface HookRuntimeIssue {
   name: string;
   path: string;
@@ -835,33 +635,16 @@ export interface HookRuntimeIssue {
 }
 
 export interface HookWiringReport {
-  /** Whether this agent's hook config format is understood by the inspector. */
   supported: boolean;
-  /** Absolute path of the settings file inspected (when supported). */
   settingsPath?: string;
-  /** Number of hooks the manifest says should be wired for this version. */
   expected?: number;
-  /** Native hook config does not exist — nothing declared can be wired. */
   settingsMissing?: boolean;
-  /** Native hook config cannot be parsed — wiring can't be verified. */
   settingsUnparseable?: boolean;
-  /** Hooks whose file is present/resolvable but that are NOT referenced in the
-   *  native event group/entry should carry them in. */
   unwired: HookWiringIssue[];
-  /** Expected hooks that ARE referenced in native config (expected − unwired).
-   *  Empty whenever wiring cannot be verified (unsupported family, missing or
-   *  unparseable settings). */
   wired: HookWiringIssue[];
-  /** Generated agents-managed wrappers that are absent or unusable. This is
-   * independent of whether the native config format itself is understood. */
   runtimeBroken: HookRuntimeIssue[];
 }
 
-/**
- * Check the filesystem properties a shell hook needs without invoking it. A
- * dangling symlink is deliberately distinguished from an absent file because
- * the repair/remediation is the same but the diagnostic is materially clearer.
- */
 function shellQuoteForHookShim(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
@@ -877,7 +660,6 @@ function hookRuntimeProblem(
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === 'ENOENT') return 'missing';
-    // Stable: errno code only — never absolute path text (fleet/menu aggregation).
     return `cannot inspect (${code || 'error'})`;
   }
 
@@ -890,16 +672,10 @@ function hookRuntimeProblem(
     return `cannot inspect (${code || 'error'})`;
   }
   if (!target.isFile()) return 'not a regular file';
-  // Generation always writes non-empty content; an empty placeholder is broken.
   if (target.size === 0) return 'broken (empty)';
-  // Windows does not use a POSIX executable bit; requiring it there would
-  // continuously rewrite healthy .sh files on Windows hosts.
   if (platform !== 'win32' && (target.mode & 0o111) === 0) return 'not executable';
   try {
     const body = fs.readFileSync(shimPath, 'utf-8');
-    // The global shim must name the selected live version-home script. A
-    // wrapper can remain executable while its SOURCE points to an older or
-    // deleted version; detect that without running either script.
     if (!body.includes(`SOURCE=${shellQuoteForHookShim(artifact.scriptPath)}`)) {
       return 'source mismatch';
     }
@@ -910,12 +686,6 @@ function hookRuntimeProblem(
   return null;
 }
 
-/**
- * Gather managed generated-shim expectations for one installed version. The
- * script must resolve inside that version home (or be an existing absolute
- * subrule), matching the registrar's selection rules. This function never
- * creates a shim or runs a hook.
- */
 function managedHookRuntimeArtifactsForVersion(agent: AgentId, version: string): ManagedHookRuntimeArtifact[] {
   if (!AGENTS[agent].supportsHooks) return [];
   const localHooksDir = getVersionHooksDir(agent, version);
@@ -944,15 +714,10 @@ function managedHookRuntimeArtifactsForVersion(agent: AgentId, version: string):
   return artifacts;
 }
 
-/** Inspect managed generated hook wrappers without executing user hook code. */
 export function inspectBrokenManagedHookRuntimeArtifacts(
   filter?: { agent?: AgentId; version?: string },
   platform: NodeJS.Platform = process.platform,
 ): BrokenManagedHookRuntimeArtifact[] {
-  // Generated destinations are shared across every harness. Always select the
-  // owner from the global population first; an agent-scoped doctor call may
-  // restrict which shim names are relevant, but must not change the expected
-  // SOURCE for a shared wrapper.
   const versions = iterHooksCapableVersions();
   if (
     filter?.agent &&
@@ -988,47 +753,29 @@ export function inspectBrokenManagedHookRuntimeArtifacts(
   );
 }
 
-/** Outcome of one generation attempt for a unique shim path. */
 export interface HookRuntimeRepairAttempt {
   name: string;
   path: string;
   reasonBefore: string;
-  /** True when generateHookShim ran for this path in this pass. */
   attempted: boolean;
   repaired: boolean;
-  /** Stable failure text when not repaired after an attempt (or dry-run skip). */
   reason?: string;
 }
 
-/**
- * Result of one bounded repair pass over agents-managed generated hook shims.
- * Shared by self-heal and agents sync; additive types for the doctor track.
- */
 export interface HookRuntimeRepairReport {
-  /** Broken artifacts found before any write (inspect-only snapshot). */
   brokenBefore: BrokenManagedHookRuntimeArtifact[];
-  /** Unique shim paths considered for generation in this pass. */
   attemptedPaths: string[];
   attempts: HookRuntimeRepairAttempt[];
-  /** Human-readable lines for CheckResult.fixed (includes dry-run would-fix). */
   fixed: string[];
-  /** Human-readable lines for CheckResult.needsAttention — stable wording. */
   needsAttention: string[];
 }
 
 interface RepairManagedHookRuntimeOptions {
-  /** Detect only — never write. Default false. */
   dryRun?: boolean;
   filter?: { agent?: AgentId; version?: string };
   platform?: NodeJS.Platform;
 }
 
-/**
- * Prefer the agent's global default when it appears in the candidate set;
- * otherwise the newest non-isolated version. Shared shim paths embed a single
- * SOURCE script — picking the wrong version permanently points every harness
- * at a stale or dead path.
- */
 function pickCanonicalHookRuntimeArtifact<T extends ManagedHookRuntimeArtifact>(
   candidates: T[],
 ): T {
@@ -1040,8 +787,6 @@ function pickCanonicalHookRuntimeArtifact<T extends ManagedHookRuntimeArtifact>(
     const active = candidates.find((c) => c.agent === agent && c.version === defaultVersion);
     if (active) return active;
   }
-  // listInstalledVersions is the canonical semver ordering. Scan backward
-  // rather than inventing another version comparator at this call site.
   for (const agent of agents) {
     for (const version of [...listInstalledVersions(agent)].reverse()) {
       const newest = candidates.find((c) => c.agent === agent && c.version === version);
@@ -1051,16 +796,9 @@ function pickCanonicalHookRuntimeArtifact<T extends ManagedHookRuntimeArtifact>(
   return candidates[0];
 }
 
-/**
- * One repair target per unique shim path. Generated shims are global, so both
- * unattended and explicit repair leave isolated/private version homes out.
- */
 function selectCanonicalHookRuntimeArtifacts<T extends ManagedHookRuntimeArtifact>(
   artifacts: T[],
 ): T[] {
-  // No hook runtime exists for a version that does not support hooks. Isolated
-  // versions never own a global generated shim, even when a caller names one:
-  // selecting it would repoint every harness at a private version home.
   const pool = eligibleHookRuntimeArtifacts(artifacts);
 
   const byPath = new Map<string, T[]>();
@@ -1076,7 +814,6 @@ function selectCanonicalHookRuntimeArtifacts<T extends ManagedHookRuntimeArtifac
   return selected;
 }
 
-/** Versions that may own — and therefore diagnose — a shared generated shim. */
 function eligibleHookRuntimeArtifacts<T extends ManagedHookRuntimeArtifact>(
   artifacts: T[],
 ): T[] {
@@ -1087,12 +824,6 @@ function eligibleHookRuntimeArtifacts<T extends ManagedHookRuntimeArtifact>(
   );
 }
 
-/**
- * Stable failure text: errno code + detector reason only.
- * Never include absolute paths or randomized atomic-temp basenames — those
- * break cross-device / menu-bar aggregation of identical failures. The hook
- * name is attached by the caller (`hook shim <name>: …`).
- */
 function stableHookRuntimeRepairFailure(
   before: string,
   err: unknown,
@@ -1101,21 +832,11 @@ function stableHookRuntimeRepairFailure(
   return `repair failed [${code || 'UNKNOWN'}]: ${before}`;
 }
 
-/**
- * Regenerate one known-broken wrapper and prove the result is usable. Callers
- * provide a snapshot from inspectBrokenManagedHookRuntimeArtifacts; this never
- * loops or retries and returns a stable error for the current pass.
- *
- * Generation is delegated to generateHookShim (idempotent — preserves mtime when
- * content already matches). This path never calls registerHooksToSettings,
- * installHooks, or any sync routine.
- */
 function repairManagedHookRuntimeArtifact(
   artifact: ManagedHookRuntimeArtifact,
   platform: NodeJS.Platform = process.platform,
 ): { repaired: boolean; reason?: string } {
   const before = hookRuntimeProblem(artifact, platform);
-  // Already healthy (e.g. race with another pass) — no-op, no needsAttention.
   if (!before) return { repaired: false };
   try {
     generateHookShim({
@@ -1127,25 +848,12 @@ function repairManagedHookRuntimeArtifact(
   } catch (err) {
     return { repaired: false, reason: stableHookRuntimeRepairFailure(before, err) };
   }
-  // Post-repair reinspection — prove the artifact is usable without executing it.
   const after = hookRuntimeProblem(artifact, platform);
   return after
     ? { repaired: false, reason: `${before}; repair did not produce a usable shim (${after})` }
     : { repaired: true };
 }
 
-/**
- * Bounded repair of all broken agents-managed generated hook shims.
- *
- * - Inspect first (read-only, no hook execution).
- * - One generation attempt per unique shim path per call (no retry, no timer).
- * - Canonical owner per shared path: global default, else newest non-isolated.
- * - Post-repair reinspection; unresolved findings become stable needsAttention.
- * - Never recurses into resource sync / registerHooksToSettings.
- *
- * This is the shared routine used by the self-heal `hook-runtime` check and
- * exported for the doctor track.
- */
 export function repairManagedHookRuntimeArtifacts(
   opts: RepairManagedHookRuntimeOptions = {},
 ): HookRuntimeRepairReport {
@@ -1163,8 +871,6 @@ export function repairManagedHookRuntimeArtifacts(
     attemptedPaths.push(artifact.shimPath);
 
     if (dryRun) {
-      // Would-fix: same shape as a real fix so doctor dry-run and daemon previews
-      // stay consistent with other HealChecks.
       attempts.push({
         name: artifact.name,
         path: artifact.shimPath,
@@ -1189,8 +895,6 @@ export function repairManagedHookRuntimeArtifacts(
     if (result.repaired) {
       fixed.push(`hook shim ${artifact.name}`);
     } else if (result.reason) {
-      // Stable needs-attention wording for aggregation across devices / menubar.
-      // No reason means already-healthy no-op (race) — do not emit attention noise.
       needsAttention.push(`hook shim ${artifact.name}: ${result.reason}`);
     }
   }
@@ -1198,24 +902,7 @@ export function repairManagedHookRuntimeArtifacts(
   return { brokenBefore, attemptedPaths, attempts, fixed, needsAttention };
 }
 
-/**
- * Verify that every hook the manifest says should be wired is actually
- * referenced in that version's harness-native config, not merely present as a
- * file on disk.
- *
- * `agents doctor` compares hook FILES against source (see diffHooks in
- * doctor-diff.ts) but never checks the wiring, so a hook whose script is
- * byte-identical to source yet missing from settings.json's PreToolUse/Stop/…
- * array reads as "ok" while it never fires. This closes that blind spot.
- *
- * Read-only by construction: it mirrors registerHooksForClaude's command
- * resolution WITHOUT the shim-generation / chmod side effects that
- * resolveHookCommand performs, so it never mutates the version home.
- */
 export function checkVersionHookWiring(agent: AgentId, version: string): HookWiringReport {
-  // Runtime verification does not rely on parsing a native settings format.
-  // That lets doctor catch a deleted generated shim for every hooks-capable
-  // harness, including families whose wiring schema is intentionally unsupported.
   const runtimeBroken = inspectBrokenManagedHookRuntimeArtifacts({ agent, version })
     .map(({ name, shimPath, reason }) => ({ name, path: shimPath, reason }));
   if (
@@ -1235,20 +922,11 @@ export function checkVersionHookWiring(agent: AgentId, version: string): HookWir
       : path.join(versionHome, agentConfigDirName(agent), 'settings.json');
   const localHooksDir = getVersionHooksDir(agent, version);
 
-  // Resolve ONLY to a script that was actually synced for THIS agent+version: the
-  // copy in the version home hooks dir, or an absolute subrule-dir path (those are
-  // registered in place, never copied). Deliberately NO central-source fallback —
-  // sync wires `selectHookManifest(parseHookManifest(), hooksToSync)` where
-  // hooksToSync is the per-agent selected set (versions.ts), so a hook the manifest
-  // declares but that was never synced into THIS version home (e.g. a claude-scoped
-  // hook viewed for droid) must not be expected here. A missing-but-declared hook
-  // is a FILE gap that diffHooks reports as `missing`, not a wiring gap.
-  // No ensureExecutable — that chmods, and this path must not touch disk.
+  // Wiring proof resolves only hooks synced into this version home; it never mutates disk.
   const resolveScript = (script: string): string | null => {
     if (path.isAbsolute(script) && fs.existsSync(script)) return script;
     return resolveContainedHookPath(localHooksDir, script);
   };
-  // Read-only mirror of resolveHookCommand — same command string, no shim write.
   const expectedCommand = (name: string, hookDef: ManifestHook): string | null => {
     const scriptPath = resolveScript(hookDef.script);
     if (!scriptPath) return null;
@@ -1264,7 +942,7 @@ export function checkVersionHookWiring(agent: AgentId, version: string): HookWir
   for (const [name, hookDef] of Object.entries(manifest)) {
     if (!hookDef.events || hookDef.events.length === 0) continue;
     const command = expectedCommand(name, hookDef);
-    if (!command) continue; // script unresolved — a file gap, reported by diffHooks
+    if (!command) continue;
     for (const event of hookDef.events) {
       if (HOOKS_JSON_HOOK_FAMILY.includes(agent)) {
         const matcher = GROK_MATCHER_EVENTS.has(event)
@@ -1306,9 +984,6 @@ export function checkVersionHookWiring(agent: AgentId, version: string): HookWir
     };
   }
 
-  // Command strings actually referenced, keyed by (event, matcher) — a hook wired
-  // under the WRONG matcher group must NOT read as wired, so scope by matcher and
-  // not just by event.
   const wiredByGroup = new Map<string, Set<string>>();
   const groupKey = (event: string, matcher: string): string => `${event}\n${matcher}`;
   if (TOML_ARRAY_HOOK_FAMILY.includes(agent)) {
@@ -1347,9 +1022,6 @@ export function checkVersionHookWiring(agent: AgentId, version: string): HookWir
   return { supported: true, settingsPath, expected: expected.length, unwired, wired, runtimeBroken };
 }
 
-/**
- * Check if a hook installed in a specific version matches central content.
- */
 function versionHookMatches(agent: AgentId, version: string, hookName: string): boolean {
   const central = listHookEntriesFromDir(getCentralHooksDir()).find((e) => e.name === hookName);
   if (!central) return false;
@@ -1383,9 +1055,6 @@ interface VersionHookDiff {
   orphans: string[];
 }
 
-/**
- * Compare a version home's hooks against central. Returns the reconciliation diff.
- */
 export function diffVersionHooks(agent: AgentId, version: string): VersionHookDiff {
   const central = new Set(listHookEntriesFromDir(getCentralHooksDir()).map((e) => e.name));
   const installed = new Set(listHooksInVersionHome(agent, version).map((e) => e.name));
@@ -1412,10 +1081,6 @@ export function diffVersionHooks(agent: AgentId, version: string): VersionHookDi
   return { agent, version, toAdd: toAdd.sort(), toUpdate: toUpdate.sort(), matched, orphans: orphans.sort() };
 }
 
-/**
- * Remove a single hook (script + data file) from a specific version home.
- * Soft-deletes to ~/.agents/.trash/hooks/.
- */
 export function removeHookFromVersion(
   agent: AgentId,
   version: string,
@@ -1451,10 +1116,6 @@ export function removeHookFromVersion(
   return { success: true };
 }
 
-/**
- * Iterate all (agent, version) pairs that support hooks and are installed,
- * optionally scoped to a single agent/version.
- */
 export function iterHooksCapableVersions(filter?: { agent?: AgentId; version?: string }): Array<{ agent: AgentId; version: string }> {
   const pairs: Array<{ agent: AgentId; version: string }> = [];
   const hookAgents: AgentId[] = capableAgents('hooks');
@@ -1501,9 +1162,6 @@ export async function removeHook(
   return { removed, errors };
 }
 
-/**
- * Get detailed info about a hook from central storage.
- */
 export function getHookInfo(name: string): {
   name: string;
   path: string;
@@ -1516,13 +1174,11 @@ export function getHookInfo(name: string): {
     return null;
   }
 
-  // Read hook content - it could be a file or directory
   let content = '';
   const stat = fs.statSync(hookPath);
   if (stat.isFile()) {
     content = fs.readFileSync(hookPath, 'utf-8');
   } else if (stat.isDirectory()) {
-    // For directory hooks, list the files
     const files = fs.readdirSync(hookPath);
     content = `Directory hook containing:\n${files.map((f) => `  - ${f}`).join('\n')}`;
   }
@@ -1539,10 +1195,6 @@ export function discoverHooksFromRepo(repoPath: string): string[] {
   return listHookEntriesFromDir(hooksDir).map((h) => h.name);
 }
 
-/**
- * Install hooks to central ~/.agents/hooks/ directory.
- * Shims will symlink this to per-agent directories for synced agents.
- */
 export async function installHooksCentrally(
   source: string
 ): Promise<{ installed: string[]; errors: string[] }> {
@@ -1554,7 +1206,6 @@ export async function installHooksCentrally(
     fs.mkdirSync(centralDir, { recursive: true });
   }
 
-  // Collect all hooks from shared directory
   const sharedDir = path.join(source, 'hooks');
   const sharedHooks = listHookEntriesFromDir(sharedDir);
 
@@ -1570,10 +1221,6 @@ export async function installHooksCentrally(
   return { installed, errors };
 }
 
-/**
- * List hooks from user (~/.agents/hooks/) and system (~/.agents/.system/hooks/) dirs.
- * User dir takes priority; deduplication preserves first occurrence.
- */
 export function listCentralHooks(): HookEntry[] {
   const seen = new Set<string>();
   const results: HookEntry[] = [];
@@ -1590,21 +1237,6 @@ export function listCentralHooks(): HookEntry[] {
 
 const MAX_HOOK_DURATION_SECONDS = 24 * 60 * 60;
 
-/**
- * Normalize a hook `timeout` from agents.yaml into a whole number of seconds.
- *
- * A bare number stays seconds (`timeout: 30` → 30) for backward compatibility.
- * A Go-style duration string is parsed into seconds: `5s`, `2m`, `1h30m`,
- * `90s`, `1h`. Suffixed durations longer than 24 hours are rejected as likely
- * typos, while bare seconds stay uncapped for backward compatibility. This
- * intentionally does NOT reuse {@link parseTimeout} from routines.ts — that one
- * returns milliseconds, has no seconds (`s`) unit, and floors at one minute,
- * none of which fit hook timeouts (typically 5–600s).
- *
- * Returns the seconds value, or `null` when the input is not a positive number,
- * is not parseable, or is a suffixed duration longer than 24 hours — the caller
- * decides how to surface that.
- */
 export function normalizeHookTimeoutSeconds(value: unknown): number | null {
   if (typeof value === 'number') {
     return Number.isFinite(value) && value > 0 ? value : null;
@@ -1612,7 +1244,6 @@ export function normalizeHookTimeoutSeconds(value: unknown): number | null {
   if (typeof value === 'string') {
     const s = value.trim();
     if (s === '') return null;
-    // A bare integer string means seconds, matching the bare-number form.
     if (/^\d+$/.test(s)) {
       const n = Number(s);
       return n > 0 ? n : null;
@@ -1630,31 +1261,16 @@ export function normalizeHookTimeoutSeconds(value: unknown): number | null {
   return null;
 }
 
-/**
- * Parse hook manifests. Reads system hooks from ~/.agents/.system/hooks.yaml
- * (npm-shipped defaults) and user hooks from the `hooks:` section of
- * ~/.agents/agents.yaml. Merges with user-wins-on-key-collision precedence.
- * A user entry with `enabled: false` disables the system-shipped hook of
- * the same name without forking the system file.
- *
- * Hooks marked `enabled: false` are dropped from the returned map. A hook
- * `timeout` written as a duration string (`5s`, `2m`) is normalized to a
- * seconds number here, so every downstream serializer keeps reading a number.
- */
 export function parseHookManifest(opts: { warn?: boolean } = {}): Record<string, ManifestHook> {
   const warn = opts.warn !== false;
   const merged: Record<string, ManifestHook> = {};
   const systemHooks: Record<string, ManifestHook> = {};
 
-  // Lowest-precedence layer: hooks declared inside active subrule directories.
-  // Seeded first so any same-key entry from system/user agents.yaml wins.
-  // Gated so a malformed hooks.yaml never breaks rule sync.
   try {
     const subruleHooks = collectSubruleHooksFromState();
     for (const [name, def] of Object.entries(subruleHooks)) merged[name] = def;
-  } catch { /* subrule hook collection is best-effort */ }
+  } catch {  }
 
-  // System layer: hooks: section of agents.yaml (npm-shipped, separate repo).
   const systemPath = path.join(getSystemAgentsDir(), 'agents.yaml');
   if (fs.existsSync(systemPath)) {
     try {
@@ -1663,25 +1279,18 @@ export function parseHookManifest(opts: { warn?: boolean } = {}): Record<string,
         systemHooks[name] = def;
         merged[name] = def;
       }
-    } catch { /* skip unreadable manifest */ }
+    } catch {  }
   }
 
-  // Extra-repo layer: hooks: section of each enabled extra repo's agents.yaml.
-  // Sits above system but below user, mirroring resolveHookScriptPath's
-  // first-found order (user > extra > system). Without this layer the script
-  // path of an extra-repo hook resolves but its events never register (#602).
-  // Earlier extras win over later ones, so iterate in reverse: the last write
-  // for a given name comes from the earliest-registered repo.
   for (const { dir } of [...getEnabledExtraRepos()].reverse()) {
     const extraMetaPath = path.join(dir, 'agents.yaml');
     if (!fs.existsSync(extraMetaPath)) continue;
     try {
       const meta = yaml.parse(fs.readFileSync(extraMetaPath, 'utf-8')) as { hooks?: Record<string, ManifestHook> } | null;
       if (meta?.hooks) for (const [name, def] of Object.entries(meta.hooks)) merged[name] = def;
-    } catch { /* skip unreadable extra-repo manifest */ }
+    } catch {  }
   }
 
-  // User layer: hooks: section of agents.yaml.
   const userMetaPath = path.join(getUserAgentsDir(), 'agents.yaml');
   if (fs.existsSync(userMetaPath)) {
     try {
@@ -1695,18 +1304,13 @@ export function parseHookManifest(opts: { warn?: boolean } = {}): Record<string,
         }
         merged[name] = def;
       }
-    } catch { /* skip unreadable meta */ }
+    } catch {  }
   }
 
-  // Strip disabled hooks so they never reach the registrar.
   for (const [name, def] of Object.entries(merged)) {
     if (def.enabled === false) delete merged[name];
   }
 
-  // Normalize each surviving hook's timeout to a seconds number, so the raw
-  // agents.yaml can express it as a duration string (`5s`, `2m`) while every
-  // downstream serializer keeps consuming a plain number. An unparseable value
-  // is dropped with a warning rather than silently coerced to a wrong duration.
   for (const [name, def] of Object.entries(merged)) {
     const raw = (def as { timeout?: unknown }).timeout;
     if (raw === undefined) continue;
@@ -1739,38 +1343,11 @@ export function selectHookManifest(
   );
 }
 
-/**
- * Hook files present in a version home but absent from every configured
- * SOURCE — genuine orphans left behind by a removed/renamed source hook.
- *
- * The definition is deliberately source-based, not manifest-based (PHNX-2693).
- * Sync copies EVERY source hook file into a version home — registered hooks AND
- * the helper / test / benchmark scripts that sit alongside them — but only the
- * registered ones appear in `parseHookManifest`. Diffing installed names against
- * the manifest therefore flagged every source-present-but-unregistered file
- * (e.g. `permission-handler`, `verify-work-state`, `*_test`, `benchmark_*`) as
- * an orphan, so `agents prune cleanup` offered to trash ~1000 in-use files. An
- * installed hook is only truly orphaned when NO configured source still carries
- * a file of that name — which is exactly what the `prune`/`doctor` help already
- * promised ("present in a version home but missing from every configured
- * source").
- *
- * Pure on purpose (no disk reads) so it is trivially testable; callers pass the
- * installed hook names and the source hook script paths.
- */
 export function unmanagedHookNames(installedHookNames: string[], sourceHookScripts: string[]): string[] {
   const inSource = new Set(sourceHookScripts.map((s) => path.basename(s).replace(/\.[^.]+$/, '')));
   return installedHookNames.filter((name) => !inSource.has(name)).sort();
 }
 
-/**
- * Every hook script path across the resolved SOURCE roots — user
- * (`~/.agents/hooks`), system (`~/.agents/.system/hooks`), and each enabled
- * extra repo's `hooks/` — grouped the same way sync materializes them
- * ({@link listHookEntriesFromDir}, which also descends one-level event-group
- * dirs). This is the set an installed hook must be absent from to count as an
- * orphan.
- */
 function listResolvedSourceHookScripts(): string[] {
   const roots = [
     getUserHooksDir(),
@@ -1784,18 +1361,12 @@ function listResolvedSourceHookScripts(): string[] {
   return scripts;
 }
 
-/**
- * The orphan hooks (see {@link unmanagedHookNames}) sitting in one version home:
- * installed hook files whose name matches no file in any configured source root.
- */
 export function listUnmanagedHooksInVersionHome(agent: AgentId, version: string): string[] {
   if (!AGENTS[agent].supportsHooks) return [];
   const installed = listHooksInVersionHome(agent, version).map((e) => e.name);
   return unmanagedHookNames(installed, listResolvedSourceHookScripts());
 }
 
-// Codex events that support a matcher field (matches tool name or session type).
-// UserPromptSubmit and Stop never include a matcher.
 const CODEX_MATCHER_EVENTS = new Set(['PreToolUse', 'PostToolUse', 'SessionStart']);
 
 type CodexMatcherGroup = {
@@ -1807,9 +1378,6 @@ type CodexHooksFile = {
   hooks: Record<string, CodexMatcherGroup[]>;
 };
 
-// Maps PascalCase hook event names (as written in hooks.json) to the
-// snake_case labels Codex uses in its persisted [hooks.state] keys.
-// Mirrors hook_event_key_label() in codex-rs/hooks/src/lib.rs.
 const CODEX_EVENT_KEY_LABELS: Record<string, string> = {
   PreToolUse: 'pre_tool_use',
   PermissionRequest: 'permission_request',
@@ -1823,9 +1391,6 @@ const CODEX_EVENT_KEY_LABELS: Record<string, string> = {
   Stop: 'stop',
 };
 
-// Recursively sort object keys alphabetically at every level, mirroring
-// canonical_json() in codex-rs/config/src/fingerprint.rs. Codex hashes the
-// canonical JSON form so trust survives key-order differences.
 function canonicalizeForHash(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map(canonicalizeForHash);
@@ -1840,22 +1405,6 @@ function canonicalizeForHash(value: unknown): unknown {
   return value;
 }
 
-/**
- * Compute the trust hash Codex expects for a single command hook handler, so
- * agents-cli can pre-trust the hooks it registers. Without a matching
- * trusted_hash in [hooks.state], Codex classifies the hook Untrusted and
- * silently drops it in non-interactive (`codex exec`) mode where there is no
- * TUI prompt to approve it.
- *
- * Mirrors command_hook_hash() in codex-rs/hooks/src/engine/discovery.rs +
- * version_for_toml() in codex-rs/config/src/fingerprint.rs:
- *   sha256( canonicalJson( NormalizedHookIdentity ) ) prefixed with "sha256:".
- *
- * The identity passes through TOML on the Codex side, which drops None fields
- * (commandWindows, statusMessage, and matcher when absent). `async` is always
- * false (async hooks are not yet supported) and is always present. `timeout`
- * is normalized to >= 1 (Codex: unwrap_or(600).max(1)).
- */
 export function computeCodexHookTrustHash(
   eventKeyLabel: string,
   command: string,
@@ -1880,22 +1429,6 @@ export function computeCodexHookTrustHash(
   return `sha256:${hex}`;
 }
 
-/**
- * Register hooks as lifecycle events in an agent's config.
- * Reads hooks.yaml manifest, merges into the agent's config file(s).
- * Only manages hooks whose command paths are under ~/.agents/hooks/ or
- * ~/.agents/.system/hooks/. Does not remove user-added hooks.
- *
- * @param agentsDirOverride - When provided, treats this single dir as the
- *   only managed hook root. Used by tests to inject a temp path. In normal
- *   operation, both user and system roots are consulted with user precedence.
- */
-/**
- * Delete shim files for hooks that no longer exist in the manifest.
- * managedPrefixes already GCs the settings.json entries pointing at orphaned
- * shims, but the .sh files on disk would otherwise persist forever. Called
- * once per registerHooksToSettings invocation — cheap (a single readdir).
- */
 function sweepOrphanShims(manifest: Record<string, ManifestHook>): void {
   const shimsDir = getHookShimsDir();
   if (!fs.existsSync(shimsDir)) return;
@@ -1904,23 +1437,10 @@ function sweepOrphanShims(manifest: Record<string, ManifestHook>): void {
     if (!file.endsWith('.sh')) continue;
     const name = file.slice(0, -3);
     if (activeNames.has(name)) continue;
-    try { fs.unlinkSync(path.join(shimsDir, file)); } catch { /* best effort */ }
+    try { fs.unlinkSync(path.join(shimsDir, file)); } catch {  }
   }
 }
 
-/**
- * Options that narrow `registerHooksToSettings`'s process-global side effects.
- *
- * `skipGlobalShimSweep` — do NOT run {@link sweepOrphanShims}. The sweep deletes
- * every `.sh` in the ONE process-global shim dir (`getHookShimsDir()`,
- * `~/.agents/.cache/shims/hooks/`) whose name is absent from the manifest it is
- * handed. That is correct for a normal install/sync (the manifest is the
- * operator's complete hook set), but catastrophic when the materializer registers
- * a portable PACKAGE's hooks into an isolated output home: that manifest carries
- * only the package's hooks, so the sweep would wipe the operator's unrelated
- * global shims. The materializer sets this so materialization stays isolated
- * (PHNX-3838); every normal caller leaves it unset and keeps the sweep.
- */
 interface RegisterHooksOptions {
   skipGlobalShimSweep?: boolean;
 }
@@ -1950,14 +1470,10 @@ export function registerHooksToSettings(
   if (!options?.skipGlobalShimSweep) sweepOrphanShims(manifest);
 
   const overrideRoots = agentsDirOverride ? [agentsDirOverride] : null;
-  // Scripts are copied into the version home during sync — prefer that stable
-  // local path so registered commands don't break when source dirs change.
   const localHooksDir = !overrideRoots
     ? getHooksDirInHome(agentId, versionHome)
     : null;
   const resolveScript = (script: string): string | null => {
-    // Subrule-dir hooks declare an already-absolute script path. Use it
-    // directly (made executable) — these are not copied into the version home.
     if (path.isAbsolute(script) && fs.existsSync(script)) {
       ensureExecutable(script);
       return script;
@@ -1966,8 +1482,6 @@ export function registerHooksToSettings(
       return resolveContainedHookPath(path.join(overrideRoots[0], 'hooks'), script);
     }
     if (localHooksDir) {
-      // Prefer the exact relative path, then a flat basename copy (sync flattens
-      // group-dir scripts into the version-home hooks/ root).
       const local =
         resolveContainedHookPath(localHooksDir, script) ||
         resolveContainedHookPath(localHooksDir, path.basename(script));
@@ -1978,21 +1492,11 @@ export function registerHooksToSettings(
   const managedPrefixes = overrideRoots
     ? [
         path.join(overrideRoots[0], 'hooks') + path.sep,
-        // The shim dir is one global location regardless of which hooks
-        // source (agentsDirOverride vs the normal user/system dirs) resolved
-        // the underlying script, so it belongs in every managedPrefixes
-        // shape — omitting it here left a shim path unrecognized as managed
-        // under the override branch, so a hook's matcher/event change never
-        // GC'd its stale shim-path entry (only reachable via a caller that
-        // passes agentsDirOverride; no production call site does today).
         getHookShimsDir() + path.sep,
       ]
     : [
         ...getManagedHookPrefixes(),
         ...(localHooksDir ? [localHooksDir + path.sep] : []),
-        // Generated cache/timing shims live here; needs GC coverage so that a
-        // hook whose `cache:` field is removed gets its stale shim path purged
-        // from the agent's settings file (see resolveHookCommand).
         getHookShimsDir() + path.sep,
       ];
 
@@ -2000,9 +1504,6 @@ export function registerHooksToSettings(
     return registerHooksForClaude(versionHome, manifest, resolveScript, managedPrefixes);
   }
   if (agentId === 'droid') {
-    // Droid's settings.json hooks schema is identical to Claude's (top-level
-    // `hooks` object → event → matcher-group array), so reuse the Claude
-    // registrar targeting `.factory/settings.json` (agentConfigDirName('droid')).
     return registerHooksForClaude(
       versionHome,
       manifest,
@@ -2012,9 +1513,6 @@ export function registerHooksToSettings(
     );
   }
   if (agentId === 'muse') {
-    // Muse Code: Claude-compatible hooks block in ~/.config/muse/settings.json
-    // (events SessionStart / PreToolUse / …, matcher groups, command hooks).
-    // settings.json MUST carry schema_version: 1 or Muse refuses to start.
     return registerHooksForClaude(
       versionHome,
       manifest,
@@ -2054,19 +1552,6 @@ export function registerHooksToSettings(
   return { registered: [], errors: [] };
 }
 
-/**
- * The concrete config file(s) `registerHooksToSettings` writes for `agentId` in
- * `home` — the settings/registrar leaves, NOT the per-hook script copies. A
- * caller materializing into an UNTRUSTED home (the portable-agent materializer)
- * uses this to verify none of those leaves is a preplanted symlink before the
- * registrar follows it and overwrites a file outside the home.
- *
- * This MUST mirror the `registerHooksToSettings` dispatch above — each arm's
- * write target is reproduced here, so a new registrar branch adds its leaf here
- * too. It intentionally returns only the primary settings/registrar file(s); the
- * per-event/script files a registrar also writes live under the hooks dir the
- * caller already guards. An agent with no hooks registrar returns `[]`.
- */
 export function hookRegistrationTargets(agentId: AgentId, home: string): string[] {
   switch (agentId) {
     case 'claude':
@@ -2118,15 +1603,6 @@ type OpenCodeGeneratedHook = {
   matcher?: string;
 };
 
-/**
- * Compile canonical hooks.yaml entries into a local OpenCode plugin.
- *
- * OpenCode has no declarative shell-hook config block. It auto-loads direct
- * TS/JS modules from ~/.config/opencode/plugins/, and supplies Bun's `$` shell
- * primitive to each plugin. The generated module subscribes to native plugin
- * events, sends the event payload to the managed hook script as JSON on stdin,
- * and surfaces a non-zero script exit as a plugin error.
- */
 function registerHooksForOpenCode(
   versionHome: string,
   manifest: Record<string, ManifestHook>,
@@ -2169,8 +1645,6 @@ function registerHooksForOpenCode(
 
   const serializedDirect = JSON.stringify(Object.fromEntries(direct), null, 2);
   const serializedLifecycle = JSON.stringify(Object.fromEntries(lifecycle), null, 2);
-  // Same disposable perf spool the bash shims (hooks/cache.ts) append to — see
-  // the timedOut branch below for why OpenCode needs its own writer.
   const perfSpoolPath = path.join(getPerfDir(), 'spool.jsonl');
   const pluginSource = `// Generated by agents-cli. Re-run agents sync to update.
 import fs from "node:fs"
@@ -2288,18 +1762,8 @@ export const AgentsCliHooks = async ({ $ }) => ({
   return { registered, errors };
 }
 
-/**
- * Antigravity (agy) event names differ from agents-cli manifest names. The
- * mapping below is the documented agy schema. PostToolUse has no exact
- * agy equivalent — agy fires `after_model_call` after the model finishes a
- * turn (which includes any tool calls in that turn), so it's the closest
- * lifecycle phase but not a 1:1 match. Manifest events not in this map are
- * skipped silently (the manifest may declare events for other agents).
- */
 const ANTIGRAVITY_EVENT_MAP: Record<string, string> = {
   PreToolUse: 'before_tool_call',
-  // Imperfect mapping: agy has no per-tool post-event. after_model_call
-  // fires once at the end of the turn, after all tool calls completed.
   PostToolUse: 'after_model_call',
   Stop: 'on_loop_stop',
   OnError: 'on_error',
@@ -2331,7 +1795,6 @@ function registerHooksForClaude(
     }
   }
 
-  // Muse (and any future agent that pins a settings schema) requires this key.
   if (options?.schemaVersion !== undefined && config.schema_version === undefined) {
     config.schema_version = options.schemaVersion;
   }
@@ -2341,9 +1804,6 @@ function registerHooksForClaude(
   }
   const hooks = config.hooks as Record<string, unknown[]>;
 
-  // Build set of all command paths the current manifest will register.
-  // Used to garbage-collect stale entries left behind after hook renames
-  // or after a `cache:` field is added/removed (raw script vs shim path).
   const currentManifestPaths = new Set<string>();
   for (const [hookName, hookDef] of Object.entries(manifest)) {
     if (!hookDef.events || hookDef.events.length === 0) continue;
@@ -2351,14 +1811,8 @@ function registerHooksForClaude(
     if (resolved) currentManifestPaths.add(resolved);
   }
 
-  // Identity of the version home being synced. Used to prune entries that point
-  // at a DIFFERENT version home of the same agent (see isStaleSiblingVersionCommand).
   const currentVh = versionHomeIdentity(versionHome);
 
-  // Remove stale entries: any hook command under a managed root that isn't in
-  // the current manifest is a leftover from a renamed/deleted hook script; any
-  // command pointing at a sibling version's home is a leftover from that
-  // version's sync (its version-scoped path never matches the current set).
   for (const eventEntries of Object.values(hooks)) {
     if (!Array.isArray(eventEntries)) continue;
     for (const group of eventEntries as Array<{
@@ -2375,7 +1829,6 @@ function registerHooksForClaude(
     }
   }
 
-  // Remove empty matcher groups left after cleanup
   for (const [event, eventEntries] of Object.entries(hooks)) {
     if (!Array.isArray(eventEntries)) continue;
     hooks[event] = (eventEntries as Array<{ hooks?: unknown[] }>).filter(
@@ -2441,19 +1894,6 @@ function registerHooksForClaude(
   return { registered, errors };
 }
 
-/**
- * Prune every Claude-family (`settings.json`) hook entry whose command lives
- * under a removed version's home
- * (`~/.agents/.history/versions/<agent>/<removedVersion>/home/…`).
- *
- * `agents remove <agent>@<version>` soft-deletes the version's files but leaves
- * the hook entries other version homes registered against it — dead hooks that
- * error on every tool call ("No such file or directory") until the next sync.
- * This clears them from a remaining version's settings immediately. Only the
- * removed version's entries are touched; the current version's entries, system
- * hooks, and the user's own custom hooks are left intact. Returns the number of
- * entries removed.
- */
 export function pruneVersionHomeHookEntriesFromSettings(
   settingsPath: string,
   agent: AgentId,
@@ -2485,7 +1925,6 @@ export function pruneVersionHomeHookEntriesFromSettings(
   }
   if (removed === 0) return 0;
 
-  // Drop matcher groups left empty by the prune.
   for (const [event, eventEntries] of Object.entries(hooks)) {
     if (!Array.isArray(eventEntries)) continue;
     hooks[event] = (eventEntries as Array<{ hooks?: unknown[] }>).filter(
@@ -2496,8 +1935,6 @@ export function pruneVersionHomeHookEntriesFromSettings(
   try {
     fs.writeFileSync(settingsPath, JSON.stringify(config, null, 2), 'utf-8');
   } catch {
-    // Best-effort cleanup: a write failure leaves the dead entry to be pruned
-    // on the next sync (see isStaleSiblingVersionCommand).
     return 0;
   }
   return removed;
@@ -2515,17 +1952,10 @@ function trustCodexHooks(hooksPath: string): void {
   if (!tomlConfig.features || typeof tomlConfig.features !== 'object') {
     tomlConfig.features = {};
   }
-  // Codex 0.116+ feature flag is `hooks` (the legacy `codex_hooks` name is
-  // an unrecognized key that triggers a deprecation error and is ignored).
   const features = tomlConfig.features as Record<string, unknown>;
   delete features.codex_hooks;
   features.hooks = true;
 
-  // Pre-trust hooks. The [hooks.state] key is keyed by the hooks.json path
-  // exactly as Codex resolves it (the absolute CODEX_HOME path), the
-  // snake_case event label, and the per-event group/handler indices — which
-  // must match Codex's parse order, so we iterate the just-written
-  // hooksFile structure in array order.
   if (!tomlConfig.hooks || typeof tomlConfig.hooks !== 'object') {
     tomlConfig.hooks = {};
   }
@@ -2550,8 +1980,6 @@ function trustCodexHooks(hooksPath: string): void {
           handler.timeout,
           group.matcher
         );
-        // Preserve a user's explicit `enabled = false` for this exact hook;
-        // only (re)write the trust hash.
         const entry: { enabled?: boolean; trusted_hash?: string } = { trusted_hash: trustedHash };
         if (keys.some((key) => existingState[key]?.enabled === false)) {
           entry.enabled = false;
@@ -2561,8 +1989,6 @@ function trustCodexHooks(hooksPath: string): void {
     });
   }
 
-  // Carry forward trust state for any hooks we did not (re)register this
-  // pass — e.g. user-added hooks under a different command path.
   for (const [key, entry] of Object.entries(existingState)) {
     if (!(key in hookState)) {
       hookState[key] = entry;
@@ -2586,7 +2012,6 @@ function registerHooksForCodex(
   const configDir = path.join(versionHome, '.codex');
   const hooksPath = path.join(configDir, 'hooks.json');
 
-  // Read existing hooks.json — must have top-level "hooks" wrapper key
   let hooksFile: CodexHooksFile = { hooks: {} };
   if (fs.existsSync(hooksPath)) {
     try {
@@ -2606,8 +2031,6 @@ function registerHooksForCodex(
     }
   }
 
-  // Build set of current manifest command paths for codex to GC stale entries.
-  // Uses resolveHookCommand so cached hooks resolve to their shim path.
   const currentManifestPaths = new Set<string>();
   for (const [hookName, hookDef] of Object.entries(manifest)) {
     if (!hookDef.events || hookDef.events.length === 0) continue;
@@ -2615,12 +2038,8 @@ function registerHooksForCodex(
     if (resolved) currentManifestPaths.add(resolved);
   }
 
-  // Identity of the version home being synced. Codex stores hooks in a shared
-  // hooks.json per CODEX_HOME, but agents-cli registers version-scoped command
-  // paths; without this, old version entries keep firing after upgrades.
   const currentVh = versionHomeIdentity(versionHome);
 
-  // Remove stale entries from all event groups
   for (const eventGroups of Object.values(hooksFile.hooks)) {
     for (const group of eventGroups) {
       if (!group.hooks) continue;
@@ -2654,12 +2073,9 @@ function registerHooksForCodex(
 
       const eventGroups = hooksFile.hooks[event];
 
-      // PreToolUse / PostToolUse / SessionStart use a matcher field.
-      // UserPromptSubmit / Stop never include a matcher.
       const usesMatcher = CODEX_MATCHER_EVENTS.has(event);
       const matcherValue = usesMatcher ? (hookDef.matcher ?? '') : undefined;
 
-      // Find the group for this matcher (or the sole no-matcher group)
       let group: CodexMatcherGroup | undefined;
       if (matcherValue !== undefined) {
         group = eventGroups.find((g) => (g.matcher ?? '') === matcherValue);
@@ -2705,11 +2121,6 @@ function registerHooksForCodex(
     return { registered, errors };
   }
 
-  // Ensure [features] hooks = true and pre-trust every registered hook in
-  // config.toml. Codex only runs hooks that are enabled AND trusted; in
-  // non-interactive (`codex exec`) mode there is no TUI prompt to approve
-  // them, so an untrusted hook is silently dropped. We compute the same
-  // trust hash Codex would and persist it under [hooks.state].
   try {
     trustCodexHooks(hooksPath);
   } catch (err) {
@@ -2719,14 +2130,6 @@ function registerHooksForCodex(
   return { registered, errors };
 }
 
-/**
- * Register hooks into antigravity's (agy) settings.json. Unlike gemini, agy uses
- * a flat per-event array of `{ command }` entries (no matcher groups). Events
- * are renamed via ANTIGRAVITY_EVENT_MAP; unmapped manifest events are skipped.
- *
- * settings.json lives at `${versionHome}/.gemini/antigravity-cli/settings.json`
- * because agy nests its config under the shared `.gemini` parent dir.
- */
 function registerHooksForAntigravity(
   versionHome: string,
   manifest: Record<string, ManifestHook>,
@@ -2757,15 +2160,9 @@ function registerHooksForAntigravity(
   }
   const hooks = config.hooks as Record<string, unknown[]>;
 
-  // Build set of all command paths the current manifest will register, so we
-  // can garbage-collect stale managed entries left over from renamed/deleted
-  // hooks. Only managed paths are considered for removal — user-added entries
-  // outside managedPrefixes are preserved.
   const currentManifestPaths = new Set<string>();
   for (const [hookName, hookDef] of Object.entries(manifest)) {
     if (!hookDef.events || hookDef.events.length === 0) continue;
-    // Only paths whose events map to a known agy event would actually be
-    // registered, so only those should survive GC.
     const anyMapped = hookDef.events.some((e) => ANTIGRAVITY_EVENT_MAP[e]);
     if (!anyMapped) continue;
     const resolved = resolveHookCommand(hookName, hookDef, resolveScript);
@@ -2798,13 +2195,11 @@ function registerHooksForAntigravity(
 
     for (const event of hookDef.events) {
       const agyEvent = ANTIGRAVITY_EVENT_MAP[event];
-      if (!agyEvent) continue; // unmapped event — silently skip
+      if (!agyEvent) continue;
 
       if (!hooks[agyEvent]) {
         hooks[agyEvent] = [];
       }
-      // Antigravity settings entries: command + optional matcher (tool scope).
-      // Without matcher every PreToolUse guard fires on ALL tools (RUSH-1353).
       const list = hooks[agyEvent] as Array<{ command: string; matcher?: string }>;
 
       const existingIdx = list.findIndex(
@@ -2832,46 +2227,12 @@ function registerHooksForAntigravity(
   return { registered, errors };
 }
 
-/**
- * Grok events that accept a `matcher` field. Per the Grok hooks guide
- * (docs/user-guide/10-hooks.md, "Key Fields"): the matcher applies to the tool
- * events — `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PermissionDenied`
- * (matches the tool name) — and to `Notification` (matches the notification
- * type). The lifecycle events `SessionStart`, `SessionEnd`, `Stop`,
- * `UserPromptSubmit` REJECT a matcher (they raise loading errors); other events
- * ignore it. Of the events this registrar emits (see GROK_EVENT_MAP), only these
- * three accept a matcher, so we emit it for these alone.
- */
 const GROK_MATCHER_EVENTS = new Set(['PreToolUse', 'PostToolUse', 'Notification']);
 
-/**
- * Tool-name matcher aliases for tools Grok does NOT auto-alias. Grok maps common
- * Claude tool names to its own (Bash → run_terminal_command, Read → read_file,
- * etc. — docs/user-guide/10-hooks.md, "Tool Name Aliases") and "a matcher keeps
- * its original name too", so most matchers need no translation. But there is no
- * alias for `ExitPlanMode`: Grok's plan tools are `enter_plan_mode` /
- * `exit_plan_mode` (docs/user-guide/19-plan-mode.md line 14), so a bare
- * `ExitPlanMode` matcher would never fire. Broaden it to a regex that matches
- * both names. Keep this an explicit, minimal map — not a general translation
- * engine.
- */
 const GROK_MATCHER_ALIASES: Record<string, string> = {
   ExitPlanMode: 'ExitPlanMode|exit_plan_mode',
 };
 
-/**
- * Register hooks for Grok Build.
- *
- * Grok merges ALL of `~/.grok/hooks/*.json` (docs/user-guide/10-hooks.md, "Hook
- * Locations"), so this registrar writes exactly ONE manifest file, `hooks.json`,
- * and prunes any stale per-event files (`pretooluse.json`, …) that an older
- * build wrote — otherwise every hook would run twice per event, forever, on
- * already-synced installs.
- *
- * Matchers are grouped one-per-distinct-matcher (like the Claude writer) and are
- * emitted only for the events that accept them (GROK_MATCHER_EVENTS); tool-name
- * matchers Grok does not auto-alias are translated via GROK_MATCHER_ALIASES.
- */
 function registerHooksForGrok(
   versionHome: string,
   manifest: Record<string, ManifestHook>,
@@ -2920,15 +2281,11 @@ function registerHooksForGrok(
       }
       const groups = grokHooks.hooks[grokEvent];
 
-      // Emit the matcher only for events that accept one; translate tool names
-      // Grok does not auto-alias. Empty/omitted matcher matches everything.
       let matcher: string | undefined;
       if (GROK_MATCHER_EVENTS.has(grokEvent) && hookDef.matcher) {
         matcher = GROK_MATCHER_ALIASES[hookDef.matcher] ?? hookDef.matcher;
       }
 
-      // Group by matcher the way the Claude writer does: one group per distinct
-      // matcher, hooks appended into the group — not one group per hook.
       let group = groups.find((g) => (g.matcher ?? '') === (matcher ?? ''));
       if (!group) {
         group = matcher ? { matcher, hooks: [] } : { hooks: [] };
@@ -2947,8 +2304,6 @@ function registerHooksForGrok(
     }
   }
 
-  // Single source of truth: hooks.json. Written fresh from the manifest every
-  // sync, so the registrar owns it outright.
   const mainHooksPath = path.join(grokHooksDir, 'hooks.json');
   try {
     fs.writeFileSync(mainHooksPath, JSON.stringify(grokHooks, null, 2));
@@ -2956,11 +2311,6 @@ function registerHooksForGrok(
     errors.push(`Failed to write hooks.json: ${(e as Error).message}`);
   }
 
-  // Clean up stale per-event files (pretooluse.json, session-start.json, …) that
-  // older builds double-wrote. Grok merges every *.json in this dir, so leaving
-  // them would run each hook twice per event. Only remove files whose contents
-  // are entirely managed by us (a lone `hooks` object referencing our managed
-  // command paths); a user's own custom *.json is left untouched.
   try {
     for (const file of fs.readdirSync(grokHooksDir)) {
       if (!file.endsWith('.json') || file === 'hooks.json') continue;
@@ -2976,13 +2326,6 @@ function registerHooksForGrok(
   return { registered, errors };
 }
 
-/**
- * A per-event Grok hook file is "ours" (safe to prune) when it is a
- * `{ hooks: { <Event>: [...] } }` document in which every command entry points
- * at a managed path (see isManagedHookCommand). This is exactly the shape older
- * builds double-wrote; a user's hand-authored *.json that mixes in unmanaged
- * commands is preserved. A file we can't parse is treated as not-ours.
- */
 function isManagedGrokHookFile(filePath: string, managedPrefixes: string[]): boolean {
   let parsed: unknown;
   try {
@@ -3022,7 +2365,6 @@ function registerHooksForKimi(
 
   const configPath = path.join(versionHome, '.kimi-code', 'config.toml');
 
-  // Read existing config.toml
   let config: Record<string, unknown> = {};
   if (fs.existsSync(configPath)) {
     try {
@@ -3033,7 +2375,6 @@ function registerHooksForKimi(
     }
   }
 
-  // Build set of current manifest command paths for GC
   const currentManifestPaths = new Set<string>();
   for (const [hookName, hookDef] of Object.entries(manifest)) {
     if (!hookDef.events || hookDef.events.length === 0) continue;
@@ -3041,7 +2382,6 @@ function registerHooksForKimi(
     if (resolved) currentManifestPaths.add(resolved);
   }
 
-  // Remove stale managed hooks from existing hooks array
   let hooksArray: Array<Record<string, unknown>> = [];
   if (Array.isArray(config.hooks)) {
     hooksArray = config.hooks as Array<Record<string, unknown>>;
@@ -3054,7 +2394,6 @@ function registerHooksForKimi(
     return currentManifestPaths.has(cmd);
   });
 
-  // Add/update hooks from manifest
   for (const [name, hookDef] of Object.entries(manifest)) {
     if (!hookDef.events || hookDef.events.length === 0) continue;
 
@@ -3069,7 +2408,6 @@ function registerHooksForKimi(
     for (const event of hookDef.events) {
       const matcher = hookDef.matcher;
 
-      // Find existing hook with same event, command, and matcher
       const existingIdx = filteredHooks.findIndex((h) => {
         const sameEvent = h.event === event;
         const sameCmd = h.command === commandPath;
@@ -3109,13 +2447,6 @@ function registerHooksForKimi(
 }
 
 
-/**
- * Canonical hooks.yaml event names → Copilot camelCase event names.
- * Copilot accepts both camelCase (native) and PascalCase (VS Code-compatible).
- * We emit camelCase, the format documented at
- * https://docs.github.com/en/copilot/reference/hooks-configuration.
- * Unmapped events are skipped so a Claude-only event does not land in the file.
- */
 const COPILOT_EVENT_MAP: Record<string, string> = {
   SessionStart: 'sessionStart',
   SessionEnd: 'sessionEnd',
@@ -3132,10 +2463,6 @@ const COPILOT_EVENT_MAP: Record<string, string> = {
   PermissionRequest: 'permissionRequest',
 };
 
-/**
- * Copilot events that accept a `matcher` field (regex, full-string match).
- * See "Matcher filtering" in the Copilot hooks reference.
- */
 const COPILOT_MATCHER_EVENTS = new Set([
   'preToolUse',
   'postToolUse',
@@ -3145,19 +2472,8 @@ const COPILOT_MATCHER_EVENTS = new Set([
   'subagentStart',
 ]);
 
-/** Managed filename under ~/.copilot/hooks/ — we own this file entirely. */
 const COPILOT_MANAGED_HOOKS_FILE = 'agents-cli-hooks.json';
 
-/**
- * Register hooks for GitHub Copilot CLI.
- *
- * Copilot loads every `*.json` under `~/.copilot/hooks/` (and project
- * `.github/hooks/`). Schema: `{ "version": 1, "hooks": { event: [entries] } }`
- * with command entries `{ type: "command", bash|command, timeoutSec?, matcher? }`.
- *
- * We rewrite a single managed file (`agents-cli-hooks.json`) on every sync so
- * GC is trivial — user-authored sibling JSON files are never touched.
- */
 function registerHooksForCopilot(
   versionHome: string,
   manifest: Record<string, ManifestHook>,
@@ -3191,7 +2507,7 @@ function registerHooksForCopilot(
 
     for (const event of hookDef.events) {
       const copilotEvent = COPILOT_EVENT_MAP[event];
-      if (!copilotEvent) continue; // unmapped — skip silently
+      if (!copilotEvent) continue;
 
       if (!hooks[copilotEvent]) hooks[copilotEvent] = [];
 
@@ -3204,7 +2520,6 @@ function registerHooksForCopilot(
         entry.matcher = hookDef.matcher;
       }
 
-      // De-dupe on (event, command, matcher) so repeated sync is idempotent.
       const existingIdx = hooks[copilotEvent].findIndex(
         (h) => h.command === entry.command && (h.matcher ?? '') === (entry.matcher ?? '')
       );
@@ -3220,7 +2535,6 @@ function registerHooksForCopilot(
 
   const outPath = path.join(copilotHooksDir, COPILOT_MANAGED_HOOKS_FILE);
   try {
-    // Always rewrite: empty manifest → empty hooks object (GC of prior managed entries).
     fs.writeFileSync(
       outPath,
       JSON.stringify({ version: 1, hooks }, null, 2) + '\n',
@@ -3239,10 +2553,6 @@ function registerHooksForCopilot(
 
 
 
-/**
- * Canonical hooks.yaml event names that goose supports (Open Plugins PascalCase).
- * Unmapped events are skipped. Goose ≥ 1.34.0.
- */
 const GOOSE_EVENT_MAP: Record<string, string> = {
   SessionStart: 'SessionStart',
   SessionEnd: 'SessionEnd',
@@ -3255,24 +2565,10 @@ const GOOSE_EVENT_MAP: Record<string, string> = {
   AfterFileEdit: 'AfterFileEdit',
   BeforeShellExecution: 'BeforeShellExecution',
   AfterShellExecution: 'AfterShellExecution',
-  // SubagentStart/SubagentStop are not emitted by Goose — do not advertise them.
 };
 
-/** Managed Open Plugins directory name under ~/.agents/plugins/. */
 const GOOSE_MANAGED_PLUGIN_NAME = 'agents-cli-hooks';
 
-/**
- * Register hooks for Goose (block-goose-cli ≥ 1.34.0).
- *
- * Goose auto-discovers Open Plugins under `$HOME/.agents/plugins/<name>/` that
- * contain `hooks/hooks.json` (HOME is the version home under the agents-cli
- * shim). Schema (Open Plugins / Claude-shaped):
- *   { "hooks": { Event: [ { matcher?, hooks: [{ type: "command", command }] } ] } }
- *
- * We own a single managed plugin (`agents-cli-hooks`) under the version home
- * and rewrite its hooks.json on every sync. Command paths are absolute
- * (portable ~/ form) pointing at the already-copied hook scripts.
- */
 function registerHooksForGoose(
   versionHome: string,
   manifest: Record<string, ManifestHook>,
@@ -3324,16 +2620,12 @@ function registerHooksForGoose(
     }
   }
 
-  // Goose discovers Open Plugins at ~/.agents/plugins/<name>/ when HOME is the
-  // version home (shim sets HOME). Write under versionHome so each installed
-  // goose version gets its own managed plugin and tests stay hermetic.
   const pluginRoot = path.join(versionHome, '.agents', 'plugins', GOOSE_MANAGED_PLUGIN_NAME);
   const hooksDir = path.join(pluginRoot, 'hooks');
   const outPath = path.join(hooksDir, 'hooks.json');
 
   try {
     fs.mkdirSync(hooksDir, { recursive: true });
-    // Minimal plugin marker so the directory is a valid Open Plugins bundle.
     const markerPath = path.join(pluginRoot, '.agents-cli-managed');
     if (!fs.existsSync(markerPath)) {
       fs.writeFileSync(markerPath, 'managed by agents-cli hooks sync\n', 'utf-8');
@@ -3351,16 +2643,6 @@ function registerHooksForGoose(
 }
 
 
-/**
- * Canonical → Cursor CLI camelCase events.
- *
- * Only events verified to fire in cursor-agent CLI (not full IDE parity).
- * Ticket RUSH-1326 note (2026-06): working = sessionStart, stop, preToolUse,
- * postToolUse, beforeShellExecution, afterShellExecution, beforeReadFile,
- * afterFileEdit. Also map SessionEnd / beforeSubmitPrompt / preCompact /
- * subagent* which Cursor documents for agent hooks.
- * Unmapped events (e.g. afterAgentResponse) are skipped.
- */
 const CURSOR_EVENT_MAP: Record<string, string> = {
   SessionStart: 'sessionStart',
   SessionEnd: 'sessionEnd',
@@ -3378,15 +2660,6 @@ const CURSOR_EVENT_MAP: Record<string, string> = {
   AfterFileEdit: 'afterFileEdit',
 };
 
-/**
- * Register hooks for Cursor CLI (`cursor-agent`).
- *
- * Writes `~/.cursor/hooks.json` (under version home):
- *   { "version": 1, "hooks": { event: [{ command, timeout?, matcher? }] } }
- *
- * GC: rewrite managed entries by command path under managedPrefixes; preserve
- * user-authored entries whose command is outside managed roots.
- */
 function registerHooksForCursor(
   versionHome: string,
   manifest: Record<string, ManifestHook>,
@@ -3416,8 +2689,6 @@ function registerHooksForCursor(
     }
   }
 
-  // Desired managed entries keyed by event|command|matcher so a matcher or
-  // event change drops the stale entry instead of retaining it by command path alone.
   const desiredManaged = new Set<string>();
   for (const [hookName, hookDef] of Object.entries(manifest)) {
     if (!hookDef.events || hookDef.events.length === 0) continue;
@@ -3430,7 +2701,6 @@ function registerHooksForCursor(
     }
   }
 
-  // GC managed entries that are no longer in the manifest (by event+command+matcher)
   const hooks: Record<string, CursorEntry[]> = {};
   for (const [event, entries] of Object.entries(existing.hooks || {})) {
     if (!Array.isArray(entries)) continue;
@@ -3489,15 +2759,6 @@ function registerHooksForCursor(
   return { registered, errors };
 }
 
-/**
- * Canonical → Hermes (Nous Research) snake_case lifecycle events.
- *
- * Hermes ≥ 0.11.0 runs configurable hooks declared under `hooks:` in
- * ~/.hermes/config.yaml. Only events with a documented Hermes equivalent are
- * mapped; unmapped canonical events (the manifest may declare events for other
- * agents) are skipped silently. UserPromptSubmit maps to `pre_llm_call` (the
- * closest pre-turn phase) and Stop to `on_session_finalize`.
- */
 const HERMES_EVENT_MAP: Record<string, string> = {
   SessionStart: 'on_session_start',
   SessionEnd: 'on_session_end',
@@ -3508,24 +2769,9 @@ const HERMES_EVENT_MAP: Record<string, string> = {
   Stop: 'on_session_finalize',
 };
 
-/** Hermes caps hook timeouts at 300s (default 60s). */
 const HERMES_TIMEOUT_CAP = 300;
 const HERMES_TIMEOUT_DEFAULT = 60;
 
-/**
- * Register hooks for Hermes Agent (Nous Research ≥ 0.11.0).
- *
- * Read-modify-writes the shared `~/.hermes/config.yaml` (under the version
- * home): it merges a `hooks:` block of the form
- *   hooks: { <event>: [ { command, timeout, matcher? } ] }
- * into the YAML doc WITHOUT touching sibling keys (`mcp_servers` in
- * particular — a naive overwrite would wipe the user's MCP servers). No
- * `version` wrapper: Hermes' config is a flat YAML map.
- *
- * GC: rewrite managed entries by command path under managedPrefixes; preserve
- * user-authored entries whose command is outside managed roots. Keyed by
- * event|command|matcher so a matcher or event change drops the stale entry.
- */
 function registerHooksForHermes(
   versionHome: string,
   manifest: Record<string, ManifestHook>,
@@ -3540,7 +2786,6 @@ function registerHooksForHermes(
 
   type HermesEntry = { command: string; timeout: number; matcher?: string };
 
-  // Read-modify-write: preserve the full existing YAML doc (mcp_servers, etc.).
   let config: Record<string, unknown> = {};
   if (fs.existsSync(configPath)) {
     try {
@@ -3559,8 +2804,6 @@ function registerHooksForHermes(
       ? (config.hooks as Record<string, HermesEntry[]>)
       : {};
 
-  // Desired managed entries keyed by event|command|matcher so a matcher or
-  // event change drops the stale entry instead of retaining it by command alone.
   const desiredManaged = new Set<string>();
   for (const [hookName, hookDef] of Object.entries(manifest)) {
     if (!hookDef.events || hookDef.events.length === 0) continue;
@@ -3573,7 +2816,6 @@ function registerHooksForHermes(
     }
   }
 
-  // GC managed entries that are no longer in the manifest; preserve user entries.
   const hooks: Record<string, HermesEntry[]> = {};
   for (const [event, entries] of Object.entries(existingHooks)) {
     if (!Array.isArray(entries)) continue;
@@ -3643,12 +2885,10 @@ interface InstallSessionTrackerHookResult {
 
 function resolveSessionTrackerRoot(): string | null {
   const here = path.dirname(fileURLToPath(import.meta.url));
-  // Built/installed layout: dist/lib/hooks/ -> dist/session-tracker
   const built = path.resolve(here, '..', '..', 'session-tracker');
   if (fs.existsSync(path.join(built, 'dist', 'hook.sh'))) {
     return built;
   }
-  // Source layout: cli/src/lib/hooks/ -> repo root (4 up) -> packages/session-tracker
   const source = path.resolve(here, '..', '..', '..', '..', 'packages', 'session-tracker');
   if (fs.existsSync(path.join(source, 'src', 'hook.sh'))) {
     return source;
@@ -3678,14 +2918,6 @@ function buildInstallHookInvocation(
   };
 }
 
-/**
- * Install the shared SessionStart state-writer hook (`packages/session-tracker`)
- * into the harness's native config. Gated by `supports(agent, 'hooks', version)`;
- * unsupported agents return `installed: false` with a reason instead of throwing.
- *
- * This is the bridge that makes bare `claude` / `codex` / `kimi` launches write
- * `~/.agents/.cache/terminals/sessions/<pid>.json`, not just `agents run` launches.
- */
 export async function installSessionTrackerHook(
   agent: AgentId,
   version?: string,
@@ -3716,11 +2948,6 @@ export async function installSessionTrackerHook(
   }
 }
 
-/**
- * The child reports its refusal reason on stdout (its HOOK_SUPPORT table), not
- * stderr — and a Buffer-typed empty stderr is truthy, so a bare `err.stderr ??
- * err.message` surfaced an empty string. Prefer the first NON-EMPTY stream.
- */
 function installFailureMessage(err: unknown): string {
   const e = err as Error & { stdout?: string | Buffer; stderr?: string | Buffer };
   for (const stream of [e.stderr, e.stdout]) {
@@ -3730,10 +2957,6 @@ function installFailureMessage(err: unknown): string {
   return e.message;
 }
 
-/**
- * Synchronous variant for callers that cannot be made async (e.g.
- * `syncResourcesToVersion`). Best-effort: failures are returned, not thrown.
- */
 export function installSessionTrackerHookSync(
   agent: AgentId,
   version?: string,
@@ -3765,8 +2988,8 @@ export function installSessionTrackerHookSync(
   }
 }
 
-/** The hook installer must target this account, not the current global home. */
 function sessionTrackerInstallEnv(agent: AgentId, version?: string, home?: string): NodeJS.ProcessEnv {
+  // The installer inherits the selected account/version HOME, never the ambient global home.
   const target = home ?? (version ? getVersionHomePath(agent, version) : undefined);
   if (agent === 'codex' && target && version) {
     const originHome = path.join(target, '.codex');
