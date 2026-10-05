@@ -7,11 +7,6 @@ import { spawnSync } from 'child_process';
 import { memoryTargetDir, syncClaudeProjectMemoryDir, getClaudeProjectMemoryDir } from './memory.js';
 import { claudeProjectDirName } from './project-key.js';
 
-// Pass-through by default (real symlinkSync) — only the raced-EEXIST tests
-// below override one call each via mockImplementationOnce. Needed because
-// vitest can't vi.spyOn an ESM namespace export directly ("module namespace
-// is not configurable"); this is the standard workaround, scoped to exactly
-// the one syscall those tests need to simulate a concurrent winner.
 vi.mock('fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs')>();
   return { ...actual, symlinkSync: vi.fn(actual.symlinkSync) };
@@ -27,14 +22,13 @@ function makeTempHome(): string {
 
 afterEach(() => {
   for (const dir of tempDirs.splice(0)) {
-    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {  }
   }
 });
 
 const tsxBin = path.resolve('node_modules/.bin/tsx');
 const memoryModuleUrl = pathToFileURL(path.resolve('src/lib/memory.ts')).href;
 
-/** Run an expression against memory.ts under an isolated HOME. */
 function runMemory(home: string, expression: string): unknown {
   const child = spawnSync(
     tsxBin,
@@ -132,13 +126,11 @@ describe('memory resource (RUSH-1330)', () => {
     const memDir = path.join(home, '.agents', 'memory');
     fs.mkdirSync(memDir, { recursive: true });
 
-    // Rule and index files that must be excluded
     fs.writeFileSync(path.join(memDir, 'AGENTS.md'), '# rules', 'utf-8');
     fs.writeFileSync(path.join(memDir, 'README.md'), '# readme', 'utf-8');
     fs.writeFileSync(path.join(memDir, 'CLAUDE.md'), '# claude', 'utf-8');
     fs.writeFileSync(path.join(memDir, 'GEMINI.md'), '# gemini', 'utf-8');
     fs.writeFileSync(path.join(memDir, 'MEMORY.md'), '# index', 'utf-8');
-    // The one real fact
     fs.writeFileSync(path.join(memDir, 'my-fact.md'), '# fact', 'utf-8');
 
     const child = spawnSync(
@@ -184,7 +176,6 @@ describe('claude native per-project memory sync (PHNX-2817)', () => {
     expect(fs.existsSync(seenUnderB)).toBe(true);
     expect(fs.readFileSync(seenUnderB, 'utf-8')).toContain('written under v-a');
 
-    // Same canonical target — not two independent copies.
     const canonicalDir = runMemory(home, `memory.getClaudeProjectMemoryDir(${JSON.stringify(cwd)})`) as string;
     expect(fs.realpathSync(nativeDirA)).toBe(fs.realpathSync(canonicalDir));
     expect(fs.realpathSync(nativeDirB)).toBe(fs.realpathSync(canonicalDir));
@@ -197,7 +188,6 @@ describe('claude native per-project memory sync (PHNX-2817)', () => {
     const versionHomeA = path.join(home, 'versions', 'claude', 'v-a', 'home');
     const nativeDirA = path.join(versionHomeA, '.claude', 'projects', key, 'memory');
 
-    // Simulate the bug today: a real directory already holding a note, no symlink.
     fs.mkdirSync(nativeDirA, { recursive: true });
     fs.writeFileSync(path.join(nativeDirA, 'existing-note.md'), '# existing\nfrom before the fix\n', 'utf-8');
 
@@ -209,7 +199,6 @@ describe('claude native per-project memory sync (PHNX-2817)', () => {
     const canonicalDir = runMemory(home, `memory.getClaudeProjectMemoryDir(${JSON.stringify(cwd)})`) as string;
     expect(fs.existsSync(path.join(canonicalDir, 'existing-note.md'))).toBe(true);
 
-    // A second version home syncing afterward sees the migrated note too.
     const versionHomeB = path.join(home, 'versions', 'claude', 'v-b', 'home');
     const nativeDirB = path.join(versionHomeB, '.claude', 'projects', key, 'memory');
     runMemory(home, `memory.syncClaudeProjectMemoryDir(${JSON.stringify(versionHomeB)}, ${JSON.stringify(cwd)})`);
@@ -232,17 +221,6 @@ describe('claude native per-project memory sync (PHNX-2817)', () => {
   });
 
   it('treats a raced EEXIST as success when the winner landed the same canonical target', async () => {
-    // True multi-process concurrency turned out impossible to land reliably
-    // here: the vulnerable window (lstat sees nothing -> symlinkSync) is
-    // sub-millisecond, well under real OS process-scheduling granularity —
-    // measured directly, 20+ trials of real concurrent `tsx` processes
-    // (even barrier-synchronized to release simultaneously) produced zero
-    // collisions. A prior version of this test claimed to reproduce the
-    // race via two unsynchronized processes; non-author review of PHNX-2817
-    // caught that it didn't reliably (0/15 on a rerun) — this replaces it
-    // with a deterministic simulation of the exact outcome a real race
-    // produces: `fs.symlinkSync` throwing EEXIST because another process
-    // won the link first.
     const home = makeTempHome();
     const prevStateDir = process.env.AGENTS_STATE_DIR;
     process.env.AGENTS_STATE_DIR = path.join(home, '.cache', 'state');
@@ -255,9 +233,6 @@ describe('claude native per-project memory sync (PHNX-2817)', () => {
 
       const { symlinkSync: realSymlinkSync } = await vi.importActual<typeof import('fs')>('fs');
       vi.mocked(fs.symlinkSync).mockImplementationOnce(((...args: Parameters<typeof fs.symlinkSync>) => {
-        // Actually create the link — simulating that a concurrent sync won
-        // it a moment before ours got here — then surface the exact error
-        // a real racing `symlinkSync` call raises against an existing path.
         realSymlinkSync(...args);
         const err = new Error('EEXIST: file already exists, symlink') as NodeJS.ErrnoException;
         err.code = 'EEXIST';
@@ -288,9 +263,6 @@ describe('claude native per-project memory sync (PHNX-2817)', () => {
         throw err;
       }) as typeof fs.symlinkSync);
 
-      // readlinkSync on the still-absent nativeMemoryDir throws too — the
-      // catch's "racedTarget !== canonicalDir" branch takes the mismatch
-      // path and rethrows rather than swallowing a genuine, unrelated error.
       expect(() => syncClaudeProjectMemoryDir(versionHomeA, cwd)).toThrow(/EEXIST/);
     } finally {
       if (prevStateDir === undefined) delete process.env.AGENTS_STATE_DIR;

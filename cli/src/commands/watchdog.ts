@@ -1,21 +1,3 @@
-/**
- * `agents watchdog` — the watchdog CONSUMER (RUSH-1415).
- *
- * Runs the tick loop that ties the merged pieces together: list active sessions,
- * classify stalls, read the tail, decide (deterministic promise-without-toolcall
- * by default), run the resolver safety gate, and inject "Continue." into the EXACT
- * split — all without the Swift menu-bar. See src/lib/watchdog/runner.ts.
- *
- *   agents watchdog                    one tick, dry — prints what it WOULD nudge/skip and why
- *   agents watchdog --nudge            one tick, actually injects (explicit opt-in)
- *   agents watchdog --watch            manual poll loop (dry unless --nudge)
- *   agents watchdog --json             machine-readable tick output (for the menu-bar)
- *   agents watchdog enable|disable             turn the device-local daemon pass on/off
- *   agents watchdog policy <id> <p>    per-session policy: off | keep | handsoff
- *
- * The agents daemon is the sole automatic watchdog scheduler. The menu bar reads
- * persisted state; it never runs a tick.
- */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -39,16 +21,10 @@ import { readWatchdogEvents, WATCHDOG_LOG_PATH } from '../lib/watchdog/log.js';
 import { selectWatchdogHistory } from '../lib/watchdog/history.js';
 import { sessionHeadline } from '../lib/session/title.js';
 
-/** Default state dir the runner and these subcommands share. */
 function stateDir(): string {
   return path.join(getRuntimeStateDir(), 'watchdog');
 }
 
-/**
- * (Re)load the daemon so a just-changed routine takes effect without a restart.
- * Best-effort: enabling starts the daemon if it is not running, then SIGHUPs it.
- * Dynamic import keeps daemon.ts's heavy deps off the watchdog command's load path.
- */
 async function reloadDaemonForRoutine(startIfStopped: boolean): Promise<void> {
   const { isDaemonRunning, ensureDaemonStarted, signalDaemonReload } = await import('../lib/daemon/daemon.js');
   if (isDaemonRunning()) {
@@ -58,7 +34,6 @@ async function reloadDaemonForRoutine(startIfStopped: boolean): Promise<void> {
   if (startIfStopped) ensureDaemonStarted();
 }
 
-/** Parse a duration flag ("60s", "5m", "1h") to ms, or fall back to `fallbackMs`. */
 function durationMsOr(raw: string | undefined, fallbackMs: number): number {
   if (raw === undefined) return fallbackMs;
   const secs = parseDuration(raw);
@@ -71,7 +46,6 @@ function humanMs(ms: number): string {
   return `${Math.round(ms / 1000)}s`;
 }
 
-/** Render one tick's outcomes as a human status block. */
 function elapsedLabel(atMs: number, eventMs: number): string {
   const seconds = Math.max(0, Math.round((atMs - eventMs) / 1000));
   if (seconds < 60) return `${seconds} second${seconds === 1 ? '' : 's'} ago`;
@@ -115,8 +89,6 @@ export function formatWatchdogTickLines(
       : o.decision === 'nudge' ? 'WOULD-NUDGE'
       : 'skip';
     const id = o.sessionId?.slice(0, 8) ?? 'no-session-id';
-    // `name` is the `agents run --name` launch handle — a user-given name, so it
-    // ranks with the label; everything below it is the shared headline ladder.
     const title = o.label || o.name || sessionHeadline(o);
     lines.push(`  ${tag.padEnd(11)} ${id}${title ? ` · ${title}` : ''}`);
     const metadata = [
@@ -149,7 +121,6 @@ async function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Register the `agents watchdog` command tree. */
 export function registerWatchdogCommand(program: Command): void {
   const cmd = program
     .command('watchdog')
@@ -171,10 +142,6 @@ export function registerWatchdogCommand(program: Command): void {
         cooldownMs: durationMsOr(opts.cooldown, DEFAULT_THRESHOLDS.cooldownMs),
         dormantMs: durationMsOr(opts.dormant, DEFAULT_THRESHOLDS.dormantMs),
       };
-      // Injection gate: --nudge is the explicit opt-in to actually inject. Bare
-      // `agents watchdog` (and `--watch` without `--nudge`) is dry. The always-on
-      // path is the daemon-owned pass. Device config is its on/off switch; this
-      // explicit command still requires --nudge before it can inject.
       const computeWillInject = (): boolean => opts.nudge === true;
 
       const tickOnce = async (willInject: boolean, sessions: ActiveSession[]): Promise<WatchdogTickResult> =>
@@ -187,8 +154,6 @@ export function registerWatchdogCommand(program: Command): void {
           sessions,
         });
 
-      // RUSH-2062: share the daemon-warmed local active-session snapshot with
-      // menubar/CLI/Factory instead of re-running a full gather every tick.
       if (!opts.watch) {
         const willInject = computeWillInject();
         const sessions = await loadWatchdogSessions();
@@ -198,7 +163,6 @@ export function registerWatchdogCommand(program: Command): void {
         return;
       }
 
-      // Manual poll loop for ad-hoc use; the daemon owns the automatic cadence.
       const intervalMs = durationMsOr(opts.interval, 30_000);
       if (!computeWillInject() && !opts.json) {
         console.log(chalk.yellow(
@@ -208,7 +172,6 @@ export function registerWatchdogCommand(program: Command): void {
       }
       // eslint-disable-next-line no-constant-condition
       while (true) {
-        // Re-evaluated each tick: picks up enable/disable flips mid-run.
         const willInject = computeWillInject();
         const sessions = await loadWatchdogSessions();
         const result = await tickOnce(willInject, sessions);
@@ -290,7 +253,6 @@ export function registerWatchdogCommand(program: Command): void {
     `,
   });
 
-  // --- always-on enable/disable/status (backed by the daemon routine) --------
 
   const turnOn = async (): Promise<void> => {
       setConfigValue('watchdog.enabled', true);
@@ -340,10 +302,6 @@ export function registerWatchdogCommand(program: Command): void {
     .description('Show whether the daemon watchdog pass is enabled and where state is written.')
     .option('--json', 'Emit status as JSON (for the menu-bar / scripts)')
     .action((_opts, command) => {
-      // The parent `watchdog` command also declares --json and greedily parses it
-      // before dispatching here, so `watchdog status --json` lands the flag on the
-      // parent, not this subcommand. optsWithGlobals() merges both levels, so we
-      // read it correctly regardless of which command commander bound it to.
       const json = command.optsWithGlobals().json === true;
       const on = getConfigValue('watchdog.enabled').value === true;
       const rotate = isWatchdogRotateEnabled() ? 'on' : 'off';
@@ -415,7 +373,6 @@ export function registerWatchdogCommand(program: Command): void {
       console.log(chalk.dim(`${entries.length} event${entries.length === 1 ? '' : 's'} · ${WATCHDOG_LOG_PATH}`));
     });
 
-  // --- per-session policy ----------------------------------------------------
 
   cmd.command('policy <sessionId> <policy>')
     .description('Set per-session policy: off (ignore) | keep (default) | handsoff (detect + flag, never inject).')

@@ -75,15 +75,6 @@ describe('classifyCiScope', () => {
   });
 
   test('a .changelog edit brings the CLI job with it, for gen-changelog.test.ts', () => {
-    // `cli` is true because the changelog-sources group selects
-    // cli/scripts/gen-changelog.test.ts, and scopeFromPlan's
-    // testUnder('cli/') reports "a test under cli/ was selected" --
-    // the same generic derivation every other group gets. It costs nothing
-    // extra: tests.yml has ONE job, driven by plan.tests/plan.checks, and
-    // nothing in .github/ reads steps.plan.outputs.cli. Before this group
-    // existed the value read `cli: false` -- and a hand-edited CHANGELOG.md that
-    // no source reproduces reached main three times in one day, each caught only
-    // by the full suite at release time.
     expect(classifyCiScope([
       'cli/docs/architecture.md',
       'cli/.changelog/next/ci.md',
@@ -96,8 +87,6 @@ describe('classifyCiScope', () => {
   });
 
   test('a docs-only diff with no .changelog file still skips the CLI suite', () => {
-    // The counterpart: widening must be scoped to the changelog sources, not to
-    // every docs edit.
     expect(classifyCiScope(['cli/docs/architecture.md'], REPO)).toEqual({
       cli: false,
       cliDocs: true,
@@ -225,9 +214,6 @@ describe('selectImpact policy', () => {
   });
 
   test('a bootstrap change carries the group budget, not the 85s default', () => {
-    // Grouped --help lives in bootstrap.ts; a one-line surface edit selects
-    // non-interactive.test.ts (54s) plus command-surface tests. PR #2826 run
-    // 32431700986 measured 93s and failed the 85s gate.
     const plan = selectImpact({
       files: ['cli/src/bootstrap.ts'],
       repoRoot: REPO,
@@ -239,11 +225,6 @@ describe('selectImpact policy', () => {
   });
 
   test('a sessions change carries the group budget, not the 85s default', () => {
-    // Registering a subcommand must touch sessions.ts, which selects the whole
-    // sessions* suite. Extracting width/short-id/relative-time (PR #2796, run
-    // 32392267349) still touches session/* re-export shims, so the sessions
-    // group is selected; impact was 198s and failed the previous 180s ceiling.
-    // Under the flat 85s default no new `agents sessions <verb>` could merge.
     const plan = selectImpact({
       files: ['cli/src/commands/sessions.ts'],
       repoRoot: REPO,
@@ -266,8 +247,6 @@ describe('selectImpact policy', () => {
   });
 
   test('an installations change carries the group budget, not the 85s default', () => {
-    // versions.ts is the install/sync hub. PR #2840 run 32436359101 measured
-    // 97s of a passing vitest run and failed the 85s gate.
     const plan = selectImpact({
       files: ['cli/src/lib/installations/versions.ts'],
       repoRoot: REPO,
@@ -279,9 +258,6 @@ describe('selectImpact policy', () => {
   });
 
   test('a daemon change carries the group budget, not the 85s default', () => {
-    // runner.ts lives in daemon/; retargeting commands/routines.ts onto it
-    // selects routines.test.ts (78 tests / 174s) inside a 213s impact run
-    // (PR #2803, run 32395701692). Under 85s the move cannot merge.
     const plan = selectImpact({
       files: ['cli/src/lib/daemon/runner.ts'],
       repoRoot: REPO,
@@ -293,10 +269,6 @@ describe('selectImpact policy', () => {
   });
 
   test('a group with no budget keeps the default, so the ceiling only rises where declared', () => {
-    // Uses a genuinely unbudgeted group. This previously pointed at
-    // cli/src/commands/** (command-surface), which acquired a budget in
-    // RUSH-3062 — the invariant held, only the example went stale. Pick a group
-    // whose entry in test-ownership.yaml has no budget_sec today.
     const plan = selectImpact({
       files: ['packages/session-tracker/src/index.ts'],
       repoRoot: REPO,
@@ -306,12 +278,7 @@ describe('selectImpact policy', () => {
   });
 
   test('the highest budget among matched groups wins', () => {
-    // A change spanning a budgeted and an unbudgeted group must not be capped by
-    // the unbudgeted one — the run still has to execute the union of both.
     const plan = selectImpact({
-      // sessions (240) spanning a genuinely unbudgeted group — commands/** is no
-      // longer one, so pairing two command files would compare 240 against 120
-      // rather than against the default, and stop testing the stated case.
       files: ['cli/src/commands/sessions.ts', 'packages/session-tracker/src/index.ts'],
       repoRoot: REPO,
       related: false,
@@ -320,8 +287,6 @@ describe('selectImpact policy', () => {
   });
 
   test('a budget below the default cannot tighten the gate', () => {
-    // The docblock promises budget_sec only ever RAISES the ceiling. Enforce it in
-    // code: a group asking for less than IMPACT_BUDGET_SEC gets the default.
     const dir = mkdtempSync(join(tmpdir(), 'budget-floor-'));
     try {
       mkdirSync(join(dir, 'cli/ci'), { recursive: true });
@@ -375,15 +340,11 @@ describe('selectImpact policy', () => {
   });
 
   test('a deleted tree selects no tests and does not fail the plan', () => {
-    // The PR shape that removes a whole mapped tree (apps/ext/** moved to
-    // phnx-labs/agi-ext, RUSH-3189): deleted test files must not be queued as
-    // work, and a deleted source is not the missing-coverage signal
-    // zero_selection exists to catch. None of these paths exist at head.
     const plan = selectImpact({
       files: [
-        'apps/ext/app/floorData.test.ts', // testless-exempted tree, deleted
-        'scripts/release.test.sh', // mapped scripts/ area, deleted test
-        'scripts/release.sh', // mapped scripts/ area, deleted source
+        'apps/ext/app/floorData.test.ts',
+        'scripts/release.test.sh',
+        'scripts/release.sh',
       ],
       repoRoot: REPO,
       related: false,
@@ -501,17 +462,15 @@ describe('selectImpact policy', () => {
 
 describe('rename-aware changed files (PHNX-3200)', () => {
   test('parseRenameAwareRawDiff: a same-mode R100 selects nothing; edits and a mode flip select the new path', () => {
-    // `git diff --raw -z` records: ":<oldmode> <newmode> <oldsha> <newsha> <status>" then path(s).
     const z = [
-      ':100644 100644 aaa bbb R100', 'cli/src/old.ts', 'cli/lib/old.ts', // pure move, same mode -> nothing
-      ':100644 100644 aaa bbb M', 'cli/src/b.ts', // modified -> b
-      ':100644 100644 aaa bbb R080', 'cli/src/c.ts', 'cli/lib/c.ts', // rename with edits -> new
-      ':000000 100644 000 ddd A', 'cli/src/d.ts', // added -> d
-      ':100644 000000 eee 000 D', 'cli/src/e.ts', // deleted -> e (consumer exempts from zero-selection)
-      ':100644 100755 fff ggg R100', 'cli/scripts/g.sh', 'cli/lib/g.sh', // move + chmod +x: R100 by content, mode flipped -> new
+      ':100644 100644 aaa bbb R100', 'cli/src/old.ts', 'cli/lib/old.ts',
+      ':100644 100644 aaa bbb M', 'cli/src/b.ts',
+      ':100644 100644 aaa bbb R080', 'cli/src/c.ts', 'cli/lib/c.ts',
+      ':000000 100644 000 ddd A', 'cli/src/d.ts',
+      ':100644 000000 eee 000 D', 'cli/src/e.ts',
+      ':100644 100755 fff ggg R100', 'cli/scripts/g.sh', 'cli/lib/g.sh',
       '',
     ].join('\0');
-    // Source order; the same-mode R100 move contributes nothing, the +x move does.
     expect(parseRenameAwareRawDiff(z)).toEqual([
       'cli/src/b.ts',
       'cli/lib/c.ts',
@@ -559,8 +518,6 @@ describe('rename-aware changed files (PHNX-3200)', () => {
   });
 
   test('a rename that also flips the executable bit selects the new path (R100 by content, mode changed)', () => {
-    // git reports this as R100 (content identical), but chmod +x is a real change
-    // to a script the repo runs directly -- --name-status would have hidden it.
     const { repo, base, head } = initRenameHistory(
       (r) => writeFixture(r, 'cli/scripts/tool.sh', '#!/usr/bin/env bash\necho hi\n'),
       (r) => {
@@ -696,13 +653,6 @@ describe('metadata-class diffs stop selecting the full suite (RUSH-2666)', () =>
   });
 
   test('a CHANGELOG-only diff selects its generator test, never cli-full', () => {
-    // CHANGELOG.md is GENERATED from .changelog/<version>.md, and
-    // gen-changelog.test.ts is what asserts the committed file still matches
-    // those sources. Selecting nothing here is what let three separate
-    // hand-edits reach main on 2026-08-20, each surfacing only when the full
-    // suite ran at release time and refused to attest a red tree. The point of
-    // the assertion is still that this stays `selected` -- one fast test, not
-    // cli-full.
     const plan = selectImpact({
       files: ['CHANGELOG.md', 'cli/CHANGELOG.md'],
       repoRoot: REPO,
@@ -845,12 +795,6 @@ describe('commandsForPlan', () => {
     expect(cmds[0].cmd.join(' ')).not.toContain('--shard');
   });
 
-  // RUSH-2666 (wave 6): vitest's CLI treats every arg after a literal `--`
-  // as opaque pass-through, not a file filter. `vitest run -- state.test.ts`
-  // silently falls back to the full `include` glob. Measured on PR #2770:
-  // the plan selected 3 files, the `--` invocation ran all 864 (883.72s)
-  // instead of the selected files (~13s single-file). Guard the exact
-  // token shape so this regression can't sneak back in.
   test('vitest invocations never carry a bare `--` before the file list', () => {
     const single = commandForTestFile('cli/src/lib/state.test.ts', REPO);
     expect(single.cmd).not.toContain('--');
@@ -870,16 +814,12 @@ describe('commandsForPlan', () => {
 
 describe('typecheck runs once per selected run (PR #3568)', () => {
   test('the CLI install is the typecheck: prepare builds with tsc, and the check adds no second build', () => {
-    // Half one: the package's install lifecycle really is a tsc build. If this
-    // ever stops being true the `typecheck` check must run a build again.
     const pkg = JSON.parse(readFileSync(join(REPO, 'cli', 'package.json'), 'utf8')) as {
       scripts: Record<string, string>;
     };
     expect(pkg.scripts.prepare).toBe('npm run build');
     expect(pkg.scripts.build.startsWith('tsc')).toBe(true);
 
-    // Half two: a plan that asks for typecheck installs the CLI (which builds)
-    // and runs no separate build command.
     const plan = {
       ...selectImpact({ files: ['cli/src/commands/webhook.ts'], repoRoot: REPO, related: false }),
       tests: [],
@@ -1006,11 +946,6 @@ test('changedFilesBetween ignores changes made only on the updated base branch',
 });
 
 test('changedFilesBetween treats a pure cross-component move as moved-not-changed (PHNX-3200)', () => {
-  // Was: `--no-renames` reported this as a delete of the old path PLUS an add of
-  // the new one, so a pure move read as two changed files (and the #3033 flatten
-  // of ~2100 files read as ~2100 changes → suite=cli-full). Rename-aware, a
-  // 100%-similarity move selects nothing: the content is unchanged, and any
-  // importer whose path broke shows up as its own content change.
   const repo = mkdtempSync(join(tmpdir(), 'agents-ci-rename-'));
   try {
     git(repo, 'init', '-b', 'main');

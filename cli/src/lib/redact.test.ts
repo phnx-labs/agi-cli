@@ -1,23 +1,10 @@
-/**
- * Redaction is a secret-leak guard: any text that gets logged (daemon logs) or
- * exported (session transcripts) runs through `redactSecrets` first. These tests
- * pin the token classes that must never survive — in particular the AWS / GitHub
- * / npm token forms that a prior *private* daemon copy of this function silently
- * missed, leaking them into `~/.agents/.../logs.jsonl`.
- */
 
 import { describe, it, expect } from 'vitest';
 import { redactSecrets, knownSecretValuesFromEnv, sanitizeForTerminal } from './redact.js';
 
-// Token fixtures are ASSEMBLED FROM FRAGMENTS at runtime (via `j`) so no
-// contiguous token literal ever appears in this source file — GitHub push
-// protection / secret scanners flag file text, not runtime-joined strings.
-// The joined values below are synthetic (repeating/placeholder bodies), not
-// live credentials. `j` is a plain concatenation.
 const j = (...parts: string[]): string => parts.join('');
-const B36 = '1234567890abcdefghijklmnopqrstuvwxyz'; // 36-char classic GitHub body
+const B36 = '1234567890abcdefghijklmnopqrstuvwxyz';
 
-// Each entry: the reconstructed secret + its expected marker after redaction.
 const TOKENS: Array<[string, string, string]> = [
   ['AWS access key', j('AKIA', 'IOSFODNN7EXAMPLE'), '[REDACTED_AWS_KEY]'],
   ['GitHub PAT (ghp_)', j('ghp', '_', B36), '[REDACTED_GITHUB_TOKEN]'],
@@ -26,9 +13,6 @@ const TOKENS: Array<[string, string, string]> = [
   ['GitHub refresh token (ghr_)', j('ghr', '_', B36), '[REDACTED_GITHUB_TOKEN]'],
   ['GitHub fine-grained PAT', j('github', '_pat_', '11ABCDEFG0aBcDeFgHiJkL', '_1234567890abcDEF'), '[REDACTED_GITHUB_TOKEN]'],
   ['Anthropic key (sk-ant-api03-)', j('sk-ant', '-api03-', 'abcdefghijklmnopqrstuvwxyz012345'), '[REDACTED_ANTHROPIC_KEY]'],
-  // OAuth setup-token (sk-ant-oat01-). The generic sk- rule can't reach it — the
-  // hyphen after `ant` breaks its alnum run — so this is the only rule that masks
-  // it. Its leak into run logs is the #1767 credential spill.
   ['Anthropic OAuth setup-token (sk-ant-oat01-)', j('sk-ant', '-oat01-', 'abcdefghijklmnopqrstuvwxyz012345'), '[REDACTED_ANTHROPIC_KEY]'],
   ['Stripe live secret key (sk_live_)', j('sk_', 'live_', 'abcdefghijklmnopqrstuvwxyz01'), '[REDACTED_STRIPE_KEY]'],
   ['Stripe restricted key (rk_live_)', j('rk_', 'live_', 'abcdefghijklmnopqrstuvwxyz01'), '[REDACTED_STRIPE_KEY]'],
@@ -71,9 +55,6 @@ describe('redactSecrets', () => {
   });
 
   it('masks the OAuth setup-token inside a captured setup-token TTY blob (#1767)', () => {
-    // The exact leak shape: `claude setup-token` output — ANSI banner + the token —
-    // captured and logged. sanitizeForTerminal strips the control sequences, then
-    // redactSecrets must mask the token so it never survives into a log/export.
     const token = j('sk-ant', '-oat01-', 'abcdefghijklmnopqrstuvwxyz012345');
     const blob = j('\x1b[?2004h', 'Welcome to Claude Code\n', 'Your OAuth token (valid for 1 year):\n  ', token, '\n');
     const out = redactSecrets(sanitizeForTerminal(blob));
@@ -82,11 +63,10 @@ describe('redactSecrets', () => {
   });
 
   it('value-aware pass masks a known secret regardless of format', () => {
-    // A credential whose shape matches no pattern still leaks without value-awareness.
     const weird = 'zZ9-plainish-value-no-known-shape';
     const input = `config: {"apiToken":"${weird}"} and bare ${weird}`;
     const naive = redactSecrets(input);
-    expect(naive).toContain(weird); // no pattern catches it
+    expect(naive).toContain(weird);
     const aware = redactSecrets(input, [weird]);
     expect(aware).not.toContain(weird);
     expect(aware).toContain('[REDACTED]');
@@ -126,15 +106,12 @@ describe('sanitizeForTerminal', () => {
   it('handles ST-terminated OSC, two-byte escapes, and unterminated sequences', () => {
     expect(sanitizeForTerminal('a\x1b]0;title\x1b\\b')).toBe('ab');
     expect(sanitizeForTerminal('a\x1bMb')).toBe('ab');
-    // An OSC with no terminator drops only its introducer; the payload is kept.
     expect(sanitizeForTerminal('a\x1b]0;open')).toBe('a0;open');
     expect(sanitizeForTerminal('a\x9d0;open')).toBe('a0;open');
     expect(sanitizeForTerminal('a\x1b[31')).toBe('a31');
   });
 
   it('runs in linear time on adversarial OSC-introducer repetition (CodeQL js/polynomial-redos)', () => {
-    // The old regex took ~1.7s on 40k unterminated 8-bit OSC introducers; the
-    // scanner must stay flat on both the 8-bit and the ESC-] shape.
     for (const introducer of ['\x9d', '\x1b]']) {
       const hostile = introducer.repeat(200_000) + 'x';
       const started = performance.now();
@@ -151,7 +128,7 @@ describe('knownSecretValuesFromEnv', () => {
       DB_PASSWORD: 'hunter2-longenough',
       HOME: '/home/someone',
       PATH: '/usr/bin:/bin',
-      SHORT_KEY: 'ab', // below the min length
+      SHORT_KEY: 'ab',
     } as unknown as NodeJS.ProcessEnv;
     const values = knownSecretValuesFromEnv(env);
     expect(values).toContain('super-secret-token-value');

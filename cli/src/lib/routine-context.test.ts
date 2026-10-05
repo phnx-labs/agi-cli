@@ -9,7 +9,6 @@ import {
   type ExecutionContextInput,
 } from './routine-context.js';
 
-/** Real filesystem probe against a target home — no mocks. */
 function realProbe(): ContextFsProbe {
   return {
     exists: (p) => fs.existsSync(p),
@@ -177,8 +176,6 @@ describe('resolveRoutineExecutionContext', () => {
   });
 
   it('resolves against a DISTINCT remote target home (deferred existence, no probe)', () => {
-    // A remote target whose home differs — resolution roots at the remote home
-    // and existence is deferred (no probe reaches the remote filesystem).
     const remoteHome = '/home/remoteuser';
     const res = resolveRoutineExecutionContext({
       name: 'r',
@@ -194,11 +191,6 @@ describe('resolveRoutineExecutionContext', () => {
   });
 
   it('builds the target path with the TARGET machine separator, not this host\'s', () => {
-    // The target home belongs to whichever box runs the routine. Joining with the
-    // local separator built `\home\remoteuser\...` for a POSIX target when the
-    // scheduler ran on Windows (and the mirror image the other way), so the
-    // separator is inferred from the home itself. Both directions are asserted
-    // here, so the case that is cross-platform on THIS runner is still covered.
     const posixTarget = resolveRoutineExecutionContext({
       name: 'r', kind: 'agent', mode: 'host',
       targetHome: '/home/remoteuser', cwd: 'projects/svc', probe: undefined,
@@ -210,8 +202,6 @@ describe('resolveRoutineExecutionContext', () => {
       targetHome: 'C:\\Users\\remoteuser', cwd: 'projects/svc', probe: undefined,
     });
     expect(windowsTarget.absoluteCwd).toBe('C:\\Users\\remoteuser\\projects\\svc');
-    // The portable form stays POSIX-shaped whatever the target — it is the wire
-    // format, not a filesystem path.
     expect(windowsTarget.resolvedCwd).toBe('~/projects/svc');
   });
 
@@ -235,13 +225,6 @@ describe('resolveRoutineExecutionContext', () => {
   });
 
   it('an absolute Windows-shaped cwd overrides a project base instead of being misread as project-relative (RUSH-2393)', () => {
-    // isBareRelative used to check `path.isAbsolute` with the HOST's default
-    // path module. A POSIX daemon dispatching to a Windows target saw
-    // `path.isAbsolute('C:\\Users\\remoteuser\\override')` return false (posix
-    // doesn't recognize a drive letter), so the cwd was misclassified as
-    // project-relative: joined against the project base, found to escape it,
-    // and paused with cwd_not_portable — even though it is a legitimate
-    // absolute override under the target's own home.
     const res = resolveRoutineExecutionContext({
       name: 'r',
       kind: 'agent',
@@ -258,9 +241,6 @@ describe('resolveRoutineExecutionContext', () => {
   });
 
   it('an absolute POSIX cwd overrides a project base the same way (regression guard, other direction)', () => {
-    // Mirrors the Windows-target case above with a POSIX target home, so a fix
-    // that swapped the posix/win32 selection (or hardcoded one flavour) would
-    // fail this the same way it would have failed the Windows case.
     const res = resolveRoutineExecutionContext({
       name: 'r',
       kind: 'agent',
@@ -277,10 +257,7 @@ describe('resolveRoutineExecutionContext', () => {
   });
 
   it('an unwritable directory pauses with workspace_not_writable', () => {
-    if (process.getuid && process.getuid() === 0) return; // root bypasses W_OK
-    // Windows ignores the mode bits chmod sets, so W_OK still succeeds and there
-    // is no unwritable directory to detect. Same reason as the root guard above:
-    // the platform cannot produce the precondition, not that the check is wrong.
+    if (process.getuid && process.getuid() === 0) return;
     if (process.platform === 'win32') return;
     const dir = path.join(home, 'ro');
     fs.mkdirSync(dir);

@@ -5,11 +5,6 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 
-// star-nudge.ts -> state.ts resolves HOME at import time, so pin HOME to a
-// throwaway dir BEFORE the module is ever loaded. Done at top-level module
-// scope (runs after the hoisted imports above, none of which load state.ts),
-// then the single dynamic import below picks it up — no vi.resetModules needed,
-// which keeps this compatible with both vitest and `bun test`.
 const savedHome = process.env.HOME;
 const savedCI = process.env.CI;
 const savedOptOut = process.env.AGENTS_NO_NUDGE;
@@ -18,10 +13,6 @@ const savedTTY = Object.getOwnPropertyDescriptor(process.stdout, 'isTTY');
 
 const TMP_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-nudge-test-'));
 process.env.HOME = TMP_HOME;
-// The nudge sentinel lives under getRuntimeStateDir(), which honors
-// AGENTS_STATE_DIR ahead of HOME — and tests/setup.ts pins that fork-wide. Point
-// it back at this file's own HOME so the sentinel lands where these cases assert,
-// and so the per-case `raceHome` override below still isolates.
 process.env.AGENTS_STATE_DIR = path.join(TMP_HOME, '.agents', '.cache', 'state');
 delete process.env.CI;
 delete process.env.AGENTS_NO_NUDGE;
@@ -42,7 +33,6 @@ afterAll(() => {
   if (savedTTY) Object.defineProperty(process.stdout, 'isTTY', savedTTY);
 });
 
-/** A fully "green light" context; override one field per case to prove the gate. */
 function ctx(over: Partial<Parameters<Mod['shouldShowStarNudge']>[0]> = {}) {
   return { quiet: false, isTTY: true, ci: false, optedOut: false, alreadyShown: false, ...over };
 }
@@ -73,7 +63,6 @@ describe('shouldShowStarNudge gate', () => {
   });
 });
 
-/** Run a thunk with console.log captured; returns every logged line. Portable — no vi mocks. */
 function captureLog(fn: () => void): string[] {
   const lines: string[] = [];
   const orig = console.log;
@@ -84,7 +73,6 @@ function captureLog(fn: () => void): string[] {
 
 describe('maybeShowStarNudge one-time behavior', () => {
   it('prints exactly once, writes the sentinel, then stays silent', () => {
-    // Force the TTY gate on for this non-interactive test process.
     Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true });
 
     expect(mod.hasShownStarNudge()).toBe(false);
@@ -97,17 +85,10 @@ describe('maybeShowStarNudge one-time behavior', () => {
     expect(second).toHaveLength(0);
     expect(third).toHaveLength(0);
     expect(mod.hasShownStarNudge()).toBe(true);
-    // Sentinel really landed under the pinned throwaway HOME.
     expect(fs.existsSync(path.join(TMP_HOME, '.agents', '.cache', 'state', 'star-nudge-shown'))).toBe(true);
   });
 });
 
-// The real reason the guard uses an atomic O_EXCL create: `agents teams` spawns
-// many processes that finish near-simultaneously, and an existsSync+write pair
-// is a cross-process TOCTOU race (a reviewer saw 3 of 5 procs double-print). An
-// in-process test can't reproduce that — it needs genuinely concurrent
-// processes — so we spawn N children against one shared HOME and assert the
-// nudge is printed exactly once. Skipped on Windows (subprocess/tsx-shim churn).
 describe('maybeShowStarNudge is race-safe across concurrent processes', () => {
   const tsxBin = fileURLToPath(new URL('../../node_modules/.bin/tsx', import.meta.url));
   const starNudgeSrc = fileURLToPath(new URL('./star-nudge.ts', import.meta.url));
@@ -129,9 +110,6 @@ describe('maybeShowStarNudge is race-safe across concurrent processes', () => {
           env: {
             ...process.env,
             HOME: raceHome,
-            // Must travel with HOME: AGENTS_STATE_DIR outranks it, so inheriting
-            // the parent's value would point every child at the outer test's
-            // sentinel — which already exists, so no child would ever print.
             AGENTS_STATE_DIR: path.join(raceHome, '.agents', '.cache', 'state'),
             CI: '',
             AGENTS_NO_NUDGE: '',

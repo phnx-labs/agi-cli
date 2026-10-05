@@ -57,8 +57,6 @@ describe('verdictFromProbe', () => {
     expect(verdictFromProbe({ status: 200, token: 'present' })).toBe('live');
   });
   it('setup-token usage-scope 403 -> unverified, never revoked (RUSH-2392)', () => {
-    // Bare 403 is still revoked (unknown denial). The reason field is the
-    // only signal that this is the known headless scope gap.
     expect(verdictFromProbe({ status: 403, token: 'present' })).toBe('revoked');
     expect(
       verdictFromProbe({
@@ -124,7 +122,6 @@ describe('authCacheKey', () => {
     expect(authCacheKey('yosemite-s0', 'kimi', 'default')).toBe('yosemite-s0:kimi:default');
   });
   it('distinguishes two installs of the same account on one host', () => {
-    // gmail live in 2.1.207 but revoked in 2.1.186 — different keys, no collision
     expect(authCacheKey('yosemite-s1', 'claude', '2.1.207'))
       .not.toBe(authCacheKey('yosemite-s1', 'claude', '2.1.186'));
   });
@@ -133,9 +130,7 @@ describe('authCacheKey', () => {
 describe('summarizeVerdicts', () => {
   it('counts live, present (unverified), bad (revoked), and warn (soft)', () => {
     expect(summarizeVerdicts(['live', 'live', 'live', 'live'])).toEqual({ live: 4, present: 0, bad: 0, warn: 0, total: 4 });
-    // only revoked is "bad"; expired is soft -> warn; unverified is benign signed-in -> present
     expect(summarizeVerdicts(['live', 'revoked', 'expired', 'unverified'])).toEqual({ live: 1, present: 1, bad: 1, warn: 1, total: 4 });
-    // unverified (codex/grok signed in, no probe) must NOT land in warn — it's `present`
     expect(summarizeVerdicts(['unverified', 'unverified'])).toEqual({ live: 0, present: 2, bad: 0, warn: 0, total: 2 });
     expect(summarizeVerdicts(['rate_limited', 'error'])).toEqual({ live: 0, present: 0, bad: 0, warn: 2, total: 2 });
     expect(summarizeVerdicts([])).toEqual({ live: 0, present: 0, bad: 0, warn: 0, total: 0 });
@@ -144,7 +139,6 @@ describe('summarizeVerdicts', () => {
 
 describe('verdictColor', () => {
   it('reserves red for revoked; expired is soft yellow, never red', () => {
-    // the exact regression: the ping verbose list painted `expired` red (lumped with revoked)
     expect(verdictColor('revoked')).toBe('red');
     expect(verdictColor('expired')).toBe('yellow');
     expect(verdictColor('rate_limited')).toBe('yellow');
@@ -162,14 +156,12 @@ describe('authCellColor', () => {
     ({ live: 0, present: 0, bad: 0, warn: 0, total: 0, ...o });
   it('red only when a token is genuinely revoked', () => {
     expect(authCellColor(s({ bad: 1, total: 1 }))).toBe('red');
-    // revoked wins even alongside live accounts
     expect(authCellColor(s({ live: 2, bad: 1, total: 3 }))).toBe('red');
   });
   it('expired-only cell is soft yellow, NOT red (kimi/droid self-refresh)', () => {
     expect(authCellColor(s({ warn: 1, total: 1 }))).toBe('yellow');
   });
   it('all-unverified cell (codex/grok signed in) is neutral gray, NOT yellow', () => {
-    // this is the "cry wolf" fix: a fully-logged-in codex fleet must not read as degraded
     expect(authCellColor(s({ present: 1, total: 1 }))).toBe('gray');
   });
   it('all-live cell is green; empty cell is dim', () => {
@@ -182,7 +174,6 @@ describe('mergeAuthHealthEntries', () => {
   it('a fresh error does NOT clobber a prior known verdict (keeps last known)', () => {
     const current = { 'zion:claude:2.1.170': { verdict: 'live' as const, checkedAt: 100 } };
     const incoming = { 'zion:claude:2.1.170': { verdict: 'error' as const, checkedAt: 200, detail: 'timeout' } };
-    // the live entry survives the transient error
     expect(mergeAuthHealthEntries(current, incoming)['zion:claude:2.1.170']).toEqual({ verdict: 'live', checkedAt: 100 });
   });
   it('a real verdict (revoked/live) DOES overwrite', () => {
@@ -211,23 +202,22 @@ describe('summarizeHostAuth', () => {
   const cache: Record<string, AuthHealth> = {
     'zion:claude:1.0.0': h('live', 5000),
     'zion:claude:1.1.0': h('live', 3000),
-    'zion:codex:0.1.0': h('unverified', 7000),   // signed in, no probe → present
-    'zion:opencode:0.1.0': h('revoked', 4000),   // server rejected → revoked
-    'zion:kimi:0.1.0': h('expired', 6000),        // soft/self-healing → degraded
-    'zion-2:claude:1.0.0': h('revoked', 1000),   // sibling host, must not bleed into 'zion'
+    'zion:codex:0.1.0': h('unverified', 7000),
+    'zion:opencode:0.1.0': h('revoked', 4000),
+    'zion:kimi:0.1.0': h('expired', 6000),
+    'zion-2:claude:1.0.0': h('revoked', 1000),
     'yosemite-s1:claude:1.0.0': h('live', 9000),
   };
 
   it('splits present/degraded/revoked into distinct buckets and tracks oldest', () => {
     const r = summarizeHostAuth(cache, 'zion');
-    // 5 zion rows — the 'zion-2' row (a `zion` substring) is excluded.
     expect(r).toEqual({
-      live: 2,       // two claude
-      present: 1,    // codex unverified — NOT counted as degraded
-      degraded: 1,   // kimi expired (soft)
-      revoked: 1,    // opencode revoked (the only real re-login)
+      live: 2,
+      present: 1,
+      degraded: 1,
+      revoked: 1,
       total: 5,
-      oldestCheckedAt: 3000, // not zion-2's 1000
+      oldestCheckedAt: 3000,
     });
   });
 
@@ -251,10 +241,8 @@ describe('groupFleetAuthInstalls — probe once per account (RUSH-2111, PHNX-405
       inst('claude', '1.0.0', 'alice@example.com'),
       inst('claude', '1.1.0', 'alice@example.com'),
     ]);
-    // The whole point: two version homes, one live probe.
     expect(groups).toHaveLength(1);
     expect(groups[0].members.map((m) => m.version)).toEqual(['1.0.0', '1.1.0']);
-    // The representative is the first-seen home; every member rides its verdict.
     expect(groups[0].probe.version).toBe('1.0.0');
   });
 
@@ -280,8 +268,6 @@ describe('groupFleetAuthInstalls — probe once per account (RUSH-2111, PHNX-405
       inst('claude', '1.0.0', undefined),
       inst('claude', '1.1.0', undefined),
     ]);
-    // Can't prove they're the same account, so probe each (matches the old
-    // per-install behaviour for the un-labelable / unconfigured case).
     expect(groups).toHaveLength(2);
   });
 
@@ -292,7 +278,6 @@ describe('groupFleetAuthInstalls — probe once per account (RUSH-2111, PHNX-405
       inst('claude', '1.2.0', undefined),
       inst('claude', '1.3.0', 'bob@example.com'),
     ]);
-    // alice(1 group of 2) + bob(1) + un-labelable(1) = 3 probes for 4 homes.
     expect(groups).toHaveLength(3);
     const alice = groups.find((g) => g.probe.account === 'alice@example.com');
     expect(alice?.members.map((m) => m.version)).toEqual(['1.0.0', '1.1.0']);
@@ -303,9 +288,6 @@ describe('groupFleetAuthInstalls — probe once per account (RUSH-2111, PHNX-405
   });
 
   it('only merges installs the isMergeable predicate accepts', () => {
-    // The real caller passes `LIVE_PROBE_AGENTS.has(agent)`: claude merges (it can
-    // 429), cursor does not (a cheap local verdict with no rate limit — merging
-    // could silently override one home's signedIn state with another's).
     const isLive = (i: FleetAuthInstall) => i.agent === 'claude';
     const groups = groupFleetAuthInstalls(
       [
@@ -316,7 +298,6 @@ describe('groupFleetAuthInstalls — probe once per account (RUSH-2111, PHNX-405
       ],
       isLive,
     );
-    // claude: 2 homes -> 1 group; cursor: 2 homes -> 2 groups (never merged).
     expect(groups).toHaveLength(3);
     const claude = groups.find((g) => g.probe.agent === 'claude');
     expect(claude?.members).toHaveLength(2);
@@ -330,7 +311,6 @@ describe('groupFleetAuthInstalls — probe once per account (RUSH-2111, PHNX-405
       inst('claude', 'slot:acc-123', undefined, id),
       inst('claude', '2.1.171', 'a@x.com', id),
     ]);
-    // All three share one identity -> one probe, not three.
     expect(groups).toHaveLength(1);
     expect(groups[0].members).toHaveLength(3);
   });
@@ -355,12 +335,6 @@ describe('formatCheckedAge', () => {
 });
 
 describe('probeAuthHealth derives live from a fresh usage fetch (RUSH-3036)', () => {
-  // The auth probe and the usage fetch hit the SAME rate-limited endpoint with
-  // the SAME shared setup-token, so a fresh successful usage snapshot already
-  // proves the token live. Exercised against the REAL cache file via the test
-  // seam; in this environment no credentials exist, so a 'live' verdict can
-  // ONLY come from the derivation path — a broken gate falls through to the
-  // live probe and returns a non-live verdict.
   it('returns live without a network probe when the account has a fresh snapshot', async () => {
     const os = await import('node:os');
     const fs = await import('node:fs');
@@ -376,7 +350,7 @@ describe('probeAuthHealth derives live from a fresh usage fetch (RUSH-3036)', ()
       writeClaudeUsageCache(usageKey, {
         source: 'live',
         sourceLabel: 'live account data',
-        capturedAt: new Date(Date.now() - 5 * 60_000), // 5 minutes old — fresh
+        capturedAt: new Date(Date.now() - 5 * 60_000),
         windows: [{ key: 'week', label: 'Current week', shortLabel: 'W', usedPercent: 42, resetsAt: null, windowMinutes: 10080 }],
       });
       const { probeAuthHealth } = await import('./auth-health.js');
@@ -403,15 +377,13 @@ describe('probeAuthHealth derives live from a fresh usage fetch (RUSH-3036)', ()
       usage.writeClaudeUsageCache(usageKey, {
         source: 'live',
         sourceLabel: 'live account data',
-        capturedAt: new Date(Date.now() - 25 * 60_000), // 25 minutes — beyond the window
+        capturedAt: new Date(Date.now() - 25 * 60_000),
         windows: [{ key: 'week', label: 'Current week', shortLabel: 'W', usedPercent: 42, resetsAt: null, windowMinutes: 10080 }],
       });
       const { probeAuthHealth } = await import('./auth-health.js');
       const health = await probeAuthHealth('claude', undefined, {
         info: { usageKey, signedIn: true } as never,
       });
-      // No credentials in this environment: the live probe path cannot return
-      // 'live', proving the stale snapshot was NOT used as evidence.
       expect(health.verdict).not.toBe('live');
     } finally {
       usage.setClaudeUsageCachePathForTest(prev);
@@ -433,7 +405,7 @@ describe('derivation guards (RUSH-3036 review findings)', () => {
       usage.writeClaudeUsageCache(usageKey, {
         source: 'live',
         sourceLabel: 'live account data',
-        capturedAt: new Date(Date.now() - 60_000), // 1 minute old — maximally fresh
+        capturedAt: new Date(Date.now() - 60_000),
         windows: [{ key: 'week', label: 'Current week', shortLabel: 'W', usedPercent: 10, resetsAt: null, windowMinutes: 10080 }],
       });
       return await run(usageKey);
@@ -450,9 +422,6 @@ describe('derivation guards (RUSH-3036 review findings)', () => {
         info: { usageKey, signedIn: true } as never,
         forceLive: true,
       });
-      // Fresh evidence exists, but forceLive must ignore it. No credentials in
-      // this environment, so the real probe path cannot return 'live' — a
-      // 'live' here would mean the derivation leaked through the force path.
       expect(health.verdict).not.toBe('live');
     });
   });
@@ -461,7 +430,7 @@ describe('derivation guards (RUSH-3036 review findings)', () => {
     await withFreshSnapshot(async (usageKey) => {
       const { probeAuthHealth } = await import('./auth-health.js');
       const health = await probeAuthHealth('claude', undefined, {
-        info: { usageKey, signedIn: false } as never, // no local credential
+        info: { usageKey, signedIn: false } as never,
       });
       expect(health.verdict).not.toBe('live');
     });
@@ -469,10 +438,6 @@ describe('derivation guards (RUSH-3036 review findings)', () => {
 });
 
 describe('enumerateSlotInstalls — the daemon probe covers account slots', () => {
-  // Real temp dirs, no mocks: a registered codex account with a slot on disk is a
-  // probe target keyed `slot:<id>`; a slot whose dir is gone, and an account whose
-  // harness is not being probed, are skipped. Before this the probe walked
-  // `listInstalledVersions` only, so a slot's verdict was never re-derived.
   it('yields one probe target per registered slot that exists on disk', async () => {
     const fs = await import('node:fs');
     const os = await import('node:os');
@@ -505,7 +470,6 @@ describe('enumerateSlotInstalls — the daemon probe covers account slots', () =
       expect(out).toEqual([
         { agent: 'codex', version: slotAuthVersionKey(present), home: presentDir, account: undefined, accountId: present },
       ]);
-      // The other harness's slot is a target only when that harness is probed.
       expect(enumerateSlotInstalls(meta as never, ['claude']).map((s) => s.accountId)).toEqual([otherHarness]);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });

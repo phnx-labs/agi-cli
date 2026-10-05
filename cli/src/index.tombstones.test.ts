@@ -5,18 +5,6 @@ import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 
-/**
- * Real-CLI tests for the removed-command tombstones. `agents check` and
- * `agents resources` (RUSH-1234) were deleted when their behavior folded into
- * `agents doctor --check` and `agents view --merged`; the hidden alias commands
- * in index.ts must (1) print a deprecation notice to STDERR — never stdout, so a
- * `--json` consumer's stdout stays clean — and (2) forward into the replacement,
- * preserving flags and the drift-gate exit code. `agents hq` had no replacement
- * (the interactive Agents HQ floor UI it bridged was never built), so its hidden
- * tombstone just reports the removal and exits non-zero instead of forwarding.
- * No mocks: we build a temp HOME with a real installed version + a real source
- * command, then drive the actual CLI in a subprocess.
- */
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const INDEX = path.join(REPO_ROOT, 'src', 'index.ts');
@@ -29,7 +17,6 @@ afterEach(() => {
   if (projectDir) fs.rmSync(projectDir, { recursive: true, force: true });
 });
 
-/** Temp HOME with an installed claude@2.0.0 and one user-layer source command. */
 function seedHome(): void {
   testHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-tombstone-home-'));
   projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-tombstone-proj-'));
@@ -53,9 +40,6 @@ function seedHome(): void {
   fs.writeFileSync(path.join(commandsDir, 'demo.md'), '---\ndescription: demo\n---\n\n# demo\n');
 }
 
-// Note: no implicit --cwd here. `doctor` accepts --cwd (the check test passes it
-// explicitly); `view` does not, and neither did the old `resources` — view resolves
-// the resource surface from HOME + process.cwd().
 function run(...args: string[]): { status: number | null; stdout: string; stderr: string } {
   const r = spawnSync('bun', [INDEX, ...args], {
     cwd: REPO_ROOT,
@@ -72,21 +56,18 @@ function run(...args: string[]): { status: number | null; stdout: string; stderr
 
 describe('removed-command tombstones (RUSH-1234)', () => {
   it('`agents check` forwards to `doctor --check`: notice on stderr, JSON on stdout, exit code preserved', () => {
-    seedHome(); // installed but never-synced → doctor --check must exit non-zero
+    seedHome();
 
-    // --cwd points doctor at the empty project dir; the tombstone must forward it
-    // through to `doctor --check --json --cwd <dir>`.
     const r = run('check', '--json', '--cwd', projectDir);
 
-    // Notice is on stderr, NOT stdout — stdout must be parseable JSON for CI.
     expect(r.stderr).toContain('Deprecated');
     expect(r.stderr).toContain('doctor --check');
     expect(r.stdout).not.toContain('Deprecated');
 
-    const parsed = JSON.parse(r.stdout); // proves it reached doctor --check's JSON path
+    const parsed = JSON.parse(r.stdout);
     expect(parsed).toHaveProperty('hasDrift');
-    expect(parsed.hasDrift).toBe(true); // never-synced version → drift
-    expect(r.status).not.toBe(0); // the gate exit code survived the rename
+    expect(parsed.hasDrift).toBe(true);
+    expect(r.status).not.toBe(0);
   });
 
   it('`agents resources` forwards to `view --merged`: notice on stderr, merged table on stdout', () => {
@@ -96,9 +77,8 @@ describe('removed-command tombstones (RUSH-1234)', () => {
 
     expect(r.stderr).toContain('Deprecated');
     expect(r.stderr).toContain('view --merged');
-    expect(r.stderr).toContain('inspect'); // points at inspect for per-target detail
+    expect(r.stderr).toContain('inspect');
     expect(r.stdout).not.toContain('Deprecated');
-    // The merged first-wins renderer prints a "… merged" header and per-kind rows.
     expect(r.stdout.toLowerCase()).toContain('merged');
     expect(r.status).toBe(0);
   });
@@ -127,9 +107,6 @@ describe('removed `hq` command (no replacement)', () => {
   it('a stale `agents hq floor --json` invocation also hits the tombstone', () => {
     seedHome();
 
-    // The old subcommand + flag: allowUnknownOption/allowExcessArguments must
-    // route this into the tombstone action rather than commander rejecting
-    // `floor` as an unrecognized subcommand.
     const r = run('hq', 'floor', '--json');
 
     expect(r.status).not.toBe(0);

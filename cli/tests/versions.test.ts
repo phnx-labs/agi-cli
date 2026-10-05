@@ -4,10 +4,6 @@ import * as path from 'path';
 import * as os from 'os';
 import { IS_WINDOWS, toPosix } from '../src/lib/platform/index.js';
 
-// Mock state.ts to redirect all paths to temp directory. Stash mutable
-// override state on globalThis instead of a top-level const — vitest 4
-// hoists vi.mock above local declarations (TDZ error) and Bun's native
-// runner doesn't expose vi.hoisted. globalThis is always initialized.
 interface VersionsHoistedState {
   TEST_ROOT: string;
   AGENTS_DIR: string;
@@ -29,11 +25,6 @@ let PROJECT_AGENTS_DIR: string | null = null;
 let META: { agents?: Record<string, string> } = {};
 
 vi.mock('../src/lib/state.js', () => {
-  // Pull from globalThis at call time so vitest's hoisting of vi.mock above
-  // the local `hoistedState` binding (TDZ) doesn't break references. Seed
-  // the bucket here too — if vitest invokes the factory before the
-  // module-body const initializer runs, the consumer's first read still
-  // sees a real object instead of undefined.
   const nodeFs = require('node:fs') as typeof import('fs');
   const nodePath = require('node:path') as typeof import('path');
   const gt = globalThis as Record<string, unknown>;
@@ -98,13 +89,10 @@ vi.mock('../src/lib/state.js', () => {
     get setActiveRulesPreset() { return () => {}; },
     get getCliVersionCachePath() { return () => nodePath.join(state().AGENTS_DIR, '.cli-version-cache.json'); },
     get getRuntimeStateDir() { return () => nodePath.join(state().AGENTS_DIR, '.cache', 'state'); },
-    // droid/muse global-binary paths resolve under the real user home; pin to
-    // TEST_ROOT so path helpers stay hermetic in this suite.
     get getHomeDir() { return () => state().TEST_ROOT || require('node:os').homedir(); },
   };
 });
 
-// Mock external dependencies that syncResourcesToVersion calls
 vi.mock('../src/lib/plugins/plugins.js', () => ({
   discoverPlugins: () => [],
   syncPluginToVersion: () => ({ success: false }),
@@ -113,10 +101,6 @@ vi.mock('../src/lib/plugins/plugins.js', () => ({
   cleanOrphanedPluginSkills: () => [],
 }));
 
-// The subagent registry (imported transitively via the staleness writer) reads
-// every transform binding when it builds its target table at import time, so the
-// mock must define them all even though these tests never invoke them
-// (listInstalledSubagents returns [] — nothing syncs).
 vi.mock('../src/lib/subagents.js', () => ({
   listInstalledSubagents: () => [],
   parseSubagentFrontmatter: () => null,
@@ -153,9 +137,6 @@ vi.mock('../src/lib/permissions.js', () => ({
   PERMISSION_SET_ENV_VAR: 'AGENTS_PERMISSION_SET',
 }));
 
-// Override only the two mcp.js exports we need to neutralize; vi.spyOn keeps
-// the rest real and avoids vi.importActual / importOriginal which Bun's
-// native test runner does not support.
 import * as mcpModule from '../src/lib/mcp.js';
 vi.spyOn(mcpModule, 'installMcpServers').mockReturnValue({ applied: [] });
 vi.spyOn(mcpModule, 'listMcpServerConfigs').mockReturnValue([]);
@@ -210,7 +191,6 @@ function emptyResources(): AvailableResources {
   };
 }
 
-// --- Setup / Teardown ---
 
 beforeEach(() => {
   TEST_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-test-'));
@@ -229,9 +209,6 @@ afterEach(() => {
 });
 
 
-// ============================================================
-// Pure function tests
-// ============================================================
 
 describe('parseAgentSpec', () => {
   it('parses agent@version', () => {
@@ -463,7 +440,6 @@ describe('compareVersions', () => {
   });
 
   it('handles non-numeric segments gracefully', () => {
-    // parseInt('beta', 10) returns NaN -> || 0 makes it 0
     expect(compareVersions('1.0.beta', '1.0.0')).toBe(0);
   });
 });
@@ -543,11 +519,6 @@ describe('getNewResources', () => {
   });
 
   it('excludes project-only entries for kinds that sync intentionally skips', () => {
-    // Regression for the "infinite New resources prompt" bug. The available
-    // set unions project + user + system layers, but syncResourcesToVersion
-    // intentionally excludes the project layer for security on commands,
-    // skills, hooks, subagents, plugins, and workflows — so those project-only
-    // names would otherwise re-appear as "new" on every run.
     const available: AvailableResources = {
       commands: ['debug', 'project-only-cmd'],
       skills: ['mq', 'project-only-skill'],
@@ -577,7 +548,6 @@ describe('getNewResources', () => {
     expect(diff.subagents).toEqual(['researcher']);
     expect(diff.plugins).toEqual(['plug']);
     expect(diff.workflows).toEqual(['flow']);
-    // MCP and permissions are unaffected by the project-layer exclusion.
     expect(diff.mcp).toEqual(['Swarm']);
     expect(diff.permissions).toEqual(['01-core']);
   });
@@ -591,61 +561,46 @@ describe('hasNewResources', () => {
   it('returns true when skills are present (always applies)', () => {
     const diff = { ...emptyResources(), skills: ['mq'] };
     expect(hasNewResources(diff)).toBe(true);
-    // Skills apply to ALL agents
     expect(hasNewResources(diff, 'openclaw')).toBe(true);
     expect(hasNewResources(diff, 'claude')).toBe(true);
   });
 
   it('filters commands by agent capability', () => {
     const diff = { ...emptyResources(), commands: ['debug'] };
-    // claude supports commands
     expect(hasNewResources(diff, 'claude')).toBe(true);
-    // openclaw does NOT support commands
     expect(hasNewResources(diff, 'openclaw')).toBe(false);
   });
 
   it('filters hooks by agent capability', () => {
     const diff = { ...emptyResources(), hooks: ['pre-commit.sh'] };
-    // claude supports hooks
     expect(hasNewResources(diff, 'claude')).toBe(true);
-    // codex now supports hooks (version-gate applies at sync time, not here)
     expect(hasNewResources(diff, 'codex')).toBe(true);
-    // cursor supports hooks (CLI since 2026-01-16)
     expect(hasNewResources(diff, 'cursor')).toBe(true);
-    // amp does NOT support hooks
     expect(hasNewResources(diff, 'amp')).toBe(false);
   });
 
   it('filters memory by commands capability (same gate)', () => {
     const diff = { ...emptyResources(), memory: ['AGENTS'] };
-    // claude supports commands -> memory applies
     expect(hasNewResources(diff, 'claude')).toBe(true);
-    // openclaw does NOT support commands -> memory skipped
     expect(hasNewResources(diff, 'openclaw')).toBe(false);
   });
 
   it('filters MCP by agent capability', () => {
     const diff = { ...emptyResources(), mcp: ['Swarm'] };
-    // All agents support MCP
     expect(hasNewResources(diff, 'claude')).toBe(true);
     expect(hasNewResources(diff, 'openclaw')).toBe(true);
   });
 
   it('filters permissions by agent capability', () => {
     const diff = { ...emptyResources(), permissions: ['01-core'] };
-    // claude supports permissions
     expect(hasNewResources(diff, 'claude')).toBe(true);
-    // cursor supports permissions (cli-config.json allowlist)
     expect(hasNewResources(diff, 'cursor')).toBe(true);
-    // amp does NOT support permissions
     expect(hasNewResources(diff, 'amp')).toBe(false);
   });
 
   it('filters plugins by agent capability', () => {
     const diff = { ...emptyResources(), plugins: ['my-plugin'] };
-    // claude supports plugins
     expect(hasNewResources(diff, 'claude')).toBe(true);
-    // codex supports plugins from 0.128.0 onward
     expect(hasNewResources(diff, 'codex')).toBe(true);
     expect(hasNewResources(diff, 'codex', '0.127.0')).toBe(false);
     expect(hasNewResources(diff, 'codex', '0.128.0')).toBe(true);
@@ -659,9 +614,6 @@ describe('hasNewResources', () => {
 });
 
 
-// ============================================================
-// Path helper tests
-// ============================================================
 
 describe('version path helpers', () => {
   it('getVersionDir returns correct path', () => {
@@ -675,9 +627,6 @@ describe('version path helpers', () => {
   });
 
   it('getBinaryPath for muse is the global self-updating launcher (any version)', () => {
-    // Muse installs once under ~/.local/bin/muse (or %USERPROFILE%\bin\muse.exe).
-    // Version dirs must resolve to the same path so isGlobalBinaryAgent is true
-    // and agents view / isVersionInstalled see the real binary after import.
     const a = getBinaryPath('muse', '0.1.0');
     const b = getBinaryPath('muse', '9.9.9');
     expect(a).toBe(b);
@@ -691,9 +640,6 @@ describe('version path helpers', () => {
 });
 
 
-// ============================================================
-// getAvailableResources (filesystem-based with mocked dirs)
-// ============================================================
 
 describe('getAvailableResources', () => {
   it('finds commands from *.md files', () => {
@@ -713,7 +659,7 @@ describe('getAvailableResources', () => {
     const skillsDir = path.join(AGENTS_DIR, 'skills');
     fs.mkdirSync(path.join(skillsDir, 'mq'), { recursive: true });
     fs.mkdirSync(path.join(skillsDir, 'browser'), { recursive: true });
-    fs.mkdirSync(path.join(skillsDir, '.hidden'), { recursive: true }); // should be excluded
+    fs.mkdirSync(path.join(skillsDir, '.hidden'), { recursive: true });
     fs.writeFileSync(path.join(skillsDir, 'file.md'), 'not a skill dir');
 
     const resources = getAvailableResources();
@@ -751,7 +697,6 @@ describe('getAvailableResources', () => {
   it('finds MCP configs from *.yaml and *.yml', () => {
     const mcpDir = path.join(AGENTS_DIR, 'mcp');
     fs.mkdirSync(mcpDir, { recursive: true });
-    // Valid MCP configs require name, transport, and transport-specific fields
     fs.writeFileSync(path.join(mcpDir, 'Swarm.yaml'), 'name: Swarm\ntransport: stdio\ncommand: swarm');
     fs.writeFileSync(path.join(mcpDir, 'Other.yml'), 'name: Other\ntransport: http\nurl: http://example.com');
     fs.writeFileSync(path.join(mcpDir, 'readme.txt'), 'not mcp');
@@ -777,7 +722,6 @@ describe('getAvailableResources', () => {
     const subagentsDir = path.join(AGENTS_DIR, 'subagents');
     fs.mkdirSync(path.join(subagentsDir, 'researcher'), { recursive: true });
     fs.writeFileSync(path.join(subagentsDir, 'researcher', 'AGENT.md'), '# Researcher');
-    // Directory without AGENT.md should be excluded
     fs.mkdirSync(path.join(subagentsDir, 'incomplete'), { recursive: true });
 
     const resources = getAvailableResources();
@@ -786,7 +730,6 @@ describe('getAvailableResources', () => {
   });
 
   it('returns empty arrays when directories do not exist', () => {
-    // AGENTS_DIR exists but no subdirectories
     const resources = getAvailableResources();
     expect(resources.commands).toEqual([]);
     expect(resources.skills).toEqual([]);
@@ -811,33 +754,25 @@ describe('getAvailableResources', () => {
 });
 
 
-// ============================================================
-// syncResourcesToVersion (the critical function)
-// ============================================================
 
 describe('syncResourcesToVersion', () => {
   function setupCentralResources() {
-    // Commands
     const commandsDir = path.join(AGENTS_DIR, 'commands');
     fs.mkdirSync(commandsDir, { recursive: true });
     fs.writeFileSync(path.join(commandsDir, 'debug.md'), '---\ndescription: Debug things\n---\nDebug prompt with $ARGUMENTS');
     fs.writeFileSync(path.join(commandsDir, 'plan.md'), '---\ndescription: Plan things\n---\nPlan prompt');
 
-    // Skills
     const skillsDir = path.join(AGENTS_DIR, 'skills');
     fs.mkdirSync(path.join(skillsDir, 'mq'), { recursive: true });
     fs.writeFileSync(path.join(skillsDir, 'mq', 'SKILL.md'), '---\nname: mq\n---\nMQ skill');
     fs.mkdirSync(path.join(skillsDir, 'mq', 'rules'), { recursive: true });
     fs.writeFileSync(path.join(skillsDir, 'mq', 'rules', 'rule1.md'), 'Rule 1 content');
 
-    // Hooks
     const hooksDir = path.join(AGENTS_DIR, 'hooks');
     fs.mkdirSync(hooksDir, { recursive: true });
     fs.writeFileSync(path.join(hooksDir, 'pre-commit.sh'), '#!/bin/bash\necho "pre-commit"');
     fs.chmodSync(path.join(hooksDir, 'pre-commit.sh'), 0o755);
 
-    // Rules — composer-model layout: subrules/ + rules.yaml. The state mock
-    // points all rules-dir getters at <AGENTS_DIR>/memory, so we write here.
     const rulesDir = path.join(AGENTS_DIR, 'memory');
     fs.mkdirSync(path.join(rulesDir, 'subrules'), { recursive: true });
     fs.writeFileSync(path.join(rulesDir, 'subrules', 'core.md'), '# Agent Instructions\nDo good work.');
@@ -847,7 +782,6 @@ describe('syncResourcesToVersion', () => {
       'presets:\n  default:\n    subrules: [core, soul]\n'
     );
 
-    // Version home
     const versionHome = path.join(AGENTS_DIR, 'versions', 'claude', '2.0.65', 'home');
     fs.mkdirSync(versionHome, { recursive: true });
     return versionHome;
@@ -864,7 +798,6 @@ describe('syncResourcesToVersion', () => {
       expect(result.commands).toBe(true);
       expect(fs.existsSync(path.join(commandsDir, 'debug.md'))).toBe(true);
       expect(fs.existsSync(path.join(commandsDir, 'plan.md'))).toBe(true);
-      // Content should match source
       const content = fs.readFileSync(path.join(commandsDir, 'debug.md'), 'utf-8');
       expect(content).toContain('Debug prompt');
     });
@@ -905,24 +838,16 @@ describe('syncResourcesToVersion', () => {
     it('skips missing source files gracefully', () => {
       setupCentralResources();
 
-      // Request a command that does not exist
       const selection: ResourceSelection = { commands: ['nonexistent', 'debug'] };
       const result = syncResourcesToVersion('claude', '2.0.65', selection);
 
       const commandsDir = path.join(getVersionHomePath('claude', '2.0.65'), '.claude', 'commands');
-      expect(result.commands).toBe(true); // debug was synced
+      expect(result.commands).toBe(true);
       expect(fs.existsSync(path.join(commandsDir, 'debug.md'))).toBe(true);
       expect(fs.existsSync(path.join(commandsDir, 'nonexistent.md'))).toBe(false);
     });
 
     it('ignores project commands and uses the user/system layer (security defense)', () => {
-      // The project `.agents/commands/` layer is intentionally excluded from
-      // sync — a cloned public repo could ship a malicious command body that
-      // fires when the user invokes the slash command. See commit 1cc35b14.
-      // The resolveResource API still surfaces project commands (so `agents
-      // commands list` and friends can show them) but the sync pipeline used
-      // by the shim only materializes user/system content. This test pins
-      // that contract.
       setupCentralResources();
       const projectAgents = path.join(TEST_ROOT, 'project', '.agents');
       fs.mkdirSync(path.join(projectAgents, 'commands'), { recursive: true });
@@ -937,10 +862,6 @@ describe('syncResourcesToVersion', () => {
 
       syncResourcesToVersion('claude', '2.0.65', undefined, { projectDir: projectAgents, cwd: path.dirname(projectAgents) });
 
-      // debug.md lands because setupCentralResources() planted it in the user
-      // layer (line 701, body 'Debug things' / 'Debug prompt with $ARGUMENTS').
-      // The synced body must be the user-layer one, not the project marker —
-      // that proves the project layer was skipped.
       const commandsDir = path.join(getVersionHomePath('claude', '2.0.65'), '.claude', 'commands');
       const content = fs.readFileSync(path.join(commandsDir, 'debug.md'), 'utf-8');
       expect(content).toContain('Debug things');
@@ -967,7 +888,6 @@ describe('syncResourcesToVersion', () => {
       expect(result.skills).toBe(true);
       expect(fs.existsSync(path.join(skillDir, 'SKILL.md'))).toBe(true);
       expect(fs.existsSync(path.join(skillDir, 'rules', 'rule1.md'))).toBe(true);
-      // Content should match
       const content = fs.readFileSync(path.join(skillDir, 'rules', 'rule1.md'), 'utf-8');
       expect(content).toBe('Rule 1 content');
     });
@@ -978,21 +898,17 @@ describe('syncResourcesToVersion', () => {
       const versionHome = getVersionHomePath('claude', '2.0.65');
       const skillDir = path.join(versionHome, '.claude', 'skills', 'mq');
       fs.mkdirSync(skillDir, { recursive: true });
-      // Write stale content
       fs.writeFileSync(path.join(skillDir, 'SKILL.md'), 'OLD CONTENT');
       fs.writeFileSync(path.join(skillDir, 'stale-file.txt'), 'should be removed');
 
       syncResourcesToVersion('claude', '2.0.65');
 
-      // Should have fresh content
       expect(fs.readFileSync(path.join(skillDir, 'SKILL.md'), 'utf-8')).toContain('MQ skill');
-      // Stale file should be gone
       expect(fs.existsSync(path.join(skillDir, 'stale-file.txt'))).toBe(false);
     });
 
     it('syncs only selected skills', () => {
       setupCentralResources();
-      // Add a second skill
       const skillsDir = path.join(AGENTS_DIR, 'skills');
       fs.mkdirSync(path.join(skillsDir, 'browser'), { recursive: true });
       fs.writeFileSync(path.join(skillsDir, 'browser', 'SKILL.md'), '# Browser');
@@ -1032,12 +948,9 @@ describe('syncResourcesToVersion', () => {
       const hookFile = path.join(versionHome, '.claude', 'hooks', 'pre-commit.sh');
       expect(result.hooks).toBe(true);
       expect(fs.existsSync(hookFile)).toBe(true);
-      // Check executable permission — Windows has no POSIX exec bit (statSync
-      // mode does not carry 0o111), so the copy preserving it is only
-      // observable on POSIX.
       if (!IS_WINDOWS) {
         const stat = fs.statSync(hookFile);
-        expect(stat.mode & 0o111).toBeGreaterThan(0); // has execute bits
+        expect(stat.mode & 0o111).toBeGreaterThan(0);
       }
     });
 
@@ -1059,10 +972,8 @@ describe('syncResourcesToVersion', () => {
       const result = syncResourcesToVersion('claude', '2.0.65');
 
       const versionHome = getVersionHomePath('claude', '2.0.65');
-      // Composer writes a single instruction file per agent.
       expect(result.memory).toContain('CLAUDE.md');
       const content = fs.readFileSync(path.join(versionHome, '.claude', 'CLAUDE.md'), 'utf-8');
-      // The default preset includes both subrules — both bodies should be inlined.
       expect(content).toContain('Agent Instructions');
       expect(content).toContain('Be kind');
     });
@@ -1074,7 +985,6 @@ describe('syncResourcesToVersion', () => {
 
       const versionHome = getVersionHomePath('claude', '2.0.65');
       const composed = fs.readFileSync(path.join(versionHome, '.claude', 'CLAUDE.md'), 'utf-8');
-      // No per-subrule files are written — only the single composed file.
       expect(fs.existsSync(path.join(versionHome, '.claude', 'core.md'))).toBe(false);
       expect(fs.existsSync(path.join(versionHome, '.claude', 'SOUL.md'))).toBe(false);
       expect(composed).toContain('Do good work');
@@ -1082,10 +992,6 @@ describe('syncResourcesToVersion', () => {
     });
 
     it('writes openclaw rules to workspace/AGENTS.md (rules cap drives sync, not commands cap)', () => {
-      // Previously gated on COMMANDS_CAPABLE_AGENTS, which silently skipped
-      // openclaw even though it ships its own memory file. The registry now
-      // dispatches off the `rules` capability — openclaw's `{ file:
-      // 'workspace/AGENTS.md' }` writes correctly.
       setupCentralResources();
       const versionHome = path.join(AGENTS_DIR, 'versions', 'openclaw', '1.0.0', 'home');
       fs.mkdirSync(versionHome, { recursive: true });
@@ -1114,31 +1020,25 @@ describe('syncResourcesToVersion', () => {
     it('does not remove existing commands when syncing new ones', () => {
       setupCentralResources();
 
-      // First sync: sync only debug
       syncResourcesToVersion('claude', '2.0.65', { commands: ['debug'] });
 
       const versionHome = getVersionHomePath('claude', '2.0.65');
       const commandsDir = path.join(versionHome, '.claude', 'commands');
       expect(fs.existsSync(path.join(commandsDir, 'debug.md'))).toBe(true);
 
-      // Second sync: sync only plan
       syncResourcesToVersion('claude', '2.0.65', { commands: ['plan'] });
 
-      // Both should exist
       expect(fs.existsSync(path.join(commandsDir, 'debug.md'))).toBe(true);
       expect(fs.existsSync(path.join(commandsDir, 'plan.md'))).toBe(true);
     });
 
     it('does not remove existing skills when syncing new ones', () => {
       setupCentralResources();
-      // Add second skill
       const skillsDir = path.join(AGENTS_DIR, 'skills');
       fs.mkdirSync(path.join(skillsDir, 'browser'), { recursive: true });
       fs.writeFileSync(path.join(skillsDir, 'browser', 'SKILL.md'), '# Browser');
 
-      // Sync mq first
       syncResourcesToVersion('claude', '2.0.65', { skills: ['mq'] });
-      // Sync browser second
       syncResourcesToVersion('claude', '2.0.65', { skills: ['browser'] });
 
       const versionHome = getVersionHomePath('claude', '2.0.65');
@@ -1216,13 +1116,6 @@ describe('installVersion', () => {
   });
 
   it.skipIf(IS_WINDOWS)('keeps a concrete self-updating install label while recording the current release', async () => {
-    // A self-updating agent (no VERSION token in the installer) can't pin. A
-    // network-free `true` installer stands in for the real curl/brew script.
-    // A stub `agy` (antigravity's actual cliCommand — NOT the agent id) on
-    // PATH lets the post-install version probe resolve for real (RUSH-1321's
-    // own follow-up fix: installVersion no longer tolerates an unresolvable
-    // probe by silently falling back to the literal string 'latest' — see
-    // relocateGrokBinaryToVersionHome).
     const original = AGENTS.antigravity.installScript;
     AGENTS.antigravity.installScript = 'true';
 
@@ -1255,9 +1148,6 @@ describe('installVersion', () => {
 });
 
 
-// ============================================================
-// getActuallySyncedResources
-// ============================================================
 
 describe('getActuallySyncedResources', () => {
   function setupVersionHome(agent: string, version: string) {
@@ -1282,12 +1172,10 @@ describe('getActuallySyncedResources', () => {
   });
 
   it('detects skills when content matches central source', () => {
-    // Setup central skill
     const centralSkillDir = path.join(AGENTS_DIR, 'skills', 'mq');
     fs.mkdirSync(centralSkillDir, { recursive: true });
     fs.writeFileSync(path.join(centralSkillDir, 'SKILL.md'), '# MQ Skill v2');
 
-    // Setup version skill with matching content
     const { agentDir } = setupVersionHome('claude', '2.0.65');
     const versionSkillDir = path.join(agentDir, 'skills', 'mq');
     fs.mkdirSync(versionSkillDir, { recursive: true });
@@ -1298,12 +1186,10 @@ describe('getActuallySyncedResources', () => {
   });
 
   it('marks skill as NOT synced when content differs', () => {
-    // Central has updated content
     const centralSkillDir = path.join(AGENTS_DIR, 'skills', 'mq');
     fs.mkdirSync(centralSkillDir, { recursive: true });
     fs.writeFileSync(path.join(centralSkillDir, 'SKILL.md'), '# MQ Skill v2 (updated)');
 
-    // Version has stale content
     const { agentDir } = setupVersionHome('claude', '2.0.65');
     const versionSkillDir = path.join(agentDir, 'skills', 'mq');
     fs.mkdirSync(versionSkillDir, { recursive: true });
@@ -1314,7 +1200,6 @@ describe('getActuallySyncedResources', () => {
   });
 
   it('considers skill synced if no central source exists (user-local)', () => {
-    // No central skill dir for "custom-skill"
     const { agentDir } = setupVersionHome('claude', '2.0.65');
     const versionSkillDir = path.join(agentDir, 'skills', 'custom-skill');
     fs.mkdirSync(versionSkillDir, { recursive: true });
@@ -1325,12 +1210,10 @@ describe('getActuallySyncedResources', () => {
   });
 
   it('detects hooks when content matches central source', () => {
-    // Central hook
     const centralHooksDir = path.join(AGENTS_DIR, 'hooks');
     fs.mkdirSync(centralHooksDir, { recursive: true });
     fs.writeFileSync(path.join(centralHooksDir, 'pre-commit.sh'), '#!/bin/bash\necho hook');
 
-    // Version hook with same content
     const { agentDir } = setupVersionHome('claude', '2.0.65');
     const hooksDir = path.join(agentDir, 'hooks');
     fs.mkdirSync(hooksDir, { recursive: true });
@@ -1355,18 +1238,15 @@ describe('getActuallySyncedResources', () => {
   });
 
   it('reports the active preset as synced when the instruction file exists', () => {
-    // Version home with composed CLAUDE.md present.
     const { agentDir } = setupVersionHome('claude', '2.0.65');
     fs.writeFileSync(path.join(agentDir, 'CLAUDE.md'), '# composed body');
 
     const synced = getActuallySyncedResources('claude', '2.0.65');
-    // Mock returns 'default' from getActiveRulesPreset.
     expect(synced.memory).toContain('default');
   });
 
   it('reports no synced rules when the instruction file is absent', () => {
     setupVersionHome('claude', '2.0.65');
-    // No CLAUDE.md written — composer hasn't run.
     const synced = getActuallySyncedResources('claude', '2.0.65');
     expect(synced.memory).toEqual([]);
   });
@@ -1388,26 +1268,19 @@ describe('getActuallySyncedResources', () => {
 });
 
 
-// ============================================================
-// End-to-end: sync then detect
-// ============================================================
 
 describe('sync then detect roundtrip', () => {
   it('synced commands are detected as synced', () => {
-    // Setup central commands
     const commandsDir = path.join(AGENTS_DIR, 'commands');
     fs.mkdirSync(commandsDir, { recursive: true });
     fs.writeFileSync(path.join(commandsDir, 'debug.md'), '# Debug');
     fs.writeFileSync(path.join(commandsDir, 'plan.md'), '# Plan');
 
-    // Create version home
     const versionHome = path.join(AGENTS_DIR, 'versions', 'claude', '2.0.65', 'home');
     fs.mkdirSync(versionHome, { recursive: true });
 
-    // Sync
     syncResourcesToVersion('claude', '2.0.65', { commands: 'all' });
 
-    // Detect
     const synced = getActuallySyncedResources('claude', '2.0.65');
     expect(synced.commands).toContain('debug');
     expect(synced.commands).toContain('plan');
@@ -1442,8 +1315,6 @@ describe('sync then detect roundtrip', () => {
 
     syncResourcesToVersion('claude', '2.0.65', { memory: 'all' });
 
-    // The composer wrote ~/.claude/CLAUDE.md — getActuallySyncedResources
-    // should detect a synced instruction file at that path.
     const synced = getActuallySyncedResources('claude', '2.0.65');
     expect(synced.memory.length).toBeGreaterThan(0);
   });
@@ -1464,7 +1335,6 @@ describe('sync then detect roundtrip', () => {
   });
 
   it('getNewResources returns empty after full sync', () => {
-    // Setup all resource types
     const commandsDir = path.join(AGENTS_DIR, 'commands');
     fs.mkdirSync(commandsDir, { recursive: true });
     fs.writeFileSync(path.join(commandsDir, 'debug.md'), '# Debug');
@@ -1484,10 +1354,8 @@ describe('sync then detect roundtrip', () => {
     const versionHome = path.join(AGENTS_DIR, 'versions', 'claude', '2.0.65', 'home');
     fs.mkdirSync(versionHome, { recursive: true });
 
-    // Full sync (no selection = sync all)
     syncResourcesToVersion('claude', '2.0.65');
 
-    // Check
     const available = getAvailableResources();
     const synced = getActuallySyncedResources('claude', '2.0.65');
     const newRes = getNewResources(available, synced);
@@ -1499,7 +1367,6 @@ describe('sync then detect roundtrip', () => {
   });
 
   it('getNewResources shows unsynced resource after central update', () => {
-    // Initial setup and sync
     const skillsDir = path.join(AGENTS_DIR, 'skills', 'mq');
     fs.mkdirSync(skillsDir, { recursive: true });
     fs.writeFileSync(path.join(skillsDir, 'SKILL.md'), '# MQ v1');
@@ -1509,10 +1376,8 @@ describe('sync then detect roundtrip', () => {
 
     syncResourcesToVersion('claude', '2.0.65', { skills: 'all' });
 
-    // Update central source
     fs.writeFileSync(path.join(skillsDir, 'SKILL.md'), '# MQ v2 (updated)');
 
-    // Now the skill should show as "new" (needs re-sync)
     const available = getAvailableResources();
     const synced = getActuallySyncedResources('claude', '2.0.65');
     const newRes = getNewResources(available, synced);

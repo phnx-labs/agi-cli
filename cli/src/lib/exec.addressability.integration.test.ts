@@ -1,15 +1,3 @@
-/**
- * Addressability failure must surface to the user with the command that restores
- * it — and it must not false-warn on IDE terminals whose session id is not known
- * until after spawn (RUSH-3066 follow-up / PHNX-3070).
- *
- * This test exercises the real launch path: it plants a fake Claude binary as a
- * managed version, calls execAgent to spawn it interactively, and verifies that
- * the resulting live session is honestly reported un-addressable when we force
- * the host to one with no precise rail (Ghostty). The lazy failure paths
- * (sessions inject, agents message) include a recovery hint that names both
- * `agents sessions resume <id>` and tmux wrapping.
- */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -29,10 +17,6 @@ describe.skipIf(process.platform === 'win32')('bare interactive run addressabili
     const binDir = path.join(home, '.agents', '.history', 'versions', 'claude', '9.9.9', 'node_modules', '.bin');
     fs.mkdirSync(binDir, { recursive: true });
     const fakeClaude = path.join(binDir, 'claude');
-    // A fake Claude process that the active scanner recognizes: set the process
-    // comm to 'claude' (Node's process.title uses prctl(PR_SET_NAME) on Linux),
-    // write our pid to a marker so the test can identify the launched process,
-    // then stay alive until killed.
     fs.writeFileSync(
       fakeClaude,
       '#!/usr/bin/env node\nprocess.title = \'claude\';\nconst fs = require(\'fs\');\nconst marker = process.env.AGENTS_ADDRESSABILITY_MARKER;\nif (marker) fs.writeFileSync(marker, String(process.pid));\nsetInterval(() => {}, 600000);\n',
@@ -43,7 +27,6 @@ describe.skipIf(process.platform === 'win32')('bare interactive run addressabili
     fs.mkdirSync(systemDir, { recursive: true });
     execFileSync('git', ['init', '-q'], { cwd: systemDir, stdio: 'ignore' });
 
-    // Force a fresh module load so state.ts captures the temp HOME.
     vi.resetModules();
   });
 
@@ -59,7 +42,6 @@ describe.skipIf(process.platform === 'win32')('bare interactive run addressabili
   it('records an active session whose un-addressable failure carries a recovery hint', async () => {
     const marker = path.join(home, 'spawned.marker');
 
-    // Dynamic import so these modules load with the temp HOME.
     const { execAgent } = await import('./exec.js');
     const { getActiveSessions } = await import('./session/active.js');
     const { readPidSessionEntry } = await import('./session/pid-registry.js');
@@ -74,7 +56,6 @@ describe.skipIf(process.platform === 'win32')('bare interactive run addressabili
       env: { AGENTS_ADDRESSABILITY_MARKER: marker },
     });
 
-    // Wait for the fake agent to start and write its pid.
     let spawnedPid: number | undefined;
     for (let i = 0; i < 60; i++) {
       if (fs.existsSync(marker)) {
@@ -87,15 +68,11 @@ describe.skipIf(process.platform === 'win32')('bare interactive run addressabili
     expect(spawnedPid).toBeGreaterThan(0);
     childPid = spawnedPid;
 
-    // The launch must have recorded an exact pid -> session mapping.
     const entry = readPidSessionEntry(spawnedPid!);
     expect(entry).toBeDefined();
     expect(entry!.sessionId).toBeDefined();
     const sessionId = entry!.sessionId!;
 
-    // The active scanner should also surface the launched row. If it does not
-    // (e.g. the test host has other claude processes that fold it), the pid
-    // registry entry is still the ground truth for the launched session.
     const sessions = await getActiveSessions();
     let found = sessions.find((s) => s.pid === spawnedPid);
     if (!found) {
@@ -104,9 +81,6 @@ describe.skipIf(process.platform === 'win32')('bare interactive run addressabili
     expect(found).toBeDefined();
     expect(found!.sessionId).toBe(sessionId);
 
-    // Force the host to Ghostty (no per-split addressing without tmux) and strip
-    // any provenance rails the test runner's actual terminal may have provided,
-    // so the assertion is deterministic.
     const ghosttySession = {
       ...found!,
       context: 'terminal' as const,
@@ -127,8 +101,6 @@ describe.skipIf(process.platform === 'win32')('bare interactive run addressabili
       expect(resolution.hint).toContain('tmux');
     }
 
-    // agents message should refuse a parked interactive session with no rail and
-    // surface the same recovery command.
     const route = resolveAnswerRoute({
       mailboxId: sessionId,
       answer: 'keep going',

@@ -4,14 +4,6 @@ import * as os from 'os';
 import * as path from 'path';
 import * as http from 'http';
 
-/**
- * The seam's contract, driven against a REAL HTTP server (no mocked fetch):
- * the poll-state decoding the CLI depends on, the single-token-source rule, and
- * the fail-loud behavior when nobody is signed in.
- *
- * The server here stands in for Phoenix ID and answers with the exact bodies
- * the real service returns — the shapes were verified live against it.
- */
 
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-identity-'));
 process.env.AGENTS_STATE_DIR = path.join(HOME, 'state');
@@ -19,7 +11,6 @@ process.env.HOME = HOME;
 
 let server: http.Server;
 let base: string;
-/** Queue of canned responses the next requests will receive, in order. */
 let queue: Array<{ status: number; body: unknown; onRequest?: () => void }> = [];
 let received: Array<{ method: string; url: string; auth: string | undefined; body: string }> = [];
 
@@ -79,7 +70,6 @@ describe('the identity seam', () => {
 
     await expect(listSpaces()).rejects.toThrowError(PhoenixApiError);
     await expect(listSpaces()).rejects.toThrow(/Not signed in/);
-    // Fail-loud: nothing was put on the wire.
     expect(received).toHaveLength(0);
   });
 
@@ -140,7 +130,6 @@ describe('the identity seam', () => {
   it('never reads another product\'s credential file', async () => {
     const { clearSession, readSession } = await identity();
     clearSession();
-    // A Rush session sitting in the home dir must not sign agents-cli in.
     fs.mkdirSync(path.join(HOME, '.rush'), { recursive: true });
     fs.writeFileSync(path.join(HOME, '.rush', 'user.yaml'), 'session:\n  access_token: rush-token\n');
     expect(readSession()).toBeNull();
@@ -170,11 +159,9 @@ describe('the identity seam', () => {
     await refreshSessionProfile({ userId: 'alice-1', email: 'alice@example.com', valid: true, avatar_url: 'https://cdn.id.example/new.png' });
     expect(received).toHaveLength(0);
     expect(readSession()?.avatarUrl).toBe('https://cdn.id.example/new.png');
-    // An http or blank value never replaces a stored https picture.
     await refreshSessionProfile({ userId: 'alice-1', email: 'alice@example.com', valid: true, avatar_url: 'http://insecure/x.png' });
     await refreshSessionProfile({ userId: 'alice-1', email: 'alice@example.com', valid: true });
     expect(readSession()?.avatarUrl).toBe('https://cdn.id.example/new.png');
-    // The display name rides the same write, and a blank one never erases it.
     await refreshSessionProfile({ userId: 'alice-1', email: 'alice@example.com', valid: true, name: 'Alice Liddell' });
     await refreshSessionProfile({ userId: 'alice-1', email: 'alice@example.com', valid: true, name: ' ' });
     expect(readSession()).toMatchObject({ name: 'Alice Liddell', avatarUrl: 'https://cdn.id.example/new.png' });
@@ -182,23 +169,19 @@ describe('the identity seam', () => {
 
   it('refreshSessionProfile is a no-op when signed out, already carrying an avatar, or the server exposes none', async () => {
     const { clearSession, writeSession, readSession, refreshSessionProfile } = await identity();
-    // Signed out: nothing on the wire.
     clearSession();
     await refreshSessionProfile();
     expect(received).toHaveLength(0);
 
-    // Already has an avatar: no /auth/me call at all.
     writeSession({ access_token: 'pid_alice', userId: 'alice-1', email: 'alice@example.com', avatarUrl: 'https://x/a.png' });
     await refreshSessionProfile();
     expect(received).toHaveLength(0);
 
-    // Server exposes no avatar_url: session unchanged, no crash.
     writeSession({ access_token: 'pid_alice', userId: 'alice-1', email: 'alice@example.com' });
     queue.push({ status: 200, body: { userId: 'alice-1', email: 'alice@example.com', valid: true } });
     await refreshSessionProfile();
     expect(readSession()).toEqual({ access_token: 'pid_alice', userId: 'alice-1', email: 'alice@example.com' });
 
-    // Server unreachable: failure swallowed, session intact.
     queue.push({ status: 500, body: { error: 'boom' } });
     await refreshSessionProfile();
     expect(readSession()).toEqual({ access_token: 'pid_alice', userId: 'alice-1', email: 'alice@example.com' });
@@ -208,20 +191,17 @@ describe('the identity seam', () => {
     const { writeSession, clearSession, readSession, refreshSessionProfile } = await identity();
     const alice = { userId: 'alice-1', email: 'alice@example.com', valid: true, name: 'Alice', avatar_url: 'https://cdn.id.example/a.png' };
 
-    // Re-login as someone else while /auth/me is in flight: Bob's session stays Bob's.
     writeSession({ access_token: 'pid_alice', userId: 'alice-1', email: 'alice@example.com' });
     const bob = { access_token: 'pid_bob', userId: 'bob-2', email: 'bob@example.com' };
     queue.push({ status: 200, body: alice, onRequest: () => writeSession(bob) });
     await refreshSessionProfile();
     expect(readSession()).toEqual(bob);
 
-    // Logout while in flight: nothing is resurrected.
     writeSession({ access_token: 'pid_alice', userId: 'alice-1', email: 'alice@example.com' });
     queue.push({ status: 200, body: alice, onRequest: () => clearSession() });
     await refreshSessionProfile();
     expect(readSession()).toBeNull();
 
-    // Same sign-in, other fields written meanwhile: the merge keeps them.
     writeSession({ access_token: 'pid_alice', userId: 'alice-1', email: 'alice@example.com' });
     queue.push({
       status: 200,
@@ -248,9 +228,6 @@ describe('the identity seam', () => {
 
     const after = fs.statSync(file);
     expect(after.mode & 0o777).toBe(0o600);
-    // A new inode means a temp file was renamed over the old one: an in-place
-    // truncate-and-write keeps the inode, and a crash mid-way would leave a
-    // truncated bearer behind. Rename is atomic, so a reader sees old or new.
     expect(after.ino).not.toBe(before);
     expect(fs.readdirSync(path.dirname(file)).filter((f) => f.includes('.tmp-'))).toEqual([]);
     expect(readSession()?.access_token).toBe('pid_new');

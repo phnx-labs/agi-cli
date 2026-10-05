@@ -1,13 +1,3 @@
-/**
- * Spawn-time native-account HOME resolution (PHNX-3940 T5).
- *
- * Order: existing slot → provisionable worker slot → recorded leftover `homes`
- * label → identity match across installed version homes → fail loud with the
- * T4 hint. Never a wrong home that looks like success. Identity matching is
- * the pre-T5 fallback (`resolveAccountVersion` over each installed home's own
- * credential file) so a native account whose backfill never wrote a `homes`
- * label still spawns from the home that actually holds its login.
- */
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -31,23 +21,9 @@ interface NativeSpawnHome {
   execHome: string;
   source: SpawnHomeSource;
   slot?: DeviceAccountSlot;
-  /** Installation label when `source` is `legacy-home`. */
   label?: string;
 }
 
-/**
- * The env a DURABLE slot injects at spawn (PHNX-3940 T5/T6). A worker's slot
- * for an api-key harness (codex/grok/cursor/opencode/droid) holds no file — the
- * daemon pushed the account's worker API key into the reserved
- * `__<harness>__` store and `provisionWorkerSlot` recorded the slot as
- * `durable`; the key rides the harness's own env var (`CURSOR_API_KEY`, …)
- * on every launch. Anything else — a native login in the slot on a headed
- * device, a claude durable slot (its setup-token is a `.oauth_token` file the
- * adapter reads), a harness with no api-key worker kind, a headed device — injects
- * nothing.
- * Without this, `agents run cursor#gmail` on a worker reached Cursor with an
- * empty env and got `Authentication required … set CURSOR_API_KEY`.
- */
 export function durableSlotEnv(
   agent: AgentId,
   account: { id: string },
@@ -56,10 +32,6 @@ export function durableSlotEnv(
   deps: { selfRole?: () => ReturnType<typeof selfConfiguredDeviceRole> } = {},
 ): Record<string, string> {
   if (resolved.slot?.authMode !== 'durable') return {};
-  // A headed device authenticates from its own native login (invariant 7). A
-  // `durable` record can outlive a role change (`agents devices role … personal`
-  // never rewrites slots), so the gate is the box's CURRENT role, the same
-  // predicate `isProvisionableWorker` applies — never a record on disk.
   if (isHeadedDeviceRole((deps.selfRole ?? selfConfiguredDeviceRole)())) return {};
   const envName = workerApiKeyEnv(agent);
   if (!envName) return {};
@@ -97,7 +69,6 @@ export function adoptedSymlinkMismatchError(agent: AgentId, name: string, execHo
     + `Switch with: agents accounts default ${agent} ${name}`;
 }
 
-/** The adopted `~/.<config>` symlink's resolved target, or null when missing / not a symlink. */
 function adoptedConfigTarget(agent: AgentId): string | null {
   const configPath = getAgentConfigPath(agent);
   try {
@@ -117,11 +88,6 @@ export function adoptedConfigPointsAtHome(agent: AgentId, home: string): boolean
   return current === path.resolve(home, configDirName);
 }
 
-/**
- * For a symlink-adopted harness, point `~/.<config>` at this account's slot
- * or throw. Does not write the harness default — the caller records that only
- * after this succeeds.
- */
 export function ensureAdoptedDefaultRepoint(
   agent: AgentId,
   account: { id: string; name: string; agent: AgentId },
@@ -154,7 +120,6 @@ function isProvisionableWorker(account: NativeAccount): boolean {
   if (account.workerCredential) {
     return readReservedCredential(account.workerCredential.bundle, account.workerCredential.key) != null;
   }
-  // Pre-T1 Claude rows key the legacy `auth` bundle by email.
   if (account.agent === 'claude' && account.identityLabel) {
     return readReservedCredential(AUTH_BUNDLE, claudeAccountTokenKey(account.identityLabel)) != null;
   }
@@ -170,8 +135,6 @@ async function matchLegacyIdentityHome(
   const needles = [row?.identityKey, row?.identityLabel]
     .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
     .map((value) => value.trim().toLowerCase());
-  // For accounts that predate the native registry, the row is missing but the
-  // account name carries the email the caller selected with `#email`.
   if (needles.length === 0 && account.name.includes('@')) {
     needles.push(account.name.trim().toLowerCase());
   }
@@ -197,11 +160,6 @@ async function matchLegacyIdentityHome(
   return null;
 }
 
-/**
- * Resolve the spawn HOME for a native account on THIS device.
- * Existing slot, then a provisionable worker slot, then a leftover `homes`
- * label, then identity match across installed homes, then fail loud.
- */
 export async function resolveNativeSpawnHome(
   agent: AgentId,
   account: { id: string; name: string; agent: AgentId },

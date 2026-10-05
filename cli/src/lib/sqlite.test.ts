@@ -1,12 +1,3 @@
-/**
- * The session index writes its rows with a named-parameter bind
- * (`upsertSessionStmt` in session/db.ts). bun:sqlite only matches such an
- * object when its keys carry the SQL sigil unless the DB is opened with
- * `strict: true` — without it every parameter stays NULL and `sessions.short_id`
- * (NOT NULL) rejects the row, so no session ever reaches the index when the CLI
- * runs as the standalone Bun binary. The suite itself runs under Node, so the
- * bun half has to be exercised in a real `bun` subprocess.
- */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'child_process';
@@ -49,8 +40,6 @@ describe('sqlite shim named-parameter binds', () => {
     `;
     execFileSync('bun', ['-e', script], { cwd: process.cwd(), stdio: ['ignore', 'pipe', 'inherit'] });
 
-    // Read back from this (Node) process: the row must exist with real values,
-    // not the all-NULL row a silent bind failure would have produced.
     const db = new Database(dbPath);
     expect(db.prepare('SELECT id, short_id, count FROM t').all()).toEqual([
       { id: 'sess-1', short_id: 'sess', count: 7 },
@@ -58,17 +47,11 @@ describe('sqlite shim named-parameter binds', () => {
     db.close();
   });
 
-  // The shim-level tests above pin the binding; this one pins the bug that
-  // motivated the fix — `agents sessions` writing its index (upsertSessionsBatch
-  // in session/db.ts, the codebase's only named bind) from the runtime the
-  // shipped standalone binary embeds.
   it('indexes a scanned session when `agents sessions` runs under bun', () => {
     const home = path.join(dir, 'home');
     const sessionId = 'aaaaaaaa-1111-2222-3333-444444444444';
     const projectDir = path.join(home, '.claude', 'projects', '-tmp-demo');
     fs.mkdirSync(projectDir, { recursive: true });
-    // ensureInitialized() gates every non-setup command on the system repo being
-    // a git checkout — seed it so `sessions` runs instead of erroring.
     fs.mkdirSync(path.join(home, '.agents', '.system', '.git'), { recursive: true });
     fs.writeFileSync(path.join(home, '.agents', 'agents.yaml'), 'agents: {}\n');
     fs.writeFileSync(path.join(projectDir, `${sessionId}.jsonl`), [
@@ -86,17 +69,11 @@ describe('sqlite shim named-parameter binds', () => {
 
     const out = execFileSync('bun', [path.resolve(process.cwd(), 'src/index.ts'), 'sessions', '--all', '--local', '--json'], {
       cwd: process.cwd(),
-      // USERPROFILE too: discover.ts roots its scan at os.homedir(), which
-      // ignores HOME on Windows. With only HOME set, state.ts writes the index
-      // under the temp home while the transcript scan reads the runner's real
-      // profile, so the session is never found.
       env: { ...process.env, HOME: home, USERPROFILE: home, AGENTS_REAL_HOME: home },
       stdio: ['ignore', 'pipe', 'inherit'],
     }).toString('utf-8');
     expect(JSON.parse(out).map((s: { id: string }) => s.id)).toContain(sessionId);
 
-    // The listing can be served from the scan itself, so assert the row actually
-    // landed in the index — that is what the failed bind used to swallow.
     const db = new Database(path.join(home, '.agents', '.history', 'sessions', 'sessions.db'));
     expect(db.prepare('SELECT id, short_id FROM sessions').all()).toEqual([
       { id: sessionId, short_id: 'aaaaaaaa' },

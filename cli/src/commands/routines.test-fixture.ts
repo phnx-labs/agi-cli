@@ -7,39 +7,19 @@ import * as yaml from 'yaml';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { createRequire } from 'module';
 
-/**
- * Shared fixture for the routines.*.test.ts suite slices (RUSH-2819).
- *
- * routines.test.ts was one 2,249-line file measured at ~194s of test time —
- * one of the slowest files in CI, serializing an entire fork while every
- * other selected file finished. The suite is split into topical slices so
- * vitest's per-file fork parallelism can spread the subprocess-heavy tests
- * across workers; the helpers each slice shares live here.
- *
- * Every test spawns the real CLI (`node --import tsx src/index.ts routines ...`)
- * against an isolated mkdtemp HOME — no live ~/.agents state, no mocks, no
- * imported writeJob/readJob. Modeled on `routines-webhook.test.ts`.
- */
 
 export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const require = createRequire(import.meta.url);
-// `--import` takes a module specifier, not a path: a bare Windows path like
-// `D:\a\...\tsx\dist\loader.mjs` is parsed as a URL with protocol 'd:' and the
-// child dies with ERR_UNSUPPORTED_ESM_URL_SCHEME before running the CLI. Same
-// pattern as sessions.test.ts:21.
 export const TSX_IMPORT = pathToFileURL(require.resolve('tsx')).href;
 export const CLI_ENTRYPOINT = path.join(REPO_ROOT, 'src', 'index.ts');
 
-// win32: subprocess CLI + process-group signals / path spawn assumptions (RUSH-2215).
 export const describeRoutines: typeof describe.skip = process.platform === 'win32' ? describe.skip : describe;
 
-/** Provision an isolated HOME with agents.yaml, .system/.git, and optional routines + device registry. */
 export function makeHome(opts: {
   jobs?: Record<string, unknown>[];
   projectJobs?: Record<string, unknown>[];
   registry?: Record<string, unknown>;
   deviceRoutines?: Record<string, string[]>;
-  /** Full mkdtemp prefix override — the daemon harness scopes its leak sweep by it. */
   tmpPrefix?: string;
 } = {}): string {
   const home = fs.mkdtempSync(opts.tmpPrefix ?? path.join(os.tmpdir(), 'agents-routines-test-'));
@@ -80,7 +60,6 @@ export function makeHome(opts: {
   return home;
 }
 
-/** Run `agents routines <args>` against an isolated HOME. */
 export function run(
   home: string,
   args: string[],
@@ -93,9 +72,6 @@ export function run(
       ...process.env,
       HOME: home,
       USERPROFILE: home,
-      // Point the device registry at this test's home (RUSH-2042): getDevicesDir()
-      // reads AGENTS_DEVICES_DIR, and the parent vitest fork exports its own via
-      // setup.ts — override it so the child reads the registry makeHome() wrote.
       AGENTS_DEVICES_DIR: path.join(home, '.agents', '.history', 'devices'),
       AGENTS_SKIP_MIGRATION: '1',
       ...extraEnv,
@@ -138,22 +114,6 @@ export function isProcessAlive(pid: number): boolean {
   }
 }
 
-/**
- * Per-file isolated-daemon harness (RUSH-2367, RUSH-2819). Each slice that
- * spawns a real `__daemon-run` process against an isolated HOME calls this
- * once at module scope and registers its own leak detector — the tracked pid
- * set MUST be private to the file that spawned it, since vitest's per-file
- * fork isolation means the leak sweep only ever needs to answer for what THIS
- * file started.
- *
- * `fileSlug` MUST be unique per test file: it names the mkdtemp prefix
- * `makeDaemonHome` uses, and the CI leak sweep matches ONLY that prefix.
- * The suite slices run in parallel forks, so a sweep over the shared
- * `agents-routines-test-` prefix would catch a sibling file's still-running
- * daemon and kill it mid-test — exactly what failed the first CI run of the
- * RUSH-2819 split (run 32552954164: add's sweep killed a live daemon whose
- * HOME belonged to a concurrently running slice).
- */
 export function createDaemonHarness(fileSlug: string): {
   startIsolatedDaemon: (home: string) => { child: ReturnType<typeof spawn>; pidPromise: Promise<number | null> };
   stopIsolatedDaemon: (child: ReturnType<typeof spawn>) => Promise<void>;
@@ -161,18 +121,8 @@ export function createDaemonHarness(fileSlug: string): {
   makeDaemonHome: (opts?: Omit<Parameters<typeof makeHome>[0], 'tmpPrefix'>) => string;
 } {
   const homePrefix = path.join(os.tmpdir(), `agents-routines-${fileSlug}-`);
-  /**
-   * Every daemon pid spawned via `startIsolatedDaemon` in this file, live for as
-   * long as `stopIsolatedDaemon` has not yet reaped it. Backstops the per-test
-   * try/finally: this file's `afterAll` (registered via `registerLeakDetector`)
-   * asserts the set is empty and force-kills + fails the suite on anything left
-   * in it — a leaked real daemon process is exactly the RUSH-2367 bug (three
-   * left running for up to 3.5 days on a fleet box, invisible to `agents daemon`
-   * because each served its own fixture HOME/registry).
-   */
   const trackedDaemonPids = new Set<number>();
 
-  /** Start the real scheduler foreground process against an isolated HOME. */
   function startIsolatedDaemon(home: string): { child: ReturnType<typeof spawn>; pidPromise: Promise<number | null> } {
     const child = spawn('node', ['--import', 'tsx', 'src/index.ts', '__daemon-run'], {
       cwd: REPO_ROOT,
@@ -180,16 +130,8 @@ export function createDaemonHarness(fileSlug: string): {
         ...process.env,
         HOME: home,
         USERPROFILE: home,
-        // Without this override the daemon inherits the parent vitest process's real
-        // AGENTS_HISTORY_DIR (pointing at ~/.agents/.history). The daemon's SIGTERM
-        // sweep then reads live session records from the production history directory
-        // and kills real tmux-wrapped processes every five-minute tick (RUSH-2545).
         AGENTS_HISTORY_DIR: path.join(home, '.agents', '.history'),
         AGENTS_SKIP_MIGRATION: '1',
-        // PHNX-2545 test-home tripwire: name the isolated home this daemon must
-        // resolve its state dir under. If the HOME override above ever failed to
-        // reach the child, runDaemon()'s assertTestDaemonHome() refuses to boot
-        // instead of ticking its scheduler against the operator's real host.
         AGENTS_DAEMON_TEST_HOME: home,
       },
       detached: true,
@@ -216,7 +158,6 @@ export function createDaemonHarness(fileSlug: string): {
     return { child, pidPromise };
   }
 
-  /** Terminate a daemon process started by startIsolatedDaemon and wait for it to exit. */
   async function stopIsolatedDaemon(child: ReturnType<typeof spawn>): Promise<void> {
     const pid = child.pid;
     try {
@@ -241,7 +182,6 @@ export function createDaemonHarness(fileSlug: string): {
             child.kill(sig);
           }
         } catch {
-          // already gone
         }
       };
 
@@ -254,39 +194,12 @@ export function createDaemonHarness(fileSlug: string): {
     }
   }
 
-  /**
-   * Suite-level leak detector (RUSH-2367). Every per-test try/finally above
-   * already reaps its own daemon on success, failure, or a thrown assertion —
-   * but nothing in JS runs if the whole vitest worker is killed externally
-   * before reaching `finally`, which is what actually produced three real
-   * orphaned daemons found alive on a fleet box for up to 3.5 days: their
-   * fixture HOME dirs still existed (the `finally`'s `fs.rmSync` never ran
-   * either), so no amount of in-test cleanup logic would have caught it. This
-   * is the second line of defense, not a substitute for the self-terminate
-   * guard in the daemon itself (`runDaemon`'s state-dir check).
-   *
-   * Two checks, after every test in this file has run:
-   *  1. Always: nothing THIS run spawned via `startIsolatedDaemon` may still be
-   *     alive — `trackedDaemonPids` is only ever non-empty here if a bug (not
-   *     an external kill) let one slip past its own test's `finally`.
-   *  2. CI only: sweep for any OTHER live `__daemon-run` process whose HOME
-   *     sits under THIS FILE's unique `agents-routines-<fileSlug>-` prefix —
-   *     a leak from a previous interrupted run of this same file. Scoped to
-   *     the per-file prefix because sibling slices run in parallel forks and
-   *     legitimately have live daemons under their own prefixes. POSIX-only
-   *     (`/proc`); best-effort and skipped where `/proc` is unavailable
-   *     (macOS CI legs).
-   *
-   * Either check force-kills what it finds and fails the suite — a silent
-   * "still running, we'll get it next time" is exactly how the original three
-   * accumulated.
-   */
   function registerLeakDetector(): void {
     afterAll(() => {
       const leaks: string[] = [];
       const killDaemon = (pid: number): void => {
-        try { process.kill(-pid, 'SIGKILL'); } catch { /* already gone, or never its own group leader */ }
-        try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
+        try { process.kill(-pid, 'SIGKILL'); } catch {  }
+        try { process.kill(pid, 'SIGKILL'); } catch {  }
       };
 
       for (const pid of trackedDaemonPids) {
@@ -302,7 +215,7 @@ export function createDaemonHarness(fileSlug: string): {
         let psOut = '';
         try {
           psOut = execFileSync('ps', ['-eo', 'pid=,args='], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
-        } catch { /* ps unavailable — nothing to sweep */ }
+        } catch {  }
         for (const line of psOut.split('\n')) {
           const m = line.trim().match(/^(\d+)\s+(.*)$/);
           if (!m) continue;
@@ -315,7 +228,7 @@ export function createDaemonHarness(fileSlug: string): {
             const environ = fs.readFileSync(`/proc/${pid}/environ`, 'utf-8');
             const homeVar = environ.split('\0').find((v) => v.startsWith('HOME='));
             home = homeVar ? homeVar.slice(5) : null;
-          } catch { continue; } // /proc unreadable (macOS, permissions) — best-effort only
+          } catch { continue; }
           if (!home || !home.startsWith(prefix)) continue;
           leaks.push(`pid ${pid} HOME=${home} (leaked from a previous interrupted run of this file)`);
           killDaemon(pid);
@@ -331,7 +244,6 @@ export function createDaemonHarness(fileSlug: string): {
     });
   }
 
-  /** makeHome under this file's unique prefix — REQUIRED for any home a daemon runs against. */
   function makeDaemonHome(opts: Omit<Parameters<typeof makeHome>[0], 'tmpPrefix'> = {}): string {
     return makeHome({ ...opts, tmpPrefix: homePrefix });
   }
@@ -344,11 +256,7 @@ export const baseJob = {
   schedule: '0 3 * * *',
   agent: 'claude',
   prompt: 'noop',
-  // Agent routines now need an execution anchor to activate (RUSH-2290); home
-  // is a valid one and keeps these device/eligibility fixtures ready.
   cwd: '~',
-  // Legacy fixture state: tests that specifically cover the new manifest model
-  // materialize a device document below.
   enabled: true,
 };
 
@@ -370,18 +278,13 @@ export function writeDeviceRoutines(home: string, device: string, routines: stri
   fs.writeFileSync(path.join(dir, 'agents.yaml'), yaml.stringify({ routines }));
 }
 
-// ---------------------------------------------------------------------------
-// Project-tagging tests (--project / --all-projects / list --json projectGroup)
-// ---------------------------------------------------------------------------
 
-/** Write a minimal project YAML so listProjectDefs() sees it. */
 export function writeProject(home: string, name: string): void {
   const dir = path.join(home, '.agents', 'projects');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, `${name}.yaml`), yaml.stringify({ name }));
 }
 
-/** Env that points the projects dir at the isolated home. */
 export function projectsEnv(home: string): Record<string, string> {
   return { AGENTS_PROJECTS_DIR: path.join(home, '.agents', 'projects') };
 }
