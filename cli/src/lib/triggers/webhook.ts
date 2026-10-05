@@ -84,6 +84,7 @@ export function linearTeamKey(payload: Record<string, unknown>): string | null {
 
 export function linearLabels(payload: Record<string, unknown>): string[] {
   const data = payload.data as Record<string, unknown> | undefined;
+  // Linear webhook labels are a flat array, unlike the GraphQL connection shape.
   const labels = Array.isArray(data?.labels) ? (data?.labels as unknown[]) : [];
   return labels
     .map((n) => (n as { name?: unknown }).name)
@@ -151,6 +152,7 @@ function linearTriggerMatches(trigger: LinearJobTrigger, webhook: IncomingWebhoo
     if (!linearLabels(webhook.payload).some((name) => name.toLowerCase() === expected)) return false;
   }
   if (trigger.stateTo) {
+    // Require updatedFrom so later edits cannot retrigger an already-entered state.
     const data = webhook.payload.data as Record<string, unknown> | undefined;
     const current = (data?.state as Record<string, unknown> | undefined)?.name;
     if (current !== trigger.stateTo) return false;
@@ -282,6 +284,7 @@ export function verifySlackSignature(
   if (Math.abs(Math.floor(now / 1000) - Number(ts)) > toleranceSec) return false;
   const received = header(headers, 'x-slack-signature');
   const signature = received?.startsWith('v0=') ? received.slice('v0='.length) : undefined;
+  // Slack signs raw bytes; decoding first changes the HMAC for non-ASCII payloads.
   const base = Buffer.concat([Buffer.from(`v0:${ts}:`, 'utf-8'), rawBody]);
   const expected = crypto.createHmac('sha256', secret).update(base).digest('hex');
   return timingSafeHexEqual(signature, expected);
@@ -560,6 +563,7 @@ export function startWebhookServer(options: WebhookServerOptions): http.Server {
 
       const matchedJobs = matchJobsToWebhook(fireOptions.jobs ?? listJobs(), webhook);
       const matchedHandlers = listHandlers().filter((handler) => handlerMatchesWebhook(handler, webhook));
+      // Report accepted matches before slow dispatch; delivery callbacks describe final settlement.
       options.onMatch?.(webhook, matchedJobs.map((job) => job.name), matchedHandlers.map((handler) => handler.name));
 
       const firedJobs = await fireWebhookJobs(webhook, {
@@ -582,6 +586,7 @@ export function startWebhookServer(options: WebhookServerOptions): http.Server {
           emit('webhook.matched', { source, event: webhookEvent, deliveryId: id, handlerName: handler.name });
           try {
             const result = await executeHandler(handler, webhook);
+            // Per-job completion survives a partial delivery so retries skip successful work only.
             deliveryStore.markJob(id, handler.name);
             firedHandlers.push(result);
           } catch (err) {
@@ -590,6 +595,7 @@ export function startWebhookServer(options: WebhookServerOptions): http.Server {
         }),
       );
 
+      // The delivery becomes complete only after every dispatch settles; failures use the post-ack path.
       deliveryStore.mark(id);
       for (const failure of handlerErrors) {
         emit('webhook.failed', { source, event: webhookEvent, deliveryId: id, handlerName: failure.handlerName, error: failure.error });
@@ -626,6 +632,7 @@ export function startWebhookServer(options: WebhookServerOptions): http.Server {
       }
 
       const ip = req.socket.remoteAddress ?? 'unknown';
+      // Shed invalid traffic and oversized declarations before allocating or authenticating a body.
       if (!ipRateLimiter.take(ip)) {
         emit('webhook.rejected', { source, reason: 'ip rate limit exceeded' });
         res.writeHead(429, { 'content-type': 'application/json' });
@@ -740,6 +747,7 @@ export function startWebhookServer(options: WebhookServerOptions): http.Server {
     })();
   });
 
+  // Bound descriptors and aggregate request-buffer memory at the public ingress.
   server.maxConnections = options.maxConnections ?? 256;
 
   server.listen(options.port ?? 0, options.host ?? '127.0.0.1');
