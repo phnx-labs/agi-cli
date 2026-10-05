@@ -306,3 +306,8 @@ testless:
   - cli/CLAUDE.md
   - cli/GEMINI.md
   - scripts/ci-runner/supervise.sh
+  # Same retained CI-box scripts as supervise.sh. A comment-only edit has no
+  # companion test, and the runner is not on the pull-request gate.
+  - scripts/ci-runner/cli.ts
+  - scripts/ci-runner/janitor.sh
+  - scripts/ci-runner/src/types.ts
