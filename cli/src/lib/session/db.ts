@@ -10,7 +10,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import Database from '../sqlite.js';
-import type { SessionAgentId, SessionCheckpoint, SessionChecklistItem, SessionEvent, SessionFiles, SessionMeta, SessionRequest, SessionRunMode, SessionTimeline, SummaryState } from '@phnx-labs/sessions-cli/reader';
+import type { SessionAgentId, SessionCheckpoint, SessionChecklistItem, SessionEvent, SessionFiles, SessionGlance, SessionMeta, SessionRequest, SessionRunMode, SessionSubagent, SessionTimeline, SummaryState } from '@phnx-labs/sessions-cli/reader';
+import { claudeSubagentFiles, resolvedSubAgentCount } from './glance-files.js';
 import { parseSession, sessionFilePathContainer } from '@phnx-labs/sessions-cli/reader';
 import { extractRecentDirectoriesTouched, extractTodoProgressFromEvents } from '@phnx-labs/sessions-cli/reader';
 import { getSessionsDir, getSessionsDbPath } from '../state.js';
@@ -2585,14 +2586,16 @@ function writeResourceUsage(sessionId: string, events: SessionEvent[], cwd: stri
 function fanOutCounts(
   events: SessionEvent[],
   agent: SessionAgentId,
+  sessionFile?: string,
 ): { subAgentCount: number; backgroundShellCount: number | undefined } {
   let subAgentCount = 0;
   for (const e of events) {
     if (e.type !== 'tool_use' || e._local) continue;
     if (isSubAgentTool(e.tool || '', e.command || '')) subAgentCount++;
   }
+  const children = agent === 'claude' && sessionFile ? claudeSubagentFiles(sessionFile) : undefined;
   return {
-    subAgentCount,
+    subAgentCount: resolvedSubAgentCount(children, subAgentCount),
     backgroundShellCount: harnessTracksBackgroundShells(agent)
       ? extractBackgroundShells(events).length
       : undefined,
@@ -2607,7 +2610,7 @@ function enrichMetaFromEvents(meta: SessionMeta, events: SessionEvent[]): Sessio
     lastUserMessage: meta.lastUserMessage ?? lastUserMessageFromEvents(events),
     todos: extractTodoProgressFromEvents(events),
     recentDirectoriesTouched: extractRecentDirectoriesTouched(events, meta.cwd),
-    ...fanOutCounts(events, meta.agent),
+    ...fanOutCounts(events, meta.agent, meta.filePath),
   };
 }
 
@@ -4398,7 +4401,8 @@ export function writeSessionSummary(entry: {
  * bounded projection a row merges, plus the request and files derived in the
  * same fold.
  */
-export interface SessionTimelineProjection {
+export interface SessionTimelineProjection extends SessionGlance {
+  subagents?: SessionSubagent[];
   timeline: SessionTimeline;
   request?: SessionRequest;
   files?: SessionFiles;

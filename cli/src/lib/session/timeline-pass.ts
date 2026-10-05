@@ -29,12 +29,14 @@ import {
   compactTimelineState,
   emptyTimelineState,
   foldTimeline,
+  projectGlance,
   projectSessionFiles,
   projectTimeline,
   unavailableTimeline,
   TIMELINE_EXTRACTOR_VERSION,
   type TimelineState,
 } from '@phnx-labs/sessions-cli/reader';
+import { materializeInlineImages, readSessionSubagents } from './glance-files.js';
 
 /** Sessions folded per tick. The tick's own deadline is 30 s; this stays well inside it. */
 const TIMELINE_PASS_MAX_PER_TICK = 8;
@@ -152,7 +154,7 @@ function readCompleteLines(
  */
 function eventsForChunk(agent: SessionAgentId, text: string): SessionEvent[] {
   if (agent === 'claude') {
-    return parseClaudeContent(text, { includeInterrupts: true, includeFileHistory: true });
+    return parseClaudeContent(text, { includeInterrupts: true, includeFileHistory: true, includeInlineImages: true });
   }
   return parseCodexItemsContent(text);
 }
@@ -169,7 +171,7 @@ export function parseTimelineEvents(filePath: string, agent: SessionAgentId): Se
   if (isResumableTimelineSource(agent)) {
     return eventsForChunk(agent, fs.readFileSync(filePath, 'utf8'));
   }
-  return parseSession(filePath, agent, { includeInterrupts: true, includeFileHistory: true });
+  return parseSession(filePath, agent, { includeInterrupts: true, includeFileHistory: true, includeInlineImages: true });
 }
 
 /** One session's fold: the entry to cache, and what it actually cost to produce. */
@@ -289,6 +291,7 @@ function foldSessionTimeline(
     bytesRead = fileSize;
   }
 
+  if (agent === 'claude' && session.sessionId) materializeInlineImages(events, session.sessionId);
   const folded = compactTimelineState(
     foldTimeline(events, state, {
       attachments: session.attachments,
@@ -297,8 +300,15 @@ function foldSessionTimeline(
     }),
   );
   const files = projectSessionFiles(folded);
+  const glance = projectGlance(folded.glance);
+  if (offset < fileSize) delete glance.activityHistogram;
+  const subagents = agent === 'claude'
+    ? readSessionSubagents(filePath, session.pidAlive === true, folded.glance.failedAgentCalls, nowMs)
+    : undefined;
   return {
     entry: {
+      ...glance,
+      ...(subagents?.length ? { subagents } : {}),
       timeline: projectTimeline(folded, session.activity),
       ...(folded.request ? { request: folded.request } : {}),
       ...(files ? { files } : {}),
@@ -370,7 +380,7 @@ export function runTimelinePassSync(
 
     const prior = readSessionTimelineEntry(id);
     // Cached against these exact bytes: nothing was appended, nothing to fold.
-    if (prior && prior.state.offset === stamp.fileSize) {
+    if (prior && prior.state.version === TIMELINE_EXTRACTOR_VERSION && prior.state.offset === stamp.fileSize) {
       result.reused++;
       continue;
     }

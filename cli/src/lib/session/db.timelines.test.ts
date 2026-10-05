@@ -40,6 +40,7 @@ function entry() {
     timeline: projectTimeline(state, 'working'),
     request: state.request!,
     ...(files ? { files } : {}),
+    model: 'claude-opus-5-5',
     state,
   };
 }
@@ -111,6 +112,7 @@ describe('the folded timeline reaches every row surface (PHNX-3939)', () => {
     mergeSessionTimeline(row);
     expect(row.request?.headline).toBe('Ship the timeline card.');
     expect(row.timeline?.steps.length).toBeGreaterThan(0);
+    expect(row.model).toBe('claude-opus-5-5');
     expect(row.files?.changes[0].path).toBe('/repo/src/timeline.ts');
   });
 

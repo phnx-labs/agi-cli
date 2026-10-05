@@ -1045,6 +1045,25 @@ SSH access (§7); rendering sessions that no harness produced.
   because the harness keeps no ledger at all. A `created` claim, once made,
   survives a later `modified` on the same path
   (`sessions-cli/src/lib/session/timeline.ts` `projectSessionFiles`).
+- **SES-57 (MUST, PHNX-4218).** A watch row MUST carry the glance projection from
+  `@phnx-labs/sessions-cli` `projectGlance`, folded in the daemon timeline pass,
+  so a client can show what the agent needs, where it works, and what it produced
+  without reading a transcript. `model` is the latest reply's model id, and
+  Claude's `<synthetic>` marker is not a model. `failures` is the newest 20
+  failed or policy-blocked calls. `activityHistogram` is 48 buckets across the
+  folded span; a partial fold (`offset < fileSize`) MUST omit it. `userTurns` is
+  the user's own turns. `subagents` is this session's own
+  `subagents/agent-*.jsonl` children. `subAgentCount` MUST use that file count
+  when the directory contains transcripts, and MUST keep the tool-call count when
+  the directory is missing or empty. Pasted images are written once under
+  `~/.agents/.cache/attachments/<sessionId>/` and the inline bytes MUST NOT
+  remain on the folded event. Artifact sidecars join `artifacts` by session id,
+  and a `plans` bucket sets `planFile`. Older clients ignore the new fields. A
+  heavy filter (agent, tools, reasoning) is not on the row: one explicit
+  `agents sessions <id> --include … --json` fetches it, never a selection change
+  or a timer (`lib/session/timeline-pass.ts`, `lib/session/glance-files.ts`;
+  `lib/session/glance-files.test.ts`, `lib/session/timeline-pass.test.ts`,
+  `lib/session/db.timelines.test.ts`).
 - **SES-43 (MUST).** The default stream MUST hold one long-lived local subscription
   and one long-lived SSH subscription per dialable compute device. `--local` MUST
   suppress peer subscriptions. Neither path may poll transcript history or invoke
