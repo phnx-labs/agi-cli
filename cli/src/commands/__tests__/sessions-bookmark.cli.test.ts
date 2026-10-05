@@ -7,8 +7,6 @@ import { spawnSync } from 'child_process';
 
 const repoRoot = process.cwd();
 const cliEntry = path.join(repoRoot, 'src', 'index.ts');
-// Run tsx via `node node_modules/tsx/dist/cli.mjs`, not the .bin/tsx shim: on
-// Windows the shim is tsx.cmd, which spawnSync cannot exec without a shell.
 const tsxBin = path.join(repoRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs');
 
 let home: string;
@@ -29,7 +27,6 @@ function run(args: string[]) {
 
 beforeAll(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'bookmark-cli-' + crypto.randomBytes(4).toString('hex') + '-'));
-  // ensureInitialized() looks for ~/.agents/.system/.git as the setup marker.
   fs.mkdirSync(path.join(home, '.agents', '.system', '.git'), { recursive: true });
 });
 
@@ -37,16 +34,6 @@ afterAll(() => {
   fs.rmSync(home, { recursive: true, force: true });
 });
 
-/**
- * Drives the REAL CLI, because the bug this pins lives in argument parsing and
- * is invisible to a direct call of the action.
- *
- * `agents sessions` declares `--json` AND takes a positional `[query]`, so
- * commander keeps matching parent-known options past the subcommand name and
- * binds `--json` to the PARENT. `sessions bookmark --list --json` therefore
- * printed the human listing while the subcommand's own `options.json` sat
- * undefined — a machine caller silently got prose. Only a real spawn sees it.
- */
 describe('agents sessions bookmark (real CLI parse)', () => {
   it('honors --json even though the parent command also declares it', () => {
     const res = run(['sessions', 'bookmark', '--list', '--json']);
@@ -73,15 +60,6 @@ describe('agents sessions bookmark (real CLI parse)', () => {
     expect(parsed.results[0].error).toContain('No session matches');
   });
 
-  // `--bookmarks` was wired into the interactive BROWSER only, so on every path
-  // that skips the browser — --json, --waiting, a pipe, a multi-host scope, an
-  // SSH-fanout peer — the flag silently did nothing and `--active --bookmarks`
-  // returned the whole fleet. That is the exact command the browser's own `y`
-  // copy-cmd hands to an agent.
-  // `--active` discovers real local session state (tmux panes, live processes)
-  // in addition to the fixtures this test seeds — on a busy fleet box that scan
-  // is genuinely slow, and this test drives it through several real CLI spawns.
-  // The default 30s budget is tuned for a lightweight spawn, not this cost.
   it('narrows --active to bookmarked sessions, not just in the browser', () => {
     const registry = path.join(home, '.agents', '.cache', 'terminals', 'live-terminals.json');
     fs.mkdirSync(path.dirname(registry), { recursive: true });
@@ -112,14 +90,10 @@ describe('agents sessions bookmark (real CLI parse)', () => {
     }[];
     expect(only.map((r) => r.sessionId)).toEqual([bookmarked]);
 
-    // Leave the store clean for the other cases in this file.
     run(['sessions', 'bookmark', bookmarked, '--remove']);
     fs.rmSync(registry, { force: true });
   }, 90_000);
 
-  // Same real-discovery cost as above, across four real CLI spawns (one to
-  // index the routine archive, three `--active` queries) — see the comment
-  // on the previous test.
   it('narrows real --active JSON output to all or one named routine', () => {
     const routineName = 'nightly-review';
     const routineId = 'dddddddd-0000-0000-0000-000000000004';
@@ -165,8 +139,6 @@ describe('agents sessions bookmark (real CLI parse)', () => {
       'utf-8',
     );
 
-    // Drive discovery through the public command so the archive becomes real
-    // indexed routine metadata before the active renderer joins against it.
     const indexed = run(['sessions', '--routine', routineName, '--all', '--local', '--json']);
     expect(indexed.status, indexed.stderr).toBe(0);
 
@@ -216,8 +188,6 @@ describe('agents sessions bookmark (real CLI parse)', () => {
   });
 
   it('still refuses a partial id that resolves to nothing', () => {
-    // Only a COMPLETE id skips the index; a short prefix must still fail loudly
-    // rather than bookmarking an id that names no session at all.
     const res = run(['sessions', 'bookmark', 'ccccc']);
     expect(res.status).toBe(1);
     expect(res.stderr).toContain('No session matches');

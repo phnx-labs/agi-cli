@@ -1,47 +1,22 @@
 name: Attest main
 
-# Producer for exact-tree release attestations (RUSH-2666, plan line 336).
-#
-# release.sh already CONSUMES an attestation for `origin/main^{tree}`: its
-# wait_for_attestation() polls the local store for a passing exact-tree proof
-# (release-attestation.sh require) and never rebuilds. The PRODUCER was the
-# missing half — nothing dropped that proof where a fleet release box could
-# find it, so every release wedged at "missing exact attestation key" and a
-# human had to run the suite by hand.
-#
-# This job closes that gap: on every push to main it produces the attestation
-# for the pushed tree (release-attestation-produce.sh, which runs the full
-# suite fail-closed and packs the exact pretested tarball) and uploads it to a
-# ROLLING GitHub Release under a FIXED tag (`main-attestations`). Assets are
-# named by tree hash (`attest-<tree>.json` + the packed `.tgz`), so a consumer
-# on any box downloads the exact one for the tree it is releasing. Old-tree
-# assets simply never match a new `origin/main^{tree}` — "invalidate on base
-# advance" falls out of tree-keying for free.
-#
-# This is purely ADDITIVE and FAIL-SAFE: it can only make releases faster.
-# If this job has not run yet, errored, or the tree is not attested, release.sh
-# falls back to exactly today's behavior (poll the local store). The producer
-# never gates a merge and is not a required check.
+# release.sh consumes a passing proof for the exact origin/main tree and never
+# rebuilds it. This additive producer publishes tree-keyed proofs; failure or a
+# missing asset leaves release.sh in its existing fail-safe polling path and
+# never gates a merge.
 
 on:
   push:
     branches: ['main']
-    # Mirror the inputs the attestation key hashes (release-attestation.sh:
-    # candidateTree + lockfileDigest + policyVersion + toolchain). The tree
-    # digest covers all of cli/**, so a change anywhere under cli/ (including
-    # the lockfile and the vitest/ci-scope policy files) must re-produce. Scope
-    # to cli/** so docs-only / non-cli commits don't burn a full-suite run for
-    # a tree no release will ever ask about — but if in any doubt the tree hash
-    # is the real gate, and an over-trigger is harmless (the consumer only ever
-    # asks for the exact origin/main tree it is releasing).
+    # Keep this list aligned with every input to the attestation key. cli/** is
+    # covered as one tree digest; over-triggering is safe because consumers ask
+    # only for the exact tree they release.
     paths:
       - 'cli/**'
       - '.github/workflows/attest-main.yml'
 
-# Overlapping merges must not race to clobber the rolling release. Serialize on
-# a fixed group; do NOT cancel-in-progress — a producer run that started for an
-# earlier tree should finish and publish its (still-valid, tree-keyed) asset
-# rather than be killed, since a release for that earlier tree may still want it.
+# An older tree can still be released, so serialize publication but never cancel
+# an in-flight producer for a previous, still-valid tree.
 concurrency:
   group: attest-main
   cancel-in-progress: false
@@ -51,21 +26,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
-      contents: write # create/update the rolling `main-attestations` release + upload assets
+      contents: write
     defaults:
       run:
         working-directory: cli
     env:
-      # Fixed tag for the rolling attestation release. Assets are per-tree, so
-      # many trees' proofs coexist under this one tag until pruned.
       ATTEST_TAG: main-attestations
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
 
       - name: Resolve the pushed tree
         id: tree
@@ -75,11 +48,8 @@ jobs:
           echo "tree=$tree" >> "$GITHUB_OUTPUT"
           echo "Attesting commit ${{ github.sha }} (tree $tree)"
 
-      # Skip the full suite if this exact tree is already attested on the rolling
-      # release. A push that only touched non-key inputs (or a re-run) can share a
-      # prior tree's proof, and re-running the ~13k-test suite for a byte-identical
-      # tree buys nothing. Fail-safe: if the download misses, or gh errors, we fall
-      # through to produce it. Never gates anything.
+      # Reuse only a proof named for this exact tree. A miss or gh error falls
+      # through to the full fail-closed producer.
       - name: Short-circuit if the tree is already attested
         id: existing
         run: |
@@ -97,20 +67,6 @@ jobs:
             echo "No prior attestation for $tree — producing it."
           fi
 
-      # The producer runs the FULL suite in its own throwaway worktree, whose
-      # `bun install --frozen-lockfile` (produce.sh — note: NOT --ignore-scripts,
-      # so lifecycle install scripts DO run) rebuilds node_modules there. Two
-      # native deps need attention or the suite fails and the producer refuses to
-      # attest (fail-closed → no asset → release.sh falls back to today's poll,
-      # never gaining speed for this tree — safe, just not fast):
-      #   - node-pty: its own install script runs under produce.sh's plain
-      #     `bun install` and fetches the prebuilt, which ships for Linux — so on
-      #     ubuntu it self-heals with no step here. (ci.yml uses --ignore-scripts
-      #     and an explicit `npm run install` because it targets macOS/Windows too,
-      #     where the prebuilt is absent; this Linux-only producer does not.)
-      #   - Playwright's chromium lives in the shared ~/.cache/ms-playwright, which
-      #     the worktree's suite reads too, so install it once here. Same
-      #     invocation the nightly matrix (ci.yml) uses on Linux.
       - name: Install Playwright chromium for the suite
         if: steps.existing.outputs.already != 'true'
         run: bunx playwright install --with-deps chromium
@@ -118,7 +74,6 @@ jobs:
       - name: Produce the exact-tree attestation
         if: steps.existing.outputs.already != 'true'
         env:
-          # The store the producer writes into; we upload from it below.
           RELEASE_ATTESTATION_DIR: ${{ runner.temp }}/attest-store
         run: |
           set -euo pipefail

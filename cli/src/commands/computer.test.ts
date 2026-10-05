@@ -13,9 +13,6 @@ import {
   withHostFlag,
 } from './computer.js';
 
-// The `computer` preAction hook calls process.exit(1) exactly when
-// shouldBlockOffPlatform() is true. These cases pin the rule that off-macOS
-// invocations are NOT blocked once a remote daemon is reachable.
 describe('shouldBlockOffPlatform', () => {
   it('never blocks on macOS (local Accessibility path)', () => {
     expect(shouldBlockOffPlatform({ platform: 'darwin', tcpConfigured: false })).toBe(false);
@@ -28,25 +25,18 @@ describe('shouldBlockOffPlatform', () => {
   });
 
   it('does NOT block off macOS when COMPUTER_HELPER_TCP is configured', () => {
-    // A Linux host with a tunnel to a Windows daemon must be allowed to drive it.
     expect(shouldBlockOffPlatform({ platform: 'linux', tcpConfigured: true })).toBe(false);
   });
 
   it('does NOT block off macOS when a --device remote device is given', () => {
-    // The engine resolves and hydrates the endpoint for that device itself.
     expect(shouldBlockOffPlatform({ platform: 'linux', tcpConfigured: false, device: 'win-mini' })).toBe(false);
   });
 
   it('does NOT block off macOS when a --vnc desktop is configured', () => {
-    // A Linux host driving a GUI desktop over RFB/VNC must be allowed.
     expect(shouldBlockOffPlatform({ platform: 'linux', tcpConfigured: false, vncConfigured: true })).toBe(false);
   });
 });
 
-// The verb catalog is agents-cli's half of the contract with the standalone
-// engine: it is what `agents computer --help` lists and what the help groups
-// index. A verb dropped here silently disappears from the surface even though
-// the engine still implements it, so the catalog is pinned.
 describe('COMPUTER_PASSTHROUGH_VERBS', () => {
   const names = COMPUTER_PASSTHROUGH_VERBS.map((v) => v.name);
 
@@ -75,8 +65,6 @@ describe('COMPUTER_PASSTHROUGH_VERBS', () => {
   });
 });
 
-// The trust probe is the one place agents-cli reads engine stdout instead of
-// passing it through, so its parsing has to survive real-world output shapes.
 describe('parseTrustFromStatusJson', () => {
   it('reads trusted:true out of a clean JSON status', () => {
     expect(parseTrustFromStatusJson('{"trusted":true,"pid":4211}')).toBe(true);
@@ -91,8 +79,6 @@ describe('parseTrustFromStatusJson', () => {
   });
 
   it('returns false — never throws — on empty or unparseable output', () => {
-    // The wizard polls this while the user is in System Settings; a throw would
-    // abort the very flow that fixes the untrusted state.
     expect(parseTrustFromStatusJson('')).toBe(false);
     expect(parseTrustFromStatusJson('daemon not running')).toBe(false);
     expect(parseTrustFromStatusJson('{oops')).toBe(false);
@@ -104,11 +90,6 @@ describe('parseTrustFromStatusJson', () => {
   });
 });
 
-// The engine has no fleet registry of its own (PHNX-4090) — a resolved --device
-// becomes --host on the argv it actually sees. This is the descendant of the
-// regression that made `agents computer setup --device win-mini` install the
-// macOS helper locally instead of provisioning the Windows box: the selector
-// commander consumed has to be put back, now as --host.
 describe('withHostFlag', () => {
   it('re-inserts --host right after the verb so the engine sees the remote selector', () => {
     expect(withHostFlag(['setup'], 'ssh://Administrator@win-mini')).toEqual(['setup', '--host', 'ssh://Administrator@win-mini']);
@@ -129,8 +110,6 @@ describe('withHostFlag', () => {
   });
 });
 
-// PHNX-4090: --device resolves to the --host the standalone engine speaks,
-// through the device's computer.host config when set.
 describe('resolveDeviceHost', () => {
   beforeEach(() => {
     mockGetConfigValue.mockReset();
@@ -158,12 +137,6 @@ describe('resolveDeviceHost', () => {
   });
 
   it('uses the configured ssh:// host/user, not the registry\'s own resolution, when they disagree', async () => {
-    // Regression: computer.host must actually override the connection target,
-    // not just gate scheme selection while the registry's resolveRemoteDevice
-    // answer silently wins. The forwarded --host and the fd-3 target.host must
-    // also stay byte-identical, since the engine matches its own
-    // sshTarget(parseAddress(--host)) against context.target.host to decide
-    // whether the inherited ssh identity (sshArgs) applies at all.
     mockGetConfigValue.mockReturnValue({ value: 'ssh://otheruser@otherhost:2222' });
     mockResolveRemoteDevice.mockResolvedValue({
       target: 'muqsit@linux-desk', user: 'muqsit', host: 'linux-desk',
@@ -171,11 +144,8 @@ describe('resolveDeviceHost', () => {
     });
     const result = await resolveDeviceHost('linux-desk');
     expect(result.host).toBe('ssh://otheruser@otherhost:2222');
-    // target.host must match what the engine's own sshTarget(parseAddress(host))
-    // derives from the forwarded --host, so its context lookup finds this entry.
     expect(result.target.host).toBe('otheruser@otherhost');
     expect(result.target.hostname).toBe('otherhost');
-    // Identity args still come from the fleet — the one thing computer.host cannot express.
     expect(result.target.sshArgs).toEqual(['-i', '/key']);
   });
 

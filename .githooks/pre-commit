@@ -1,12 +1,4 @@
 #!/usr/bin/env bash
-# Optional fast first-line guard against committing confidential strategy
-# content to the public .agents/artifacts/ tree (PHNX-3033).
-#
-# This hook is NOT the enforcement — the CI check in .github/workflows/tests.yml
-# is. To enable locally:
-#
-#   git config core.hooksPath .githooks
-#
 set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel)"

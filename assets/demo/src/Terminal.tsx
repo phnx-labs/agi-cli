@@ -1,7 +1,6 @@
 import { useCurrentFrame, interpolate, spring, useVideoConfig } from "remotion";
 import type { TermLine } from "./scenes";
 
-// ── Typewriter effect ──
 const Typewriter: React.FC<{ text: string; startFrame: number; color: string }> = ({
   text,
   startFrame,
@@ -11,7 +10,6 @@ const Typewriter: React.FC<{ text: string; startFrame: number; color: string }> 
   const elapsed = frame - startFrame;
   if (elapsed < 0) return null;
 
-  // 2 chars per frame = fast but readable
   const charsToShow = Math.min(Math.floor(elapsed * 2), text.length);
   const shown = text.slice(0, charsToShow);
   const showCursor = charsToShow < text.length;
@@ -35,7 +33,6 @@ const Typewriter: React.FC<{ text: string; startFrame: number; color: string }> 
   );
 };
 
-// ── Spinner animation ──
 const Spinner: React.FC<{ startFrame: number }> = ({ startFrame }) => {
   const frame = useCurrentFrame();
   const elapsed = frame - startFrame;
@@ -45,7 +42,6 @@ const Spinner: React.FC<{ startFrame: number }> = ({ startFrame }) => {
   return <span style={{ color: "#b3ff0c" }}>{chars[idx]}</span>;
 };
 
-// ── Single terminal line ──
 const Line: React.FC<{
   line: TermLine;
   sceneStartFrame: number;
@@ -89,7 +85,6 @@ const Line: React.FC<{
   );
 };
 
-// ── Terminal window chrome ──
 export const Terminal: React.FC<{
   lines: TermLine[];
   sceneStartFrame: number;
@@ -106,7 +101,7 @@ export const Terminal: React.FC<{
         boxShadow: "0 25px 80px rgba(0,0,0,0.6), 0 0 120px rgba(179,255,12,0.03)",
       }}
     >
-      {/* Title bar */}
+      {}
       <div
         style={{
           display: "flex",
@@ -138,7 +133,7 @@ export const Terminal: React.FC<{
         </div>
       </div>
 
-      {/* Terminal content */}
+      {}
       <div
         style={{
           padding: "20px 24px",

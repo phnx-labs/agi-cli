@@ -1,12 +1,3 @@
-/**
- * `agents fleet apply` / `agents devices apply` — reconcile the whole fleet
- * to a declared profile: install agents-cli + agents and sync config. Native
- * harness logins remain device-local; portable provider credentials move only
- * through explicit `agents accounts sync`.
- *
- * The manifest is the `fleet:` block of any `-f` file (default `agents.yaml`).
- * Top-level `agents apply` is retired (RUSH-2981).
- */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -44,14 +35,13 @@ interface ApplyOptions {
   dryRun?: boolean;
   yes?: boolean;
   device?: string;
-  agent?: string[]; // --agent claude@all codex@latest (variadic)
+  agent?: string[];
   only?: string;
-  login?: boolean; // Commander sets false for --no-login
+  login?: boolean;
   provisionSecrets?: boolean;
   force?: boolean;
 }
 
-/** Version of the running agents-cli — the fleet target version. */
 function localCliVersion(): string {
   try {
     const here = path.dirname(fileURLToPath(import.meta.url));
@@ -81,7 +71,6 @@ const ONLY_KINDS: Record<string, Set<string>> = {
   login: new Set(['needs-login']),
 };
 
-/** Render the device x dimension matrix (cribbed from `doctor --devices`). */
 function renderPlan(plan: FleetPlan): void {
   const rows = plan.devices;
   const nameWidth = Math.max('device'.length, ...rows.map((r) => r.device.length));
@@ -97,8 +86,6 @@ function renderPlan(plan: FleetPlan): void {
     return chalk.cyan('↑ ' + acts.map((a) => a.agent ?? a.kind.replace('-cli', '')).join(','));
   };
 
-  // Only show the secrets column when the manifest declares any — an all-`-`
-  // column on every fleet that uses no bundles is noise.
   const anySecrets = rows.some((r) => r.actions.some((a) => a.kind === 'push-secret' || a.kind === 'needs-secret'));
   const header = `  ${'device'.padEnd(nameWidth)}   ${'agents-cli'.padEnd(12)}${'agents'.padEnd(20)}${'config'.padEnd(10)}${anySecrets ? 'login'.padEnd(18) + 'secrets' : 'login'}`;
   console.log(chalk.gray(header));
@@ -134,18 +121,10 @@ function renderPlan(plan: FleetPlan): void {
   console.log();
   console.log(chalk.gray(`  ${plan.actions.length} action(s) across ${rows.filter((r) => r.probe.reachable).length} reachable device(s)`));
 
-  // The capability is opt-in, so when it is OFF and the manifest declares
-  // bundles, say that it exists. Otherwise an operator reads "manual recreate"
-  // and concludes there is no supported path — which is exactly the conclusion
-  // that led to a master key being hand-exported across the fleet (RUSH-1968).
   if (anySecrets && !rows.some((r) => r.actions.some((a) => a.kind === 'push-secret'))) {
     console.log(chalk.gray('  secrets: not pushed. `--provision-secrets` pushes declared bundles to devices whose host key is pinned.'));
   }
 
-  // `apply` no longer propagates ANY login (SING-1b: a native OAuth / session
-  // login is never copied between devices). Every login:sync agent that has a
-  // login to establish is surfaced here with the one honest reason + the portable
-  // alternative — never a silent skip.
   const needsLogin = [...new Set(rows.flatMap((r) => r.loginBlocked.map((a) => `${a}@${r.device}`)))];
   if (needsLogin.length > 0) {
     console.log(
@@ -155,9 +134,6 @@ function renderPlan(plan: FleetPlan): void {
       ),
     );
   }
-  // Secrets bundles are declared once for the fleet; surface the distinct set the
-  // gate did NOT push, so a refusal is never silent. "never pushed" used to be
-  // literally true here and no longer is — `--provision-secrets` pushes them.
   const bundles = [...new Set(rows.flatMap((r) => r.secretsNeeded))];
   if (bundles.length > 0) {
     const shown = bundles.slice(0, 12);
@@ -167,11 +143,7 @@ function renderPlan(plan: FleetPlan): void {
   }
 }
 
-/** padEnd on the visible width, ignoring chalk color codes. Exported for tests. */
 export function stripPad(s: string, width: number): string {
-  // Strip the whole SGR sequence (ESC `[` ... `m`). Matching only the `[...m`
-  // tail leaves each leading ESC byte counted as visible, so every colored
-  // cell over-pads and the plan table misaligns in a real TTY.
   // eslint-disable-next-line no-control-regex
   const visible = s.replace(/\x1b\[[0-9;]*m/g, '').length;
   return s + ' '.repeat(Math.max(1, width - visible));
@@ -182,12 +154,6 @@ async function runApply(opts: ApplyOptions): Promise<void> {
   const manifest = readFleetFile(path.resolve(file));
   const source = machineId();
 
-  // Fresh-machine bootstrap: an explicit `devices:` map may name boxes this
-  // machine has never registered (e.g. a freshly-cloned agents.yaml). Resolve
-  // those names live from Tailscale and register them BEFORE resolveDesired
-  // validates the roster — so replication needs only the repo, never committed
-  // IPs/usernames. `devices: all` needs no bootstrap (it targets what's already
-  // registered + online).
   let unresolved: string[] = [];
   if (manifest.devices !== 'all') {
     const wanted = Object.keys(manifest.devices).filter((n) => n !== source);
@@ -206,17 +172,11 @@ async function runApply(opts: ApplyOptions): Promise<void> {
   const online = all.filter((d) => d.tailscale?.online === true).map((d) => d.name);
   const registered = all.map((d) => d.name);
 
-  // Unresolved names are skipped (surfaced above), never fatal — a manifest
-  // naming an asleep box must not abort the reconcile for every other device.
   let desired = resolveDesired(manifest, { onlineDevices: online, registeredDevices: registered, source, unresolved });
   if (opts.device) {
     desired = desired.filter((d) => d.device === opts.device);
     if (desired.length === 0) throw new Error(`Device '${opts.device}' is not a target in this manifest.`);
   }
-  // --agent overrides the roster for the targeted device(s): install exactly these
-  // specs instead of the manifest's. `claude@all` expands to every claude version
-  // installed on THIS machine, so a fresh box inherits the same version set. Pair
-  // with --device to seed one box; without it, every targeted device gets the set.
   if (opts.agent && opts.agent.length > 0) {
     const specs = expandAllSpecs(opts.agent, (id) => listInstalledVersions(id as AgentId));
     desired = desired.map((d) => ({ ...d, agents: specs }));
@@ -234,7 +194,6 @@ async function runApply(opts: ApplyOptions): Promise<void> {
     return;
   }
 
-  // Snapshot source auth once for every agent named anywhere in the profile.
   const allAgents = [...new Set(desired.flatMap((d) => d.agents.map(agentIdOf)))];
   const snap = snapshotAuth(allAgents, { home: sourceHome(), platform: process.platform });
   const filesByAgent = new Map<string, typeof snap.files>();
@@ -249,12 +208,8 @@ async function runApply(opts: ApplyOptions): Promise<void> {
     filesByAgent,
   };
 
-  // Probe every target device in parallel.
   const nameToProfile = new Map<string, DeviceProfile>(desired.map((d) => [d.device, registry[d.device]!]));
   const withVersions = rosterNeedsVersions(desired);
-  // One extra `secrets list --json` per device, and only when it can change the
-  // plan: the manifest declares bundles AND provisioning is on. Same cost
-  // discipline as `withVersions` — a fleet that uses no bundles never pays it.
   const secretsBundles = fleetSecretsBundles(manifest.secrets?.bundles);
   const withSecrets = (opts.provisionSecrets === true && secretsBundles.length > 0)
     || secretsBundles.includes(AUTH_STORE_ALIAS);
@@ -269,18 +224,12 @@ async function runApply(opts: ApplyOptions): Promise<void> {
     secretsBundles,
     provisionSecrets: opts.provisionSecrets === true,
     forceSecrets: opts.force === true,
-    // Portable secret values only ever go to a host whose key is already pinned.
-    // Resolve the device to its profile so the pin is checked against the FQDN the
-    // ssh connection dials (isDevicePinned), not the bare name — a tailnet worker
-    // pinned only under its FQDN would otherwise be refused as "not pinned"
-    // (PHNX-3505). A name with no profile falls back to the raw host-string check.
     isHostPinned: (device) => {
       const p = nameToProfile.get(device);
       return p ? isDevicePinned(p) : isHostPinned(device, managedKnownHostsPath());
     },
   });
 
-  // --only filter.
   if (opts.only) {
     const keep = new Set<string>();
     for (const k of opts.only.split(',').map((s) => s.trim())) for (const x of ONLY_KINDS[k] ?? []) keep.add(x);
@@ -296,10 +245,6 @@ async function runApply(opts: ApplyOptions): Promise<void> {
 
   const isDry = opts.plan || opts.dryRun;
   if (isDry) return;
-  // `needs-login`/`needs-secret` are surfaced manual reminders, not executable
-  // mutations — exclude them so an otherwise-converged fleet still says "nothing
-  // to do" instead of looping forever on un-actionable surfacing. `push-secret`
-  // IS executable and deliberately stays counted.
   if (plan.actions.filter((a) => a.kind !== 'needs-login' && a.kind !== 'needs-secret').length === 0) {
     console.log(chalk.green('\nNothing to do — fleet already matches the profile.'));
     return;
@@ -345,9 +290,6 @@ function reportResults(results: DeviceApplyResult[]): void {
   console.log(chalk.green('Fleet reconciled.'));
 }
 
-/**
- * Attach the reconcile options + action to a command node.
- */
 function configureApplyCommand(cmd: Command): Command {
   return cmd
     .description('Reconcile the fleet to a declared profile: install agents and sync config.')
@@ -371,11 +313,6 @@ function configureApplyCommand(cmd: Command): Command {
     });
 }
 
-/**
- * Canonical surface: `agents fleet apply` / `agents devices apply`.
- * Top-level `agents apply` is retired (RUSH-2981) — not a noun, already nested
- * here. Same reconcile engine, kept in lockstep via {@link configureApplyCommand}.
- */
 export function registerFleetApplyAlias(devicesCmd: Command): void {
   const sub = configureApplyCommand(devicesCmd.command('apply'));
   setHelpSections(sub, {

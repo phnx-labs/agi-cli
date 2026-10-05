@@ -535,8 +535,6 @@ so no estimate is given. No test suite was run; nothing here changes behavior.</
   };
   apply();
   button.addEventListener('click', () => {
-    // First click always makes a visible change, then cycles through both fixed
-    // palettes and back to System. The mode survives a blocked storage API too.
     const opposite = media.matches ? 'light' : 'dark';
     mode = mode === 'system' ? opposite : mode === opposite ? (media.matches ? 'dark' : 'light') : 'system';
     try { if (mode === 'system') localStorage.removeItem('artifacts-theme'); else localStorage.setItem('artifacts-theme', mode); } catch {}
@@ -559,7 +557,6 @@ so no estimate is given. No test suite was run; nothing here changes behavior.</
       const seconds = Math.floor((now - instant.getTime()) / 1000);
       if (!Number.isFinite(seconds)) continue;
       const label = time.dataset.label;
-      // Future dates are never called "just now".
       let value = seconds < 0 ? instant.toLocaleString() : instant.toISOString().slice(0, 10);
       if (seconds >= 0 && seconds < 60) value = 'just now';
       else if (seconds >= 60 && seconds < 3600) { const n = Math.floor(seconds / 60); value = n + (n === 1 ? ' min ago' : ' mins ago'); }
@@ -575,9 +572,6 @@ so no estimate is given. No test suite was run; nothing here changes behavior.</
 })();
 </script><script>
 (() => {
-  // Scroll-spy: mark the section the reader is currently in. The active heading
-  // is the last one whose top has passed the reading line, so a heading is
-  // "current" from the moment it reaches the top, not when it leaves.
   const links = [...document.querySelectorAll('.toc-item')];
   if (links.length) {
     const targets = links
@@ -587,10 +581,6 @@ so no estimate is given. No test suite was run; nothing here changes behavior.</
     let queued = false;
     const sync = () => {
       queued = false;
-      // A heading inside a collapsed section renders nowhere (offsetParent is
-      // null), so its rect is the zero-box the browser reports for anything
-      // not laid out — that zero top would otherwise look like "at the reading
-      // line" and win the section below it. Drop it from contention entirely.
       const visible = targets.filter((entry) => entry.heading.offsetParent !== null);
       if (!visible.length) return;
       const line = 120;
@@ -599,7 +589,6 @@ so no estimate is given. No test suite was run; nothing here changes behavior.</
         if (entry.heading.getBoundingClientRect().top <= line) current = entry;
         else break;
       }
-      // Past the end of the document the last visible section is being read.
       if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 4) current = visible[visible.length - 1];
       if (!current || current.link === active) return;
       if (active) active.classList.remove('is-active');
@@ -614,14 +603,10 @@ so no estimate is given. No test suite was run; nothing here changes behavior.</
     const onScroll = () => { if (!queued) { queued = true; requestAnimationFrame(sync); } };
     addEventListener('scroll', onScroll, { passive: true });
     addEventListener('resize', onScroll, { passive: true });
-    // A collapse/expand toggle changes which headings are laid out without
-    // necessarily firing a scroll event — resync explicitly when that happens.
     document.addEventListener('artifacts:section-toggle', onScroll);
     sync();
   }
 
-  // Local read count. Per-browser, keyed by this artifact's own identity, so a
-  // shared link counts each reader's own visits rather than a global total.
   try {
     const key = 'artifacts-views:' + location.origin + location.pathname + ':' + (document.title || '');
     const count = (parseInt(localStorage.getItem(key) || '0', 10) || 0) + 1;
@@ -639,18 +624,13 @@ so no estimate is given. No test suite was run; nothing here changes behavior.</
   const current = document.querySelector('meta[name="artifacts-content-hash"]')?.content || '';
   const chip = document.querySelector('.reload-chip');
   if (!current || !chip) return;
-  // file:// (and any non-web scheme) cannot be re-fetched for a fresh render.
   if (location.protocol !== 'http:' && location.protocol !== 'https:') return;
   chip.addEventListener('click', () => location.reload());
   let inFlight = false;
   const check = async () => {
-    // Pause while the tab is hidden and never overlap a slow fetch with the next.
     if (inFlight || document.hidden) return;
     inFlight = true;
     try {
-      // Same-origin by construction (this page's own URL); only a successful
-      // response is trusted — a transient 5xx or a dropped dev server never
-      // flips the chip.
       const response = await fetch(location.href, { cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(8000) });
       if (!response.ok) return;
       const next = marker(await response.text());
@@ -678,9 +658,6 @@ so no estimate is given. No test suite was run; nothing here changes behavior.</
   const isStoredCollapsed = (key) => Object.prototype.hasOwnProperty.call(state, key) && state[key] === true;
 
   const bodyFor = (button) => document.getElementById(button.getAttribute('aria-controls'));
-  // Every layout-affecting change gets announced so the scroll-spy (a separate
-  // inlined script with no import between the two) can drop a heading that just
-  // became hidden, or pick one up that just became visible, without a scroll.
   const announce = () => document.dispatchEvent(new Event('artifacts:section-toggle'));
 
   const setExpanded = (button, expanded, persist) => {
@@ -702,12 +679,6 @@ so no estimate is given. No test suite was run; nothing here changes behavior.</
     button.addEventListener('click', () => setExpanded(button, button.getAttribute('aria-expanded') !== 'true', true));
   }
 
-  // A hash target hidden inside a collapsed ancestor — or hidden because it IS
-  // a collapsed heading's own content — never scrolls into view on its own: the
-  // browser's built-in fragment scroll already ran (and silently did nothing,
-  // since the target was not being rendered) before this script gets a chance
-  // to run. Open the target's own section, walk every collapsed ancestor open
-  // too, then finish the scroll ourselves.
   const reveal = (target) => {
     const own = target.id ? toggles.find((button) => button.dataset.sectionId === target.id) : undefined;
     if (own && own.getAttribute('aria-expanded') !== 'true') setExpanded(own, true, true);
@@ -727,11 +698,6 @@ so no estimate is given. No test suite was run; nothing here changes behavior.</
   };
   addEventListener('hashchange', gotoHash);
   gotoHash();
-  // A click on a same-page anchor whose href already matches the current hash
-  // never fires 'hashchange' (the URL does not change), so a reader who
-  // re-collapsed a section and clicks its TOC link again would otherwise see
-  // nothing happen. Re-run after the browser's own default handling so a real
-  // navigation (new tab, modified click, a target elsewhere) is never hijacked.
   document.addEventListener('click', (event) => {
     if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     const link = event.target.closest && event.target.closest('a[href^="#"]');
@@ -803,9 +769,6 @@ so no estimate is given. No test suite was run; nothing here changes behavior.</
     return last ? [last, last.data.length] : [anchor, 0];
   };
 
-  // Both endpoints must name a block that still exists exactly once, and they
-  // must still be in document order. Anything else returns null: the caller has
-  // to leave the text alone rather than guess.
   const resolve = (record) => {
     if (!record || !record.start || !record.end) return null;
     const first = byId.get(record.start.anchor); const last = byId.get(record.end.anchor);
@@ -815,8 +778,6 @@ so no estimate is given. No test suite was run; nothing here changes behavior.</
     return { firstIndex, lastIndex };
   };
 
-  // The text that currently sits where the record points, so a caller can
-  // require an exact quote match before painting anything.
   const quoteAt = (record) => {
     const resolved = resolve(record); if (!resolved) return null;
     const [startNode, startOffset] = pointAt(anchors[resolved.firstIndex], record.start.offset);
@@ -859,8 +820,6 @@ so no estimate is given. No test suite was run; nothing here changes behavior.</
     for (const anchor of anchors) anchor.normalize();
   };
 
-  // A live selection turned into the stored vocabulary, or null when it does not
-  // land inside the artifact body.
   const selectionRecord = () => {
     const selection = getSelection(); if (!selection || selection.isCollapsed || !selection.rangeCount) return null;
     const range = selection.getRangeAt(0);
@@ -946,8 +905,6 @@ so no estimate is given. No test suite was run; nothing here changes behavior.</
 
   const extras = new Map();
   window.__artifactsHighlights = {
-    // Adds a button beside Highlight and Note. The handler receives the pending
-    // selection record in the shared anchor vocabulary.
     addAction: (id, label, handler) => {
       extras.set(id, handler);
       const separator = document.createElement('span'); separator.setAttribute('aria-hidden', 'true'); separator.textContent = '·';
@@ -991,7 +948,6 @@ so no estimate is given. No test suite was run; nothing here changes behavior.</
 (() => {
   const reader = window.__artifactsReader;
   if (!reader) return;
-  // file:// and any other non-web scheme keep the standalone reader untouched.
   if (location.protocol !== 'http:' && location.protocol !== 'https:') return;
 
   const normalizeSharePath = function normalizeSharePath(pathname) {
@@ -1028,9 +984,6 @@ so no estimate is given. No test suite was run; nothing here changes behavior.</
   let selected = null;
   let draft = null;
   let stream = null;
-  // The thread whose marker opened the rail. Stored as an id, not an element:
-  // repainting replaces every marker node, so the element would be stale by the
-  // time focus has to go back to it.
   let returnTo = null;
 
   const canComment = () => Boolean(context && context.permissions && context.permissions.comment === true);
@@ -1040,8 +993,6 @@ so no estimate is given. No test suite was run; nothing here changes behavior.</
   const idempotencyKey = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
   const when = (value) => { const date = new Date(value); return Number.isNaN(date.getTime()) ? '' : date.toLocaleString(); };
 
-  // One key per intent, reused across every retry of that intent, so a response
-  // lost on the wire cannot become a second thread or a duplicate reply.
   const send = async (method, path, payload, key) => {
     let failure = null;
     for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -1105,8 +1056,6 @@ so no estimate is given. No test suite was run; nothing here changes behavior.</
     returnTo = null;
     paintAll();
     const mark = target && reader.root.querySelector('mark[data-collab-thread="' + CSS.escape(target) + '"]');
-    // A reader can collapse the quoted section while Review is open. Focusing
-    // its hidden mark would leave focus in the now-hidden rail.
     (mark && mark.getClientRects().length ? mark : launcher).focus();
   };
 
@@ -1115,9 +1064,6 @@ so no estimate is given. No test suite was run; nothing here changes behavior.</
     for (const thread of threads.values()) {
       if (thread.draft) continue;
       const found = reader.quoteAt(thread.anchor);
-      // Repaint only on an unambiguous anchor resolution AND an exact quote
-      // match. Anything else leaves the prose alone; the thread stays legible in
-      // the rail instead of decorating the wrong sentence.
       thread.stale = found === null || reader.normalizeQuote(found) !== reader.normalizeQuote(thread.anchor.quote);
       if (thread.stale || !visible(thread)) continue;
       reader.paint(thread.anchor, () => {
@@ -1208,8 +1154,6 @@ so no estimate is given. No test suite was run; nothing here changes behavior.</
     if (thread.stale) {
       const stale = document.createElement('p');
       stale.className = 'collab-stale';
-      // The exact wording is part of the cross-repo contract: a thread whose
-      // text moved is reported honestly rather than silently re-anchored.
       stale.textContent = thread.anchor.revision && thread.anchor.revision !== revision
         ? 'From an earlier revision'
         : 'Anchored text not found';
@@ -1277,13 +1221,6 @@ so no estimate is given. No test suite was run; nothing here changes behavior.</
     launcher.setAttribute('aria-label', open === 1 ? '1 open review thread' : open + ' open review threads');
   };
 
-  // The single door every server snapshot comes through, from the stream, from
-  // catch-up, and from a write's own response. Snapshots are whole threads and
-  // each carries the cursor it was written at, so the rule is simply that a
-  // thread never moves backwards: a slow write response that lands after a
-  // teammate's newer change must not revert it. Without this an awaited reply
-  // whose response is overtaken by someone else's resolve would silently reopen
-  // that thread on the replying reader's screen and stay wrong.
   const upsert = (thread) => {
     if (!thread || !thread.id) return false;
     const existing = threads.get(thread.id);
@@ -1292,27 +1229,14 @@ so no estimate is given. No test suite was run; nothing here changes behavior.</
     return true;
   };
 
-  // Every durable change reaches the client as a cursored envelope, whether it
-  // arrived on the stream or through catch-up. Applying is keyed by that cursor,
-  // so a reconnect that replays and a catch-up that refetches land exactly once.
   const applyEnvelope = (rawId, payload) => {
-    // SSE hands back a string cursor and JSON hands back a number; both name the
-    // same durable change, so the dedupe key is normalized or catch-up applies
-    // an event the stream already delivered.
     const id = rawId === null || rawId === undefined ? '' : String(rawId);
     if (!id || seen.has(id)) return false;
     seen.add(id);
-    // Envelopes carry whole-thread snapshots, so one at or before the newest
-    // change already materialized holds nothing new. A server that replays its
-    // whole stream to a fresh subscriber would otherwise walk a resolved thread
-    // back to open, because the newest event is the one already deduped.
     if (Number(id) <= Number(cursor || 0)) return false;
     appliedEvents += 1;
     cursor = String(id);
     if (payload && payload.thread) {
-      // The stream can outrun the POST response for the author's own write. The
-      // server echoes the idempotency key, so the optimistic row is retired by
-      // the event instead of briefly double-painting its own selection.
       if (payload.thread.idempotency_key) threads.delete('pending:' + payload.thread.idempotency_key);
       const previous = threads.get(payload.thread.id);
       upsert(payload.thread);
@@ -1343,9 +1267,6 @@ so no estimate is given. No test suite was run; nothing here changes behavior.</
 
   const connect = () => {
     stream = new EventSource(endpoint('/__collab/events', { share }));
-    // The browser resends Last-Event-ID on its own reconnect; the explicit
-    // catch-up covers everything the server could not replay from memory. Both
-    // paths funnel through applyEnvelope, so the overlap is deduped, not doubled.
     stream.addEventListener('open', () => { loadThreads(cursor || '0').catch(() => {}); });
     stream.addEventListener('thread', (event) => {
       let payload = null;
@@ -1373,8 +1294,6 @@ so no estimate is given. No test suite was run; nothing here changes behavior.</
       selected = result.thread.id;
       renderRail(); paintAll();
     } catch (error) {
-      // Roll the optimistic thread back and hand the text to the reader again,
-      // rather than leaving a comment on screen that the server never stored.
       threads.delete(optimisticId);
       draft = { id: 'draft', draft: true, status: 'open', anchor, comments: [], composerValue: body, error: 'Not sent: ' + error.message };
       threads.set('draft', draft);
@@ -1384,11 +1303,6 @@ so no estimate is given. No test suite was run; nothing here changes behavior.</
     }
   };
 
-  // Re-reads the thread out of the map rather than trusting the object captured
-  // when the button was clicked. A concurrent write replaces the map entry with
-  // a fresh object, so an in-place edit of the captured one — in particular the
-  // rollback and its error message — would be written to a detached object and
-  // never reach the screen, losing the failure silently.
   const revise = (id, change) => {
     const current = threads.get(id);
     if (!current) return null;
@@ -1402,9 +1316,6 @@ so no estimate is given. No test suite was run; nothing here changes behavior.</
     if (result.cursor) { seen.add(String(result.cursor)); if (Number(result.cursor) > Number(cursor || 0)) cursor = String(result.cursor); }
   };
 
-  // A rollback only undoes this write. If a newer server snapshot landed while
-  // the request was in flight it already carries the truth, so the optimistic
-  // change is gone anyway and only the error is worth adding.
   const overtaken = (before, current) => Number(current.cursor || 0) > Number(before);
 
   const replyTo = async (thread, body) => {
@@ -1577,8 +1488,6 @@ so no estimate is given. No test suite was run; nothing here changes behavior.</
       if (!response.ok) return;
       discovered = await response.json();
     } catch { return; }
-    // Fail closed on anything short of an explicit read grant: no rail, no
-    // launcher, no markers — the page stays exactly the standalone artifact.
     if (!discovered || !discovered.permissions || discovered.permissions.read !== true) return;
     context = discovered;
     mount().catch(() => {});
@@ -1614,9 +1523,6 @@ so no estimate is given. No test suite was run; nothing here changes behavior.</
       return ok;
     }
   };
-  // Where is this page being viewed? The loopback dev server (artifacts render
-  // --open) answers POSTs for real actions; any other http(s) origin is an
-  // already-published page; file:// has no server at all.
   const hostname = location.hostname;
   const web = location.protocol === 'http:' || location.protocol === 'https:';
   const loopback = web && (hostname === '127.0.0.1' || hostname === 'localhost' || hostname === '[::1]' || hostname === '::1');
@@ -1633,8 +1539,6 @@ so no estimate is given. No test suite was run; nothing here changes behavior.</
     favoriteButton.setAttribute('title', on ? 'Remove from favorites' : 'Favorite this artifact');
   };
   if (hosted) {
-    // Already published: re-sharing makes no sense here, so Share becomes a
-    // plain copy-link of this page's URL.
     shareButton.querySelector('.share-action-label').textContent = 'Copy link';
     shareButton.setAttribute('aria-label', 'Copy link to this page');
     shareButton.setAttribute('title', 'Copy the link to this page');

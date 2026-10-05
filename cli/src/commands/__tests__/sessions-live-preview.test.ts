@@ -1,10 +1,3 @@
-/**
- * Tests for the pure helpers that enrich the default `agents sessions` listing
- * with live state (Feature 2). Correlating a historical row to the session
- * that is still running hinges on the full-UUID key, and the glyph must reflect
- * the coarse status — both are easy to get subtly wrong, so they're exercised
- * directly rather than through the chalk+console renderer.
- */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { indexActiveBySessionId, liveGlyphAndPreview, formatActiveRowDescription } from '../sessions.js';
@@ -24,7 +17,6 @@ describe('indexActiveBySessionId', () => {
     const a = mk({ sessionId: 'abc12345-def6-7890-1234-567890abcdef' });
     const idx = indexActiveBySessionId([a]);
     expect(idx.get('abc12345-def6-7890-1234-567890abcdef')).toBe(a);
-    // Not addressable by the 8-char short id — the caller matches on meta.id.
     expect(idx.get('abc12345')).toBeUndefined();
   });
 
@@ -91,11 +83,9 @@ describe('liveGlyphAndPreview', () => {
       total: 2,
       activeForm: 'A5 wiring runner',
     };
-    // Interactive / headless terminal row.
     expect(
       liveGlyphAndPreview(mk({ status: 'running', preview: 'editing sessions.ts', todos })).preview,
     ).toBe('✓1/2 · A5 wiring runner · editing sessions.ts');
-    // Teams-spawned session: team name + todos + preview.
     expect(
       liveGlyphAndPreview(
         mk({
@@ -107,7 +97,6 @@ describe('liveGlyphAndPreview', () => {
         }),
       ).preview,
     ).toBe('checklists · ✓1/2 · A5 wiring runner · wiring runner');
-    // No live preview: todos alone still surface.
     expect(liveGlyphAndPreview(mk({ status: 'running', todos })).preview).toBe(
       '✓1/2 · A5 wiring runner',
     );
@@ -115,7 +104,6 @@ describe('liveGlyphAndPreview', () => {
 });
 
 describe('formatActiveRowDescription (RUSH-2045)', () => {
-  // Force OSC 8 support so we can assert the hyperlink survives cleanPreview.
   const savedTerm = process.env.TERM_PROGRAM;
   const savedIsTTY = process.stdout.isTTY;
 
@@ -142,7 +130,6 @@ describe('formatActiveRowDescription (RUSH-2045)', () => {
     expect(desc).toContain('views');
     expect(desc).toContain('✓1/2 · A5 wiring runner');
     expect(desc).toContain('editing sessions.ts');
-    // Project label present; when hyperlinks are on, the GitHub target survives.
     expect(desc).toContain('agents-cli');
     if (desc.includes('\x1b]8;;')) {
       expect(desc).toContain('https://github.com/phnx-labs/agents-cli');

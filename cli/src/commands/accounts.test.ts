@@ -17,11 +17,6 @@ vi.mock('@inquirer/prompts', async (importOriginal) => {
   return { ...actual, password: vi.fn(actual.password) };
 });
 
-// Provider accounts (`agents accounts add`, addAccount) are bundles with no
-// explicit backend, so on a headed macOS box the real standalone would write
-// them to the operator's login keychain; those tests run where keychain items
-// are file-backed (headless Linux/Windows, CI). The reserved `auth` bundle is
-// explicitly file-backed and runs everywhere.
 const fileBacked = await standaloneKeychainIsFileBacked();
 
 function cancelledPromptError(): Error {
@@ -42,11 +37,6 @@ describe('accounts credential import', () => {
   });
 });
 
-/**
- * PHNX-2578: add --from-secrets and inspect used to throw a raw Error that
- * bootstrap rethrows as an uncaught Node stack dump. They must fail as a
- * commander CLI error (code accounts.error) with a one-line message.
- */
 describe('accounts add/inspect CLI errors', () => {
   useFreshSecretsHome();
 
@@ -121,8 +111,6 @@ describe('accounts add/inspect CLI errors', () => {
       '--from-secrets', 'does-not-exist:KEY',
     ]);
     expect(err).toMatchObject({ code: 'accounts.error', exitCode: 1 });
-    // The standalone reports only a code; agents-cli names the bundle, as one
-    // clean line, never a stack dump.
     expect(err.message).toMatch(/Secrets bundle 'does-not-exist' not found/);
     expect(err.message).not.toMatch(/\n\s+at /);
   });
@@ -244,7 +232,7 @@ describe('accounts default write path', () => {
       expect(path.resolve(path.dirname(configPath), target)).toBe(path.resolve(dir, '.factory'));
     } finally {
       if (native) {
-        try { removeAccount(native.name); } catch { /* already gone */ }
+        try { removeAccount(native.name); } catch {  }
       }
       updateMeta((m) => {
         const defaults = { ...m.accounts?.defaults };
@@ -285,8 +273,6 @@ describe('parseLogoutTarget (PHNX-3940 — honor @label / #account selectors)', 
 });
 
 describe('accounts add/login/default surface (PHNX-3940 T4)', () => {
-  // Each case gets its own SECRETS_HOME (real standalone), so bundle writes are
-  // isolated per test with no in-memory keychain mock.
   useFreshSecretsHome();
 
   afterEach(() => {
@@ -342,7 +328,7 @@ describe('accounts add/login/default surface (PHNX-3940 T4)', () => {
       expect(readMeta().accounts?.defaults?.claude).toBe('t4-default');
     } finally {
       updateMeta(meta => ({ ...meta, accounts: { ...meta.accounts, defaults: { ...meta.accounts?.defaults, claude: undefined } } }));
-      try { removeAccount('t4-default'); } catch { /* absent */ }
+      try { removeAccount('t4-default'); } catch {  }
     }
   });
 

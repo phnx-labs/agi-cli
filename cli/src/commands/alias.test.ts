@@ -1,11 +1,3 @@
-/**
- * RUSH-2965 — top-level `agents alias` moved under `agents setup alias`.
- * Pins both directions: the nested path still writes shims, and the old
- * top-level name is gone (not a silent auto-correct).
- *
- * Tree assertions use `buildFullCommandTree` (no mocks). The CLI spawn
- * tests drive `src/index.ts` against a disposable HOME.
- */
 import { afterEach, describe, expect, it } from 'vitest';
 import { spawnSync } from 'child_process';
 import { Command } from 'commander';

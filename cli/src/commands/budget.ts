@@ -1,15 +1,3 @@
-/**
- * `agents config budget` — view and set spend caps (issue #346).
- *
- *   agents config budget                show effective caps + spend-to-cap (today + project)
- *   agents config budget --json         machine-readable snapshot
- *   agents config budget set <cap> <n>  write a cap to the user agents.yaml budget: block
- *
- * Caps resolve project > user (see lib/budget/config.ts); `agents config budget`
- * reports the EFFECTIVE merged config for the current directory, and `set`
- * writes the user-global layer (the project layer is hand-edited in the repo's
- * agents.yaml, like every other project override).
- */
 import type { Command } from 'commander';
 import chalk from 'chalk';
 
@@ -22,7 +10,6 @@ import { formatUsd } from '../lib/pricing/index.js';
 
 const TOP_CAPS = ['per_run', 'per_day', 'per_project'] as const;
 
-/** Register `agents config budget` under the config parent. */
 export function registerBudgetCommand(configCmd: Command): void {
   const budgetCmd = configCmd
     .command('budget')
@@ -127,7 +114,6 @@ interface SpendSnapshot {
   day: string;
 }
 
-/** Render one cap line: "  per_run     $0.42 / $5.00  ▮▮▯▯▯▯▯▯▯▯". Unset caps render as "(unset)". */
 function capLine(label: string, spend: number | null, cap: number | undefined): string {
   if (cap === undefined) {
     return `  ${label.padEnd(14)} ${chalk.dim('(unset)')}`;

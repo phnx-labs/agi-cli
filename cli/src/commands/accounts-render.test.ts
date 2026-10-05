@@ -60,8 +60,6 @@ describe('renderAccountList', () => {
     const data = out.split('\n').find((line) => line.includes('work'))!;
     expect(data).toContain('* work');
     expect(data).toContain('20%');
-    // The columns the old table printed on every row are gone: a healthy
-    // account says only what it is and how used it is.
     expect(data).not.toContain('w@example.com');
     expect(data).not.toContain('LIVE');
     expect(data).not.toContain('box');
@@ -126,8 +124,6 @@ describe('renderAccountList', () => {
   });
 
   it('prints the exact repair command and attention count for an expired account', () => {
-    // PHNX-4116: the row no longer trails the verdict WORD — the auth fact carries
-    // what happened, and the repair command + attention count still surface.
     const out = stripAnsi(renderAccountList([
       row({
         verdict: 'expired',
@@ -187,9 +183,6 @@ describe('renderAccountList', () => {
   });
 
   it('shows the rate-limited auth fact independently of the usage cell (PHNX-4116)', () => {
-    // The auth fact is per-box run evidence, separate from the usage windows: a
-    // throttle recorded by a run prints with its reset time even when the maxed
-    // usage window is folded behind the overview "+1".
     const window = (key: 'session' | 'week' | 'month', shortLabel: string, usedPercent: number) => ({
       key, label: key, shortLabel, usedPercent, resetsAt: new Date('2026-09-07T00:00:00.000Z'), windowMinutes: null,
     });
@@ -239,8 +232,6 @@ describe('renderAccountList', () => {
     expect(out).toContain('claude');
     expect(out).toContain('* work');
     expect(out).toContain('openrouter-work');
-    // A ready provider credential is the ordinary case: name only, no state,
-    // and never the provider label the old IDENTITY column repeated.
     const providerLine = out.split('\n').find((line) => line.includes('openrouter-work'))!;
     expect(providerLine.trim()).toBe('openrouter-work');
     expect(out).toContain('Other accounts');

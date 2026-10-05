@@ -1,15 +1,3 @@
-/**
- * `agents cli` — manage declarative CLI binary installs.
- *
- * Each entry under <repo>/cli/<name>.yaml declares a CLI tool the user wants on
- * the host PATH (e.g. higgsfield, gh, glab). On a fresh machine `agents cli
- * install` runs the first install method whose package manager is available
- * (npm > brew > script > binary, in declared order).
- *
- * This is a sibling to `agents mcp` but one layer down: MCP wires servers into
- * agent configs; CLI puts binaries on the user's normal PATH. CLI manifests are
- * NOT copied into per-agent version homes — they are global to the user.
- */
 import type { Command } from 'commander';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -34,7 +22,6 @@ function userCliDir(): string {
   return path.join(getUserAgentsDir(), 'clis');
 }
 
-/** Render the status table — one row per declared CLI. */
 function printStatus(rows: { manifest: CliManifest; installed: boolean }[]): void {
   if (rows.length === 0) {
     console.log(chalk.gray('No CLIs declared.'));
@@ -142,14 +129,12 @@ When to use:
         targets = manifests;
       }
 
-      // Filter out already-installed unless --force
       const work = targets.filter((m) => opts.force || !isCliInstalled(m));
       if (work.length === 0) {
         console.log(chalk.green(`All ${targets.length} declared CLI(s) already installed.`));
         return;
       }
 
-      // Preview + confirm
       console.log(chalk.bold('\nWill install:'));
       for (const m of work) {
         const method = selectInstallMethod(m);
@@ -174,7 +159,6 @@ When to use:
         }
       }
 
-      // Execute
       let failures = 0;
       for (const m of work) {
         console.log(chalk.bold(`\n→ ${m.name}`));

@@ -4,15 +4,8 @@ type WatchCallback = (
   filename: string | Buffer | null,
 ) => void;
 
-// Plain top-level const captured by closure in the vi.mock factory below.
-// Bun's test runner does not hoist vi.mock, and vitest's hoister sees the
-// const declared above the factory, so this works in both runners without
-// vi.hoisted (which is not available in Bun's native test runner).
 const watchState: { callbacks: WatchCallback[] } = { callbacks: [] };
 
-// Pull the real fs via the alternate `node:fs` specifier so vi.mock('fs')
-// does not affect this lookup. vi.importActual is vitest-only and is not
-// available under Bun's native test runner.
 vi.mock('fs', () => {
   const actual = require('node:fs') as typeof import('fs');
   return {
@@ -35,7 +28,6 @@ function mkTempDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agents-tail-test-'));
 }
 
-/** Wait for a predicate to become true, polling every 20ms. */
 async function waitFor(
   predicate: () => boolean,
   timeoutMs = 2000,
@@ -69,7 +61,6 @@ describe('tailFile', () => {
     const ac = new AbortController();
     const tailPromise = tailFile(filePath, (l) => lines.push(l), ac);
 
-    // Give watcher time to attach
     await new Promise((r) => setTimeout(r, 50));
 
     await fsp.appendFile(filePath, 'one\n');
@@ -80,7 +71,6 @@ describe('tailFile', () => {
     triggerWatch(path.basename(filePath));
     await waitFor(() => lines.length >= 3);
 
-    // Partial line: should NOT emit until newline arrives
     await fsp.appendFile(filePath, 'partial');
     triggerWatch(path.basename(filePath));
     await new Promise((r) => setTimeout(r, 80));
@@ -176,7 +166,6 @@ describe('tailFile', () => {
     triggerWatch(path.basename(filePath));
     await waitFor(() => lines.length >= 2);
 
-    // Truncate + write new content
     fs.writeFileSync(filePath, 'after-trunc\n');
     triggerWatch(path.basename(filePath));
     await waitFor(() => lines.length >= 3, 3000);

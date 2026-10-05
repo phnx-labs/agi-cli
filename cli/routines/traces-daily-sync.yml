@@ -1,22 +1,5 @@
-# Routine: daily agents traces sync — accumulates bucketHistory for drift signals.
-#
-# Install:
-#   agents routines add ./cli/routines/traces-daily-sync.yml
-#
-# Pin to a reliably-online device (required — traces needs a live Phoenix session):
-#   agents routines devices traces-daily-sync --set <device-name>
-#
-# Prerequisites:
-#   - agents auth login must have run on the pinned device
-#   - agents traces setup must have run at least once on that device
-#
-# Why daily: bucketHistory is a 14-day rolling window. driftSignals only fires
-# once ≥3 calendar days of history exist. Without this routine the index stays
-# at 1 day indefinitely and drift signals never appear.
-#
-# Runs as a `command:` (plain shell) routine — no LLM, no token burn.
 name: traces-daily-sync
-schedule: "0 2 * * *"   # daily at 02:00 UTC
+schedule: "0 2 * * *"
 timeout: 30m
 command: |
   set -eu

@@ -1,15 +1,3 @@
-/**
- * `agents events audit` — thin alias of `agents events --include runs`.
- *
- * New run-dispatch outcomes land in the unified event stream as `run.dispatched`
- * (see lib/audit/log.ts::recordDispatchedRun). This command does not own a
- * separate store or query path — it only sets the default family filter.
- *
- *   agents events audit              ≡ agents events --include runs
- *   agents events audit list         ≡ same
- *   agents events audit verify       walks the legacy hash-chain file if present
- *                                    (pre-unification history only)
- */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -35,7 +23,6 @@ Examples:
 `)
     .action((_options: EventsOptions, command: Command) => {
       const opts = command.optsWithGlobals() as EventsOptions;
-      // Bare audit defaults to --include runs unless the user already set families.
       if (!opts.include && !opts.exclude) opts.include = 'runs';
       return runEventsCommand(opts);
     });
