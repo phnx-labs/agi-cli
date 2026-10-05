@@ -1,5 +1,6 @@
 import { installCli, installedCliVersion, type CliManifest } from './cli-resources.js';
 import { compareVersions } from './agent-spec/primitives.js';
+import { SECRETS_CLI_PACKAGE, SECRETS_CLI_VERSION } from './secrets-cli.js';
 
 export const STANDALONE_TOOLS = ['sessions', 'browser', 'secrets', 'computer', 'term'] as const;
 export type StandaloneTool = typeof STANDALONE_TOOLS[number];
@@ -13,7 +14,7 @@ export interface StandaloneToolPin {
 export const STANDALONE_TOOL_PINS: Readonly<Record<StandaloneTool, StandaloneToolPin>> = {
   sessions: { tool: 'sessions', pkg: '@phnx-labs/sessions-cli', floor: '0.5.0' },
   browser: { tool: 'browser', pkg: '@phnx-labs/browser-cli', floor: '0.1.15' },
-  secrets: { tool: 'secrets', pkg: '@phnx-labs/secrets-cli', floor: '0.1.8' },
+  secrets: { tool: 'secrets', pkg: SECRETS_CLI_PACKAGE, floor: SECRETS_CLI_VERSION },
   computer: { tool: 'computer', pkg: '@phnx-labs/computer-cli', floor: '0.1.5' },
   term: { tool: 'term', pkg: '@phnx-labs/term-cli', floor: '0.1.0' },
 };

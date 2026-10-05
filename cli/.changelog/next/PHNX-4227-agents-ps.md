@@ -20,3 +20,8 @@
   filter requires, so the roster (and a peer's answer to `-D <device>`) was empty
   whenever the daemon's snapshot was the newest. Rows are now stamped with this
   machine's id. Source: `cli/src/lib/session/session-cache.ts`.
+- **`agents send --device <box>` now runs the send on that box**, for any channel. It
+  was refused before (`send` had no remote interpretation). It exists so
+  `--channel session` can reach a pane on another device.
+- **`agents setup secrets` installs secrets-cli 0.1.8, up from 0.1.5**, the same
+  version `agents setup tools` pins. Source: `cli/src/lib/secrets-cli.ts`.

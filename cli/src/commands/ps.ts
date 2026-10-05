@@ -83,6 +83,8 @@ export function registerPsCommand(program: Command): void {
       - Type into a running agent with: agents send --channel session --to <id> --text "continue"
       - Resume an ended session with: agents run --resume <id>
       - A session on another device is stopped, detached, or focused there over SSH.
+      - Put -D and --status after the verb or after the roster flags, never before a
+        verb: they take several values, so 'ps -D box stop <id>' reads 'stop' as a device.
     `,
   });
 
